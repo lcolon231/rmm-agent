@@ -1,0 +1,53 @@
+# ---- Go (agent) ----
+agent/bin/
+*.exe
+*.exe~
+*.dll
+*.test
+*.out
+vendor/
+
+# ---- Python (server) ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node (dashboard) ----
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+
+# ---- Env & secrets ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+!ca-cert.example.crt
+
+# ---- Agent runtime files ----
+agent/config.json
+agent/identity.json
+identity.json
+config.json
+!config.example.json
+
+# ---- DB ----
+*.sqlite
+*.sqlite3
+*.db
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
