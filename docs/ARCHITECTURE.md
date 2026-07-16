@@ -50,8 +50,10 @@ Three parts live in one repository:
 
 The transport today is **plain HTTP with polling**: the agent's heartbeat doubles
 as the command poll (the heartbeat response carries any queued commands). There
-is no WebSocket and no TLS termination in the scaffold yet — both are planned
-(see Roadmap and Known drift).
+is no WebSocket yet (planned — see Roadmap and Known drift). The scaffold itself
+does not terminate TLS; for any off-box deployment, TLS is terminated by a
+reverse proxy in front of the server — see `docs/DEPLOYMENT-TLS.md` and
+`deploy/Caddyfile`.
 
 | Component | Stack | Status |
 |-----------|-------|--------|
@@ -360,9 +362,11 @@ passed (the SCM code has no automated test by nature):
 - **Graceful shutdown.** Every stop/reboot logged `shutting down` and the
   service reached `Stopped` cleanly.
 
-**Gate 3 — Safe to deploy off the dev box.** HTTPS enforced end-to-end;
-**agent-side command TTL + replay/nonce protection** (the one genuinely open
-security item — see below); least-privilege service account; repeatable
+**Gate 3 — Safe to deploy off the dev box.** HTTPS enforced end-to-end
+(deployment path documented in `docs/DEPLOYMENT-TLS.md` + `deploy/Caddyfile`);
+~~agent-side command TTL + replay/nonce protection~~ **done** — the agent now
+refuses expired commands (fail-closed TTL) and persists executed command IDs to
+reject replays across restarts; least-privilege service account; repeatable
 install/uninstall; code-signed binary; multi-day soak test. Above all of this
 sits a **HIPAA compliance bar** for medical endpoints (documented change control,
 rollback plan, security review of the command-execution surface). **Regulated
@@ -373,14 +377,18 @@ friendly non-critical client who knows it's early → regulated endpoints.
 
 ### Open security gaps (see `docs/threat-model.md` for the live list)
 
-- **Agent-side command TTL / replay protection.** Server-side TTL works
-  (`expires_at`, and the heartbeat expires stale commands before delivery), but
-  the agent never checks `expires_at` and there is no nonce. This is the most
-  important open item. Note cross-*agent* replay is already prevented (agent_id
-  is signed).
-- **TLS.** Not implemented; the scaffold serves plain uvicorn. Terminate TLS
-  (reverse proxy or the server) and switch agent configs to `https://` before any
-  off-box use; consider cert pinning for high-assurance clients.
+- ~~**Agent-side command TTL / replay protection.**~~ **Closed.** The agent now
+  parses each command's `expires_at` defensively (fail closed: a
+  present-but-unparseable timestamp is treated as expired) and refuses expired
+  commands, and it persists executed command IDs (`seen_commands.json`, beside
+  `identity.json`) so a replayed command ID is never executed twice, across
+  restarts. Cross-*agent* replay was already prevented (agent_id is signed).
+  Remaining hardening (future): bind `expires_at` into the signed bytes.
+- **TLS.** The scaffold itself still serves plain uvicorn, but the deployment
+  path is now documented: terminate TLS in front of the server (see
+  `docs/DEPLOYMENT-TLS.md` and `deploy/Caddyfile`) and switch agent configs to
+  `https://` before any off-box use. Cert pinning in the agent remains future
+  work for high-assurance clients.
 - **Token revocation + login rate-limiting.** JWTs are stateless, so a leaked
   token is valid until expiry. Consider short lifetimes + refresh tokens or a
   denylist, plus throttling on `/auth/login`.
