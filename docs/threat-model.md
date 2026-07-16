@@ -73,11 +73,28 @@ Consequences:
 - The signature binds the command to a specific `agent_id`, so a valid command
   for one endpoint cannot be replayed against another.
 
-**Known gap — replay within the same agent.** A captured, still-valid command
-could in principle be re-presented to the same agent. Mitigations to add: a
-per-command nonce the agent records as used, and honoring the server-side TTL
-(`expires_at`) agent-side as well. The server already expires commands; the
-agent should reject stale ones too.
+**Replay within the same agent — now mitigated.** A captured, still-valid
+command could in principle be re-presented to the same agent. The agent now
+defends against this on two fronts:
+
+- **Agent-side TTL.** The agent honors the server's `expires_at` and refuses any
+  command whose deadline has passed. Parsing fails closed: a present-but-
+  unparseable timestamp is treated as expired, while an empty/absent value means
+  "no TTL". This is *defense-in-depth*: `expires_at` is delivered by the server
+  but is **not** part of the signed canonical bytes, so a transport attacker who
+  could strip it would not be stopped by this check alone — see below.
+- **Replay store.** The agent persists the set of already-executed command IDs
+  (`seen_commands.json`, mode 0600, beside `identity.json`, written atomically)
+  and refuses to run any command ID twice, surviving restarts. Entries whose TTL
+  has lapsed are pruned (the TTL check would reject them anyway); entries with no
+  TTL are retained.
+
+Refusal order in the agent is signature → TTL → replay → execute.
+
+**Future hardening (out of scope here).** Bind `expires_at` into the signed
+canonical bytes on both server and agent so the TTL cannot be tampered with in
+transit, upgrading the agent-side TTL check from defense-in-depth to an
+authenticated guarantee.
 
 ### (4) Agent → Endpoint OS
 
@@ -122,7 +139,7 @@ column is the unit of anchoring; no schema change is needed to add this layer.
 |---|-----|----------|--------|
 | 1 | Management API unauthenticated | Critical | **Closed** — operator authN + role-based authZ |
 | 2 | No token revocation / login rate-limit | Medium | Open — short-lived tokens + refresh, denylist, throttle |
-| 3 | No agent-side command TTL / nonce | High | Open — reject expired commands; per-command nonce |
+| 3 | No agent-side command TTL / nonce | High | **Closed** — agent refuses expired commands (fail-closed TTL) and persists executed command IDs to reject replays across restarts. Future: sign `expires_at` |
 | 4 | TLS not enforced by scaffold | High | Open — terminate TLS; optional cert pinning |
 | 5 | Audit chain not externally anchored | Medium | Open — periodic Merkle anchoring of `event_hash` |
 | 6 | Agent runs commands at its own privilege | By design | Partial — installable service (Gate 2) runs as `LocalSystem`; least-privilege service account still open |

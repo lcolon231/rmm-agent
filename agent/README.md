@@ -91,6 +91,21 @@ is refused and never executed** — the agent reports a failure result instead.
 The canonical encoding matches the server's exactly (sorted keys, no whitespace,
 no HTML escaping), which is covered by a test in `internal/verify`.
 
+Two further checks run after signature verification, in the order
+signature → TTL → replay → execute:
+
+- **TTL enforcement.** The agent honors the server's `expires_at` and refuses any
+  command whose deadline has passed, reporting a failure result. Parsing fails
+  closed: a present-but-unparseable timestamp is treated as expired; an empty or
+  absent value means "no TTL". Because `expires_at` is not part of the signed
+  bytes today, this is defense-in-depth over the server's own expiry (binding it
+  into the signature is noted as future work in `docs/threat-model.md`).
+- **Replay protection.** The agent persists the set of already-executed command
+  IDs to `seen_commands.json` (mode 0600, beside `identity.json`, written
+  atomically) and refuses to run the same command ID twice, surviving restarts.
+  A replayed command is neither executed nor re-reported, so it cannot clobber
+  the original result. Expired IDs are pruned on load.
+
 Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
 (`cmd.exe` / `/bin/sh`), and `collect_inventory`. Commands run with a 5-minute
 timeout.
