@@ -61,6 +61,12 @@ type Command struct {
 	Payload   json.RawMessage `json:"payload"`
 	Signature string          `json:"signature"`
 	Status    string          `json:"status"`
+	// ExpiresAt is the server-set TTL deadline (Python isoformat UTC). It is kept
+	// as a raw string and parsed defensively in the runner so one malformed
+	// timestamp cannot break decoding of the whole heartbeat ack. Empty/absent
+	// means "no TTL". Note this field is NOT part of the signed canonical bytes;
+	// the agent-side TTL check is defense-in-depth (see runner.processCommand).
+	ExpiresAt string `json:"expires_at"`
 }
 
 // HeartbeatAck is the server's response to a heartbeat.
@@ -73,11 +79,11 @@ type HeartbeatAck struct {
 // nil for ordinary beats.
 func (c *Client) Heartbeat(s telemetry.Sample, inventory map[string]any) (*HeartbeatAck, error) {
 	body := map[string]any{
-		"cpu_percent":     s.CPUPercent,
-		"mem_percent":     s.MemPercent,
-		"disk_percent":    s.DiskPercent,
-		"uptime_seconds":  s.UptimeSeconds,
-		"logged_in_user":  s.LoggedInUser,
+		"cpu_percent":    s.CPUPercent,
+		"mem_percent":    s.MemPercent,
+		"disk_percent":   s.DiskPercent,
+		"uptime_seconds": s.UptimeSeconds,
+		"logged_in_user": s.LoggedInUser,
 	}
 	if inventory != nil {
 		body["inventory"] = inventory
