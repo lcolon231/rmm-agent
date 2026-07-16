@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
+    # Failed logins allowed per (client IP, email) within the window before
+    # further attempts are rejected with 429.
+    login_max_failures: int = 5
+    login_window_seconds: int = 300
+
     # Ed25519 private key (PEM) used to SIGN commands sent to agents.
     # Agents hold the matching public key and verify every command before executing.
     # Generate a keypair with the helper in scripts/gen_command_keys.py

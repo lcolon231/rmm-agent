@@ -42,9 +42,22 @@ Login hardening: unknown-email and wrong-password both return an identical 401,
 and a dummy hash verification runs on unknown emails to avoid a timing
 side-channel that would reveal which accounts exist.
 
-**Still to add:** token revocation (JWTs are stateless, so a leaked token is
-valid until expiry — consider short lifetimes + refresh tokens, or a
-server-side denylist), and rate-limiting on `/auth/login` to slow brute force.
+Two hardening layers on top of that:
+
+- **Token revocation.** JWTs are stateless, so individual tokens cannot be
+  recalled — instead each operator row carries a `token_generation` counter,
+  every JWT records the generation it was minted under, and validation rejects
+  any mismatch. `POST /auth/revoke-tokens` (self) or
+  `POST /auth/operators/{id}/revoke-tokens` (admin) bumps the counter,
+  instantly invalidating all outstanding tokens for that operator. Both are
+  audited (`operator.tokens_revoked`).
+- **Login rate-limiting.** Failed logins are counted per (client IP, email) in
+  a sliding window; once it fills, `/auth/login` answers 429 with Retry-After,
+  even for the correct password. A successful login clears the pair's counter.
+  Keying on the pair slows online brute force without letting an attacker lock
+  a victim out from a different address. The counters are in-process — behind
+  multiple workers the effective limit multiplies by the worker count; move
+  them to a shared store before scaling out.
 
 ### (2) Server ↔ Network (transport)
 
@@ -139,7 +152,7 @@ column is the unit of anchoring; no schema change is needed to add this layer.
 | # | Gap | Severity | Status |
 |---|-----|----------|--------|
 | 1 | Management API unauthenticated | Critical | **Closed** — operator authN + role-based authZ |
-| 2 | No token revocation / login rate-limit | Medium | Open — short-lived tokens + refresh, denylist, throttle |
+| 2 | No token revocation / login rate-limit | Medium | **Closed** — per-operator `token_generation` bump revokes all outstanding JWTs (self + admin endpoints, audited); sliding-window 429 throttle on `/auth/login` per (IP, email). Limiter is per-process — use a shared store when running multiple workers |
 | 3 | No agent-side command TTL / nonce | High | **Closed** — agent refuses expired commands (fail-closed TTL) and persists executed command IDs to reject replays across restarts. Future: sign `expires_at` |
 | 4 | TLS not enforced by scaffold | High | Partial — deployment path documented (`docs/DEPLOYMENT-TLS.md`, `deploy/Caddyfile`): TLS-terminating proxy with uvicorn bound to localhost; agent cert pinning still open |
 | 5 | Audit chain not externally anchored | Medium | Open — periodic Merkle anchoring of `event_hash` |
