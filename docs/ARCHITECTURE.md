@@ -94,7 +94,8 @@ AuditEvent (standalone, append-only hash chain)
   base64 Ed25519 `signature`, `status`, captured `exit_code`/`stdout`/`stderr`,
   and timestamps including `expires_at`.
 - **Operator** — a human user: `email` (unique), bcrypt `password_hash`, `role`
-  (readonly/operator/admin), `disabled`.
+  (readonly/operator/admin), `disabled`, and `token_generation` (bumping it
+  revokes all outstanding JWTs for that operator).
 - **AuditEvent** — append-only record with `prev_hash` + `event_hash` forming a
   hash chain, plus `ts_iso` (the exact string that was hashed, stored so
   verification never depends on DB datetime round-tripping).
@@ -107,9 +108,11 @@ All routes are mounted under `/api/v1` (plus an unauthenticated `/healthz`).
 
 | Method | Path | Purpose | Auth |
 |--------|------|---------|------|
-| POST | `/auth/login` | Email + password → JWT | Public |
+| POST | `/auth/login` | Email + password → JWT (429 rate-limited on repeated failures) | Public |
 | POST | `/auth/operators` | Create an operator | admin |
 | GET  | `/auth/me` | Return the calling operator | readonly+ |
+| POST | `/auth/revoke-tokens` | Invalidate all of the caller's tokens ("log out everywhere") | readonly+ |
+| POST | `/auth/operators/{id}/revoke-tokens` | Invalidate all of another operator's tokens | admin |
 
 **Agent-facing (`app/api/agents.py`)**
 
@@ -389,9 +392,14 @@ friendly non-critical client who knows it's early → regulated endpoints.
   `docs/DEPLOYMENT-TLS.md` and `deploy/Caddyfile`) and switch agent configs to
   `https://` before any off-box use. Cert pinning in the agent remains future
   work for high-assurance clients.
-- **Token revocation + login rate-limiting.** JWTs are stateless, so a leaked
-  token is valid until expiry. Consider short lifetimes + refresh tokens or a
-  denylist, plus throttling on `/auth/login`.
+- ~~**Token revocation + login rate-limiting.**~~ **Closed.** Each operator has
+  a `token_generation`; JWTs carry the generation they were minted under and a
+  mismatch is rejected, so bumping the counter (self-service
+  `POST /auth/revoke-tokens`, or the admin per-operator variant) revokes every
+  outstanding token at once — audited as `operator.tokens_revoked`. Failed
+  logins are throttled per (client IP, email) with a sliding window (429 +
+  Retry-After); a success clears the counter. The limiter is in-process — use a
+  shared store before running multiple workers.
 - **External anchoring of the audit chain.** The local chain proves internal
   consistency; anchoring the periodic `event_hash` (e.g. a Merkle root) to an
   external append-only medium would make history un-rewritable even by a server

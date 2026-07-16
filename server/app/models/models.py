@@ -96,6 +96,10 @@ class Operator(Base):
         Enum(OperatorRole), default=OperatorRole.readonly, nullable=False
     )
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Monotonic token version. Every JWT carries the generation it was minted
+    # under; bumping this immediately invalidates all outstanding tokens for
+    # this operator (logout-everywhere / revocation after a suspected leak).
+    token_generation: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

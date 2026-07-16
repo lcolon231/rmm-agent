@@ -82,20 +82,34 @@ def verify_token(token: str, token_hash: str) -> bool:
 # --------------------------------------------------------------------------- #
 # Dashboard JWTs (for human operators, Phase 2)
 # --------------------------------------------------------------------------- #
-def create_access_token(subject: str, expires_minutes: int | None = None) -> str:
+def create_access_token(
+    subject: str, generation: int = 0, expires_minutes: int | None = None
+) -> str:
+    """Mint a signed JWT for `subject`.
+
+    `generation` is the operator's token_generation at mint time. Validation
+    compares it against the current DB value, so bumping the DB counter
+    revokes every previously issued token at once (JWTs themselves are
+    stateless and cannot be recalled individually).
+    """
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=expires_minutes or settings.access_token_expire_minutes
     )
-    payload = {"sub": subject, "exp": expire}
+    payload = {"sub": subject, "gen": generation, "exp": expire}
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
-def decode_access_token(token: str) -> str | None:
+def decode_access_token(token: str) -> dict | None:
+    """Return the verified claims, or None if the signature/expiry is invalid.
+
+    Callers read `sub` (operator id) and `gen` (token generation). Tokens
+    minted before the generation claim existed decode with gen defaulting to
+    0, matching the column default, so they stay valid until the first bump.
+    """
     try:
-        payload = jwt.decode(
+        return jwt.decode(
             token, settings.secret_key, algorithms=[settings.jwt_algorithm]
         )
-        return payload.get("sub")
     except JWTError:
         return None
 

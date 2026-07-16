@@ -70,16 +70,22 @@ async def get_current_operator(
             detail="Missing or malformed Authorization header",
         )
 
-    operator_id = decode_access_token(token)  # None if signature/exp invalid
-    if operator_id is None:
+    claims = decode_access_token(token)  # None if signature/exp invalid
+    if claims is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )
 
-    operator = await db.get(Operator, operator_id)
+    operator = await db.get(Operator, claims.get("sub"))
     if operator is None or operator.disabled:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Operator not found or disabled"
+        )
+    # A token minted under an older generation has been revoked (logout-all /
+    # suspected leak). Same detail as other token failures — no oracle.
+    if claims.get("gen", 0) != operator.token_generation:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )
     return operator
 
