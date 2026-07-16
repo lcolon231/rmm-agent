@@ -54,8 +54,9 @@ most common RMM attack surface (exposed agent listeners) and means no firewall
 changes at medical offices.
 
 **Before production:** terminate TLS at the server (or a reverse proxy) with a
-valid certificate. Consider certificate pinning in the agent for high-assurance
-clients.
+valid certificate — the supported pattern (Caddy in front of uvicorn bound to
+localhost) is documented in `docs/DEPLOYMENT-TLS.md` with `deploy/Caddyfile`.
+Consider certificate pinning in the agent for high-assurance clients.
 
 ### (3) Network → Agent (command authenticity)
 
@@ -140,7 +141,7 @@ column is the unit of anchoring; no schema change is needed to add this layer.
 | 1 | Management API unauthenticated | Critical | **Closed** — operator authN + role-based authZ |
 | 2 | No token revocation / login rate-limit | Medium | Open — short-lived tokens + refresh, denylist, throttle |
 | 3 | No agent-side command TTL / nonce | High | **Closed** — agent refuses expired commands (fail-closed TTL) and persists executed command IDs to reject replays across restarts. Future: sign `expires_at` |
-| 4 | TLS not enforced by scaffold | High | Open — terminate TLS; optional cert pinning |
+| 4 | TLS not enforced by scaffold | High | Partial — deployment path documented (`docs/DEPLOYMENT-TLS.md`, `deploy/Caddyfile`): TLS-terminating proxy with uvicorn bound to localhost; agent cert pinning still open |
 | 5 | Audit chain not externally anchored | Medium | Open — periodic Merkle anchoring of `event_hash` |
 | 6 | Agent runs commands at its own privilege | By design | Partial — installable service (Gate 2) runs as `LocalSystem`; least-privilege service account still open |
 | 7 | Agent was foreground-only (no unattended operation) | High | **Closed (Gate 2)** — installable Windows service: auto-start at boot, SCM crash-recovery, rotated file logging, and a network-resilient check-in loop (backoff + jitter) |

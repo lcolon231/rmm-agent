@@ -1,0 +1,23 @@
+# NodeLink RMM — TLS-terminating reverse proxy (Caddy v2).
+#
+# Caddy sits in front of uvicorn and terminates HTTPS. With a public DNS name
+# it obtains and renews a Let's Encrypt certificate automatically — no certbot,
+# no cron. Full walkthrough (including LAN-only setups without public DNS):
+# docs/DEPLOYMENT-TLS.md
+#
+# Replace rmm.example.com with your server's DNS name, then run:
+#   caddy run --config deploy/Caddyfile
+#
+# uvicorn must be listening on 127.0.0.1:8000 (its default), started with
+# --proxy-headers so FastAPI sees the real client IP/scheme:
+#   uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers
+
+rmm.example.com {
+	reverse_proxy 127.0.0.1:8000
+
+	# For a LAN-only server with no public DNS, comment out nothing above and
+	# instead enable Caddy's internal CA by uncommenting the line below. The
+	# agent's OS must then trust Caddy's root CA (see docs/DEPLOYMENT-TLS.md,
+	# "LAN / no public DNS") — never disable TLS verification in the agent.
+	#tls internal
+}
