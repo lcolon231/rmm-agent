@@ -346,11 +346,19 @@ result reporting, proven on a dev machine. **Status: DONE and verified.**
 
 **Gate 2 — Runs unattended.** Windows service install, auto-start, crash
 recovery, rotating logs, backoff on network failure, graceful shutdown.
-**Status: CODE COMPLETE; needs the real manual acceptance test** — install on
-Windows, reboot and confirm the agent comes back online with nobody logged in;
-kill the process and confirm SCM restarts it; stop the server and confirm the
-agent retries quietly then reconnects. (The SCM code has no automated test by
-nature.)
+**Status: DONE — verified on Windows 2026-07-16.** Manual acceptance test
+passed (the SCM code has no automated test by nature):
+
+- **Reboot / auto-start headless.** After a reboot the service auto-started at
+  boot with nobody logged in (`starting as Windows service` in the log at boot
+  time) and self-reconnected to `online` once the server was reachable.
+- **Crash recovery.** The service process was hard-killed (`taskkill /F`); the
+  SCM restarted it within seconds as a new PID, no manual intervention.
+- **Network resilience.** With the server down, the check-in loop backed off
+  with bounded exponential + jitter (never a tight spin or crash) and
+  reconnected automatically when the server returned.
+- **Graceful shutdown.** Every stop/reboot logged `shutting down` and the
+  service reached `Stopped` cleanly.
 
 **Gate 3 — Safe to deploy off the dev box.** HTTPS enforced end-to-end;
 **agent-side command TTL + replay/nonce protection** (the one genuinely open
