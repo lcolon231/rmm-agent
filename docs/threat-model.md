@@ -136,16 +136,34 @@ that point forward.
 any. This is demonstrated by a test that mutates one field of one row and
 confirms detection.
 
-### Toward external verifiability
+### External verifiability: Merkle anchoring
 
 The local hash chain proves internal consistency but not *when* an event
-existed — a sufficiently privileged attacker could in principle rebuild the
-entire chain. The design leaves a clean on-ramp to close this: periodically
-batch the latest `event_hash` values and anchor a Merkle root to an external,
-append-only medium (a managed transparency log, or an on-chain anchor as in the
-NodeLink thesis work). Once anchored, no party — including a server operator —
-can rewrite history prior to the anchor without detection. The `event_hash`
-column is the unit of anchoring; no schema change is needed to add this layer.
+existed — a sufficiently privileged attacker could rebuild the entire chain
+consistently and the chain check alone would pass. The anchoring layer closes
+this:
+
+- `POST /api/v1/audit/anchors` (operator+) computes a **Merkle root** over the
+  `event_hash` values of every event in the chain (in `(ts, id)` order) and
+  stores it as an `AuditAnchor` covering that prefix. The act of anchoring is
+  itself audited (`audit.anchored`).
+- `GET /api/v1/audit/anchors/{id}/verify` recomputes the root over the covered
+  prefix and compares — any alteration, removal, or reordering of covered
+  events is detected, **including a fully consistent chain rebuild** (this is
+  demonstrated by a test that rebuilds the chain and shows the chain check
+  passing while the anchor check fails).
+- The Merkle construction is documented in `app/core/anchor.py` so an external
+  verifier can reimplement it: leaves are hex-decoded `event_hash` values;
+  levels pair left-to-right with SHA-256(left‖right); an unpaired node is
+  carried up unchanged; a single leaf is its own root.
+
+**The root must leave the building.** An anchor row in the same database
+proves nothing against an attacker who owns that database — they can rebuild
+anchors too. The 64-char `merkle_root` returned at creation is the unit to
+publish externally on a schedule: a transparency log, an on-chain anchor (as
+in the NodeLink thesis work), or even the monthly compliance report. Automated
+publication to a specific external medium is an ops/deployment choice and is
+not built in.
 
 ## Summary of gaps to close before production
 
@@ -155,6 +173,6 @@ column is the unit of anchoring; no schema change is needed to add this layer.
 | 2 | No token revocation / login rate-limit | Medium | **Closed** — per-operator `token_generation` bump revokes all outstanding JWTs (self + admin endpoints, audited); sliding-window 429 throttle on `/auth/login` per (IP, email). Limiter is per-process — use a shared store when running multiple workers |
 | 3 | No agent-side command TTL / nonce | High | **Closed** — agent refuses expired commands (fail-closed TTL) and persists executed command IDs to reject replays across restarts. Future: sign `expires_at` |
 | 4 | TLS not enforced by scaffold | High | Partial — deployment path documented (`docs/DEPLOYMENT-TLS.md`, `deploy/Caddyfile`): TLS-terminating proxy with uvicorn bound to localhost; agent cert pinning still open |
-| 5 | Audit chain not externally anchored | Medium | Open — periodic Merkle anchoring of `event_hash` |
+| 5 | Audit chain not externally anchored | Medium | Partial — Merkle anchoring implemented (create/list/verify endpoints; detects consistent chain rebuilds). Publishing the root to an external append-only medium is an ops step and not automated |
 | 6 | Agent runs commands at its own privilege | By design | Partial — installable service (Gate 2) runs as `LocalSystem`; least-privilege service account still open |
 | 7 | Agent was foreground-only (no unattended operation) | High | **Closed (Gate 2)** — installable Windows service: auto-start at boot, SCM crash-recovery, rotated file logging, and a network-resilient check-in loop (backoff + jitter) |
