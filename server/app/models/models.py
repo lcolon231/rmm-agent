@@ -256,3 +256,24 @@ class AuditEvent(Base):
 
     prev_hash: Mapped[str] = mapped_column(String(64), default="")
     event_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+
+
+class AuditAnchor(Base):
+    """A Merkle commitment over a prefix of the audit chain.
+
+    Each anchor covers the first `event_count` events in (ts, id) order and
+    stores the Merkle root of their `event_hash` values. The root is the unit
+    of EXTERNAL anchoring: publish it to an append-only medium outside this
+    system (transparency log, on-chain, even a signed email thread). An anchor
+    row in this database proves nothing by itself against an attacker who owns
+    the database — its value comes from the copies that exist elsewhere.
+    """
+    __tablename__ = "audit_anchors"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # How many events (in (ts, id) order from the start of the chain) this
+    # anchor covers, and the last covered event for a cheap consistency check.
+    event_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_event_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    merkle_root: Mapped[str] = mapped_column(String(64), nullable=False)

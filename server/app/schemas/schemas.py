@@ -163,4 +163,24 @@ class AgentOut(BaseModel):
     enrolled_at: datetime
 
 
+# --------------------------------------------------------------------------- #
+# Audit anchors
+# --------------------------------------------------------------------------- #
+class AnchorOut(BaseModel):
+    """A Merkle commitment over the audit chain. `merkle_root` is the value to
+    publish externally — everything else is bookkeeping for verification."""
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    created_at: datetime
+    event_count: int
+    last_event_id: str
+    merkle_root: str
+
+
+class AnchorVerifyOut(BaseModel):
+    anchor_id: str
+    intact: bool
+    reason: str | None = None
+
+
 HeartbeatAck.model_rebuild()

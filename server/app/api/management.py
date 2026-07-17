@@ -17,11 +17,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
-from app.core import audit
+from app.core import anchor, audit
 from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
 from app.models.models import (
     Agent,
+    AuditAnchor,
     Client,
     Command,
     CommandStatus,
@@ -32,6 +33,8 @@ from app.models.models import (
 )
 from app.schemas.schemas import (
     AgentOut,
+    AnchorOut,
+    AnchorVerifyOut,
     ClientCreate,
     ClientOut,
     CommandCreate,
@@ -204,3 +207,51 @@ async def list_commands(agent_id: str, db: AsyncSession = Depends(get_db)):
 async def verify_audit_chain(db: AsyncSession = Depends(get_db)):
     ok, broken_at = await audit.verify_chain(db)
     return {"intact": ok, "first_broken_event_id": broken_at}
+
+
+@router.post("/audit/anchors", response_model=AnchorOut)
+async def create_audit_anchor(
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Commit to the audit chain as it stands: compute the Merkle root over all
+    event hashes and store it as an anchor.
+
+    The returned `merkle_root` is the value to publish OUTSIDE this system
+    (transparency log, on-chain, the monthly compliance report). The anchor row
+    alone proves nothing against an attacker with database access — the
+    external copies are what make history un-rewritable.
+    """
+    result = await anchor.create_anchor(db)
+    if result is None:
+        raise HTTPException(status_code=400, detail="No audit events to anchor")
+
+    await audit.record(
+        db,
+        action="audit.anchored",
+        actor=operator.email,
+        detail={
+            "anchor_id": result.id,
+            "merkle_root": result.merkle_root,
+            "event_count": result.event_count,
+        },
+    )
+    return result
+
+
+@router.get("/audit/anchors", response_model=list[AnchorOut])
+async def list_audit_anchors(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(AuditAnchor).order_by(AuditAnchor.created_at))
+    return list(result.scalars().all())
+
+
+@router.get("/audit/anchors/{anchor_id}/verify", response_model=AnchorVerifyOut)
+async def verify_audit_anchor(anchor_id: str, db: AsyncSession = Depends(get_db)):
+    """Recompute the Merkle root over the anchor's covered prefix and compare.
+    A mismatch means events covered by the anchor were altered, removed, or
+    reordered after it was made."""
+    a = await db.get(AuditAnchor, anchor_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="Anchor not found")
+    ok, reason = await anchor.verify_anchor(db, a)
+    return AnchorVerifyOut(anchor_id=a.id, intact=ok, reason=reason)

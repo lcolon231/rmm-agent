@@ -136,6 +136,9 @@ requires at least `readonly`, so nothing here is anonymous.
 | POST | `/agents/{id}/commands` | Queue + sign a command | operator |
 | GET  | `/agents/{id}/commands` | Command history | readonly |
 | GET  | `/audit/verify` | Walk the audit hash chain | readonly |
+| POST | `/audit/anchors` | Merkle-anchor the chain; returns the root to publish externally | operator |
+| GET  | `/audit/anchors` | List anchors | readonly |
+| GET  | `/audit/anchors/{id}/verify` | Recompute an anchor's root over its covered prefix | readonly |
 
 ### 3.3 Background work
 
@@ -400,10 +403,14 @@ friendly non-critical client who knows it's early → regulated endpoints.
   logins are throttled per (client IP, email) with a sliding window (429 +
   Retry-After); a success clears the counter. The limiter is in-process — use a
   shared store before running multiple workers.
-- **External anchoring of the audit chain.** The local chain proves internal
-  consistency; anchoring the periodic `event_hash` (e.g. a Merkle root) to an
-  external append-only medium would make history un-rewritable even by a server
-  operator.
+- ~~**External anchoring of the audit chain.**~~ **Mostly closed.** Merkle
+  anchoring is implemented: `POST /audit/anchors` commits to the whole chain
+  with a Merkle root over all `event_hash` values (audited, verifiable via
+  `GET /audit/anchors/{id}/verify`), and — unlike the plain chain check — it
+  detects even a fully consistent chain rebuild. What remains is operational:
+  publish each root to an external append-only medium (transparency log,
+  on-chain, compliance report); a root that never leaves the database protects
+  against nothing.
 
 ---
 
