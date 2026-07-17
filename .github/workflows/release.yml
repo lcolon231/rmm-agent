@@ -1,0 +1,74 @@
+name: Release
+
+# Cut a versioned agent release. Triggered by pushing a tag like v0.1.0.
+# Builds the agent for all targets with the version stamped in, publishes the
+# binaries + SHA-256 checksums to a GitHub Release. The server runs from source
+# (uvicorn), so only the agent is released as a binary.
+#
+# Code signing (Authenticode) is not wired up yet — these binaries are
+# UNSIGNED. See docs/RELEASING.md for where the signing step slots in once a
+# certificate exists.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write  # needed to create the GitHub Release
+
+jobs:
+  test:
+    name: test before release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: agent/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+
+  build:
+    name: build and publish
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: agent/go.sum
+
+      - name: Derive version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Cross-build all targets
+        run: ./build.sh "${{ steps.version.outputs.version }}"
+
+      - name: Checksums
+        working-directory: agent/bin
+        run: sha256sum * > SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            agent/bin/rmm-agent-windows-amd64.exe
+            agent/bin/rmm-agent-linux-amd64
+            agent/bin/rmm-agent-darwin-arm64
+            agent/bin/SHA256SUMS.txt
+          generate_release_notes: true
+          body: |
+            NodeLink RMM agent ${{ steps.version.outputs.version }}.
+
+            **These binaries are unsigned.** On Windows, SmartScreen may warn
+            on first run until Authenticode signing is added (see
+            docs/RELEASING.md). Verify downloads against `SHA256SUMS.txt`.
