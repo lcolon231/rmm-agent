@@ -13,7 +13,7 @@ Commercial RMMs are priced per-endpoint and treat audit logging as an afterthoug
 
 ```
 ┌─────────────┐         outbound TLS          ┌──────────────┐
-│  Go Agent   │ ────── WebSocket / HTTPS ────► │ FastAPI      │
+│  Go Agent   │ ────── HTTPS (long-poll) ────► │ FastAPI      │
 │ (Win svc)   │ ◄───── signed commands ─────── │ Server       │
 └─────────────┘                                └──────┬───────┘
                                                       │
@@ -23,15 +23,21 @@ Commercial RMMs are priced per-endpoint and treat audit logging as an afterthoug
                                                       ▲
                                               ┌───────┴───────┐
                                               │ Next.js       │
-                                              │ Dashboard     │
+                                              │ Dashboard *   │
                                               └───────────────┘
 ```
+
+> **What exists today:** the Go agent, the FastAPI server, and PostgreSQL. The
+> agent reaches the server over **outbound HTTPS long-polling** — the heartbeat
+> doubles as the command poll; a persistent WebSocket is planned, not built.
+> The `*` marks the Next.js dashboard — Phase 2, **not yet in the repo**.
 
 | Component | Stack | Status |
 |-----------|-------|--------|
 | `agent/` | Go — Windows service, check-in loop, PowerShell executor, inventory | Phase 1 |
 | `server/` | FastAPI + PostgreSQL — enrollment, heartbeat, command queue, alerts | Phase 1 |
-| `dashboard/` | Next.js — endpoint list, live status, command console | Phase 2 |
+| `installer/` | Inno Setup — graphical Windows installer wrapping the agent | Phase 1 |
+| `dashboard/` | Next.js — endpoint list, live status, command console | Phase 2 (planned, not yet in repo) |
 | `docs/` | Architecture, threat model, deployment | ongoing |
 
 ## Roadmap
@@ -46,10 +52,12 @@ Commercial RMMs are priced per-endpoint and treat audit logging as an afterthoug
 
 ```
 rmm/
-├── agent/        # Go agent
+├── agent/        # Go agent (Windows service, check-in loop, executor)
+├── installer/    # Inno Setup Windows installer for the agent
 ├── server/       # FastAPI backend
-├── dashboard/    # Next.js frontend (Phase 2)
-└── docs/         # architecture & threat model
+├── deploy/       # TLS-terminating reverse-proxy config (Caddyfile)
+├── docs/         # architecture, threat model, deployment & release runbooks
+└── dashboard/    # Next.js frontend — planned (Phase 2, not yet in the repo)
 ```
 
 ## Getting started
