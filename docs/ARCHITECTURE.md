@@ -232,6 +232,14 @@ What the service integration provides (`internal/service/service_windows.go`,
 
 On non-Windows, the service subcommands return "only supported on Windows."
 
+**Endpoint installs use the GUI installer, not the raw CLI.** For hands-on
+installs by non-technical users, each release also ships
+`NodeLinkAgentSetup-<version>.exe` — an Inno Setup wrapper (`installer/`) that
+prompts for the server URL + enrollment token, writes `config.json`, and then
+calls the very subcommands above (`install` → `start`) under the hood. It owns
+no service logic of its own; the agent stays a stdlib-only binary. The CLI path
+remains the interface for scripted/mass deployment. See `installer/README.md`.
+
 ---
 
 ## 5. Security model
@@ -312,9 +320,12 @@ Windows).
 
 Releases are cut by tagging `vX.Y.Z`, which triggers `.github/workflows/
 release.yml` to cross-build the agent (version stamped in) and publish the
-binaries + SHA-256 checksums to a GitHub Release — see `docs/RELEASING.md`.
-The binaries are currently unsigned; Authenticode signing is a documented
-follow-up.
+binaries + SHA-256 checksums to a GitHub Release — see `docs/RELEASING.md`. A
+parallel job on a Windows runner compiles the Inno Setup installer and attaches
+`NodeLinkAgentSetup-<version>.exe` to the same release. The binaries **and** the
+installer are currently unsigned; Authenticode signing is a documented follow-up
+(the tag-derived version is validated to a safe charset before it reaches the
+build steps, closing a tag-name injection path into the runner).
 
 ---
 
@@ -354,6 +365,9 @@ rmm-agent.exe stop
 rmm-agent.exe uninstall
 ```
 
+On a real endpoint, run `NodeLinkAgentSetup-<version>.exe` instead — it does the
+above through a GUI wizard (see `installer/README.md`).
+
 ---
 
 ## 8. Roadmap — three readiness gates (done strictly in order)
@@ -381,8 +395,10 @@ passed (the SCM code has no automated test by nature):
 (deployment path documented in `docs/DEPLOYMENT-TLS.md` + `deploy/Caddyfile`);
 ~~agent-side command TTL + replay/nonce protection~~ **done** — the agent now
 refuses expired commands (fail-closed TTL) and persists executed command IDs to
-reject replays across restarts; least-privilege service account; repeatable
-install/uninstall; code-signed binary; multi-day soak test. Above all of this
+reject replays across restarts; least-privilege service account; ~~repeatable
+install/uninstall~~ **done** (the GUI installer registers/starts on install and
+stops/deregisters on uninstall, verified end-to-end on Windows 11); code-signed
+binary; multi-day soak test. Above all of this
 sits a **HIPAA compliance bar** for medical endpoints (documented change control,
 rollback plan, security review of the command-execution surface). **Regulated
 endpoints come last.**
