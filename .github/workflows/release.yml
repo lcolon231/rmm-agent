@@ -2,8 +2,9 @@ name: Release
 
 # Cut a versioned agent release. Triggered by pushing a tag like v0.1.0.
 # Builds the agent for all targets with the version stamped in, publishes the
-# binaries + SHA-256 checksums to a GitHub Release. The server runs from source
-# (uvicorn), so only the agent is released as a binary.
+# binaries + SHA-256 checksums to a GitHub Release, and builds the graphical
+# Windows installer (installer/NodeLinkAgent.iss) on a Windows runner. The
+# server runs from source (uvicorn), so only the agent is released as a binary.
 #
 # Code signing (Authenticode) is not wired up yet — these binaries are
 # UNSIGNED. See docs/RELEASING.md for where the signing step slots in once a
@@ -72,3 +73,43 @@ jobs:
             **These binaries are unsigned.** On Windows, SmartScreen may warn
             on first run until Authenticode signing is added (see
             docs/RELEASING.md). Verify downloads against `SHA256SUMS.txt`.
+
+  installer:
+    name: build windows installer
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: agent/go.sum
+
+      - name: Derive version from tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build windows/amd64 agent
+        working-directory: agent
+        run: |
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          go build -ldflags "-s -w -X main.version=${{ steps.version.outputs.version }}" -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
+
+      # Pinned to the 6.x line: Inno Setup 7 is out upstream, and an unpinned
+      # install would eventually land in "Inno Setup 7\" and break the ISCC
+      # path below (the .iss targets IS6; bump both together when upgrading).
+      - name: Install Inno Setup
+        run: choco install innosetup --version=6.7.1 -y
+
+      - name: Compile installer
+        working-directory: installer
+        run: |
+          $env:NODELINK_VERSION = '${{ steps.version.outputs.version }}'
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" NodeLinkAgent.iss
+
+      - name: Attach installer to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe
