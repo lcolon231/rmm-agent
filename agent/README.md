@@ -116,31 +116,25 @@ Every command the agent receives carries an Ed25519 signature from the server.
 The agent recomputes the canonical command bytes and verifies the signature
 against the public key it got at enrollment. **A command that fails verification
 is refused and never executed** — the agent reports a failure result instead.
-The `command-v1` signature covers `envelope_version`, `command_id`, `agent_id`,
-`kind`, and `payload`. Canonical JSON is UTF-8 with sorted keys, no whitespace,
-no HTML escaping, signed 64-bit integers, no floating point, a 16-level nesting
-limit, and a 64 KiB envelope limit. Both runtimes consume
-`contracts/test-vectors/command-v1.json`.
+The `command-v2` signature covers `envelope_version`, `schema_version`,
+`command_id`, `agent_id`, `kind`, `payload`, canonical UTC `issued_at` and
+`expires_at`, and a unique nonce. Canonical JSON is UTF-8 with sorted keys, no
+whitespace, no HTML escaping, signed 64-bit integers, no floating point, a
+16-level nesting limit, and a 64 KiB envelope limit. Both runtimes consume
+`contracts/test-vectors/command-v2.json`.
 
-The agent advertises `command-v1` during enrollment and every heartbeat. It
+The agent advertises `command-v2` during enrollment and every heartbeat. It
 rejects a server that selects another version and refuses commands with a
-missing, unknown, or legacy version before signature verification. This is a
-fail-closed rollout boundary; it does not silently fall back to the old format.
+missing, unknown, malformed, expired, future-dated, or legacy version before
+execution. This is a fail-closed rollout boundary; it does not silently fall
+back to the old format.
 
-Two further checks run after signature verification, in the order
-signature → TTL → replay → execute:
-
-- **TTL enforcement.** The agent honors the server's `expires_at` and refuses any
-  command whose deadline has passed, reporting a failure result. Parsing fails
-  closed: a present-but-unparseable timestamp is treated as expired; an empty or
-  absent value means "no TTL". Because `expires_at` is not part of the signed
-  bytes today, this is defense-in-depth over the server's own expiry (binding it
-  into the signature is noted as future work in `docs/threat-model.md`).
-- **Replay protection.** The agent persists the set of already-executed command
-  IDs to `seen_commands.json` (mode 0600, beside `identity.json`, written
-  atomically) and refuses to run the same command ID twice, surviving restarts.
-  A replayed command is neither executed nor re-reported, so it cannot clobber
-  the original result. Expired IDs are pruned on load.
+Checks run after signature verification in the order signature → time window →
+command-ID replay → nonce replay → execute. The agent persists both replay keys
+to `seen_commands.json` (mode 0600, beside `identity.json`, written atomically)
+before starting a process. A replayed command ID is neither executed nor
+re-reported, so it cannot clobber the original result. Expired entries are
+pruned on load. Signing-key IDs and key rotation are not implemented yet.
 
 Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
 (`cmd.exe` / `/bin/sh`), and `collect_inventory`. Commands run with a 5-minute

@@ -94,14 +94,72 @@ def test_upgrade_from_baseline_preserves_rows_and_expires_legacy_queue(tmp_path:
         versions_raw = connection.execute(
             "SELECT command_envelope_versions FROM agents WHERE id = 'agent-1'"
         ).fetchone()[0]
-        envelope_version, status = connection.execute(
-            "SELECT envelope_version, status FROM commands WHERE id = 'command-1'"
+        envelope_version, status, schema_version, issued_at, nonce = connection.execute(
+            "SELECT envelope_version, status, schema_version, issued_at, nonce "
+            "FROM commands WHERE id = 'command-1'"
         ).fetchone()
 
     assert client_name == "Preserved client"
     assert json.loads(versions_raw) == []
     assert envelope_version == "legacy-unversioned"
     assert status == "expired"
+    assert schema_version is None
+    assert issued_at is None
+    assert nonce is None
+
+
+def test_command_v2_nonce_is_unique_per_agent(tmp_path: Path):
+    db_path = tmp_path / "nonce.db"
+    config = migration_config(sqlite_url(db_path))
+    command.upgrade(config, "head")
+
+    now = "2026-07-18T12:00:00+00:00"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO clients (id, name, created_at) VALUES (?, ?, ?)",
+            ("client-1", "Client", now),
+        )
+        connection.execute(
+            "INSERT INTO sites (id, client_id, name, created_at) VALUES (?, ?, ?, ?)",
+            ("site-1", "client-1", "HQ", now),
+        )
+        for agent_id in ("agent-1", "agent-2"):
+            connection.execute(
+                """INSERT INTO agents
+                   (id, site_id, token_hash, hostname, os, os_version,
+                    agent_version, status, enrolled_at, command_envelope_versions)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (agent_id, "site-1", agent_id, agent_id, "windows", "11", "0.2", "online", now, '["command-v2"]'),
+            )
+        command_values = (
+            "shell", "{}", "sig", "command-v2", 1, now, "same_nonce_value_1234567890", "queued", now, now
+        )
+        connection.execute(
+            """INSERT INTO commands
+               (id, agent_id, kind, payload, signature, envelope_version,
+                schema_version, issued_at, nonce, status, created_at, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("command-1", "agent-1", *command_values),
+        )
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """INSERT INTO commands
+                   (id, agent_id, kind, payload, signature, envelope_version,
+                    schema_version, issued_at, nonce, status, created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ("command-2", "agent-1", *command_values),
+            )
+        connection.rollback()
+
+        # The same nonce on a different agent is not a replay in that agent's scope.
+        connection.execute(
+            """INSERT INTO commands
+               (id, agent_id, kind, payload, signature, envelope_version,
+                schema_version, issued_at, nonce, status, created_at, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("command-3", "agent-2", *command_values),
+        )
 
 
 def test_downgrade_policy_is_forward_only(tmp_path: Path):

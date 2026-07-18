@@ -6,6 +6,7 @@ package telemetry
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"strconv"
 	"strings"
@@ -53,10 +54,16 @@ func cpuTimes() (idle, total uint64) {
 	return idle, total
 }
 
-func collect() Sample {
+func collect(ctx context.Context) Sample {
 	// CPU: sample twice over a short interval.
 	idle1, total1 := cpuTimes()
-	time.Sleep(200 * time.Millisecond)
+	timer := time.NewTimer(200 * time.Millisecond)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		return Sample{}
+	case <-timer.C:
+	}
 	idle2, total2 := cpuTimes()
 	cpu := 0.0
 	if total2 > total1 {

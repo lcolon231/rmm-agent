@@ -12,10 +12,14 @@ import (
 
 type vectorEnvelope struct {
 	EnvelopeVersion string          `json:"envelope_version"`
+	SchemaVersion   int             `json:"schema_version"`
 	CommandID       string          `json:"command_id"`
 	AgentID         string          `json:"agent_id"`
 	Kind            string          `json:"kind"`
 	Payload         json.RawMessage `json:"payload"`
+	IssuedAt        string          `json:"issued_at"`
+	ExpiresAt       string          `json:"expires_at"`
+	Nonce           string          `json:"nonce"`
 }
 
 type vectorCase struct {
@@ -35,7 +39,7 @@ type vectorFile struct {
 
 func loadVectors(t *testing.T) vectorFile {
 	t.Helper()
-	data, err := os.ReadFile("../../../contracts/test-vectors/command-v1.json")
+	data, err := os.ReadFile("../../../contracts/test-vectors/command-v2.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +50,7 @@ func loadVectors(t *testing.T) vectorFile {
 	return vectors
 }
 
-func TestSharedCommandV1ValidVectors(t *testing.T) {
+func TestSharedCommandV2ValidVectors(t *testing.T) {
 	vectors := loadVectors(t)
 	pub, err := base64.StdEncoding.DecodeString(vectors.PublicKeyB64)
 	if err != nil {
@@ -56,10 +60,14 @@ func TestSharedCommandV1ValidVectors(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			got, err := canonicalCommandBytes(
 				tc.Envelope.EnvelopeVersion,
+				tc.Envelope.SchemaVersion,
 				tc.Envelope.CommandID,
 				tc.Envelope.AgentID,
 				tc.Envelope.Kind,
 				tc.Envelope.Payload,
+				tc.Envelope.IssuedAt,
+				tc.Envelope.ExpiresAt,
+				tc.Envelope.Nonce,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -78,7 +86,7 @@ func TestSharedCommandV1ValidVectors(t *testing.T) {
 	}
 }
 
-func TestSharedCommandV1InvalidVectors(t *testing.T) {
+func TestSharedCommandV2InvalidVectors(t *testing.T) {
 	vectors := loadVectors(t)
 	for _, tc := range vectors.Invalid {
 		t.Run(tc.Name, func(t *testing.T) {
@@ -88,10 +96,14 @@ func TestSharedCommandV1InvalidVectors(t *testing.T) {
 			}
 			_, err := canonicalCommandBytes(
 				tc.Envelope.EnvelopeVersion,
+				tc.Envelope.SchemaVersion,
 				tc.Envelope.CommandID,
 				tc.Envelope.AgentID,
 				tc.Envelope.Kind,
 				payload,
+				tc.Envelope.IssuedAt,
+				tc.Envelope.ExpiresAt,
+				tc.Envelope.Nonce,
 			)
 			if err == nil {
 				t.Fatal("invalid vector was accepted")

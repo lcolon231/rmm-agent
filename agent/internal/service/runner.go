@@ -257,7 +257,13 @@ func (a *Agent) ensureEnrolled(ctx context.Context, cfg *config.Config, idPath s
 // are reported to the server and logged but do not fail the beat. ctx signals
 // shutdown (stop accepting new commands); execCtx backs command execution.
 func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
-	sample := telemetry.Collect()
+	// Telemetry collection may invoke platform tools (PowerShell on Windows),
+	// so make cancellation visible to the collector instead of starting work
+	// after shutdown has already been requested.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	sample := telemetry.CollectContext(ctx)
 	ack, err := s.api.Heartbeat(ctx, sample, nil)
 	if err != nil {
 		return err
@@ -280,16 +286,19 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 }
 
 // processCommand runs the accept/refuse gate for one command in strict order:
-// signature -> TTL -> replay -> execute. A command that fails any gate is
+// signature/shape -> signed time window -> nonce replay -> ID replay -> execute. A command that fails any gate is
 // refused and never executed.
-//
-// The TTL check is defense-in-depth: expires_at is delivered by the server but
-// is NOT part of the signed canonical bytes, so a MITM who could tamper with
-// transport could also strip it. Binding expires_at into the signature is a
-// possible future hardening (out of scope here); until then we treat the
-// delivered value as a best-effort staleness hint and fail closed on it.
 func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Command) {
-	if err := verify.Verify(s.pub, cmd.EnvelopeVersion, cmd.ID, s.agentID, cmd.Kind, cmd.Payload, cmd.Signature); err != nil {
+	if cmd.AgentID != s.agentID {
+		a.log.Printf("REFUSING command %s: agent identity mismatch", cmd.ID)
+		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
+			ExitCode: -1,
+			Stderr:   "agent refused command: agent identity mismatch",
+		})
+		return
+	}
+
+	if err := verify.Verify(s.pub, cmd.EnvelopeVersion, cmd.SchemaVersion, cmd.ID, s.agentID, cmd.Kind, cmd.Payload, cmd.IssuedAt, cmd.ExpiresAt, cmd.Nonce, cmd.Signature); err != nil {
 		a.log.Printf("REFUSING command %s: signature invalid: %v", cmd.ID, err)
 		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
 			ExitCode: -1,
@@ -298,14 +307,14 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		return
 	}
 
-	// TTL: refuse anything past its expiry. An unparseable timestamp fails closed
-	// (treated as expired); an empty value means the command carried no TTL.
-	expiry, hasTTL, err := parseExpiry(cmd.ExpiresAt)
-	if err != nil || (hasTTL && !expiry.After(time.Now().UTC())) {
-		a.log.Printf("REFUSING command %s: expired", cmd.ID)
+	// Time window: all values are signed and required. Malformed, stale, overly
+	// long-lived, or implausibly future commands fail closed.
+	expiry, err := verify.ValidateCommandWindow(cmd.IssuedAt, cmd.ExpiresAt, time.Now().UTC())
+	if err != nil {
+		a.log.Printf("REFUSING command %s: invalid time window: %v", cmd.ID, err)
 		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
 			ExitCode: -1,
-			Stderr:   "agent refused command: past TTL",
+			Stderr:   "agent refused command: invalid signed time window",
 		})
 		return
 	}
@@ -317,16 +326,32 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		return
 	}
 
+	if s.seen.HasNonce(cmd.Nonce) {
+		a.log.Printf("REFUSING command %s: nonce already used", cmd.ID)
+		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
+			ExitCode: -1,
+			Stderr:   "agent refused command: repeated nonce",
+		})
+		return
+	}
+
+	// Reserve both replay keys durably before starting the process. If the agent
+	// cannot persist this reservation, fail closed rather than execute a command
+	// that could be replayed after a restart.
+	s.seen.Add(cmd.ID, expiry)
+	s.seen.AddNonce(cmd.Nonce, expiry)
+	if err := s.seen.Save(); err != nil {
+		a.log.Printf("failed to persist replay store after %s: %v", cmd.ID, err)
+		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
+			ExitCode: -1,
+			Stderr:   "agent refused command: replay state could not be persisted",
+		})
+		return
+	}
+
 	script := extractScript(cmd.Payload)
 	a.log.Printf("executing command %s (kind=%s)", cmd.ID, cmd.Kind)
 	res := a.run(ctx, cmd.Kind, script)
-
-	// Record the command as executed and persist BEFORE reporting, so it counts
-	// as run (and cannot replay) even if result reporting fails afterwards.
-	s.seen.Add(cmd.ID, expiry)
-	if err := s.seen.Save(); err != nil {
-		a.log.Printf("failed to persist replay store after %s: %v", cmd.ID, err)
-	}
 
 	if err := s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
 		ExitCode: res.ExitCode,
@@ -335,24 +360,6 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 	}); err != nil {
 		a.log.Printf("failed to report result for %s: %v", cmd.ID, err)
 	}
-}
-
-// parseExpiry interprets a command's raw expires_at string. It returns the UTC
-// deadline and whether a TTL is present. An empty value means "no TTL"
-// (hasTTL false). A non-empty but unparseable value fails closed: err is
-// non-nil so the caller treats the command as expired. The server emits Python
-// isoformat UTC (e.g. "2026-07-16T20:30:09.971530+00:00"), which we parse
-// tolerantly.
-func parseExpiry(raw string) (expiry time.Time, hasTTL bool, err error) {
-	if raw == "" {
-		return time.Time{}, false, nil
-	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-		if t, perr := time.Parse(layout, raw); perr == nil {
-			return t.UTC(), true, nil
-		}
-	}
-	return time.Time{}, true, fmt.Errorf("unparseable expires_at %q", raw)
 }
 
 // extractScript pulls the "script" field from a command payload, if present.

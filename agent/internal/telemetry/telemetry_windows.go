@@ -5,6 +5,7 @@
 package telemetry
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 
 // osVersion returns the Windows product name and build.
 func osVersion() string {
-	out, err := psOutput(`(Get-CimInstance Win32_OperatingSystem).Version`)
+	out, err := psOutput(context.Background(), `(Get-CimInstance Win32_OperatingSystem).Version`)
 	if err != nil {
 		return ""
 	}
@@ -24,25 +25,25 @@ func osVersion() string {
 // Go dependencies at the cost of spawning powershell.exe per sample, which is
 // acceptable at a 60s cadence. A future optimization is to call the Win32 APIs
 // directly via golang.org/x/sys/windows.
-func collect() Sample {
+func collect(ctx context.Context) Sample {
 	return Sample{
-		CPUPercent:    round2(cpuPercent()),
-		MemPercent:    round2(memPercent()),
-		DiskPercent:   round2(diskPercent()),
-		UptimeSeconds: uptimeSeconds(),
-		LoggedInUser:  loggedInUser(),
+		CPUPercent:    round2(cpuPercent(ctx)),
+		MemPercent:    round2(memPercent(ctx)),
+		DiskPercent:   round2(diskPercent(ctx)),
+		UptimeSeconds: uptimeSeconds(ctx),
+		LoggedInUser:  loggedInUser(ctx),
 	}
 }
 
-func psOutput(script string) (string, error) {
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive",
+func psOutput(ctx context.Context, script string) (string, error) {
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive",
 		"-ExecutionPolicy", "Bypass", "-Command", script)
 	out, err := cmd.Output()
 	return string(out), err
 }
 
-func psFloat(script string) float64 {
-	out, err := psOutput(script)
+func psFloat(ctx context.Context, script string) float64 {
+	out, err := psOutput(ctx, script)
 	if err != nil {
 		return 0
 	}
@@ -50,27 +51,27 @@ func psFloat(script string) float64 {
 	return f
 }
 
-func cpuPercent() float64 {
-	return psFloat(`(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average`)
+func cpuPercent(ctx context.Context) float64 {
+	return psFloat(ctx, `(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average`)
 }
 
-func memPercent() float64 {
-	return psFloat(`$o=Get-CimInstance Win32_OperatingSystem; ` +
+func memPercent(ctx context.Context) float64 {
+	return psFloat(ctx, `$o=Get-CimInstance Win32_OperatingSystem; `+
 		`[math]::Round((($o.TotalVisibleMemorySize - $o.FreePhysicalMemory) / $o.TotalVisibleMemorySize) * 100, 2)`)
 }
 
-func diskPercent() float64 {
-	return psFloat(`$d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; ` +
+func diskPercent(ctx context.Context) float64 {
+	return psFloat(ctx, `$d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; `+
 		`[math]::Round((($d.Size - $d.FreeSpace) / $d.Size) * 100, 2)`)
 }
 
-func uptimeSeconds() int64 {
-	f := psFloat(`[int]((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds`)
+func uptimeSeconds(ctx context.Context) int64 {
+	f := psFloat(ctx, `[int]((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds`)
 	return int64(f)
 }
 
-func loggedInUser() string {
-	out, err := psOutput(`(Get-CimInstance Win32_ComputerSystem).UserName`)
+func loggedInUser(ctx context.Context) string {
+	out, err := psOutput(ctx, `(Get-CimInstance Win32_ComputerSystem).UserName`)
 	if err != nil {
 		return os.Getenv("USERNAME")
 	}

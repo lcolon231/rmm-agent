@@ -91,32 +91,29 @@ Consequences:
 command could in principle be re-presented to the same agent. The agent now
 defends against this on two fronts:
 
-- **Agent-side TTL.** The agent honors the server's `expires_at` and refuses any
-  command whose deadline has passed. Parsing fails closed: a present-but-
-  unparseable timestamp is treated as expired, while an empty/absent value means
-  "no TTL". This is *defense-in-depth*: `expires_at` is delivered by the server
-  but is **not** part of the signed canonical bytes, so a transport attacker who
-  could strip it would not be stopped by this check alone — see below.
-- **Replay store.** The agent persists the set of already-executed command IDs
+- **Signed time window.** `command-v2` binds canonical `issued_at` and
+  `expires_at` into the signature. The agent rejects malformed, expired,
+  overlong, or implausibly future-dated windows.
+- **Replay store.** The agent persists command IDs and signed nonces
   (`seen_commands.json`, mode 0600, beside `identity.json`, written atomically)
-  and refuses to run any command ID twice, surviving restarts. Entries whose TTL
-  has lapsed are pruned (the TTL check would reject them anyway); entries with no
-  TTL are retained.
+  and reserves both before execution. Entries whose expiry has lapsed are
+  pruned; a duplicate command ID is silently ignored while a duplicate nonce is
+  reported as a refusal.
 
-Refusal order in the agent is signature → TTL → replay → execute.
+Refusal order in the agent is signature → time window → command-ID replay →
+nonce replay → execute.
 
-**Version downgrade — mitigated.** The signed `command-v1` bytes include
+**Version downgrade — mitigated.** The signed `command-v2` bytes include
 `envelope_version`. Agents advertise versions during enrollment and heartbeat;
-the server withholds dispatch until `command-v1` is reported. Missing, unknown,
+the server withholds dispatch until `command-v2` is reported. Missing, unknown,
 and legacy versions fail closed before signature verification. Python and Go
 consume the same positive and negative vectors. Existing queued commands are
-expired during migration because their legacy signatures do not cover version.
+expired during migration because their legacy signatures do not cover the v2
+contract.
 
-**Required hardening.** Bind `expires_at`, schema version, nonce, issued-at time,
-and signing-key ID into the versioned canonical bytes on both server and agent.
-Add persisted nonce replay state and signing-key rotation. Until that lands, a
-transport attacker who can strip unsigned expiry still has a replay avenue for
-a captured command that is not already in the local executed-ID store.
+**Remaining hardening.** Signing-key IDs, overlapping verification keys,
+rotation, and compromise recovery are tracked separately. The v2 contract does
+not claim those controls.
 
 ### (4) Agent → Endpoint OS
 
@@ -180,7 +177,7 @@ not built in.
 |---|-----|----------|--------|
 | 1 | Management API unauthenticated | Critical | **Closed** — operator authN + role-based authZ |
 | 2 | No token revocation / login rate-limit | Medium | **Closed** — per-operator `token_generation` bump revokes all outstanding JWTs (self + admin endpoints, audited); sliding-window 429 throttle on `/auth/login` per (IP, email). Limiter is per-process — use a shared store when running multiple workers |
-| 3 | Command expiry/version/nonce are not signed | Critical | Partial — `command-v1` signs and rejects envelope downgrades with shared Go/Python vectors; expiry can still be stripped and there is no signed schema version, nonce, issued-at, or key ID |
+| 3 | Command expiry/version/nonce are not signed | Critical | **Mostly closed** — `command-v2` binds schema version, issued-at, expiry, and nonce with shared Go/Python vectors; signing-key IDs and rotation remain open |
 | 4 | TLS not enforced by scaffold | High | Partial — deployment path documented (`docs/DEPLOYMENT-TLS.md`, `deploy/Caddyfile`): TLS-terminating proxy with uvicorn bound to localhost; agent cert pinning still open |
 | 5 | Audit chain not externally anchored | Medium | Partial — Merkle anchoring implemented (create/list/verify endpoints; detects consistent chain rebuilds). Publishing the root to an external append-only medium is an ops step and not automated |
 | 6 | Agent runs commands at its own privilege | By design | Partial — installable service (Gate 2) runs as `LocalSystem`; least-privilege service account still open |

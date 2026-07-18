@@ -27,7 +27,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key  # 
 from app.main import app  # noqa: E402
 from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.security import canonical_command_bytes, hash_password  # noqa: E402
-from app.core.command_envelope import COMMAND_ENVELOPE_V1  # noqa: E402
+from app.core.command_envelope import COMMAND_ENVELOPE_V2  # noqa: E402
 from app.core import audit  # noqa: E402
 from app.models.models import Operator, OperatorRole  # noqa: E402
 
@@ -73,7 +73,7 @@ async def _enroll(c) -> tuple[str, str, str]:
                 "enrollment_token": et["token"],
                 "hostname": "PC1",
                 "os": "windows",
-                "supported_command_envelope_versions": [COMMAND_ENVELOPE_V1],
+                "supported_command_envelope_versions": [COMMAND_ENVELOPE_V2],
             },
         )
     ).json()
@@ -90,7 +90,7 @@ async def test_enroll_and_heartbeat(client):
             "cpu_percent": 10.0,
             "mem_percent": 20.0,
             "disk_percent": 30.0,
-            "supported_command_envelope_versions": [COMMAND_ENVELOPE_V1],
+            "supported_command_envelope_versions": [COMMAND_ENVELOPE_V2],
         },
         headers=auth,
     )
@@ -129,7 +129,7 @@ async def test_command_dispatch_pickup_and_signature(client):
             "/heartbeat",
             json={
                 "cpu_percent": 5.0,
-                "supported_command_envelope_versions": [COMMAND_ENVELOPE_V1],
+                "supported_command_envelope_versions": [COMMAND_ENVELOPE_V2],
             },
             headers=auth,
         )
@@ -139,9 +139,21 @@ async def test_command_dispatch_pickup_and_signature(client):
 
     # The agent's signature check must pass.
     pub = load_pem_public_key(pub_pem.encode())
-    assert cmd["envelope_version"] == COMMAND_ENVELOPE_V1
+    assert cmd["envelope_version"] == COMMAND_ENVELOPE_V2
+    assert cmd["schema_version"] == 1
+    assert cmd["issued_at"]
+    assert cmd["expires_at"]
+    assert cmd["nonce"]
     msg = canonical_command_bytes(
-        cmd["envelope_version"], cmd["id"], agent_id, cmd["kind"], cmd["payload"]
+        cmd["envelope_version"],
+        cmd["schema_version"],
+        cmd["id"],
+        agent_id,
+        cmd["kind"],
+        cmd["payload"],
+        cmd["issued_at"],
+        cmd["expires_at"],
+        cmd["nonce"],
     )
     pub.verify(base64.b64decode(cmd["signature"]), msg)  # raises if invalid
 
@@ -169,7 +181,7 @@ async def test_tampered_signature_rejected_by_agent(client):
             "/heartbeat",
             json={
                 "cpu_percent": 1.0,
-                "supported_command_envelope_versions": [COMMAND_ENVELOPE_V1],
+                "supported_command_envelope_versions": [COMMAND_ENVELOPE_V2],
             },
             headers=auth,
         )
@@ -180,10 +192,14 @@ async def test_tampered_signature_rejected_by_agent(client):
     # Tamper with the payload the agent would execute.
     forged = canonical_command_bytes(
         cmd["envelope_version"],
+        cmd["schema_version"],
         cmd["id"],
         agent_id,
         cmd["kind"],
         {"script": "rm -rf /"},
+        cmd["issued_at"],
+        cmd["expires_at"],
+        cmd["nonce"],
     )
     with pytest.raises(Exception):
         pub.verify(base64.b64decode(cmd["signature"]), forged)
@@ -198,7 +214,7 @@ async def test_enrollment_negotiation_rejects_unknown_without_consuming_token(cl
 
     rejected = await client.post(
         "/enroll",
-        json={**base, "supported_command_envelope_versions": ["command-v2"]},
+        json={**base, "supported_command_envelope_versions": ["command-v3"]},
     )
     assert rejected.status_code == 409
     assert rejected.json()["detail"]["code"] == "no_common_command_envelope_version"
@@ -207,11 +223,11 @@ async def test_enrollment_negotiation_rejects_unknown_without_consuming_token(cl
         "/enroll",
         json={
             **base,
-            "supported_command_envelope_versions": [COMMAND_ENVELOPE_V1],
+            "supported_command_envelope_versions": [COMMAND_ENVELOPE_V2],
         },
     )
     assert accepted.status_code == 200
-    assert accepted.json()["command_envelope_version"] == COMMAND_ENVELOPE_V1
+    assert accepted.json()["command_envelope_version"] == COMMAND_ENVELOPE_V2
 
 
 @pytest.mark.asyncio
@@ -241,7 +257,7 @@ async def test_capability_downgrade_withholds_queued_command(client):
 
     restored = await client.post(
         "/heartbeat",
-        json={"supported_command_envelope_versions": [COMMAND_ENVELOPE_V1]},
+        json={"supported_command_envelope_versions": [COMMAND_ENVELOPE_V2]},
         headers=auth,
     )
     assert [c["id"] for c in restored.json()["pending_commands"]] == [queued.json()["id"]]

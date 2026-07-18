@@ -9,10 +9,9 @@ import (
 	"time"
 )
 
-// SeenStore is a persisted set of already-executed command IDs used for replay
-// protection: a command whose ID is already present is refused rather than run a
-// second time. It survives agent restarts by loading from and atomically saving
-// to a small JSON file beside identity.json.
+// SeenStore is a persisted set of already-executed command IDs and signed
+// command nonces. Either repeated value causes the command to be refused. It
+// survives agent restarts in one atomically saved file beside identity.json.
 //
 // Access is expected from the single check-in goroutine, so the store is not
 // safe for concurrent use and does no locking of its own.
@@ -29,6 +28,7 @@ type seenEntry struct {
 
 // seenFileName is the file the store persists to, alongside identity.json.
 const seenFileName = "seen_commands.json"
+const nonceKeyPrefix = "nonce:"
 
 // SeenStorePath returns the store path beside the config/identity files.
 func SeenStorePath(configPath string) string {
@@ -65,10 +65,21 @@ func (s *SeenStore) Has(id string) bool {
 	return ok
 }
 
+// HasNonce reports whether a signed nonce has already been accepted.
+func (s *SeenStore) HasNonce(nonce string) bool {
+	_, ok := s.entries[nonceKeyPrefix+nonce]
+	return ok
+}
+
 // Add records id (with its optional expiry) as executed. A zero expiry means the
 // command carried no TTL and the entry is retained across prunes.
 func (s *SeenStore) Add(id string, expiry time.Time) {
 	s.entries[id] = seenEntry{Expiry: expiry}
+}
+
+// AddNonce records a signed nonce in the same atomic replay state as IDs.
+func (s *SeenStore) AddNonce(nonce string, expiry time.Time) {
+	s.entries[nonceKeyPrefix+nonce] = seenEntry{Expiry: expiry}
 }
 
 // Prune drops entries whose expiry has passed relative to now; such commands

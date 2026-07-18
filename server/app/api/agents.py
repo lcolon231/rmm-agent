@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_agent
 from app.core import audit
 from app.core.command_envelope import (
-    COMMAND_ENVELOPE_V1,
+    ACTIVE_COMMAND_ENVELOPE_VERSION,
     SUPPORTED_COMMAND_ENVELOPE_VERSIONS,
     select_command_envelope_version,
 )
@@ -164,12 +164,12 @@ async def heartbeat(
 
     # Expire stale commands, then fetch what's still deliverable.
     pending: list[Command] = []
-    if COMMAND_ENVELOPE_V1 in body.supported_command_envelope_versions:
+    if ACTIVE_COMMAND_ENVELOPE_VERSION in body.supported_command_envelope_versions:
         result = await db.execute(
             select(Command).where(
                 Command.agent_id == agent.id,
                 Command.status == CommandStatus.queued,
-                Command.envelope_version == COMMAND_ENVELOPE_V1,
+                Command.envelope_version == ACTIVE_COMMAND_ENVELOPE_VERSION,
             )
         )
         for cmd in result.scalars().all():
