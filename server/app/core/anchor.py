@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Merkle anchoring of the audit chain.
 
 The hash chain in `audit.py` proves internal consistency: you cannot alter one

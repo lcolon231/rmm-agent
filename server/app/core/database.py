@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Async SQLAlchemy engine, session factory, and declarative base."""
 from collections.abc import AsyncGenerator
 

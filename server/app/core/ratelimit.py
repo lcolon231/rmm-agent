@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """In-process sliding-window rate limiting for login attempts.
 
 Counts *failed* logins per (client IP, email) and blocks further attempts for

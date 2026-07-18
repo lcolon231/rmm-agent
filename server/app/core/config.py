@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Application configuration loaded from environment variables."""
 from functools import lru_cache
 

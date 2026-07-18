@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Generate the Ed25519 keypair used to sign agent commands.
 
 Usage:

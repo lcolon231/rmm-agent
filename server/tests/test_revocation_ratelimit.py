@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Tests for token revocation and login rate-limiting.
 
 Behavior under test:

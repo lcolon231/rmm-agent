@@ -9,6 +9,7 @@ These describe the behavior we want:
 
 Run just this file:  pytest tests/test_auth.py -q
 """
+# SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
 import os
