@@ -23,6 +23,12 @@ released as a binary.
    - `rmm-agent-linux-amd64`
    - `rmm-agent-darwin-arm64`
    - `SHA256SUMS.txt`
+   - `NodeLinkAgentSetup-<version>.exe` — the graphical Windows installer
+     (built on a Windows runner from `installer/NodeLinkAgent.iss`; see
+     `installer/README.md`). Like the raw binaries it is **unsigned**;
+     Authenticode signing slots in at the same place (below). Linux/macOS have
+     no installer — those platforms use the foreground/systemd path described
+     in `agent/README.md`.
 
 `rmm-agent.exe -version`-style identification: the version is compiled in and
 printed in the startup log line (`NodeLink RMM agent <version> starting`).
@@ -58,7 +64,9 @@ Where it slots in: after `Cross-build all targets` and before publishing, add a
 signing step that runs `signtool sign /fd SHA256 /tr <timestamp-url> /td SHA256
 ...` (Windows runner) or Azure Trusted Signing's action, using secrets stored in
 the repo/organization. Then regenerate `SHA256SUMS.txt` so the checksums cover
-the signed binary. Keep the certificate/keys in GitHub Actions secrets or a
+the signed binary. The Windows installer gets the same treatment in its own
+job: sign the agent `.exe` before `ISCC` compiles it in, then sign the produced
+`NodeLinkAgentSetup-<version>.exe` before upload. Keep the certificate/keys in GitHub Actions secrets or a
 cloud HSM — never in the repo.
 
 ## What is intentionally NOT released here
