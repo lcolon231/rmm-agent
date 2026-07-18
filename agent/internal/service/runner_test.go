@@ -43,7 +43,7 @@ func TestLoadSessionFatalOnMissingConfig(t *testing.T) {
 	dir := t.TempDir()
 	a := NewAgent(filepath.Join(dir, "does-not-exist.json"), "test", log.New(&bytes.Buffer{}, "", 0))
 
-	_, err := a.loadSession()
+	_, err := a.loadSession(context.Background())
 	if err == nil {
 		t.Fatal("expected error for missing config")
 	}
@@ -61,7 +61,7 @@ func TestLoadSessionFatalWhenNoCredentials(t *testing.T) {
 	}
 	a := NewAgent(cfg, "test", log.New(&bytes.Buffer{}, "", 0))
 
-	_, err := a.loadSession()
+	_, err := a.loadSession(context.Background())
 	if err == nil || !isFatal(err) {
 		t.Fatalf("expected fatal error, got %v", err)
 	}
