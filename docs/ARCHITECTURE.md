@@ -59,7 +59,8 @@ reverse proxy in front of the server — see `docs/DEPLOYMENT-TLS.md` and
 |-----------|-------|--------|
 | `server/` | FastAPI, SQLAlchemy 2 (async), Pydantic 2 | Working |
 | `agent/`  | Go 1.22, stdlib-only except `golang.org/x/sys` (Windows service) | Working, incl. Gate 2 |
-| `docs/`   | Markdown (this file + threat model) | — |
+| `docs/`   | Markdown (architecture, threat model, TLS + release runbooks) | — |
+| CI/CD     | GitHub Actions — tests on every PR, tagged agent releases | Working |
 | Dashboard | Next.js | **Not started** (Phase 2) — referenced in root README but does not exist |
 
 ---
@@ -304,8 +305,16 @@ and returns the first broken link, if any.
   backoff growth/cap/jitter, log rotation/retention, script extraction,
   fatal-config classification, and retry-until-cancelled network resilience.
 
-Not covered by automated tests: the Windows-only SCM code itself (needs Windows),
-and there is no CI workflow yet.
+Both suites run in CI on every push and PR (`.github/workflows/ci.yml`): the Go
+agent (gofmt, `go vet`, `go build`, `go test`) and the Python server (`pytest`
+against ephemeral SQLite). Not covered: the Windows-only SCM code itself (needs
+Windows).
+
+Releases are cut by tagging `vX.Y.Z`, which triggers `.github/workflows/
+release.yml` to cross-build the agent (version stamped in) and publish the
+binaries + SHA-256 checksums to a GitHub Release — see `docs/RELEASING.md`.
+The binaries are currently unsigned; Authenticode signing is a documented
+follow-up.
 
 ---
 
