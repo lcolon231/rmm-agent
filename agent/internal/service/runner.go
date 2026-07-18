@@ -22,6 +22,7 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/client"
 	"github.com/lcolon231/rmm/agent/internal/config"
 	"github.com/lcolon231/rmm/agent/internal/executor"
+	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 	"github.com/lcolon231/rmm/agent/internal/verify"
 )
@@ -87,6 +88,9 @@ func NewAgent(configPath, version string, logger *log.Logger) *Agent {
 type session struct {
 	api      *client.Client
 	pub      ed25519.PublicKey
+	pubKeys  map[string]ed25519.PublicKey
+	identityPath string
+	identity     *config.Identity
 	agentID  string
 	interval time.Duration
 	// seen is the persisted set of already-executed command IDs, used for replay
@@ -195,6 +199,16 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, fatal(fmt.Errorf("command public key: %w", err))
 	}
+	pubKeys := map[string]ed25519.PublicKey{}
+	if identity.CommandSigningKeyID != "" && len(identity.CommandPublicKeys) > 0 {
+		for keyID, pemKey := range identity.CommandPublicKeys {
+			parsed, parseErr := verify.PublicKeyFromPEM(pemKey)
+			if parseErr != nil {
+				return nil, fatal(fmt.Errorf("command public key %s: %w", keyID, parseErr))
+			}
+			pubKeys[keyID] = parsed
+		}
+	}
 	interval := time.Duration(identity.HeartbeatSeconds) * time.Second
 	if interval <= 0 {
 		interval = 60 * time.Second
@@ -209,6 +223,9 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	return &session{
 		api:      client.New(identity.ServerURL, identity.AgentToken),
 		pub:      pub,
+		pubKeys:  pubKeys,
+		identityPath: idPath,
+		identity: identity,
 		agentID:  identity.AgentID,
 		interval: interval,
 		seen:     seen,
@@ -242,6 +259,8 @@ func (a *Agent) ensureEnrolled(ctx context.Context, cfg *config.Config, idPath s
 		AgentID:          resp.AgentID,
 		AgentToken:       resp.AgentToken,
 		CommandPublicKey: resp.CommandPublicKey,
+		CommandPublicKeys: resp.CommandPublicKeys,
+		CommandSigningKeyID: resp.CommandSigningKeyID,
 		HeartbeatSeconds: resp.HeartbeatSeconds,
 		ServerURL:        cfg.ServerURL,
 	}
@@ -267,6 +286,21 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	ack, err := s.api.Heartbeat(ctx, sample, nil)
 	if err != nil {
 		return err
+	}
+	if len(ack.CommandPublicKeys) > 0 {
+		updated := map[string]ed25519.PublicKey{}
+		for keyID, pemKey := range ack.CommandPublicKeys {
+			parsed, parseErr := verify.PublicKeyFromPEM(pemKey)
+			if parseErr != nil {
+				return fmt.Errorf("invalid signing-key bundle entry %s: %w", keyID, parseErr)
+			}
+			updated[keyID] = parsed
+		}
+		s.pubKeys = updated
+		s.identity.CommandPublicKeys = ack.CommandPublicKeys
+		if err := s.identity.Save(s.identityPath); err != nil {
+			a.log.Printf("failed to persist signing-key bundle: %v", err)
+		}
 	}
 	if len(ack.PendingCommands) == 0 {
 		return nil
@@ -298,7 +332,19 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		return
 	}
 
-	if err := verify.Verify(s.pub, cmd.EnvelopeVersion, cmd.SchemaVersion, cmd.ID, s.agentID, cmd.Kind, cmd.Payload, cmd.IssuedAt, cmd.ExpiresAt, cmd.Nonce, cmd.Signature); err != nil {
+	var verifyErr error
+	if cmd.EnvelopeVersion == protocol.CommandEnvelopeV3 {
+		pub, ok := s.pubKeys[cmd.SigningKeyID]
+		if !ok {
+			a.log.Printf("REFUSING command %s: unknown or retired signing key %q", cmd.ID, cmd.SigningKeyID)
+			_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{ExitCode: -1, Stderr: "agent refused command: unknown signing key"})
+			return
+		}
+		verifyErr = verify.VerifyWithKeyID(pub, cmd.EnvelopeVersion, cmd.SchemaVersion, cmd.ID, s.agentID, cmd.Kind, cmd.Payload, cmd.IssuedAt, cmd.ExpiresAt, cmd.Nonce, cmd.SigningKeyID, cmd.Signature)
+	} else {
+		verifyErr = verify.Verify(s.pub, cmd.EnvelopeVersion, cmd.SchemaVersion, cmd.ID, s.agentID, cmd.Kind, cmd.Payload, cmd.IssuedAt, cmd.ExpiresAt, cmd.Nonce, cmd.Signature)
+	}
+	if err := verifyErr; err != nil {
 		a.log.Printf("REFUSING command %s: signature invalid: %v", cmd.ID, err)
 		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
 			ExitCode: -1,

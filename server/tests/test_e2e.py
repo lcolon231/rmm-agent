@@ -27,7 +27,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key  # 
 from app.main import app  # noqa: E402
 from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.security import canonical_command_bytes, hash_password  # noqa: E402
-from app.core.command_envelope import COMMAND_ENVELOPE_V2  # noqa: E402
+from app.core.command_envelope import COMMAND_ENVELOPE_V2, COMMAND_ENVELOPE_V3  # noqa: E402
 from app.core import audit  # noqa: E402
 from app.models.models import Operator, OperatorRole  # noqa: E402
 
@@ -61,7 +61,7 @@ async def client():
     await engine.dispose()
 
 
-async def _enroll(c) -> tuple[str, str, str]:
+async def _enroll(c, versions=None) -> tuple[str, str, str]:
     """Return (agent_id, agent_token, command_public_key)."""
     cl = (await c.post("/clients", json={"name": "Test Clinic"})).json()
     st = (await c.post("/sites", json={"client_id": cl["id"], "name": "HQ"})).json()
@@ -73,7 +73,7 @@ async def _enroll(c) -> tuple[str, str, str]:
                 "enrollment_token": et["token"],
                 "hostname": "PC1",
                 "os": "windows",
-                "supported_command_envelope_versions": [COMMAND_ENVELOPE_V2],
+                "supported_command_envelope_versions": versions or [COMMAND_ENVELOPE_V2],
             },
         )
     ).json()
@@ -166,6 +166,34 @@ async def test_command_dispatch_pickup_and_signature(client):
     assert r.status_code == 204
     cmds = (await client.get(f"/agents/{agent_id}/commands")).json()
     assert cmds[0]["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_v3_dispatch_binds_signing_key_id(client):
+    agent_id, token, pub_pem = await _enroll(client, [COMMAND_ENVELOPE_V3])
+    auth = {"Authorization": f"Bearer {token}"}
+    await client.post(
+        f"/agents/{agent_id}/commands",
+        json={"kind": "shell", "payload": {"script": "whoami"}},
+    )
+    ack = (
+        await client.post(
+            "/heartbeat",
+            json={"supported_command_envelope_versions": [COMMAND_ENVELOPE_V3]},
+            headers=auth,
+        )
+    ).json()
+    cmd = ack["pending_commands"][0]
+    assert cmd["envelope_version"] == COMMAND_ENVELOPE_V3
+    assert cmd["signing_key_id"]
+    msg = canonical_command_bytes(
+        cmd["envelope_version"], cmd["schema_version"], cmd["id"], agent_id,
+        cmd["kind"], cmd["payload"], cmd["issued_at"], cmd["expires_at"],
+        cmd["nonce"], cmd["signing_key_id"],
+    )
+    load_pem_public_key(pub_pem.encode()).verify(
+        base64.b64decode(cmd["signature"]), msg
+    )
 
 
 @pytest.mark.asyncio

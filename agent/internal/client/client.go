@@ -38,6 +38,8 @@ type EnrollResponse struct {
 	AgentToken             string `json:"agent_token"`
 	HeartbeatSeconds       int    `json:"heartbeat_interval_seconds"`
 	CommandPublicKey       string `json:"command_public_key"`
+	CommandPublicKeys      map[string]string `json:"command_public_keys"`
+	CommandSigningKeyID    string `json:"command_signing_key_id"`
 	CommandEnvelopeVersion string `json:"command_envelope_version"`
 }
 
@@ -55,7 +57,7 @@ func (c *Client) Enroll(ctx context.Context, token string, host telemetry.HostIn
 	if err := c.do(ctx, "POST", "/api/v1/enroll", body, &out, false); err != nil {
 		return nil, err
 	}
-	if out.CommandEnvelopeVersion != protocol.CommandEnvelopeV2 {
+	if out.CommandEnvelopeVersion != protocol.CommandEnvelopeV2 && out.CommandEnvelopeVersion != protocol.CommandEnvelopeV3 {
 		return nil, fmt.Errorf(
 			"server selected unsupported command envelope version %q",
 			out.CommandEnvelopeVersion,
@@ -74,6 +76,7 @@ type Command struct {
 	SchemaVersion   int             `json:"schema_version"`
 	IssuedAt        string          `json:"issued_at"`
 	Nonce           string          `json:"nonce"`
+	SigningKeyID    string          `json:"signing_key_id"`
 	Signature       string          `json:"signature"`
 	Status          string          `json:"status"`
 	// ExpiresAt is the server-set TTL deadline (Python isoformat UTC). It is kept
@@ -88,6 +91,7 @@ type Command struct {
 type HeartbeatAck struct {
 	OK              bool      `json:"ok"`
 	PendingCommands []Command `json:"pending_commands"`
+	CommandPublicKeys map[string]string `json:"command_public_keys"`
 }
 
 // Heartbeat posts telemetry and returns any queued commands. inventory may be

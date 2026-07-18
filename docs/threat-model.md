@@ -91,7 +91,7 @@ Consequences:
 command could in principle be re-presented to the same agent. The agent now
 defends against this on two fronts:
 
-- **Signed time window.** `command-v2` binds canonical `issued_at` and
+- **Signed time window.** `command-v3` binds canonical `issued_at` and
   `expires_at` into the signature. The agent rejects malformed, expired,
   overlong, or implausibly future-dated windows.
 - **Replay store.** The agent persists command IDs and signed nonces
@@ -103,17 +103,18 @@ defends against this on two fronts:
 Refusal order in the agent is signature → time window → command-ID replay →
 nonce replay → execute.
 
-**Version downgrade — mitigated.** The signed `command-v2` bytes include
+**Version downgrade — mitigated.** The signed `command-v3` bytes include
 `envelope_version`. Agents advertise versions during enrollment and heartbeat;
-the server withholds dispatch until `command-v2` is reported. Missing, unknown,
+the server withholds dispatch until `command-v3` is reported. Missing, unknown,
 and legacy versions fail closed before signature verification. Python and Go
 consume the same positive and negative vectors. Existing queued commands are
 expired during migration because their legacy signatures do not cover the v2
 contract.
 
-**Remaining hardening.** Signing-key IDs, overlapping verification keys,
-rotation, and compromise recovery are tracked separately. The v2 contract does
-not claim those controls.
+**Key lifecycle.** Command-v3 binds a signing-key ID and the agent only trusts
+the active/overlap public-key bundle delivered by the server. Registry changes,
+compromise response, and rollback remain operator-run controls that require
+review and rehearsal.
 
 ### (4) Agent → Endpoint OS
 
@@ -177,7 +178,7 @@ not built in.
 |---|-----|----------|--------|
 | 1 | Management API unauthenticated | Critical | **Closed** — operator authN + role-based authZ |
 | 2 | No token revocation / login rate-limit | Medium | **Closed** — per-operator `token_generation` bump revokes all outstanding JWTs (self + admin endpoints, audited); sliding-window 429 throttle on `/auth/login` per (IP, email). Limiter is per-process — use a shared store when running multiple workers |
-| 3 | Command expiry/version/nonce are not signed | Critical | **Mostly closed** — `command-v2` binds schema version, issued-at, expiry, and nonce with shared Go/Python vectors; signing-key IDs and rotation remain open |
+| 3 | Command expiry/version/nonce are not signed | Critical | **Mostly closed** — `command-v3` binds schema version, issued-at, expiry, nonce, and signing-key ID with shared Go/Python verification; operator key lifecycle rehearsal remains open |
 | 4 | TLS not enforced by scaffold | High | Partial — deployment path documented (`docs/DEPLOYMENT-TLS.md`, `deploy/Caddyfile`): TLS-terminating proxy with uvicorn bound to localhost; agent cert pinning still open |
 | 5 | Audit chain not externally anchored | Medium | Partial — Merkle anchoring implemented (create/list/verify endpoints; detects consistent chain rebuilds). Publishing the root to an external append-only medium is an ops step and not automated |
 | 6 | Agent runs commands at its own privilege | By design | Partial — installable service (Gate 2) runs as `LocalSystem`; least-privilege service account still open |

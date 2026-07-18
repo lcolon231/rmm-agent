@@ -70,12 +70,13 @@ accept an action. It currently contains:
 - Enrollment-token and agent-token issuance; only token hashes are stored on
   the server.
 - A single deployment-wide Ed25519 command-signing keypair.
-- A negotiated `command-v2` envelope with shared Python/Go canonical vectors,
+- A negotiated `command-v3` envelope with shared Python/Go canonical vectors,
   version downgrade rejection, and agent-side signature, signed time-window,
   command-ID, and nonce replay checks.
 
 Known gaps include agent revocation/quarantine, Windows DPAPI protection for
-credentials, signing-key identifiers and rotation, MFA/federation,
+credentials, key-registry operator workflow and compromise recovery,
+MFA/federation,
 tenant-scoped authorization, and certificate pinning.
 
 ### 3.2 Operations plane
@@ -153,6 +154,7 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/sites` | Create site | Operator |
 | POST | `/enrollment-tokens` | Create token | Operator |
 | GET | `/agents`, `/agents/{id}` | List/get endpoint | Readonly |
+| GET | `/signing-keys` | View redacted active/overlap/retired key state | Readonly |
 | POST/GET | `/agents/{id}/commands` | Dispatch/list commands | Operator / Readonly |
 | GET | `/audit/verify` | Verify hash chain | Readonly |
 | POST/GET | `/audit/anchors` | Create/list local anchors | Operator / Readonly |
@@ -188,7 +190,7 @@ contract. Stdout and stderr are held in memory without size limits.
 
 ## 6. Signed command envelope
 
-### 6.1 Implemented `command-v2` format
+### 6.1 Implemented `command-v3` format
 
 The server currently signs canonical JSON containing exactly:
 
@@ -196,11 +198,12 @@ The server currently signs canonical JSON containing exactly:
 {
   "agent_id": "...",
   "command_id": "...",
-  "envelope_version": "command-v2",
+  "envelope_version": "command-v3",
   "schema_version": 1,
   "issued_at": "2026-07-18T12:00:00Z",
   "expires_at": "2026-07-18T12:05:00Z",
   "nonce": "...",
+  "signing_key_id": "key-2026-a",
   "kind": "powershell",
   "payload": {"script": "..."}
 }
@@ -212,31 +215,35 @@ to objects, arrays, strings, booleans, null, and signed 64-bit integers; floats
 are rejected to avoid cross-runtime formatting ambiguity. Payload nesting is
 limited to 16 levels, the API payload to 60 KiB, and the full canonical envelope
 to 64 KiB. Both runtimes consume the positive and negative vectors in
-`contracts/test-vectors/command-v2.json`; the JSON Schema is
-`contracts/command-v2.schema.json`. The signed time window is canonical UTC,
+`contracts/command-v3.schema.json`. The signed time window is canonical UTC,
 expires within 24 hours, and rejects timestamps more than two minutes in the
 future.
 
 Agents advertise supported versions during enrollment and every heartbeat.
 Enrollment returns the selected version and fails with `409` when there is no
 overlap. Command dispatch also returns `409` until the target has advertised
-`command-v2`. Missing, unknown, and `legacy-unversioned` commands fail closed in
+`command-v3`. Missing, unknown, and `legacy-unversioned` commands fail closed in
 the agent before signature verification. Capability changes are audited without
 secrets. Successful dispatch audit rows record the envelope version, payload
 key names, and a SHA-256 envelope digest, not potentially sensitive payload
 values. This deliberately prevents an implicit legacy fallback.
 
-The signature binds the schema version, issued-at, expiry, and nonce. The agent
-persists both command IDs and nonces, and refuses execution if replay state
-cannot be durably written. Signing-key IDs and rotation are intentionally not
-part of v2 and remain a separate hardening issue.
+The signature binds the schema version, issued-at, expiry, nonce, and
+`signing_key_id`. The agent persists both command IDs and nonces, replaces its
+trusted public-key bundle on heartbeat, and refuses execution if replay state
+cannot be durably written or the key is unknown/retired. The external registry
+supports one active key, any number of overlap keys, and retired keys that are
+never sent to agents.
 
-### 6.2 Planned signing-key lifecycle
+### 6.2 Signing-key lifecycle and rollback
 
-Milestone 0 still needs signing-key IDs, overlapping verification keys, rotation,
-and compromise recovery. That change must extend or supersede the present
-contract with new shared vectors; it must not reinterpret already-issued v2
-bytes silently.
+The JSON registry named by `COMMAND_SIGNING_KEYRING_PATH` records the active key
+ID and each key's `active`, `overlap`, or `retired` state. Private material stays
+outside the database; overlap entries may provide public material only. Changing
+the registry is an operator action that must be reviewed, backed up, and paired
+with an audit record. On compromise, activate a new key, retain the old key only
+for the documented overlap window, then mark it retired. Rollback restores the
+previous registry atomically and never reactivates an unknown key.
 
 ## 7. Audit architecture
 

@@ -54,7 +54,7 @@
   ],
   "invalid": [
     { "name": "missing-version", "envelope": {}, "error": "missing_version" },
-    { "name": "unknown-version", "envelope": { "envelope_version": "command-v3" }, "error": "unsupported_version" },
+    { "name": "unknown-version", "envelope": { "envelope_version": "command-v4" }, "error": "unsupported_version" },
     { "name": "downgrade-to-v1", "envelope": { "envelope_version": "command-v1" }, "error": "unsupported_version" },
     { "name": "missing-schema", "envelope": { "envelope_version": "command-v2" }, "error": "missing_schema_version" },
     { "name": "unsupported-schema", "envelope": { "envelope_version": "command-v2", "schema_version": 2 }, "error": "unsupported_schema_version" },

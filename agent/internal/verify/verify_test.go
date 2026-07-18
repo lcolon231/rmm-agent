@@ -97,3 +97,27 @@ func TestMalformedCommandTimeFailsClosed(t *testing.T) {
 		t.Fatal("invalid calendar time should fail")
 	}
 }
+
+func TestV3BindsSigningKeyID(t *testing.T) {
+	got, err := canonicalCommandBytes(
+		protocol.CommandEnvelopeV3, protocol.CommandSchemaV1, "c-key", "a-key",
+		"shell", []byte(`{"script":"whoami"}`),
+		"2026-07-18T12:00:00Z", "2026-07-18T12:05:00Z",
+		"AAAAAAAAAAAAAAAAAAAAAA", "key-2026-a",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"agent_id":"a-key","command_id":"c-key","envelope_version":"command-v3","expires_at":"2026-07-18T12:05:00Z","issued_at":"2026-07-18T12:00:00Z","kind":"shell","nonce":"AAAAAAAAAAAAAAAAAAAAAA","payload":{"script":"whoami"},"schema_version":1,"signing_key_id":"key-2026-a"}`
+	if string(got) != want {
+		t.Fatalf("unexpected v3 canonical bytes\n got: %s\nwant: %s", got, want)
+	}
+	if _, err := canonicalCommandBytes(
+		protocol.CommandEnvelopeV3, protocol.CommandSchemaV1, "c-key", "a-key",
+		"shell", []byte(`{"script":"whoami"}`),
+		"2026-07-18T12:00:00Z", "2026-07-18T12:05:00Z",
+		"AAAAAAAAAAAAAAAAAAAAAA",
+	); err == nil {
+		t.Fatal("v3 without a signing key ID should fail closed")
+	}
+}

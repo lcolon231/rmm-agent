@@ -20,6 +20,32 @@ type vectorEnvelope struct {
 	IssuedAt        string          `json:"issued_at"`
 	ExpiresAt       string          `json:"expires_at"`
 	Nonce           string          `json:"nonce"`
+	SigningKeyID    string          `json:"signing_key_id"`
+}
+
+func TestSharedCommandV3Vector(t *testing.T) {
+	data, err := os.ReadFile("../../../contracts/test-vectors/command-v3.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors vectorFile
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range vectors.Valid {
+		got, err := canonicalCommandBytes(
+			tc.Envelope.EnvelopeVersion, tc.Envelope.SchemaVersion,
+			tc.Envelope.CommandID, tc.Envelope.AgentID, tc.Envelope.Kind,
+			tc.Envelope.Payload, tc.Envelope.IssuedAt, tc.Envelope.ExpiresAt,
+			tc.Envelope.Nonce, tc.Envelope.SigningKeyID,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != tc.CanonicalJSON {
+			t.Fatalf("v3 canonical mismatch: got %s want %s", got, tc.CanonicalJSON)
+		}
+	}
 }
 
 type vectorCase struct {

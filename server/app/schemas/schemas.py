@@ -129,9 +129,11 @@ class EnrollRequest(CommandEnvelopeCapabilities):
 class EnrollResponse(BaseModel):
     agent_id: str
     agent_token: str  # long-lived bearer token, shown only here
-    heartbeat_interval_seconds: int
-    command_public_key: str  # PEM Ed25519 public key for verifying commands
-    command_envelope_version: EnvelopeVersion
+      heartbeat_interval_seconds: int
+      command_public_key: str  # PEM Ed25519 public key for verifying commands
+      command_envelope_version: EnvelopeVersion
+      command_public_keys: dict[str, str] = Field(default_factory=dict)
+      command_signing_key_id: str = "default"
 
 
 # --------------------------------------------------------------------------- #
@@ -150,6 +152,7 @@ class HeartbeatAck(BaseModel):
     ok: bool = True
     # Commands the agent should pick up now (thin-poll model without WS).
     pending_commands: list["CommandOut"] = Field(default_factory=list)
+    command_public_keys: dict[str, str] = Field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------- #
@@ -176,6 +179,7 @@ class CommandOut(BaseModel):
     schema_version: int | None
     issued_at: datetime | None
     nonce: str | None
+    signing_key_id: str | None
     signature: str
     status: CommandStatus
     created_at: datetime

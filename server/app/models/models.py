@@ -225,6 +225,7 @@ class Command(Base):
     schema_version: Mapped[int | None] = mapped_column(Integer)
     issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     nonce: Mapped[str | None] = mapped_column(String(64))
+    signing_key_id: Mapped[str | None] = mapped_column(String(64))
     # Base64 Ed25519 signature over the canonical command bytes.
     signature: Mapped[str] = mapped_column(Text, default="")
 

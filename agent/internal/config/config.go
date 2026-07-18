@@ -28,6 +28,8 @@ type Identity struct {
 	AgentID          string `json:"agent_id"`
 	AgentToken       string `json:"agent_token"`
 	CommandPublicKey string `json:"command_public_key"` // PEM Ed25519
+	CommandPublicKeys map[string]string `json:"command_public_keys,omitempty"`
+	CommandSigningKeyID string `json:"command_signing_key_id,omitempty"`
 	HeartbeatSeconds int    `json:"heartbeat_seconds"`
 	ServerURL        string `json:"server_url"`
 }

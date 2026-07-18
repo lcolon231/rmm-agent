@@ -6,11 +6,12 @@ package protocol
 const (
 	CommandEnvelopeV1 = "command-v1"
 	CommandEnvelopeV2 = "command-v2"
+	CommandEnvelopeV3 = "command-v3"
 	CommandSchemaV1   = 1
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
 // mutate process-global negotiation state.
 func SupportedCommandEnvelopeVersions() []string {
-	return []string{CommandEnvelopeV2}
+	return []string{CommandEnvelopeV3, CommandEnvelopeV2}
 }

@@ -55,8 +55,8 @@ func PublicKeyFromPEM(pemStr string) (ed25519.PublicKey, error) {
 // payload is emitted via json.RawMessage to preserve its exact bytes only when
 // they are already canonical; to be safe we re-canonicalize by decoding into an
 // interface and re-encoding.
-func canonicalCommandBytes(envelopeVersion string, schemaVersion int, commandID, agentID, kind string, payload json.RawMessage, issuedAt, expiresAt, nonce string) ([]byte, error) {
-	if envelopeVersion != protocol.CommandEnvelopeV2 {
+func canonicalCommandBytes(envelopeVersion string, schemaVersion int, commandID, agentID, kind string, payload json.RawMessage, issuedAt, expiresAt, nonce string, signingKeyIDs ...string) ([]byte, error) {
+	if envelopeVersion != protocol.CommandEnvelopeV2 && envelopeVersion != protocol.CommandEnvelopeV3 {
 		if envelopeVersion == "" {
 			return nil, fmt.Errorf("missing command envelope version")
 		}
@@ -81,6 +81,17 @@ func canonicalCommandBytes(envelopeVersion string, schemaVersion int, commandID,
 	}
 	if !noncePattern.MatchString(nonce) {
 		return nil, fmt.Errorf("malformed command nonce")
+	}
+	signingKeyID := ""
+	if len(signingKeyIDs) > 0 {
+		signingKeyID = signingKeyIDs[0]
+	}
+	if envelopeVersion == protocol.CommandEnvelopeV3 {
+		if !regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`).MatchString(signingKeyID) {
+			return nil, fmt.Errorf("missing or malformed signing key ID")
+		}
+	} else if signingKeyID != "" {
+		return nil, fmt.Errorf("v2 command must not include signing key ID")
 	}
 	if _, _, err := validateCommandTimePair(issuedAt, expiresAt); err != nil {
 		return nil, err
@@ -117,6 +128,9 @@ func canonicalCommandBytes(envelopeVersion string, schemaVersion int, commandID,
 		"nonce":            nonce,
 		"payload":          payloadVal,
 		"schema_version":   schemaVersion,
+	}
+	if envelopeVersion == protocol.CommandEnvelopeV3 {
+		doc["signing_key_id"] = signingKeyID
 	}
 	// json.Marshal sorts object keys; with no extra spaces this equals Python's
 	// json.dumps(sort_keys=True, separators=(",", ":")).
@@ -237,6 +251,22 @@ func validatePayloadValue(value any, depth int) error {
 // be executed.
 func Verify(pub ed25519.PublicKey, envelopeVersion string, schemaVersion int, commandID, agentID, kind string, payload json.RawMessage, issuedAt, expiresAt, nonce, signatureB64 string) error {
 	msg, err := canonicalCommandBytes(envelopeVersion, schemaVersion, commandID, agentID, kind, payload, issuedAt, expiresAt, nonce)
+	if err != nil {
+		return err
+	}
+	sig, err := base64.StdEncoding.DecodeString(signatureB64)
+	if err != nil {
+		return fmt.Errorf("decode signature: %w", err)
+	}
+	if !ed25519.Verify(pub, msg, sig) {
+		return fmt.Errorf("signature verification failed")
+	}
+	return nil
+}
+
+// VerifyWithKeyID verifies a command-v3 signature against its declared key ID.
+func VerifyWithKeyID(pub ed25519.PublicKey, envelopeVersion string, schemaVersion int, commandID, agentID, kind string, payload json.RawMessage, issuedAt, expiresAt, nonce, signingKeyID, signatureB64 string) error {
+	msg, err := canonicalCommandBytes(envelopeVersion, schemaVersion, commandID, agentID, kind, payload, issuedAt, expiresAt, nonce, signingKeyID)
 	if err != nil {
 		return err
 	}

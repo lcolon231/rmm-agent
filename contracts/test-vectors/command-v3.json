@@ -1,0 +1,26 @@
+{
+  "contract": "command-v3",
+  "notes": "The signing_key_id is part of the canonical signed bytes.",
+  "valid": [
+    {
+      "name": "key-identified-script",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": { "script": "Get-Date" },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "key-2026-a"
+      },
+      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000101\",\"command_id\":\"00000000-0000-0000-0000-000000000101\",\"envelope_version\":\"command-v3\",\"expires_at\":\"2026-07-18T12:05:00Z\",\"issued_at\":\"2026-07-18T12:00:00Z\",\"kind\":\"powershell\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"payload\":{\"script\":\"Get-Date\"},\"schema_version\":1,\"signing_key_id\":\"key-2026-a\"}"
+    }
+  ],
+  "invalid": [
+    { "name": "missing-key-id", "envelope": { "envelope_version": "command-v3", "schema_version": 1 }, "error": "missing_signing_key_id" },
+    { "name": "retired-key-is-not-a-wire-state", "envelope": { "envelope_version": "command-v3", "schema_version": 1, "signing_key_id": "key old" }, "error": "malformed_signing_key_id" }
+  ]
+}

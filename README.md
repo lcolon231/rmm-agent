@@ -25,11 +25,12 @@ The code in this repository currently provides:
   FastAPI server through heartbeat responses.
 - One-time or limited-use enrollment tokens and long-lived per-agent bearer
   credentials. Server-side token values are stored as SHA-256 hashes.
-- Ed25519 signatures over the negotiated `command-v2` envelope: envelope
+- Ed25519 signatures over the negotiated `command-v3` envelope: envelope
   version, schema version, command ID, agent ID, kind, payload, issued-at,
   expiry, and nonce. Python and Go consume the same canonical vectors; agents
   reject missing, unknown, malformed, expired, replayed, and downgraded
-  envelopes. Signing-key IDs and rotation remain follow-on work.
+  envelopes. Key IDs support active/overlap/retired registry states; v2 remains
+  available only for mixed-version rollout.
 - Basic CPU, memory, system-disk, uptime, and logged-in-user telemetry.
 - Buffered PowerShell or shell execution with a five-minute timeout. Results
   are uploaded only after execution finishes.
@@ -51,8 +52,9 @@ the implementation and its security boundaries.
 
 ## In progress
 
-Milestone 0, Deployment Safety, is the active program: adding signing-key
-identifiers and rotation, credential protection and agent quarantine, enforcing
+Milestone 0, Deployment Safety, is the active program: hardening key-registry
+activation/retirement and rollback, credential protection and agent quarantine,
+enforcing
 production TLS policy, bounding execution resources, making audit ordering and
 anchoring operationally verifiable, adding migrations and recovery procedures,
 and strengthening Windows and release testing.
@@ -86,7 +88,7 @@ The repository does **not** currently contain:
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
 - Agent revocation/quarantine, Windows DPAPI credential protection, command
-  output-size limits, signing-key identifiers/rotation, or certificate pinning.
+  output-size limits, or certificate pinning.
 - Automated backup/restore, an automated external audit-anchor publisher,
   release SBOM/provenance, or Authenticode signing.
 - Tenant-scoped authorization, tenant-specific roles or retention, MFA,

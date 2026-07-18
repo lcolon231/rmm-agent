@@ -10,8 +10,9 @@ from typing import Any
 
 COMMAND_ENVELOPE_V1 = "command-v1"
 COMMAND_ENVELOPE_V2 = "command-v2"
-ACTIVE_COMMAND_ENVELOPE_VERSION = COMMAND_ENVELOPE_V2
-SUPPORTED_COMMAND_ENVELOPE_VERSIONS = (ACTIVE_COMMAND_ENVELOPE_VERSION,)
+COMMAND_ENVELOPE_V3 = "command-v3"
+ACTIVE_COMMAND_ENVELOPE_VERSION = COMMAND_ENVELOPE_V3
+SUPPORTED_COMMAND_ENVELOPE_VERSIONS = (COMMAND_ENVELOPE_V3, COMMAND_ENVELOPE_V2)
 COMMAND_SCHEMA_VERSION = 1
 SUPPORTED_COMMAND_KINDS = frozenset(
     {"powershell", "shell", "collect_inventory"}
@@ -157,8 +158,9 @@ def canonical_command_bytes(
     issued_at: str,
     expires_at: str,
     nonce: str,
+    signing_key_id: str | None = None,
 ) -> bytes:
-    """Validate and encode the signed command-v2 JSON representation.
+    """Validate and encode a signed command-v2/v3 JSON representation.
 
     command-v2 uses UTF-8 JSON with recursively sorted object keys, no
     insignificant whitespace, no ASCII-only escaping, signed 64-bit integers,
@@ -198,6 +200,21 @@ def canonical_command_bytes(
             "malformed_nonce", "nonce must be 22-64 URL-safe base64 characters"
         )
     validate_command_window(issued_at, expires_at)
+    if envelope_version == COMMAND_ENVELOPE_V3:
+        if not signing_key_id:
+            raise CommandEnvelopeError(
+                "missing_signing_key_id", "signing_key_id is required"
+            )
+        if not isinstance(signing_key_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9._-]{1,64}", signing_key_id
+        ):
+            raise CommandEnvelopeError(
+                "malformed_signing_key_id", "signing_key_id is invalid"
+            )
+    elif signing_key_id is not None:
+        raise CommandEnvelopeError(
+            "unexpected_signing_key_id", "command-v2 does not accept signing_key_id"
+        )
     validate_command_payload(payload)
 
     doc = {
@@ -211,6 +228,8 @@ def canonical_command_bytes(
         "payload": payload,
         "schema_version": schema_version,
     }
+    if envelope_version == COMMAND_ENVELOPE_V3:
+        doc["signing_key_id"] = signing_key_id
     encoded_text = json.dumps(
         doc,
         sort_keys=True,
