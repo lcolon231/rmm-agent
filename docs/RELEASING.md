@@ -4,6 +4,12 @@ Releases are automated by `.github/workflows/release.yml`, which fires on a
 version tag. The server is run from source (uvicorn), so only the **agent** is
 released as a binary.
 
+The current release process is for development artifacts. It publishes
+checksums but does not Authenticode-sign the Windows agent or installer, produce
+an SBOM, emit a provenance attestation, run Windows service/installer lifecycle
+tests, or validate a rollback. Do not describe a tagged artifact as
+production-ready. See [`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md).
+
 ## Cutting a release
 
 1. Make sure `main` is green (the CI workflow runs the Go and Python suites on
@@ -68,6 +74,32 @@ the signed binary. The Windows installer gets the same treatment in its own
 job: sign the agent `.exe` before `ISCC` compiles it in, then sign the produced
 `NodeLinkAgentSetup-<version>.exe` before upload. Keep the certificate/keys in GitHub Actions secrets or a
 cloud HSM — never in the repo.
+
+## Required release evidence (not yet wired up)
+
+Milestone 0 must extend the workflow so each release publishes and verifies:
+
+- Authenticode signatures and trusted timestamps for the embedded agent and
+  final installer.
+- SHA-256 checksums generated after every signing step.
+- An SBOM covering the Go module, Python server dependency lock/input, installer
+  tooling, and released artifacts at an agreed format/granularity.
+- Build provenance attestations tied to the source ref, workflow, and artifact
+  digest.
+- Windows service and installer lifecycle results.
+- Compatibility, migration, backup, upgrade, and rollback notes.
+
+The release job should fail closed if signature, checksum, SBOM, provenance, or
+required test verification fails.
+
+## Rollback (not yet validated)
+
+Every production-intended release needs a version-specific rollback procedure
+that names compatible server, agent, installer, and schema versions; states
+whether migrations are reversible; pauses automatic update; preserves audit
+evidence; and verifies the restored service. The generic acceptance checklist is
+in [`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md). There is no supported
+production rollback procedure today.
 
 ## What is intentionally NOT released here
 

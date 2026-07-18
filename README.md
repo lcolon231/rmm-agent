@@ -1,62 +1,142 @@
 # NodeLink RMM
 
-A lightweight, self-hosted Remote Monitoring & Management platform built for MSPs serving SMB and medical-office clients. Designed as an open alternative to Atera / NinjaOne / Tactical RMM, with a focus on **outbound-only agent connectivity** and a **cryptographically verifiable audit trail** suitable for HIPAA-regulated environments.
+NodeLink is a self-hosted endpoint-management platform for regulated small
+businesses and MSPs. It provides signed remote actions, outbound-only
+connectivity, and independently verifiable administrative audit records without
+the operational complexity of traditional RMM platforms.
 
-## Why this exists
+NodeLink is an early-stage, Windows-first project. It is not a full Tactical RMM
+clone, is not ready for production or regulated endpoints, and does not claim
+HIPAA compliance. The near-term goal is a controlled non-production pilot with
+HIPAA-supporting controls and defensible compliance evidence.
 
-Commercial RMMs are priced per-endpoint and treat audit logging as an afterthought. NodeLink RMM is built around two principles that matter for medical-office compliance:
+## Product direction
 
-1. **No inbound firewall changes at client sites.** Agents connect *outbound* to the server over TLS. Nothing to port-forward, nothing to expose.
-2. **Tamper-evident command history.** Every command executed on every endpoint is recorded in an append-only audit log, structured so it can be anchored to an external verification layer (see `docs/threat-model.md`).
+NodeLink intends to compete through simpler deployment, policy-controlled and
+signed endpoint actions, verifiable audit evidence, and a focused experience for
+regulated SMBs and MSPs. General RMM breadth comes later. See the
+[competitive strategy](docs/COMPETITIVE-STRATEGY.md) and the
+[phased roadmap](docs/ROADMAP.md).
 
-## Architecture
+## Current implementation
 
+The code in this repository currently provides:
+
+- A Go agent that runs as a Windows service, connects outbound, and polls the
+  FastAPI server through heartbeat responses.
+- One-time or limited-use enrollment tokens and long-lived per-agent bearer
+  credentials. Server-side token values are stored as SHA-256 hashes.
+- Ed25519 signatures over the current unversioned command fields
+  `command_id`, `agent_id`, `kind`, and `payload`. The agent refuses invalid
+  signatures, expired delivered commands, and previously executed command IDs.
+- Basic CPU, memory, system-disk, uptime, and logged-in-user telemetry.
+- Buffered PowerShell or shell execution with a five-minute timeout. Results
+  are uploaded only after execution finishes.
+- Operator password authentication, JWT sessions, three global roles, token
+  generation revocation, and in-process login throttling.
+- Client and site records, agent listing, command dispatch/history APIs, and an
+  offline-status sweeper.
+- A hash-chained audit log plus APIs that create and verify local Merkle
+  anchors. Anchors are not automatically published outside the database.
+- An Inno Setup Windows installer and tagged release workflow. Windows
+  binaries and the installer are currently unsigned.
+- Linux and macOS development builds of the polling agent. Windows is the only
+  primary support target; those builds are not a supported cross-platform RMM.
+
+The [architecture document](docs/ARCHITECTURE.md) is the source of truth for
+the implementation and its security boundaries.
+
+## In progress
+
+Milestone 0, Deployment Safety, is the active program: hardening the signed
+command envelope, adding credential protection and agent quarantine, enforcing
+production TLS policy, bounding execution resources, making audit ordering and
+anchoring operationally verifiable, adding migrations and recovery procedures,
+and strengthening Windows and release testing.
+
+## Planned
+
+- **Milestone 1 — Windows RMM MVP:** authenticated Next.js dashboard, complete
+  Windows inventory, monitoring and alerts, notification delivery, script
+  library, and recurring tasks.
+- **Milestone 2 — Patch and Remediation:** Windows Update policies and
+  installation, software deployment, endpoint operations, interactive shell,
+  streaming output, MeshCentral integration, and agent self-update.
+- **Milestone 3 — Compliance Productization:** evidence bundles, approval
+  workflows, tenant-scoped authorization, stronger identity controls,
+  immutable retention, audit verification tools, and a customer audit portal.
+- **Milestone 4 — Scale and Ecosystem:** shared infrastructure, distributed
+  execution, high availability, public APIs, integrations, signed extensions,
+  and later Linux/macOS support.
+
+## Explicitly not implemented yet
+
+The repository does **not** currently contain:
+
+- A web dashboard, authentication UI, endpoint console, or audit UI.
+- WebSocket or other live agent transport, interactive remote shell, or
+  streaming command output. Polling remains the only transport.
+- Complete hardware, software, Windows Defender, BitLocker, Secure Boot, TPM,
+  or local-administrator inventory.
+- Monitoring policy/check/alert models, alert acknowledgement, email, or
+  webhook notifications.
+- Script library, scheduled tasks, patch management, remediation operations,
+  file transfer, or remote desktop.
+- Agent revocation/quarantine, Windows DPAPI credential protection, command
+  output-size limits, signing-key rotation, or certificate pinning.
+- Production database migrations, automated backup/restore, an automated
+  external audit-anchor publisher, release SBOM/provenance, or Authenticode
+  signing.
+- Tenant-scoped authorization, tenant-specific roles or retention, MFA,
+  WebAuthn, OIDC/SAML, legal hold, or compliance evidence exports.
+
+## Architecture at a glance
+
+```text
+Operator/API client -- JWT --> FastAPI server --> PostgreSQL
+                              ^
+                              |
+Windows agent -- outbound HTTPS heartbeat/poll --+
+                signed commands returned in heartbeat response
 ```
-┌─────────────┐         outbound TLS          ┌──────────────┐
-│  Go Agent   │ ────── WebSocket / HTTPS ────► │ FastAPI      │
-│ (Win svc)   │ ◄───── signed commands ─────── │ Server       │
-└─────────────┘                                └──────┬───────┘
-                                                      │
-                                              ┌───────▼───────┐
-                                              │  PostgreSQL   │
-                                              └───────────────┘
-                                                      ▲
-                                              ┌───────┴───────┐
-                                              │ Next.js       │
-                                              │ Dashboard     │
-                                              └───────────────┘
+
+The application does not terminate TLS. The documented deployment topology
+places Caddy in front of uvicorn and binds uvicorn to localhost. This is a
+deployment procedure today, not an application-level production enforcement
+mechanism. See [deployment readiness](docs/DEPLOYMENT-READINESS.md) and the
+[TLS runbook](docs/DEPLOYMENT-TLS.md).
+
+## Repository layout
+
+```text
+rmm-agent/
+├── agent/       # Go endpoint agent and Windows service integration
+├── server/      # FastAPI API and persistence layer
+├── installer/   # Inno Setup Windows installer
+├── deploy/      # Current reverse-proxy example
+├── docs/        # Architecture, security, roadmap, and operations documents
+└── .github/     # CI, release automation, and contribution templates
 ```
 
-| Component | Stack | Status |
-|-----------|-------|--------|
-| `agent/` | Go — Windows service, check-in loop, PowerShell executor, inventory | Phase 1 |
-| `server/` | FastAPI + PostgreSQL — enrollment, heartbeat, command queue, alerts | Phase 1 |
-| `dashboard/` | Next.js — endpoint list, live status, command console | Phase 2 |
-| `docs/` | Architecture, threat model, deployment | ongoing |
+Future `dashboard/`, `contracts/`, and `tools/` directories are planned. No
+disruptive reorganization is part of the current planning change.
 
-## Roadmap
+## Local development
 
-**Phase 1 (MVP)** — enrollment with one-time tokens, 60s heartbeat (CPU/RAM/disk/uptime), hardware + software inventory, offline alerting, remote PowerShell with streamed output.
+See [server/README.md](server/README.md) to run the backend,
+[agent/README.md](agent/README.md) to build and enroll an agent, and
+[installer/README.md](installer/README.md) for the Windows installer.
 
-**Phase 2** — Windows Update patch status, scheduled scripts, threshold alerts (disk >90%, etc.), Next.js dashboard.
+Before any pilot, review the [threat model](docs/threat-model.md),
+[security roadmap](docs/SECURITY-ROADMAP.md), and
+[deployment-readiness checklist](docs/DEPLOYMENT-READINESS.md).
 
-**Phase 3** — remote desktop via embedded [MeshCentral](https://github.com/Ylianst/MeshCentral), agent self-update.
+## Contributing
 
-## Repo layout
-
-```
-rmm/
-├── agent/        # Go agent
-├── server/       # FastAPI backend
-├── dashboard/    # Next.js frontend (Phase 2)
-└── docs/         # architecture & threat model
-```
-
-## Getting started
-
-See [`server/README.md`](server/README.md) to run the backend, then [`agent/README.md`](agent/README.md) to build and enroll an agent.
-
-To install the agent on a real Windows endpoint, use the graphical installer (`NodeLinkAgentSetup-<version>.exe`, attached to each [release](https://github.com/lcolon231/rmm-agent/releases)) — it prompts for the server URL and enrollment token and registers the service for you. See [`installer/README.md`](installer/README.md).
+Development work is organized through phased GitHub milestones and actionable
+issues. Security-sensitive changes require tests, and architecture/security
+documentation must be updated in the same pull request as behavior changes.
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ## License
 

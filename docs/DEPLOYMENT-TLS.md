@@ -14,6 +14,14 @@ TLS-terminating reverse proxy in front of uvicorn:
 Agent ── https:// ──► Caddy (:443, TLS) ── http:// ──► uvicorn (127.0.0.1:8000)
 ```
 
+> **Current limitation:** this is an operator-run topology, not an
+> application-enforced production mode. The server does not reject unsafe
+> production configuration, and the agent accepts an `http://` server URL.
+> Production TLS policy, proxy-trust validation, renewal monitoring, and
+> optional certificate pinning remain Milestone 0 work. Completing this runbook
+> alone does not make a deployment production-ready; use
+> [`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md).
+
 ## Option A (recommended): Caddy with a public DNS name
 
 Caddy obtains and renews Let's Encrypt certificates automatically. You need a
@@ -97,5 +105,7 @@ The first option keeps the agent's identity and history; prefer it.
 ## Future hardening (out of scope here)
 
 - **Certificate pinning in the agent** for high-assurance clients (threat
-  model, boundary 2).
+  model, boundary 2), including overlapping pins and recovery-safe rotation.
 - **HSTS / redirect** of any legacy plain-HTTP listeners.
+- **Production startup validation** for HTTPS public URL, trusted proxy scope,
+  placeholder secrets, and certificate/renewal monitoring.

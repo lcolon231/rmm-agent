@@ -1,471 +1,292 @@
-# NodeLink RMM — Architecture & Roadmap
+# NodeLink architecture
 
-This document is the single source of truth for what NodeLink RMM is, how it's
-built, and where it's going. It reflects the code as it actually exists (not the
-aspirational bits in some of the older READMEs — see "Known drift" at the end).
+This document is the source of truth for NodeLink's implemented architecture,
+security boundaries, and planned evolution. Update it in the same pull request
+as any change to protocols, data models, authorization, deployment topology, or
+audit behavior. The [threat model](threat-model.md) remains the detailed security
+analysis.
 
-If you're an AI coding agent or a new contributor: **read this first.** Then, for
-anything security-related, read `docs/threat-model.md`, which is the most
-accurate security doc in the repo.
+## 1. Product and support boundary
 
----
+NodeLink is an early-stage, self-hosted endpoint-management platform designed
+for regulated small businesses and MSPs. The primary support target is Windows.
+Linux and macOS binaries can be built, but cross-platform product support is a
+Milestone 4 goal.
 
-## 1. What this is
+The current repository is an API and agent scaffold, not a complete RMM. There
+is no dashboard, patch engine, live remote shell, remote desktop, compliance
+exporter, or tenant-scoped authorization. Production and regulated endpoint use
+remain outside the supported boundary until the deployment-safety gates in
+[DEPLOYMENT-READINESS.md](DEPLOYMENT-READINESS.md) are satisfied.
 
-A self-hosted Remote Monitoring & Management (RMM) platform for an MSP
-(NodeLink) serving small businesses and medical offices — an open alternative to
-commercial RMMs like Atera, NinjaOne, and Tactical RMM.
+## 2. Current topology and transport
 
-Two design priorities distinguish it:
-
-1. **Outbound-only agent connectivity.** Agents dial the server; the server
-   never dials agents. No inbound firewall changes at client sites — important
-   for medical offices.
-2. **Cryptographically verifiable, tamper-evident audit log.** Every meaningful
-   action is recorded in an append-only hash chain, so the record of what was
-   done (and by whom) can be shown to be un-altered. This matters for HIPAA
-   clients.
-
-It also serves as a portfolio project demonstrating full-stack plus security
-engineering.
-
----
-
-## 2. High-level architecture
-
-Three parts live in one repository:
-
-```
-  Operator (human)                     Agent (machine, one per endpoint)
-      | JWT auth                            | enrollment token, then bearer token
-      v                                     v
-  +---------------------------- server/ (FastAPI) ----------------------------+
-  |  auth  |  agent-facing API  |  management API  |  audit log  |  offline   |
-  |        |  (enroll/heartbeat)|  (dispatch etc.) |  hash chain |  sweeper   |
-  +---------------------------------------------------------------------------+
-      |
-      v
-  Database (PostgreSQL in prod, SQLite for dev/tests)
+```text
+Operator/API client                  Endpoint
+        | JWT                           | enrollment token, then agent token
+        v                               v
+ +------------------------- FastAPI server --------------------------+
+ | auth | management API | agent API | offline sweeper | audit APIs |
+ +-------------------------------------------------------------------+
+                              |
+                              v
+                  PostgreSQL (SQLite in tests/dev)
 ```
 
-The transport today is **plain HTTP with polling**: the agent's heartbeat doubles
-as the command poll (the heartbeat response carries any queued commands). There
-is no WebSocket yet (planned — see Roadmap and Known drift). The scaffold itself
-does not terminate TLS; for any off-box deployment, TLS is terminated by a
-reverse proxy in front of the server — see `docs/DEPLOYMENT-TLS.md` and
-`deploy/Caddyfile`.
+The endpoint initiates every connection. The current transport is HTTP request
+and response polling:
 
-| Component | Stack | Status |
-|-----------|-------|--------|
-| `server/` | FastAPI, SQLAlchemy 2 (async), Pydantic 2 | Working |
-| `agent/`  | Go 1.22, stdlib-only except `golang.org/x/sys` (Windows service) | Working, incl. Gate 2 |
-| `docs/`   | Markdown (architecture, threat model, TLS + release runbooks) | — |
-| CI/CD     | GitHub Actions — tests on every PR, tagged agent releases | Working |
-| Dashboard | Next.js | **Not started** (Phase 2) — referenced in root README but does not exist |
+1. An unenrolled agent calls `POST /api/v1/enroll`.
+2. The enrolled agent calls `POST /api/v1/heartbeat` on its configured cadence.
+3. The heartbeat response carries queued commands.
+4. The agent executes accepted commands sequentially and posts the buffered
+   result to `POST /api/v1/commands/{id}/result`.
 
----
+There is no WebSocket, server-initiated endpoint connection, interactive
+session, or streamed result channel. A future interactive transport may add
+lower-latency delivery and streaming, but polling must remain a resilient
+fallback and the signed command contract must be transport-independent.
 
-## 3. The server (`server/`)
+The FastAPI application does not terminate or require TLS. The documented
+off-box topology is:
 
-FastAPI application, async SQLAlchemy, Pydantic v2. Runs on Python 3.12 for local
-development. (The README says 3.11+, and the code only strictly needs 3.10+ for
-its `X | None` unions, but **use 3.12** — newer Pythons like 3.14 lack prebuilt
-wheels for `asyncpg`/`pydantic-core` and fail to install without a C/Rust
-toolchain.)
-
-### 3.1 Data model (`app/models/models.py`)
-
-```
-Client ──< Site ──< EnrollmentToken
-                └──< Agent ──< Heartbeat
-                          └──< Command
-Operator   (standalone)
-AuditEvent (standalone, append-only hash chain)
+```text
+Agent/API client -- HTTPS --> Caddy :443 -- HTTP loopback --> uvicorn :8000
 ```
 
-- **Client / Site** — the customer org and its locations.
-- **EnrollmentToken** — one-time-ish token (configurable `max_uses`, expiry,
-  revocable) used by an installer to enroll agents at a site. Only its SHA-256
-  hash is stored; the plaintext is shown exactly once at creation.
-- **Agent** — an enrolled endpoint. Holds `token_hash` (SHA-256 of its
-  long-lived bearer token), host info, `status` (pending/online/offline),
-  `last_seen_at`, and an `inventory` JSON snapshot.
-- **Heartbeat** — one telemetry sample (CPU/mem/disk %, uptime, logged-in user).
-- **Command** — `kind` (powershell/shell/collect_inventory), `payload` (JSON),
-  base64 Ed25519 `signature`, `status`, captured `exit_code`/`stdout`/`stderr`,
-  and timestamps including `expires_at`.
-- **Operator** — a human user: `email` (unique), bcrypt `password_hash`, `role`
-  (readonly/operator/admin), `disabled`, and `token_generation` (bumping it
-  revokes all outstanding JWTs for that operator).
-- **AuditEvent** — append-only record with `prev_hash` + `event_hash` forming a
-  hash chain, plus `ts_iso` (the exact string that was hashed, stored so
-  verification never depends on DB datetime round-tripping).
+This topology is documented in [DEPLOYMENT-TLS.md](DEPLOYMENT-TLS.md) and
+`deploy/Caddyfile`; production-policy enforcement is still planned.
 
-### 3.2 API surface
+## 3. Architectural planes
 
-All routes are mounted under `/api/v1` (plus an unauthenticated `/healthz`).
+### 3.1 Trust plane
 
-**Auth (`app/api/auth.py`)**
+The trust plane decides who or what may act and whether an endpoint should
+accept an action. It currently contains:
 
-| Method | Path | Purpose | Auth |
-|--------|------|---------|------|
-| POST | `/auth/login` | Email + password → JWT (429 rate-limited on repeated failures) | Public |
-| POST | `/auth/operators` | Create an operator | admin |
-| GET  | `/auth/me` | Return the calling operator | readonly+ |
-| POST | `/auth/revoke-tokens` | Invalidate all of the caller's tokens ("log out everywhere") | readonly+ |
-| POST | `/auth/operators/{id}/revoke-tokens` | Invalidate all of another operator's tokens | admin |
+- Operator email/password authentication with bcrypt password hashes.
+- HS256 JWTs with a per-operator generation counter for logout-everywhere.
+- Global `readonly`, `operator`, and `admin` roles.
+- Enrollment-token and agent-token issuance; only token hashes are stored on
+  the server.
+- A single deployment-wide Ed25519 command-signing keypair.
+- Agent-side signature, delivered-expiry, and replay-ID checks.
 
-**Agent-facing (`app/api/agents.py`)**
+Known gaps include agent revocation/quarantine, Windows DPAPI protection for
+credentials, signing-key identifiers and rotation, a versioned command
+envelope, MFA/federation, tenant-scoped authorization, and certificate pinning.
 
-| Method | Path | Purpose | Auth |
-|--------|------|---------|------|
-| POST | `/enroll` | Claim identity via enrollment token; returns `agent_id`, one-time `agent_token`, heartbeat interval, and the Ed25519 **public key** | Enrollment token |
-| POST | `/heartbeat` | Submit telemetry; response carries queued commands (this is also the command poll) | Agent bearer token |
-| POST | `/commands/{id}/result` | Report exit code/stdout/stderr | Agent bearer token |
+### 3.2 Operations plane
 
-**Management / operator-facing (`app/api/management.py`)** — the whole router
-requires at least `readonly`, so nothing here is anonymous.
+The operations plane delivers endpoint state and actions. It currently contains
+enrollment, heartbeat telemetry, polling command pickup, three command kinds,
+buffered result submission, command history, and offline status transitions.
 
-| Method | Path | Purpose | Min role |
-|--------|------|---------|----------|
-| POST | `/clients` | Create client | operator |
-| GET  | `/clients` | List clients | readonly |
-| POST | `/sites` | Create site | operator |
-| POST | `/enrollment-tokens` | Mint enrollment token (plaintext once) | operator |
-| GET  | `/agents` | List agents | readonly |
-| GET  | `/agents/{id}` | Inspect one agent | readonly |
-| POST | `/agents/{id}/commands` | Queue + sign a command | operator |
-| GET  | `/agents/{id}/commands` | Command history | readonly |
-| GET  | `/audit/verify` | Walk the audit hash chain | readonly |
-| POST | `/audit/anchors` | Merkle-anchor the chain; returns the root to publish externally | operator |
-| GET  | `/audit/anchors` | List anchors | readonly |
-| GET  | `/audit/anchors/{id}/verify` | Recompute an anchor's root over its covered prefix | readonly |
+The current command kinds are `powershell`, `shell`, and `collect_inventory`.
+`collect_inventory` is only another script execution path; no built-in complete
+inventory collector exists. Prefer typed endpoint operations as new behavior is
+added. Arbitrary scripts remain powerful escape hatches and should receive
+stronger policy and approval controls.
 
-### 3.3 Background work
+### 3.3 Product plane
 
-`app/core/tasks.py` runs an **offline sweeper**: agents that were `online` but
-haven't been seen for `heartbeat_interval_seconds * offline_after_missed`
-(default 60 × 3 = 180s) are flipped to `offline`, and an `agent.offline` audit
-event is written.
+The product plane will provide the technician and customer experience. It does
+not exist in this repository today. Milestone 1 introduces the authenticated
+Next.js dashboard, endpoint and audit views, inventory, monitoring, alerts,
+notifications, script library, and recurring tasks. Later phases add patching,
+remediation, evidence workflows, and ecosystem integrations.
 
----
+## 4. Server
 
-## 4. The agent (`agent/`)
+The server uses FastAPI, Pydantic 2, and async SQLAlchemy. PostgreSQL is the
+intended deployment database; tests use SQLite. With `DEBUG=true`, startup calls
+`Base.metadata.create_all`. Alembic is declared as a dependency but no migration
+environment or revisions currently exist, so production schema evolution is
+not supported.
 
-Go 1.22. A single static binary. Standard-library-only **except**
-`golang.org/x/sys` (used solely for the Windows service integration). Linux/macOS
-builds are pure stdlib.
+### 4.1 Current data model
 
-### 4.1 Package layout (`agent/internal/`)
-
-- **config** — install-time `Config` (`server_url`, `enrollment_token`,
-  `heartbeat_seconds`) and the persisted `Identity` (`agent_id`, `agent_token`,
-  `command_public_key` PEM, `server_url`), saved as `identity.json` (mode 0600)
-  beside the config.
-- **client** — HTTP client for the server API: `Enroll`, `Heartbeat`,
-  `ReportResult`. 30s timeout; bearer auth on everything except enroll.
-- **telemetry** — per-OS metrics: Linux via `/proc` + `statfs`; Windows via
-  PowerShell CIM queries; other OSes return zeros so the agent still checks in.
-- **executor** — runs verified commands with a 5-minute timeout. Windows:
-  `powershell.exe` for powershell/collect_inventory, `cmd.exe /C` for shell.
-  Unix: `/bin/sh -c`, or `pwsh` for powershell if on PATH.
-- **verify** — Ed25519 command-signature verification (the security-critical
-  path — see §5).
-- **service** — the OS-independent runtime (enroll/check-in loop, backoff,
-  rotating log) plus the Windows SCM integration.
-
-### 4.2 The check-in loop
-
-Entry point is `cmd/agent/main.go` → `service.NewAgent(...)` → `Agent.Run(ctx)`.
-The loop (in `internal/service/runner.go`):
-
-1. **`loadSession`** — load config (missing/bad config is fatal, no retry). Then
-   `ensureEnrolled`: if `identity.json` exists, use it; otherwise enroll with the
-   token from config (network errors here are retried with backoff), then save
-   the identity 0600. Parse the command public key.
-2. **`checkIn`** (every heartbeat interval) — collect telemetry, POST a
-   heartbeat, and for each returned command call `processCommand`.
-3. **`processCommand`** — verify the Ed25519 signature. On failure: **refuse**,
-   log `REFUSING command ...`, and report a failure result **without executing**.
-   On success: run it via the executor, then report the result.
-
-On a failed heartbeat the loop backs off (exponential + jitter); on success it
-resets and sleeps the interval.
-
-> Note: the heartbeat interval always comes from the server's enroll response
-> (`identity.HeartbeatSeconds`). The local `Config.HeartbeatSeconds` override is
-> documented but not currently read.
-
-### 4.3 Running as a Windows service (Gate 2)
-
-The binary is both the CLI and the service. Subcommands (from
-`cmd/agent/main.go`):
-
-```
-rmm-agent run       (default)   -config FILE (default config.json), -once
-rmm-agent install               -config FILE   (copies config beside the binary)
-rmm-agent uninstall             (idempotent)
-rmm-agent start
-rmm-agent stop
-rmm-agent help
+```text
+Client --< Site --< EnrollmentToken
+                 \--< Agent --< Heartbeat
+                          \--< Command
+Operator
+AuditEvent
+AuditAnchor
 ```
 
-`rmm-agent -config config.json` still works because `run` is the default
-subcommand. When launched by the Windows SCM, the binary detects that from the
-environment and goes straight into service mode.
+`Client` and `Site` are organizational records, not security tenants. An
+authenticated operator can currently access records across every client and
+site. Tenant identifiers are not carried through every row or authorization
+decision.
 
-What the service integration provides (`internal/service/service_windows.go`,
-`runner.go`, `backoff.go`, `rotatelog.go`):
+`Agent.inventory` stores only a latest optional JSON value received in a
+heartbeat. The agent always sends `nil`, and there are no normalized inventory
+tables, history, provenance, or diffs.
 
-- **Service identity:** `NodeLinkAgent` ("NodeLink RMM Agent"), auto-start at
-  boot.
-- **Crash recovery:** SCM restart after 5s / 15s / 60s, failure counter reset
-  after 24h. If the runtime exits on a fatal error it returns non-zero so the SCM
-  applies recovery.
-- **Graceful shutdown:** on Stop/Shutdown, no new commands start; an in-flight
-  command gets a 20s grace period, then is force-killed so no child process is
-  orphaned.
-- **Logging:** rotating file log at `%ProgramData%\NodeLink\logs\rmm-agent.log`
-  (10 MB × 5 backups). Foreground runs still log to stdout.
-- **Network resilience:** exponential backoff with jitter on unreachable server —
-  a down server means "keep retrying quietly," not a crash or a tight loop.
+### 4.2 API surface
 
-On non-Windows, the service subcommands return "only supported on Windows."
+All application routes except `/healthz` are under `/api/v1`.
 
-**Endpoint installs use the GUI installer, not the raw CLI.** For hands-on
-installs by non-technical users, each release also ships
-`NodeLinkAgentSetup-<version>.exe` — an Inno Setup wrapper (`installer/`) that
-prompts for the server URL + enrollment token, writes `config.json`, and then
-calls the very subcommands above (`install` → `start`) under the hood. It owns
-no service logic of its own; the agent stays a stdlib-only binary. The CLI path
-remains the interface for scripted/mass deployment. See `installer/README.md`.
+| Method | Path | Current purpose | Authorization |
+|---|---|---|---|
+| POST | `/auth/login` | Exchange credentials for JWT | Public, throttled in-process |
+| POST | `/auth/operators` | Create operator | Admin |
+| GET | `/auth/me` | Current operator | Readonly+ |
+| POST | `/auth/revoke-tokens` | Revoke caller sessions | Readonly+ |
+| POST | `/auth/operators/{id}/revoke-tokens` | Revoke operator sessions | Admin |
+| POST | `/enroll` | Enroll with site token | Enrollment token |
+| POST | `/heartbeat` | Store telemetry and poll commands | Agent token |
+| POST | `/commands/{id}/result` | Submit buffered result | Agent token |
+| POST/GET | `/clients` | Create/list clients | Operator / Readonly |
+| POST | `/sites` | Create site | Operator |
+| POST | `/enrollment-tokens` | Create token | Operator |
+| GET | `/agents`, `/agents/{id}` | List/get endpoint | Readonly |
+| POST/GET | `/agents/{id}/commands` | Dispatch/list commands | Operator / Readonly |
+| GET | `/audit/verify` | Verify hash chain | Readonly |
+| POST/GET | `/audit/anchors` | Create/list local anchors | Operator / Readonly |
+| GET | `/audit/anchors/{id}/verify` | Verify local anchor | Readonly |
 
----
+There are no APIs yet for listing/revoking enrollment tokens, agent quarantine,
+telemetry history, operator listing/editing, audit-event listing, monitoring,
+alerts, scheduling, patching, or evidence export.
 
-## 5. Security model
+## 5. Agent
 
-This is the heart of the system. `docs/threat-model.md` has the full treatment;
-this is the summary.
+The Go agent shares one runtime between foreground mode and the Windows service.
+Windows service support includes automatic start, SCM recovery actions, rotating
+logs, network retry with jitter, and graceful cancellation of a running child
+process. Windows-specific behavior has been manually exercised but is not
+covered by Windows CI.
 
-**Operator auth (authN).** `POST /auth/login` verifies email + bcrypt password
-and returns an HS256 JWT (subject = operator id, 60-min default lifetime).
-`get_current_operator` validates the token on every management request. Login is
-hardened against account enumeration: unknown-email and wrong-password return an
-identical 401, and a dummy hash verification runs on unknown emails to keep
-timing constant.
+The current Windows telemetry collector shells out to PowerShell/CIM once per
+heartbeat for CPU, memory, system drive, uptime, user, and OS version. It does
+not collect complete hardware, installed software, Defender, BitLocker, Secure
+Boot, TPM, or local administrator state.
 
-**Authorization (authZ).** Three roles, ranked `readonly < operator < admin`.
-`require_role(minimum)` builds a dependency that 403s if the caller's rank is too
-low. AuthZ depends on authN — identity first, permission second. (401 = "who are
-you"; 403 = "not allowed".)
+After enrollment, `identity.json` contains the plaintext agent token, server URL,
+and command public key. File mode `0600` is requested, but Windows credential
+protection and explicit ACL validation are absent. `seen_commands.json` stores
+executed IDs and expiry values for replay prevention.
 
-**Agent identity.** A long-lived bearer token issued at enrollment; the server
-stores only its SHA-256 hash (single SHA-256 is appropriate for a high-entropy
-token, unlike a human password).
+The agent processes commands from a single heartbeat sequentially. This happens
+to limit concurrency to one per runtime, but there is no explicit policy,
+server-side admission control, queue limit, or testable per-agent concurrency
+contract. Stdout and stderr are held in memory without size limits.
 
-**Command authenticity (the critical path).** The server signs every command
-with an Ed25519 private key. The agent verifies against the public key it
-received at enrollment and **refuses any command that fails**. What's signed is
-the canonical encoding of `{command_id, agent_id, kind, payload}`:
+## 6. Signed command envelope
 
-```python
-# server: app/core/security.py
-json.dumps(doc, sort_keys=True, separators=(",", ":")).encode("utf-8")
+### 6.1 Implemented format
+
+The server currently signs canonical JSON containing exactly:
+
+```json
+{
+  "agent_id": "...",
+  "command_id": "...",
+  "kind": "powershell",
+  "payload": {"script": "..."}
+}
 ```
 
-The Go agent reproduces this exactly, including disabling Go's default HTML
-escaping of `<`, `>`, `&` (Python doesn't escape those). **This cross-language
-canonical encoding is the single most fragile seam in the system** — if the two
-sides ever diverge by a byte, every signature fails. It is pinned by tests on
-both sides (see §6); never change the encoding on one side without the other, and
-never without versioning it.
+Canonicalization sorts object keys and removes insignificant whitespace. Go
+disables HTML escaping to match Python. Both languages have tests for a small
+set of canonical examples.
 
-Because `agent_id` is inside the signed document, a valid command for one agent
-cannot be replayed against a different agent.
+`expires_at` is delivered beside the signature and enforced by the agent, but
+is not signed. There is no schema/envelope version, nonce field, issued-at time,
+signing-key ID, rotation state, or repository-level shared test-vector artifact.
+The persisted command ID acts as replay state but is not a distinct signed
+nonce.
 
-**Audit log.** Append-only, hash-chained: each event's `event_hash` is
-`SHA-256` over `{prev_hash, ts, actor, action, agent_id, detail}`, so altering or
-deleting any event breaks the chain from that point forward. Events:
-`agent.enrolled`, `command.dispatched` (records the operator's email as actor),
-`command.completed`, `agent.offline`. `GET /api/v1/audit/verify` walks the chain
-and returns the first broken link, if any.
+### 6.2 Planned versioned format
 
----
+Milestone 0 will define a versioned contract under a future `contracts/`
+directory. A command envelope is expected to bind at least `schema_version`,
+`command_id`, `agent_id`, `kind`, typed payload, `issued_at`, `expires_at`,
+`nonce`, and `signing_key_id` into the signature. Canonical test vectors must be
+consumed by both server and agent tests. Compatibility and rejection behavior
+must be explicit before a version is activated.
 
-## 6. Tests
+## 7. Audit architecture
 
-**Server** (`server/tests/`, pytest + httpx ASGI transport, ephemeral SQLite):
+`AuditEvent` rows contain canonical event content, the previous event hash, and
+their own SHA-256 hash. `/audit/verify` detects changes or deletion relative to
+the stored chain.
 
-- `test_auth.py` — identical 401 for wrong-password vs unknown-email; login
-  returns a token; management refuses unauthenticated callers; read-only can read
-  but gets 403 on provisioning/dispatch; dispatch records the operator email in
-  the audit event.
-- `test_e2e.py` — full lifecycle (enroll → online → dispatch → pickup → verify →
-  result → succeeded); tampered payload fails verification; audit chain verifies,
-  then a direct DB edit makes it report broken.
+Current ordering is by timestamp (and, for Merkle coverage, timestamp plus UUID).
+There is no monotonic sequence number, transactional serialization strategy, or
+database constraint that prevents concurrent writers from selecting the same
+previous hash. These limits prevent a strong total-order guarantee.
 
-**Agent** (Go):
+`AuditAnchor` stores a Merkle root over a prefix of event hashes. Local anchor
+verification is implemented and tested, including detection of a consistent
+chain rebuild. The root is not automatically sent to an external immutable
+destination, so an attacker controlling the database can rewrite events and
+anchors together. External publication, receipts, retry behavior, monitoring,
+and independent verification are Milestone 0 requirements.
 
-- `internal/verify/verify_test.go` — the **cross-language signature test**: pins
-  Go's canonical output against literal Python `json.dumps(...)` strings,
-  including a case with `>` and `&`, an empty payload, and nested key sorting.
-- `internal/service/backoff_test.go`, `rotatelog_test.go`, `runner_test.go` —
-  backoff growth/cap/jitter, log rotation/retention, script extraction,
-  fatal-config classification, and retry-until-cancelled network resilience.
+The audit system is tamper-evident by design; it is not yet immutable evidence
+storage and does not currently provide a signed evidence bundle.
 
-Both suites run in CI on every push and PR (`.github/workflows/ci.yml`): the Go
-agent (gofmt, `go vet`, `go build`, `go test`) and the Python server (`pytest`
-against ephemeral SQLite). Not covered: the Windows-only SCM code itself (needs
-Windows).
+## 8. Tenant isolation roadmap
 
-Releases are cut by tagging `vX.Y.Z`, which triggers `.github/workflows/
-release.yml` to cross-build the agent (version stamped in) and publish the
-binaries + SHA-256 checksums to a GitHub Release — see `docs/RELEASING.md`. A
-parallel job on a Windows runner compiles the Inno Setup installer and attaches
-`NodeLinkAgentSetup-<version>.exe` to the same release. The binaries **and** the
-installer are currently unsigned; Authenticode signing is a documented follow-up
-(the tag-derived version is validated to a safe charset before it reaches the
-build steps, closing a tag-name injection path into the runner).
+Today, `Client` and `Site` provide navigation scope only. Milestone 1 may use
+them to organize the dashboard, but must not describe them as security tenants.
+Milestone 3 introduces an explicit tenant boundary: tenant IDs on relevant
+records, tenant-scoped queries, tenant-aware roles, isolation tests, per-tenant
+retention, and administrative break-glass rules. Any schema transition needs a
+migration and a documented strategy for existing rows.
 
----
+## 9. Remote desktop boundary
 
-## 7. Running it locally
+NodeLink will not invent a proprietary remote desktop protocol. Milestone 2
+plans a narrowly scoped MeshCentral integration. MeshCentral remains a separate
+security and operational boundary with its own agent, sessions, permissions,
+updates, logs, and failure modes. NodeLink must authorize and audit session
+launches without treating MeshCentral's activity as automatically covered by
+NodeLink's command signature or audit guarantees.
 
-**Server:**
+## 10. Repository evolution
 
-```bash
-cd server
-python -m venv .venv && .venv\Scripts\activate    # Windows; use source .venv/bin/activate on Unix
-pip install -r requirements.txt
-python scripts/gen_command_keys.py                 # writes the Ed25519 keypair
-copy .env.example .env                             # set DATABASE_URL, SECRET_KEY
-python scripts/create_admin.py admin@example.com --role admin   # bootstrap first operator
-uvicorn app.main:app --reload                      # docs at /docs, health at /healthz
+The current top-level structure is `agent/`, `server/`, `installer/`, `deploy/`,
+`docs/`, and `.github/`. Planned additions are:
+
+```text
+dashboard/   technician web application
+contracts/   versioned schemas and canonical signature vectors
+tools/       audit verification and operational utilities
 ```
 
-Use `DATABASE_URL=sqlite+aiosqlite:///./rmm.db` and `DEBUG=true` for local dev
-(tables auto-create on startup). Tests:
-`pip install pytest pytest-asyncio httpx aiosqlite && pytest -q`.
+Reorganization must be incremental. Repository moves are separate issues with
+import/build/release compatibility criteria; working code must not be deleted or
+moved merely to match an aspirational tree.
 
-**Agent:**
+## 11. Known limitations and documentation corrections
 
-```bash
-cd agent
-go build -o rmm-agent.exe ./cmd/agent          # or ./build.sh 0.1.0 for all targets
-copy config.example.json config.json           # set server_url + enrollment_token
-./rmm-agent -config config.json                # first run enrolls, writes identity.json
-```
+- Polling is the only command transport; output is buffered, not streamed.
+- Dashboard, complete inventory, monitoring alerts, scheduling, patching,
+  remediation, remote shell, and remote desktop are not implemented.
+- Production TLS is an operator-run topology, not enforced by application
+  configuration.
+- Command expiry is not cryptographically bound to the current signature.
+- One deployment-wide signing key has no identifier or rotation mechanism.
+- Agent credentials are plaintext in endpoint JSON files and cannot be revoked.
+- Output and queues have no explicit resource limits.
+- Database migrations and automated backup/restore are absent.
+- Audit anchors remain inside the same trust boundary as the audit database.
+- Roles are global; clients/sites are not authorization tenants.
+- The login limiter is process-local and weakens with multiple workers.
+- `CommandStatus.running` exists but is never assigned.
+- `websockets`, `python-multipart`, and Alembic are declared dependencies without
+  corresponding implemented product behavior or migration scaffolding.
+- Release binaries are checksummed but unsigned and have no SBOM or provenance
+  attestation.
 
-**Windows service** (elevated prompt, binary in its final location):
+## 12. Change discipline
 
-```
-rmm-agent.exe install -config config.json
-rmm-agent.exe start
-rmm-agent.exe stop
-rmm-agent.exe uninstall
-```
-
-On a real endpoint, run `NodeLinkAgentSetup-<version>.exe` instead — it does the
-above through a GUI wizard (see `installer/README.md`).
-
----
-
-## 8. Roadmap — three readiness gates (done strictly in order)
-
-**Gate 1 — Works.** Enroll → heartbeat → signed dispatch → verified execution →
-result reporting, proven on a dev machine. **Status: DONE and verified.**
-
-**Gate 2 — Runs unattended.** Windows service install, auto-start, crash
-recovery, rotating logs, backoff on network failure, graceful shutdown.
-**Status: DONE — verified on Windows 2026-07-16.** Manual acceptance test
-passed (the SCM code has no automated test by nature):
-
-- **Reboot / auto-start headless.** After a reboot the service auto-started at
-  boot with nobody logged in (`starting as Windows service` in the log at boot
-  time) and self-reconnected to `online` once the server was reachable.
-- **Crash recovery.** The service process was hard-killed (`taskkill /F`); the
-  SCM restarted it within seconds as a new PID, no manual intervention.
-- **Network resilience.** With the server down, the check-in loop backed off
-  with bounded exponential + jitter (never a tight spin or crash) and
-  reconnected automatically when the server returned.
-- **Graceful shutdown.** Every stop/reboot logged `shutting down` and the
-  service reached `Stopped` cleanly.
-
-**Gate 3 — Safe to deploy off the dev box.** HTTPS enforced end-to-end
-(deployment path documented in `docs/DEPLOYMENT-TLS.md` + `deploy/Caddyfile`);
-~~agent-side command TTL + replay/nonce protection~~ **done** — the agent now
-refuses expired commands (fail-closed TTL) and persists executed command IDs to
-reject replays across restarts; least-privilege service account; ~~repeatable
-install/uninstall~~ **done** (the GUI installer registers/starts on install and
-stops/deregisters on uninstall, verified end-to-end on Windows 11); code-signed
-binary; multi-day soak test. Above all of this
-sits a **HIPAA compliance bar** for medical endpoints (documented change control,
-rollback plan, security review of the command-execution surface). **Regulated
-endpoints come last.**
-
-Deployment progression: your own dev box → a spare machine/VM you own → a
-friendly non-critical client who knows it's early → regulated endpoints.
-
-### Open security gaps (see `docs/threat-model.md` for the live list)
-
-- ~~**Agent-side command TTL / replay protection.**~~ **Closed.** The agent now
-  parses each command's `expires_at` defensively (fail closed: a
-  present-but-unparseable timestamp is treated as expired) and refuses expired
-  commands, and it persists executed command IDs (`seen_commands.json`, beside
-  `identity.json`) so a replayed command ID is never executed twice, across
-  restarts. Cross-*agent* replay was already prevented (agent_id is signed).
-  Remaining hardening (future): bind `expires_at` into the signed bytes.
-- **TLS.** The scaffold itself still serves plain uvicorn, but the deployment
-  path is now documented: terminate TLS in front of the server (see
-  `docs/DEPLOYMENT-TLS.md` and `deploy/Caddyfile`) and switch agent configs to
-  `https://` before any off-box use. Cert pinning in the agent remains future
-  work for high-assurance clients.
-- ~~**Token revocation + login rate-limiting.**~~ **Closed.** Each operator has
-  a `token_generation`; JWTs carry the generation they were minted under and a
-  mismatch is rejected, so bumping the counter (self-service
-  `POST /auth/revoke-tokens`, or the admin per-operator variant) revokes every
-  outstanding token at once — audited as `operator.tokens_revoked`. Failed
-  logins are throttled per (client IP, email) with a sliding window (429 +
-  Retry-After); a success clears the counter. The limiter is in-process — use a
-  shared store before running multiple workers.
-- ~~**External anchoring of the audit chain.**~~ **Mostly closed.** Merkle
-  anchoring is implemented: `POST /audit/anchors` commits to the whole chain
-  with a Merkle root over all `event_hash` values (audited, verifiable via
-  `GET /audit/anchors/{id}/verify`), and — unlike the plain chain check — it
-  detects even a fully consistent chain rebuild. What remains is operational:
-  publish each root to an external append-only medium (transparency log,
-  on-chain, compliance report); a root that never leaves the database protects
-  against nothing.
-
----
-
-## 9. Known drift (code vs. older docs)
-
-These are places where existing docs or dependencies describe things that aren't
-in the code. Fix opportunistically; listed here so nobody is misled.
-
-- **`server/README.md` is dangerously stale on auth.** It says operator
-  endpoints are "unauthenticated in Phase 1." They are **not** — full operator
-  auth is implemented. Trust the code and `docs/threat-model.md`, not that note.
-  The README's endpoint table also omits the three `/auth/*` routes.
-- **Root README shows a `dashboard/` (Next.js) and "WebSocket".** Neither exists.
-  The `websockets` dependency is unused; the transport is HTTP polling.
-- **`alembic` is in `requirements.txt` but there is no `alembic/` scaffold**
-  (a `main.py` comment references one). `python-multipart` also appears unused.
-- **Inventory is half-wired.** The server accepts and stores `inventory`, and a
-  `collect_inventory` command kind exists, but the agent always sends `nil`
-  inventory and `collect_inventory` just runs a script like any other kind.
-  Nothing populates `Agent.inventory` yet.
-- **`CommandStatus.running`** is defined but never assigned.
-- **"Remote PowerShell with streamed output"** (root README, Phase 1) is actually
-  buffered stdout/stderr reported after completion — no streaming.
-- **Naming:** the repo/module is `rmm-agent` / `github.com/lcolon231/rmm/agent`,
-  while some doc layouts call the root `rmm/`.
-- **Audit ordering** uses `ts` (timestamp), not a monotonic sequence number —
-  two events in the same tick could in principle interleave ambiguously. Fine as
-  built; worth knowing before documenting hard guarantees.
-
----
-
-*Keep this document current. When you change the architecture, the API surface,
-the security model, or a gate's status, update this file in the same commit.*
+Security-sensitive behavior requires unit and integration tests across every
+affected boundary. Windows service, installer, signing, and credential changes
+also require Windows tests. Keep this document, the threat model, deployment
+readiness, and relevant runbooks synchronized with code in the same pull
+request.
