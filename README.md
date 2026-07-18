@@ -26,10 +26,11 @@ The code in this repository currently provides:
   FastAPI server through heartbeat responses.
 - One-time or limited-use enrollment tokens and long-lived per-agent bearer
   credentials. Server-side token values are stored as SHA-256 hashes.
-- Ed25519 signatures over the negotiated `command-v1` envelope: envelope
-  version, command ID, agent ID, kind, and payload. Python and Go consume the
-  same canonical vectors; agents reject missing, unknown, and downgraded
-  envelope versions. Expiry, nonce, issued-at, and key ID are follow-on work.
+- Ed25519 signatures over the negotiated `command-v2` envelope: envelope
+  version, schema version, command ID, agent ID, kind, payload, issued-at,
+  expiry, and nonce. Python and Go consume the same canonical vectors; agents
+  reject missing, unknown, malformed, expired, replayed, and downgraded
+  envelopes. Signing-key IDs and rotation remain follow-on work.
 - Basic CPU, memory, system-disk, uptime, and logged-in-user telemetry.
 - Buffered PowerShell or shell execution with a five-minute timeout. Results
   are uploaded only after execution finishes.
@@ -51,9 +52,8 @@ the implementation and its security boundaries.
 
 ## In progress
 
-Milestone 0, Deployment Safety, is the active program: hardening the signed
-command envelope's signed time/nonce/key fields, adding credential protection
-and agent quarantine, enforcing
+Milestone 0, Deployment Safety, is the active program: adding signing-key
+identifiers and rotation, credential protection and agent quarantine, enforcing
 production TLS policy, bounding execution resources, making audit ordering and
 anchoring operationally verifiable, adding migrations and recovery procedures,
 and strengthening Windows and release testing.
@@ -87,7 +87,7 @@ The repository does **not** currently contain:
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
 - Agent revocation/quarantine, Windows DPAPI credential protection, command
-  output-size limits, signing-key rotation, or certificate pinning.
+  output-size limits, signing-key identifiers/rotation, or certificate pinning.
 - Automated backup/restore, an automated external audit-anchor publisher,
   release SBOM/provenance, or Authenticode signing.
 - Tenant-scoped authorization, tenant-specific roles or retention, MFA,
@@ -144,4 +144,14 @@ See [CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ## License
 
-TBD — private during initial development.
+NodeLink RMM Community Edition is licensed under the GNU Affero General
+Public License v3.0 only. See [LICENSE](LICENSE).
+
+SPDX-License-Identifier: AGPL-3.0-only
+
+Commercial licensing may be offered separately for organizations that need
+to embed, redistribute, modify, or operate NodeLink under terms other than
+the AGPL.
+
+The NodeLink name, logos, product identity, and branding are not licensed
+under the AGPL. See [TRADEMARKS.md](TRADEMARKS.md).

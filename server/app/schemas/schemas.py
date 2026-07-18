@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Pydantic v2 request/response schemas."""
 from __future__ import annotations
 
@@ -165,6 +166,9 @@ class CommandOut(BaseModel):
     kind: CommandKind
     payload: dict
     envelope_version: EnvelopeVersion
+    schema_version: int | None
+    issued_at: datetime | None
+    nonce: str | None
     signature: str
     status: CommandStatus
     created_at: datetime

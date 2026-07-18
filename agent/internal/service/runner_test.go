@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 package service
 
 import (
@@ -167,12 +168,24 @@ func newTestSession(t *testing.T) (*Agent, *session, ed25519.PrivateKey, *result
 }
 
 // signCommand fills cmd.Signature with a valid server signature over the
-// canonical {command_id, agent_id, kind, payload} bytes, mirroring the server's
+// canonical command-v2 bytes, mirroring the server's
 // encoding (sorted keys, no whitespace, no HTML escaping).
 func signCommand(t *testing.T, priv ed25519.PrivateKey, agentID string, cmd *client.Command) {
 	t.Helper()
 	if cmd.EnvelopeVersion == "" {
-		cmd.EnvelopeVersion = protocol.CommandEnvelopeV1
+		cmd.EnvelopeVersion = protocol.CommandEnvelopeV2
+	}
+	if cmd.SchemaVersion == 0 {
+		cmd.SchemaVersion = protocol.CommandSchemaV1
+	}
+	if cmd.IssuedAt == "" {
+		cmd.IssuedAt = time.Now().UTC().Add(-time.Minute).Format("2006-01-02T15:04:05.000000Z")
+	}
+	if cmd.ExpiresAt == "" {
+		cmd.ExpiresAt = time.Now().UTC().Add(time.Hour).Format("2006-01-02T15:04:05.000000Z")
+	}
+	if cmd.Nonce == "" {
+		cmd.Nonce = "AAAAAAAAAAAAAAAAAAAAAA"
 	}
 	var payloadVal any
 	if len(cmd.Payload) == 0 {
@@ -184,8 +197,12 @@ func signCommand(t *testing.T, priv ed25519.PrivateKey, agentID string, cmd *cli
 		"agent_id":         agentID,
 		"command_id":       cmd.ID,
 		"envelope_version": cmd.EnvelopeVersion,
+		"expires_at":       cmd.ExpiresAt,
+		"issued_at":        cmd.IssuedAt,
 		"kind":             cmd.Kind,
+		"nonce":            cmd.Nonce,
 		"payload":          payloadVal,
+		"schema_version":   cmd.SchemaVersion,
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -205,7 +222,8 @@ func TestProcessCommandExpiredIsRefused(t *testing.T) {
 		AgentID:   s.agentID,
 		Kind:      "shell",
 		Payload:   json.RawMessage(`{"script":"echo hi"}`),
-		ExpiresAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano),
+		ExpiresAt: time.Now().Add(-time.Minute).UTC().Format("2006-01-02T15:04:05.000000Z"),
+		IssuedAt:  time.Now().Add(-time.Hour).UTC().Format("2006-01-02T15:04:05.000000Z"),
 	}
 	signCommand(t, priv, s.agentID, &cmd)
 
@@ -218,7 +236,7 @@ func TestProcessCommandExpiredIsRefused(t *testing.T) {
 	if !ok {
 		t.Fatal("expired command should report a failure result")
 	}
-	if res.ExitCode != -1 || !strings.Contains(res.Stderr, "past TTL") {
+	if res.ExitCode != -1 || !strings.Contains(res.Stderr, "invalid signed time window") {
 		t.Fatalf("unexpected refusal result: %+v", res)
 	}
 	if s.seen.Has(cmd.ID) {
@@ -243,32 +261,52 @@ func TestProcessCommandUnparseableExpiryFailsClosed(t *testing.T) {
 		t.Fatal("command with unparseable expiry must not execute")
 	}
 	res, ok := cap.results[cmd.ID]
-	if !ok || res.ExitCode != -1 || !strings.Contains(res.Stderr, "past TTL") {
+	if !ok || res.ExitCode != -1 || !strings.Contains(res.Stderr, "signature verification failed") {
 		t.Fatalf("unparseable expiry should fail closed, got %+v (reported=%v)", res, ok)
 	}
 }
 
-func TestProcessCommandEmptyExpiryExecutes(t *testing.T) {
+func TestProcessCommandStrippedExpiryIsRefused(t *testing.T) {
 	a, s, priv, cap := newTestSession(t)
 	cmd := client.Command{
 		ID:      "cmd-no-ttl",
 		AgentID: s.agentID,
 		Kind:    "shell",
 		Payload: json.RawMessage(`{"script":"echo run"}`),
-		// ExpiresAt intentionally empty: no TTL.
 	}
 	signCommand(t, priv, s.agentID, &cmd)
+	cmd.ExpiresAt = "" // Simulate transport stripping after signing.
 
 	a.processCommand(context.Background(), s, cmd)
 
-	if !cap.executed["echo run"] {
-		t.Fatal("command with empty expiry should execute")
+	if cap.executed["echo run"] {
+		t.Fatal("command with stripped expiry must not execute")
 	}
-	if !s.seen.Has(cmd.ID) {
-		t.Fatal("executed command should be recorded in the replay store")
+	if s.seen.Has(cmd.ID) {
+		t.Fatal("refused command must not be recorded in the replay store")
 	}
-	if res, ok := cap.results[cmd.ID]; !ok || res.ExitCode != 0 {
-		t.Fatalf("expected a success result, got %+v (reported=%v)", res, ok)
+	if res, ok := cap.results[cmd.ID]; !ok || res.ExitCode != -1 {
+		t.Fatalf("expected a refusal result, got %+v (reported=%v)", res, ok)
+	}
+}
+
+func TestProcessCommandRepeatedNonceIsRefused(t *testing.T) {
+	a, s, priv, cap := newTestSession(t)
+	first := client.Command{ID: "cmd-nonce-1", AgentID: s.agentID, Kind: "shell", Payload: json.RawMessage(`{"script":"first"}`), Nonce: "BBBBBBBBBBBBBBBBBBBBBB"}
+	signCommand(t, priv, s.agentID, &first)
+	a.processCommand(context.Background(), s, first)
+	if !s.seen.HasNonce(first.Nonce) {
+		t.Fatal("accepted nonce should be persisted in replay state")
+	}
+
+	second := client.Command{ID: "cmd-nonce-2", AgentID: s.agentID, Kind: "shell", Payload: json.RawMessage(`{"script":"second"}`), Nonce: first.Nonce}
+	signCommand(t, priv, s.agentID, &second)
+	a.processCommand(context.Background(), s, second)
+	if cap.executed["second"] {
+		t.Fatal("a repeated nonce must not execute")
+	}
+	if res, ok := cap.results[second.ID]; !ok || !strings.Contains(res.Stderr, "repeated nonce") {
+		t.Fatalf("expected repeated nonce refusal, got %+v (reported=%v)", res, ok)
 	}
 }
 

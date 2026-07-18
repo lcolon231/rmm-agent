@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // Package client is the agent's HTTP interface to the RMM server.
 package client
 
@@ -54,7 +55,7 @@ func (c *Client) Enroll(ctx context.Context, token string, host telemetry.HostIn
 	if err := c.do(ctx, "POST", "/api/v1/enroll", body, &out, false); err != nil {
 		return nil, err
 	}
-	if out.CommandEnvelopeVersion != protocol.CommandEnvelopeV1 {
+	if out.CommandEnvelopeVersion != protocol.CommandEnvelopeV2 {
 		return nil, fmt.Errorf(
 			"server selected unsupported command envelope version %q",
 			out.CommandEnvelopeVersion,
@@ -70,13 +71,16 @@ type Command struct {
 	Kind            string          `json:"kind"`
 	Payload         json.RawMessage `json:"payload"`
 	EnvelopeVersion string          `json:"envelope_version"`
+	SchemaVersion   int             `json:"schema_version"`
+	IssuedAt       string          `json:"issued_at"`
+	Nonce          string          `json:"nonce"`
 	Signature       string          `json:"signature"`
 	Status          string          `json:"status"`
 	// ExpiresAt is the server-set TTL deadline (Python isoformat UTC). It is kept
 	// as a raw string and parsed defensively in the runner so one malformed
 	// timestamp cannot break decoding of the whole heartbeat ack. Empty/absent
-	// means "no TTL". Note this field is NOT part of the signed canonical bytes;
-	// the agent-side TTL check is defense-in-depth (see runner.processCommand).
+	// means "no TTL" for legacy responses. command-v2 requires this field and
+	// binds its exact canonical value into the signature.
 	ExpiresAt string `json:"expires_at"`
 }
 

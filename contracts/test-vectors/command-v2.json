@@ -1,0 +1,103 @@
+{
+  "contract": "command-v2",
+  "notes": "The public key is test-only. Ed25519 signatures cover every field shown in each canonical UTF-8 JSON string.",
+  "public_key_b64": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+  "valid": [
+    {
+      "name": "simple-script",
+      "envelope": {
+        "envelope_version": "command-v2",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000001",
+        "agent_id": "10000000-0000-0000-0000-000000000001",
+        "kind": "powershell",
+        "payload": { "script": "Get-Date" },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000001\",\"command_id\":\"00000000-0000-0000-0000-000000000001\",\"envelope_version\":\"command-v2\",\"expires_at\":\"2026-07-18T12:05:00Z\",\"issued_at\":\"2026-07-18T12:00:00Z\",\"kind\":\"powershell\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"payload\":{\"script\":\"Get-Date\"},\"schema_version\":1}",
+      "signature_b64": "Gg25GdFOUsWKmX2Pn3KgtvmbeUtW6PsDAvD/2yg7P/UFGvpIsadCmF1Yi/EuWaupUhJONqXrq17JyZGtsLLuCA=="
+    },
+    {
+      "name": "nested-and-integer-boundaries",
+      "envelope": {
+        "envelope_version": "command-v2",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000002",
+        "agent_id": "10000000-0000-0000-0000-000000000002",
+        "kind": "shell",
+        "payload": { "args": ["cafe", "tokyo"], "enabled": true, "limits": { "max": 9223372036854775807, "min": -9223372036854775808 } },
+        "issued_at": "2026-07-18T12:00:00.123456Z",
+        "expires_at": "2026-07-18T12:05:00.123456Z",
+        "nonce": "BBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000002\",\"command_id\":\"00000000-0000-0000-0000-000000000002\",\"envelope_version\":\"command-v2\",\"expires_at\":\"2026-07-18T12:05:00.123456Z\",\"issued_at\":\"2026-07-18T12:00:00.123456Z\",\"kind\":\"shell\",\"nonce\":\"BBBBBBBBBBBBBBBBBBBBBB\",\"payload\":{\"args\":[\"cafe\",\"tokyo\"],\"enabled\":true,\"limits\":{\"max\":9223372036854775807,\"min\":-9223372036854775808}},\"schema_version\":1}",
+      "signature_b64": "2gMYYNRJaNuNvlp1IVO9wor003TARloCh7F2aBJgWTv63yTFBbMMHh0uQbumoDu1GRp2t7M5EqrEK7Ghsr8uDA=="
+    },
+    {
+      "name": "maximum-lifetime",
+      "envelope": {
+        "envelope_version": "command-v2",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000003",
+        "agent_id": "10000000-0000-0000-0000-000000000003",
+        "kind": "collect_inventory",
+        "payload": {},
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-19T12:00:00Z",
+        "nonce": "CCCCCCCCCCCCCCCCCCCCCC"
+      },
+      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000003\",\"command_id\":\"00000000-0000-0000-0000-000000000003\",\"envelope_version\":\"command-v2\",\"expires_at\":\"2026-07-19T12:00:00Z\",\"issued_at\":\"2026-07-18T12:00:00Z\",\"kind\":\"collect_inventory\",\"nonce\":\"CCCCCCCCCCCCCCCCCCCCCC\",\"payload\":{},\"schema_version\":1}",
+      "signature_b64": "YMvbMjsHkenB5aZ5qjncNdRVfgEljUI92k+6RvjEonL85NX1n33p644jNhk5rLNMY3dugELt5gm5FMqbG04HCQ=="
+    }
+  ],
+  "invalid": [
+    { "name": "missing-version", "envelope": {}, "error": "missing_version" },
+    { "name": "unknown-version", "envelope": { "envelope_version": "command-v3" }, "error": "unsupported_version" },
+    { "name": "downgrade-to-v1", "envelope": { "envelope_version": "command-v1" }, "error": "unsupported_version" },
+    { "name": "missing-schema", "envelope": { "envelope_version": "command-v2" }, "error": "missing_schema_version" },
+    { "name": "unsupported-schema", "envelope": { "envelope_version": "command-v2", "schema_version": 2 }, "error": "unsupported_schema_version" },
+    {
+      "name": "missing-issued-at",
+      "envelope": { "envelope_version": "command-v2", "schema_version": 1, "command_id": "c", "agent_id": "a", "kind": "shell", "payload": {}, "expires_at": "2026-07-18T12:05:00Z", "nonce": "AAAAAAAAAAAAAAAAAAAAAA" },
+      "error": "missing_issued_at"
+    },
+    {
+      "name": "malformed-time",
+      "envelope": { "envelope_version": "command-v2", "schema_version": 1, "command_id": "c", "agent_id": "a", "kind": "shell", "payload": {}, "issued_at": "2026-07-18T12:00:00+00:00", "expires_at": "2026-07-18T12:05:00Z", "nonce": "AAAAAAAAAAAAAAAAAAAAAA" },
+      "error": "malformed_time"
+    },
+    {
+      "name": "expiry-not-later",
+      "envelope": { "envelope_version": "command-v2", "schema_version": 1, "command_id": "c", "agent_id": "a", "kind": "shell", "payload": {}, "issued_at": "2026-07-18T12:00:00Z", "expires_at": "2026-07-18T12:00:00Z", "nonce": "AAAAAAAAAAAAAAAAAAAAAA" },
+      "error": "invalid_time_window"
+    },
+    {
+      "name": "lifetime-too-long",
+      "envelope": { "envelope_version": "command-v2", "schema_version": 1, "command_id": "c", "agent_id": "a", "kind": "shell", "payload": {}, "issued_at": "2026-07-18T12:00:00Z", "expires_at": "2026-07-19T12:00:01Z", "nonce": "AAAAAAAAAAAAAAAAAAAAAA" },
+      "error": "invalid_time_window"
+    },
+    {
+      "name": "missing-expiry",
+      "envelope": { "envelope_version": "command-v2", "schema_version": 1, "command_id": "c", "agent_id": "a", "kind": "shell", "payload": {}, "issued_at": "2026-07-18T12:00:00Z", "nonce": "AAAAAAAAAAAAAAAAAAAAAA" },
+      "error": "missing_expires_at"
+    },
+    {
+      "name": "missing-nonce",
+      "envelope": { "envelope_version": "command-v2", "schema_version": 1, "command_id": "c", "agent_id": "a", "kind": "shell", "payload": {}, "issued_at": "2026-07-18T12:00:00Z", "expires_at": "2026-07-18T12:05:00Z" },
+      "error": "missing_nonce"
+    },
+    {
+      "name": "malformed-nonce",
+      "envelope": { "envelope_version": "command-v2", "schema_version": 1, "command_id": "c", "agent_id": "a", "kind": "shell", "payload": {}, "issued_at": "2026-07-18T12:00:00Z", "expires_at": "2026-07-18T12:05:00Z", "nonce": "too-short" },
+      "error": "malformed_nonce"
+    },
+    {
+      "name": "floating-point-payload",
+      "envelope": { "envelope_version": "command-v2", "schema_version": 1, "command_id": "c", "agent_id": "a", "kind": "shell", "payload": { "ratio": 1.5 }, "issued_at": "2026-07-18T12:00:00Z", "expires_at": "2026-07-18T12:05:00Z", "nonce": "AAAAAAAAAAAAAAAAAAAAAA" },
+      "error": "floating_point_not_supported"
+    },
+    { "name": "malformed-json", "envelope": {}, "raw_payload": "{not-json", "error": "malformed_json" }
+  ]
+}

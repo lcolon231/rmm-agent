@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 package service
 
 import (
@@ -27,6 +28,7 @@ func TestSeenStorePersistsAcrossReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Add("cmd-persist", time.Now().Add(time.Hour).UTC())
+	s.AddNonce("persisted-nonce", time.Now().Add(time.Hour).UTC())
 	if err := s.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +39,9 @@ func TestSeenStorePersistsAcrossReload(t *testing.T) {
 	}
 	if !reloaded.Has("cmd-persist") {
 		t.Fatal("id should survive reload")
+	}
+	if !reloaded.HasNonce("persisted-nonce") {
+		t.Fatal("nonce should survive reload")
 	}
 }
 

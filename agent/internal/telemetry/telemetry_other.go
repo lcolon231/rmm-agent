@@ -1,11 +1,16 @@
 //go:build !linux && !windows
 
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package telemetry
 
-import "os"
+import (
+	"context"
+	"os"
+)
 
 func osVersion() string { return "" }
 
-func collect() Sample {
+func collect(_ context.Context) Sample {
 	return Sample{LoggedInUser: os.Getenv("USER")}
 }

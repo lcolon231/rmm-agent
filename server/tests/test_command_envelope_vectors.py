@@ -1,4 +1,5 @@
-"""Python consumer for the repository-owned command-v1 vectors."""
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Python consumer for the repository-owned command-v2 vectors."""
 from __future__ import annotations
 
 import base64
@@ -15,7 +16,7 @@ VECTORS_PATH = (
     Path(__file__).resolve().parents[2]
     / "contracts"
     / "test-vectors"
-    / "command-v1.json"
+    / "command-v2.json"
 )
 
 
@@ -27,10 +28,14 @@ def vectors() -> dict:
 def _canonical(envelope: dict) -> bytes:
     return canonical_command_bytes(
         envelope.get("envelope_version", ""),
+        envelope.get("schema_version"),
         envelope.get("command_id", ""),
         envelope.get("agent_id", ""),
         envelope.get("kind", ""),
         envelope.get("payload"),
+        envelope.get("issued_at", ""),
+        envelope.get("expires_at", ""),
+        envelope.get("nonce", ""),
     )
 
 

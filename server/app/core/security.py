@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Security primitives: enrollment-token hashing, agent auth tokens, and
 Ed25519 command signing.
 
@@ -129,15 +130,27 @@ def _load_signing_key() -> Ed25519PrivateKey:
 
 def sign_command(
     envelope_version: str,
+    schema_version: int,
     command_id: str,
     agent_id: str,
     kind: str,
     payload: dict,
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
 ) -> str:
     key = _load_signing_key()
     signature = key.sign(
         canonical_command_bytes(
-            envelope_version, command_id, agent_id, kind, payload
+            envelope_version,
+            schema_version,
+            command_id,
+            agent_id,
+            kind,
+            payload,
+            issued_at,
+            expires_at,
+            nonce,
         )
     )
     return base64.b64encode(signature).decode("ascii")
