@@ -49,10 +49,21 @@ jobs:
 
       - name: Derive version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Constrain to a safe charset so the value can't smuggle shell/expression
+          # metacharacters into the steps that interpolate it (a git tag may
+          # legally contain quotes, ';', '$', backticks, etc.).
+          if ! [[ "$version" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+            echo "::error::Refusing unsafe release tag: ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Cross-build all targets
-        run: ./build.sh "${{ steps.version.outputs.version }}"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./build.sh "$VERSION"
 
       - name: Checksums
         working-directory: agent/bin
@@ -88,14 +99,24 @@ jobs:
       - name: Derive version from tag
         id: version
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Constrain to a safe charset before it reaches the PowerShell steps
+          # below; a git tag may legally contain quotes/';'/'$'/backticks.
+          if ! [[ "$version" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+            echo "::error::Refusing unsafe release tag: ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Build windows/amd64 agent
         working-directory: agent
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           $env:GOOS = 'windows'
           $env:GOARCH = 'amd64'
-          go build -ldflags "-s -w -X main.version=${{ steps.version.outputs.version }}" -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
+          go build -ldflags "-s -w -X main.version=$env:VERSION" -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
 
       # Pinned to the 6.x line: Inno Setup 7 is out upstream, and an unpinned
       # install would eventually land in "Inno Setup 7\" and break the ISCC
@@ -105,8 +126,9 @@ jobs:
 
       - name: Compile installer
         working-directory: installer
+        env:
+          NODELINK_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $env:NODELINK_VERSION = '${{ steps.version.outputs.version }}'
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" NodeLinkAgent.iss
 
       - name: Attach installer to the release
