@@ -5,6 +5,11 @@ A single-binary endpoint agent written in Go with **no external dependencies**
 reporting telemetry, picking up commands, verifying each command's Ed25519
 signature before running it, and reporting results.
 
+Windows is the primary supported endpoint platform. Linux and macOS builds are
+development artifacts for portability testing, not a supported cross-platform
+RMM product. The agent is not ready for production or regulated endpoints; see
+[`docs/DEPLOYMENT-READINESS.md`](../docs/DEPLOYMENT-READINESS.md).
+
 ## Why Go / stdlib-only
 
 - One static binary per platform, no runtime to install — drop it on a machine
@@ -42,6 +47,12 @@ cp config.example.json config.json
 - `-once` runs a single check-in and exits (useful for testing / cron-style use).
 - `run` is the default subcommand, so `./rmm-agent -config config.json` and
   `./rmm-agent run -config config.json` are equivalent.
+
+The persisted identity contains the plaintext long-lived agent token. Requested
+file mode alone is not Windows secret protection; DPAPI storage, explicit ACL
+validation, agent revocation, and quarantine are Milestone 0 work. The local
+`heartbeat_seconds` config field is also not currently applied after enrollment;
+the saved server-provided interval is used.
 
 If the server is unreachable, the agent does **not** crash or spin: the check-in
 loop retries with exponential backoff + jitter (capped), so a down server just
@@ -94,6 +105,11 @@ Each heartbeat reports CPU %, memory %, disk % (system drive), uptime, and the
 logged-in user. On Windows these come from CIM/WMI queries via PowerShell; on
 Linux from `/proc` and `statfs`.
 
+Complete hardware/software inventory and Windows security-state inventory are
+not implemented. Although the API accepts an optional inventory object, this
+agent currently sends `nil`; `collect_inventory` only executes the supplied
+script.
+
 ## Command safety
 
 Every command the agent receives carries an Ed25519 signature from the server.
@@ -122,6 +138,11 @@ Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
 (`cmd.exe` / `/bin/sh`), and `collect_inventory`. Commands run with a 5-minute
 timeout.
 
+Commands from one heartbeat are executed sequentially and stdout/stderr are
+buffered in memory, then uploaded after completion. Output streaming, explicit
+output-size limits, queue/admission limits, and a policy-configured concurrency
+contract are not implemented.
+
 ## Layout
 
 ```
@@ -140,6 +161,8 @@ agent/
 
 ## Roadmap
 
-- Agent self-update.
-- Persistent WebSocket channel to replace heartbeat command-polling for lower
-  command latency.
+- Versioned signed command envelope, key rotation, revocation/quarantine,
+  DPAPI-protected credentials, execution limits, and Windows lifecycle CI.
+- Complete Windows inventory, typed endpoint operations, and signed self-update.
+- An interactive transport for lower-latency/streaming workflows while keeping
+  heartbeat polling as a resilient fallback.
