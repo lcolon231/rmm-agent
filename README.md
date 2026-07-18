@@ -56,6 +56,8 @@ rmm/
 
 See [`server/README.md`](server/README.md) to run the backend, then [`agent/README.md`](agent/README.md) to build and enroll an agent.
 
+To install the agent on a real Windows endpoint, use the graphical installer (`NodeLinkAgentSetup-<version>.exe`, attached to each [release](https://github.com/lcolon231/rmm-agent/releases)) — it prompts for the server URL and enrollment token and registers the service for you. See [`installer/README.md`](installer/README.md).
+
 ## License
 
 TBD — private during initial development.
