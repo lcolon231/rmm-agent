@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -31,6 +30,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from jose import JWTError, jwt
 
 from app.core.config import settings
+from app.core.command_envelope import canonical_command_bytes
 
 
 # --------------------------------------------------------------------------- #
@@ -127,24 +127,19 @@ def _load_signing_key() -> Ed25519PrivateKey:
     return serialization.load_pem_private_key(path.read_bytes(), password=None)  # type: ignore[return-value]
 
 
-def canonical_command_bytes(command_id: str, agent_id: str, kind: str, payload: dict) -> bytes:
-    """Deterministic byte representation of a command for signing/verification.
-
-    Both signer and verifier must serialize identically, so we use sorted-key,
-    separator-tight JSON. Never change this format without versioning it.
-    """
-    doc = {
-        "command_id": command_id,
-        "agent_id": agent_id,
-        "kind": kind,
-        "payload": payload,
-    }
-    return json.dumps(doc, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
-def sign_command(command_id: str, agent_id: str, kind: str, payload: dict) -> str:
+def sign_command(
+    envelope_version: str,
+    command_id: str,
+    agent_id: str,
+    kind: str,
+    payload: dict,
+) -> str:
     key = _load_signing_key()
-    signature = key.sign(canonical_command_bytes(command_id, agent_id, kind, payload))
+    signature = key.sign(
+        canonical_command_bytes(
+            envelope_version, command_id, agent_id, kind, payload
+        )
+    )
     return base64.b64encode(signature).decode("ascii")
 
 

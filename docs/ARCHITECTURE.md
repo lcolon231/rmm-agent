@@ -70,11 +70,13 @@ accept an action. It currently contains:
 - Enrollment-token and agent-token issuance; only token hashes are stored on
   the server.
 - A single deployment-wide Ed25519 command-signing keypair.
-- Agent-side signature, delivered-expiry, and replay-ID checks.
+- A negotiated `command-v1` envelope with shared Python/Go canonical vectors,
+  version downgrade rejection, and agent-side signature, delivered-expiry, and
+  replay-ID checks.
 
 Known gaps include agent revocation/quarantine, Windows DPAPI protection for
-credentials, signing-key identifiers and rotation, a versioned command
-envelope, MFA/federation, tenant-scoped authorization, and certificate pinning.
+credentials, signed expiry/nonce/schema fields, signing-key identifiers and
+rotation, MFA/federation, tenant-scoped authorization, and certificate pinning.
 
 ### 3.2 Operations plane
 
@@ -98,11 +100,18 @@ remediation, evidence workflows, and ecosystem integrations.
 
 ## 4. Server
 
-The server uses FastAPI, Pydantic 2, and async SQLAlchemy. PostgreSQL is the
-intended deployment database; tests use SQLite. With `DEBUG=true`, startup calls
-`Base.metadata.create_all`. Alembic is declared as a dependency but no migration
-environment or revisions currently exist, so production schema evolution is
-not supported.
+The server uses FastAPI, Pydantic 2, async SQLAlchemy, and Alembic. PostgreSQL is
+the intended deployment database; most tests use SQLite and CI also migrates a
+fresh PostgreSQL 16 database. With `DEBUG=true`, startup calls
+`Base.metadata.create_all` for developer convenience. With `DEBUG=false`, the
+server compares the database's Alembic revision with its expected head and
+fails before serving traffic on an unversioned, older, or newer schema.
+
+Revision `0001` captures the pre-versioning schema. Revision `0002` adds agent
+envelope capabilities and persisted command envelope versions. Existing queued
+legacy commands are marked expired because their signatures do not cover a
+version. Migrations are forward-only; an existing debug-created database may
+be stamped `0001` only after backup and manual schema verification.
 
 ### 4.1 Current data model
 
@@ -156,8 +165,8 @@ alerts, scheduling, patching, or evidence export.
 The Go agent shares one runtime between foreground mode and the Windows service.
 Windows service support includes automatic start, SCM recovery actions, rotating
 logs, network retry with jitter, and graceful cancellation of a running child
-process. Windows-specific behavior has been manually exercised but is not
-covered by Windows CI.
+process. Go build and unit tests run on Windows CI, but Windows service and
+installer lifecycle behavior has only been manually exercised.
 
 The current Windows telemetry collector shells out to PowerShell/CIM once per
 heartbeat for CPU, memory, system drive, uptime, user, and OS version. It does
@@ -176,7 +185,7 @@ contract. Stdout and stderr are held in memory without size limits.
 
 ## 6. Signed command envelope
 
-### 6.1 Implemented format
+### 6.1 Implemented `command-v1` format
 
 The server currently signs canonical JSON containing exactly:
 
@@ -184,29 +193,42 @@ The server currently signs canonical JSON containing exactly:
 {
   "agent_id": "...",
   "command_id": "...",
+  "envelope_version": "command-v1",
   "kind": "powershell",
   "payload": {"script": "..."}
 }
 ```
 
-Canonicalization sorts object keys and removes insignificant whitespace. Go
-disables HTML escaping to match Python. Both languages have tests for a small
-set of canonical examples.
+Canonicalization emits UTF-8 JSON, recursively sorts object keys, removes
+insignificant whitespace, and does not HTML-escape. Payload values are limited
+to objects, arrays, strings, booleans, null, and signed 64-bit integers; floats
+are rejected to avoid cross-runtime formatting ambiguity. Payload nesting is
+limited to 16 levels, the API payload to 60 KiB, and the full canonical envelope
+to 64 KiB. Both runtimes consume the positive and negative vectors in
+`contracts/test-vectors/command-v1.json`; the JSON Schema is
+`contracts/command-v1.schema.json`.
+
+Agents advertise supported versions during enrollment and every heartbeat.
+Enrollment returns the selected version and fails with `409` when there is no
+overlap. Command dispatch also returns `409` until the target has advertised
+`command-v1`. Missing, unknown, and `legacy-unversioned` commands fail closed in
+the agent before signature verification. Capability changes are audited without
+secrets. Successful dispatch audit rows record the envelope version, payload
+key names, and a SHA-256 envelope digest, not potentially sensitive payload
+values. This deliberately prevents an implicit legacy fallback.
 
 `expires_at` is delivered beside the signature and enforced by the agent, but
-is not signed. There is no schema/envelope version, nonce field, issued-at time,
-signing-key ID, rotation state, or repository-level shared test-vector artifact.
-The persisted command ID acts as replay state but is not a distinct signed
-nonce.
+is not signed. There is no signed schema version, nonce field, issued-at time,
+signing-key ID, or rotation state. The persisted command ID acts as replay state
+but is not a distinct signed nonce.
 
-### 6.2 Planned versioned format
+### 6.2 Planned `command-v1` extension
 
-Milestone 0 will define a versioned contract under a future `contracts/`
-directory. A command envelope is expected to bind at least `schema_version`,
-`command_id`, `agent_id`, `kind`, typed payload, `issued_at`, `expires_at`,
-`nonce`, and `signing_key_id` into the signature. Canonical test vectors must be
-consumed by both server and agent tests. Compatibility and rejection behavior
-must be explicit before a version is activated.
+Milestone 0 still needs to bind `schema_version`, `issued_at`, `expires_at`, a
+unique nonce, and `signing_key_id` into the signature, with persisted nonce
+replay state and key rotation. That change must extend or supersede the present
+contract with new shared vectors; it must not reinterpret already-issued
+`command-v1` bytes silently.
 
 ## 7. Audit architecture
 
@@ -253,9 +275,9 @@ The current top-level structure is `agent/`, `server/`, `installer/`, `deploy/`,
 `docs/`, and `.github/`. Planned additions are:
 
 ```text
-dashboard/   technician web application
-contracts/   versioned schemas and canonical signature vectors
-tools/       audit verification and operational utilities
+dashboard/   technician web application (planned)
+contracts/   versioned schemas and canonical signature vectors (implemented)
+tools/       audit verification and operational utilities (planned)
 ```
 
 Reorganization must be incremental. Repository moves are separate issues with
@@ -273,13 +295,14 @@ moved merely to match an aspirational tree.
 - One deployment-wide signing key has no identifier or rotation mechanism.
 - Agent credentials are plaintext in endpoint JSON files and cannot be revoked.
 - Output and queues have no explicit resource limits.
-- Database migrations and automated backup/restore are absent.
+- Automated backup/restore and restore rehearsal remain absent; schema
+  migrations and exact startup revision checks are implemented.
 - Audit anchors remain inside the same trust boundary as the audit database.
 - Roles are global; clients/sites are not authorization tenants.
 - The login limiter is process-local and weakens with multiple workers.
 - `CommandStatus.running` exists but is never assigned.
-- `websockets`, `python-multipart`, and Alembic are declared dependencies without
-  corresponding implemented product behavior or migration scaffolding.
+- `websockets` and `python-multipart` are declared dependencies without
+  corresponding implemented product behavior.
 - Release binaries are checksummed but unsigned and have no SBOM or provenance
   attestation.
 

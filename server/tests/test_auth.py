@@ -97,7 +97,7 @@ async def test_readonly_can_read_but_not_dispatch(client):
     enr = (
         await client.post(
             "/api/v1/enroll",
-            json={"enrollment_token": et["token"], "hostname": "H", "os": "windows"},
+            json={"enrollment_token": et["token"], "hostname": "H", "os": "windows", "supported_command_envelope_versions": ["command-v1"]},
         )
     ).json()
 
@@ -133,7 +133,7 @@ async def test_dispatch_records_operator_identity(client):
     enr = (
         await client.post(
             "/api/v1/enroll",
-            json={"enrollment_token": et["token"], "hostname": "H", "os": "windows"},
+            json={"enrollment_token": et["token"], "hostname": "H", "os": "windows", "supported_command_envelope_versions": ["command-v1"]},
         )
     ).json()
 
@@ -156,3 +156,6 @@ async def test_dispatch_records_operator_identity(client):
         ).scalars().all()
     assert len(rows) == 1
     assert rows[0].actor == "admin@nodelink.test"
+    assert rows[0].detail["payload_keys"] == ["script"]
+    assert "payload" not in rows[0].detail
+    assert len(rows[0].detail["envelope_sha256"]) == 64

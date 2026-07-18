@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nodelink.example/contracts/command-v1.schema.json",
+  "title": "NodeLink signed command envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "agent_id",
+    "command_id",
+    "envelope_version",
+    "kind",
+    "payload"
+  ],
+  "properties": {
+    "agent_id": { "type": "string", "minLength": 1 },
+    "command_id": { "type": "string", "minLength": 1 },
+    "envelope_version": { "const": "command-v1" },
+    "kind": {
+      "enum": ["powershell", "shell", "collect_inventory"]
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/value" }
+    }
+  },
+  "$defs": {
+    "integer": {
+      "type": "integer",
+      "minimum": -9223372036854775808,
+      "maximum": 9223372036854775807
+    },
+    "value": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "$ref": "#/$defs/integer" },
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/value" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/value" }
+        }
+      ]
+    }
+  }
+}

@@ -129,7 +129,7 @@ func (a *Agent) Run(ctx context.Context) error {
 // RunOnce performs enrollment (if needed) and a single check-in, then returns.
 // It does not retry on failure — it mirrors the old -once behavior.
 func (a *Agent) RunOnce(ctx context.Context) error {
-	sess, err := a.loadSession()
+	sess, err := a.loadSession(ctx)
 	if err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func (a *Agent) loop(ctx, execCtx context.Context) error {
 	// failure so a server that is down at boot means "keep trying quietly."
 	var sess *session
 	for sess == nil {
-		s, err := a.loadSession()
+		s, err := a.loadSession(ctx)
 		if err != nil {
 			if isFatal(err) {
 				return err
@@ -180,13 +180,13 @@ func (a *Agent) loop(ctx, execCtx context.Context) error {
 }
 
 // loadSession loads config and identity, enrolling if no identity exists yet.
-func (a *Agent) loadSession() (*session, error) {
+func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	cfg, err := config.Load(a.configPath)
 	if err != nil {
 		return nil, fatal(err) // a bad/missing config will not fix itself
 	}
 	idPath := config.IdentityPath(a.configPath)
-	identity, err := a.ensureEnrolled(cfg, idPath)
+	identity, err := a.ensureEnrolled(ctx, cfg, idPath)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (a *Agent) loadSession() (*session, error) {
 // ensureEnrolled returns a persisted identity, enrolling first if none exists.
 // A missing/invalid config or absent credentials is fatal; a failed enroll call
 // (network) is returned bare so the caller retries.
-func (a *Agent) ensureEnrolled(cfg *config.Config, idPath string) (*config.Identity, error) {
+func (a *Agent) ensureEnrolled(ctx context.Context, cfg *config.Config, idPath string) (*config.Identity, error) {
 	if id, err := config.LoadIdentity(idPath); err == nil {
 		a.log.Printf("loaded existing identity: agent %s", id.AgentID)
 		return id, nil
@@ -232,7 +232,7 @@ func (a *Agent) ensureEnrolled(cfg *config.Config, idPath string) (*config.Ident
 	a.log.Printf("enrolling with server %s", cfg.ServerURL)
 	host := telemetry.BasicHostInfo()
 	api := client.New(cfg.ServerURL, "")
-	resp, err := api.Enroll(cfg.EnrollmentToken, host, a.version)
+	resp, err := api.Enroll(ctx, cfg.EnrollmentToken, host, a.version)
 	if err != nil {
 		return nil, err // network/enroll error: retryable
 	}
@@ -257,7 +257,7 @@ func (a *Agent) ensureEnrolled(cfg *config.Config, idPath string) (*config.Ident
 // shutdown (stop accepting new commands); execCtx backs command execution.
 func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	sample := telemetry.Collect()
-	ack, err := s.api.Heartbeat(sample, nil)
+	ack, err := s.api.Heartbeat(ctx, sample, nil)
 	if err != nil {
 		return err
 	}
@@ -288,9 +288,9 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 // possible future hardening (out of scope here); until then we treat the
 // delivered value as a best-effort staleness hint and fail closed on it.
 func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Command) {
-	if err := verify.Verify(s.pub, cmd.ID, s.agentID, cmd.Kind, cmd.Payload, cmd.Signature); err != nil {
+	if err := verify.Verify(s.pub, cmd.EnvelopeVersion, cmd.ID, s.agentID, cmd.Kind, cmd.Payload, cmd.Signature); err != nil {
 		a.log.Printf("REFUSING command %s: signature invalid: %v", cmd.ID, err)
-		_ = s.api.ReportResult(cmd.ID, client.CommandResult{
+		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
 			ExitCode: -1,
 			Stderr:   "agent refused command: signature verification failed",
 		})
@@ -302,7 +302,7 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 	expiry, hasTTL, err := parseExpiry(cmd.ExpiresAt)
 	if err != nil || (hasTTL && !expiry.After(time.Now().UTC())) {
 		a.log.Printf("REFUSING command %s: expired", cmd.ID)
-		_ = s.api.ReportResult(cmd.ID, client.CommandResult{
+		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
 			ExitCode: -1,
 			Stderr:   "agent refused command: past TTL",
 		})
@@ -327,7 +327,7 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		a.log.Printf("failed to persist replay store after %s: %v", cmd.ID, err)
 	}
 
-	if err := s.api.ReportResult(cmd.ID, client.CommandResult{
+	if err := s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
 		ExitCode: res.ExitCode,
 		Stdout:   res.Stdout,
 		Stderr:   res.Stderr,

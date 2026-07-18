@@ -105,10 +105,18 @@ defends against this on two fronts:
 
 Refusal order in the agent is signature → TTL → replay → execute.
 
-**Required hardening.** Define a versioned envelope and bind `expires_at`,
-schema version, nonce, issued-at time, and signing-key ID into the canonical
-bytes on both server and agent. Add shared test vectors, key rotation, explicit
-compatibility behavior, and downgrade rejection.
+**Version downgrade — mitigated.** The signed `command-v1` bytes include
+`envelope_version`. Agents advertise versions during enrollment and heartbeat;
+the server withholds dispatch until `command-v1` is reported. Missing, unknown,
+and legacy versions fail closed before signature verification. Python and Go
+consume the same positive and negative vectors. Existing queued commands are
+expired during migration because their legacy signatures do not cover version.
+
+**Required hardening.** Bind `expires_at`, schema version, nonce, issued-at time,
+and signing-key ID into the versioned canonical bytes on both server and agent.
+Add persisted nonce replay state and signing-key rotation. Until that lands, a
+transport attacker who can strip unsigned expiry still has a replay avenue for
+a captured command that is not already in the local executed-ID store.
 
 ### (4) Agent → Endpoint OS
 
@@ -172,7 +180,7 @@ not built in.
 |---|-----|----------|--------|
 | 1 | Management API unauthenticated | Critical | **Closed** — operator authN + role-based authZ |
 | 2 | No token revocation / login rate-limit | Medium | **Closed** — per-operator `token_generation` bump revokes all outstanding JWTs (self + admin endpoints, audited); sliding-window 429 throttle on `/auth/login` per (IP, email). Limiter is per-process — use a shared store when running multiple workers |
-| 3 | Command expiry/version/nonce are not signed | Critical | Partial — agent refuses delivered expired commands and persists executed IDs, but expiry can be stripped and there is no signed version, nonce, or key ID |
+| 3 | Command expiry/version/nonce are not signed | Critical | Partial — `command-v1` signs and rejects envelope downgrades with shared Go/Python vectors; expiry can still be stripped and there is no signed schema version, nonce, issued-at, or key ID |
 | 4 | TLS not enforced by scaffold | High | Partial — deployment path documented (`docs/DEPLOYMENT-TLS.md`, `deploy/Caddyfile`): TLS-terminating proxy with uvicorn bound to localhost; agent cert pinning still open |
 | 5 | Audit chain not externally anchored | Medium | Partial — Merkle anchoring implemented (create/list/verify endpoints; detects consistent chain rebuilds). Publishing the root to an external append-only medium is an ops step and not automated |
 | 6 | Agent runs commands at its own privilege | By design | Partial — installable service (Gate 2) runs as `LocalSystem`; least-privilege service account still open |
@@ -180,6 +188,6 @@ not built in.
 | 8 | No agent revocation/quarantine or DPAPI credential protection | Critical | Open |
 | 9 | Command stdout/stderr and queue policy are unbounded | High | Open — execution has a timeout and is sequential in one runtime, but output, admission, and explicit concurrency policy are absent |
 | 10 | Audit ordering is not monotonic and anchors remain local | High | Partial — hash chain and local Merkle anchors exist; sequence serialization and external immutable publication do not |
-| 11 | No production migrations, automated restore, or rollback rehearsal | High | Open |
+| 11 | No production migrations, automated restore, or rollback rehearsal | High | Partial — Alembic baseline/forward migration and exact startup revision checks are implemented and tested on PostgreSQL in CI; backup automation and restore/rollback rehearsal remain open |
 | 12 | Windows artifacts are unsigned and release evidence lacks SBOM/provenance | High | Open |
 | 13 | Client/site records are not authorization tenants | High | Open — roles and management access are global |

@@ -92,6 +92,20 @@ Milestone 0 must extend the workflow so each release publishes and verifies:
 The release job should fail closed if signature, checksum, SBOM, provenance, or
 required test verification fails.
 
+## Current schema and agent compatibility
+
+Server releases containing Alembic revision `0002` require `alembic upgrade
+head` before non-debug startup. Roll out the database revision and server first,
+then upgrade agents. Command dispatch returns `409` until an agent advertises
+`command-v1`; old queued commands are expired by the migration. A new agent
+refuses commands from an old server because they lack an envelope version, and
+a new server rejects enrollment when no supported version overlaps.
+
+There is no in-place schema or protocol downgrade. Prefer a forward fix. A
+restore to the pre-`0002` database and old components is an explicit destructive
+recovery choice and discards post-backup data; it is not a normal release
+rollback.
+
 ## Rollback (not yet validated)
 
 Every production-intended release needs a version-specific rollback procedure

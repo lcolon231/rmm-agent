@@ -3,8 +3,8 @@
 FastAPI backend for agent enrollment, heartbeat polling, signed command
 dispatch, operator authentication, and tamper-evident audit records.
 
-This is an early-stage scaffold. It is not production-ready: migrations,
-backup/restore, production TLS enforcement, agent revocation, bounded command
+This is an early-stage scaffold. It is not production-ready: backup/restore,
+production TLS enforcement, agent revocation, bounded command
 results, tenant isolation, and several other Milestone 0 controls are not yet
 implemented. See [deployment readiness](../docs/DEPLOYMENT-READINESS.md).
 
@@ -32,8 +32,24 @@ uvicorn app.main:app --reload
 Interactive API documentation is at `/docs`; health is at `/healthz`.
 
 With `DEBUG=true`, the application creates missing tables on startup for local
-convenience. There is currently no Alembic environment or migration revision.
-Do not use debug auto-create as a production schema-management strategy.
+convenience. With `DEBUG=false`, startup requires the database's Alembic
+revision to exactly match this server build and fails before serving traffic if
+the database is unversioned, behind, or ahead.
+
+For a fresh database, run from `server/`:
+
+```bash
+alembic upgrade head
+uvicorn app.main:app
+```
+
+Alembic reads `DATABASE_URL` (or the higher-priority
+`ALEMBIC_DATABASE_URL`). Existing databases created by the old debug
+`create_all` path need a backup and schema review against revision `0001`
+before `alembic stamp 0001 && alembic upgrade head`. Stamping does not validate
+the schema. Migrations are forward-only: recover with a tested backup or a
+forward fix, not `alembic downgrade`. See
+[deployment readiness](../docs/DEPLOYMENT-READINESS.md#database-and-recovery).
 
 ## Current behavior
 
@@ -49,10 +65,12 @@ queued commands. This is polling, not WebSocket or streaming transport.
 
 ### Signed commands
 
-The server signs canonical JSON containing `command_id`, `agent_id`, `kind`, and
-`payload`. `expires_at` is delivered and enforced by server and agent, but is
-not covered by the current signature. There is no envelope version, nonce,
-signing-key ID, or key rotation. See the
+The server signs the negotiated `command-v1` canonical JSON containing
+`envelope_version`, `command_id`, `agent_id`, `kind`, and `payload`. Agents
+advertise supported versions during enrollment and every heartbeat; dispatch
+returns `409` until `command-v1` is advertised. `expires_at` is delivered and
+enforced by server and agent, but is not covered by the current signature.
+There is no nonce, signing-key ID, or key rotation. See the
 [architecture](../docs/ARCHITECTURE.md#6-signed-command-envelope).
 
 ### Operator access
@@ -106,6 +124,8 @@ pytest -q
 
 The server suite covers authentication/roles, login throttling, operator-token
 revocation, enrollment, heartbeat, command lifecycle, Python command signing,
-audit-chain tamper detection, and local Merkle anchors against ephemeral SQLite.
-Go-side verification and replay tests live under `agent/`; Windows service and
-installer lifecycle are not yet covered by CI.
+shared command vectors, Alembic upgrades/revision checks, audit-chain tamper
+detection, and local Merkle anchors. CI also migrates a fresh PostgreSQL 16
+database.
+Go-side verification and replay tests live under `agent/` and run on Linux and
+Windows; Windows service and installer lifecycle automation remains open.

@@ -38,9 +38,40 @@ jobs:
       - run: go build ./...
       - run: go test ./...
 
+  agent-windows:
+    name: agent (Go, Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: agent/go.sum
+      - run: go build ./...
+      - run: go test ./...
+
   server:
     name: server (Python)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rmm
+          POSTGRES_PASSWORD: rmm
+          POSTGRES_DB: rmm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rmm -d rmm_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_POSTGRES_URL: postgresql+asyncpg://rmm:rmm@127.0.0.1:5432/rmm_test
     defaults:
       run:
         working-directory: server
@@ -56,5 +87,4 @@ jobs:
       - name: Generate command signing key (tests need it)
         run: python scripts/gen_command_keys.py
       - name: Run tests
-        # Tests default to an ephemeral SQLite DB; no Postgres needed.
         run: pytest -q

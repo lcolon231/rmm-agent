@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_agent
 from app.core import audit
+from app.core.command_envelope import (
+    COMMAND_ENVELOPE_V1,
+    SUPPORTED_COMMAND_ENVELOPE_VERSIONS,
+    select_command_envelope_version,
+)
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import (
@@ -51,6 +56,18 @@ async def enroll(body: EnrollRequest, db: AsyncSession = Depends(get_db)):
     The plaintext agent token is returned exactly once here; the agent must
     persist it. Server keeps only the hash.
     """
+    selected_version = select_command_envelope_version(
+        body.supported_command_envelope_versions
+    )
+    if selected_version is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "no_common_command_envelope_version",
+                "server_supported": list(SUPPORTED_COMMAND_ENVELOPE_VERSIONS),
+            },
+        )
+
     result = await db.execute(
         select(EnrollmentToken).where(
             EnrollmentToken.token_hash == hash_token(body.enrollment_token)
@@ -71,6 +88,7 @@ async def enroll(body: EnrollRequest, db: AsyncSession = Depends(get_db)):
         os=body.os,
         os_version=body.os_version,
         agent_version=body.agent_version,
+        command_envelope_versions=body.supported_command_envelope_versions,
         status=AgentStatus.pending,
     )
     db.add(agent)
@@ -82,7 +100,13 @@ async def enroll(body: EnrollRequest, db: AsyncSession = Depends(get_db)):
         action="agent.enrolled",
         actor=f"installer:{etoken.id}",
         agent_id=agent.id,
-        detail={"hostname": body.hostname, "os": body.os, "site_id": etoken.site_id},
+        detail={
+            "hostname": body.hostname,
+            "os": body.os,
+            "site_id": etoken.site_id,
+            "command_envelope_version": selected_version,
+            "supported_command_envelope_versions": body.supported_command_envelope_versions,
+        },
     )
 
     return EnrollResponse(
@@ -90,6 +114,7 @@ async def enroll(body: EnrollRequest, db: AsyncSession = Depends(get_db)):
         agent_token=agent_token,
         heartbeat_interval_seconds=settings.heartbeat_interval_seconds,
         command_public_key=public_key_pem(),
+        command_envelope_version=selected_version,
     )
 
 
@@ -119,25 +144,41 @@ async def heartbeat(
     )
     agent.last_seen_at = now
     agent.status = AgentStatus.online
+    previous_versions = list(agent.command_envelope_versions or [])
+    agent.command_envelope_versions = body.supported_command_envelope_versions
     if body.inventory is not None:
         agent.inventory = body.inventory
 
-    # Expire stale commands, then fetch what's still deliverable.
-    result = await db.execute(
-        select(Command).where(
-            Command.agent_id == agent.id,
-            Command.status == CommandStatus.queued,
+    if previous_versions != body.supported_command_envelope_versions:
+        await audit.record(
+            db,
+            action="agent.command_envelope_capabilities_changed",
+            actor=f"agent:{agent.id}",
+            agent_id=agent.id,
+            detail={
+                "previous": previous_versions,
+                "current": body.supported_command_envelope_versions,
+            },
         )
-    )
+
+    # Expire stale commands, then fetch what's still deliverable.
     pending: list[Command] = []
-    for cmd in result.scalars().all():
-        expires = ensure_utc(cmd.expires_at)
-        if expires and expires < now:
-            cmd.status = CommandStatus.expired
-            continue
-        cmd.status = CommandStatus.dispatched
-        cmd.dispatched_at = now
-        pending.append(cmd)
+    if COMMAND_ENVELOPE_V1 in body.supported_command_envelope_versions:
+        result = await db.execute(
+            select(Command).where(
+                Command.agent_id == agent.id,
+                Command.status == CommandStatus.queued,
+                Command.envelope_version == COMMAND_ENVELOPE_V1,
+            )
+        )
+        for cmd in result.scalars().all():
+            expires = ensure_utc(cmd.expires_at)
+            if expires and expires < now:
+                cmd.status = CommandStatus.expired
+                continue
+            cmd.status = CommandStatus.dispatched
+            cmd.dispatched_at = now
+            pending.append(cmd)
 
     return HeartbeatAck(
         ok=True,

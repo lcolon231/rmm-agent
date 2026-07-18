@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.models.models import (
     AgentStatus,
@@ -11,6 +13,7 @@ from app.models.models import (
     CommandStatus,
     OperatorRole,
 )
+from app.core.command_envelope import validate_command_payload
 
 
 # --------------------------------------------------------------------------- #
@@ -71,6 +74,24 @@ class SiteOut(BaseModel):
 # --------------------------------------------------------------------------- #
 # Enrollment
 # --------------------------------------------------------------------------- #
+EnvelopeVersion = Annotated[
+    str, StringConstraints(min_length=1, max_length=32, pattern=r"^[a-z0-9-]+$")
+]
+
+
+class CommandEnvelopeCapabilities(BaseModel):
+    supported_command_envelope_versions: list[EnvelopeVersion] = Field(
+        default_factory=list, max_length=8
+    )
+
+    @field_validator("supported_command_envelope_versions")
+    @classmethod
+    def versions_must_be_unique(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("command envelope versions must be unique")
+        return value
+
+
 class EnrollmentTokenCreate(BaseModel):
     site_id: str
     label: str | None = None
@@ -88,7 +109,7 @@ class EnrollmentTokenOut(BaseModel):
     expires_at: datetime | None
 
 
-class EnrollRequest(BaseModel):
+class EnrollRequest(CommandEnvelopeCapabilities):
     """Sent by the agent installer to claim an identity."""
     enrollment_token: str
     hostname: str
@@ -102,12 +123,13 @@ class EnrollResponse(BaseModel):
     agent_token: str  # long-lived bearer token, shown only here
     heartbeat_interval_seconds: int
     command_public_key: str  # PEM Ed25519 public key for verifying commands
+    command_envelope_version: EnvelopeVersion
 
 
 # --------------------------------------------------------------------------- #
 # Heartbeat
 # --------------------------------------------------------------------------- #
-class HeartbeatIn(BaseModel):
+class HeartbeatIn(CommandEnvelopeCapabilities):
     cpu_percent: float = 0.0
     mem_percent: float = 0.0
     disk_percent: float = 0.0
@@ -128,7 +150,12 @@ class HeartbeatAck(BaseModel):
 class CommandCreate(BaseModel):
     kind: CommandKind
     payload: dict = Field(default_factory=dict)
-    ttl_seconds: int = 300
+    ttl_seconds: int = Field(default=300, ge=1, le=86_400)
+
+    @field_validator("payload")
+    @classmethod
+    def payload_must_be_canonicalizable(cls, value: dict) -> dict:
+        return validate_command_payload(value)
 
 
 class CommandOut(BaseModel):
@@ -137,6 +164,7 @@ class CommandOut(BaseModel):
     agent_id: str
     kind: CommandKind
     payload: dict
+    envelope_version: EnvelopeVersion
     signature: str
     status: CommandStatus
     created_at: datetime
@@ -158,6 +186,7 @@ class AgentOut(BaseModel):
     os: str
     os_version: str
     agent_version: str
+    command_envelope_versions: list[EnvelopeVersion]
     status: AgentStatus
     last_seen_at: datetime | None
     enrolled_at: datetime

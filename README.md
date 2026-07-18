@@ -26,9 +26,10 @@ The code in this repository currently provides:
   FastAPI server through heartbeat responses.
 - One-time or limited-use enrollment tokens and long-lived per-agent bearer
   credentials. Server-side token values are stored as SHA-256 hashes.
-- Ed25519 signatures over the current unversioned command fields
-  `command_id`, `agent_id`, `kind`, and `payload`. The agent refuses invalid
-  signatures, expired delivered commands, and previously executed command IDs.
+- Ed25519 signatures over the negotiated `command-v1` envelope: envelope
+  version, command ID, agent ID, kind, and payload. Python and Go consume the
+  same canonical vectors; agents reject missing, unknown, and downgraded
+  envelope versions. Expiry, nonce, issued-at, and key ID are follow-on work.
 - Basic CPU, memory, system-disk, uptime, and logged-in-user telemetry.
 - Buffered PowerShell or shell execution with a five-minute timeout. Results
   are uploaded only after execution finishes.
@@ -38,6 +39,8 @@ The code in this repository currently provides:
   offline-status sweeper.
 - A hash-chained audit log plus APIs that create and verify local Merkle
   anchors. Anchors are not automatically published outside the database.
+- An Alembic baseline and forward migration, with exact revision enforcement
+  on non-debug startup and a disposable PostgreSQL migration test in CI.
 - An Inno Setup Windows installer and tagged release workflow. Windows
   binaries and the installer are currently unsigned.
 - Linux and macOS development builds of the polling agent. Windows is the only
@@ -49,7 +52,8 @@ the implementation and its security boundaries.
 ## In progress
 
 Milestone 0, Deployment Safety, is the active program: hardening the signed
-command envelope, adding credential protection and agent quarantine, enforcing
+command envelope's signed time/nonce/key fields, adding credential protection
+and agent quarantine, enforcing
 production TLS policy, bounding execution resources, making audit ordering and
 anchoring operationally verifiable, adding migrations and recovery procedures,
 and strengthening Windows and release testing.
@@ -84,9 +88,8 @@ The repository does **not** currently contain:
   file transfer, or remote desktop.
 - Agent revocation/quarantine, Windows DPAPI credential protection, command
   output-size limits, signing-key rotation, or certificate pinning.
-- Production database migrations, automated backup/restore, an automated
-  external audit-anchor publisher, release SBOM/provenance, or Authenticode
-  signing.
+- Automated backup/restore, an automated external audit-anchor publisher,
+  release SBOM/provenance, or Authenticode signing.
 - Tenant-scoped authorization, tenant-specific roles or retention, MFA,
   WebAuthn, OIDC/SAML, legal hold, or compliance evidence exports.
 
@@ -114,11 +117,12 @@ rmm-agent/
 ├── server/      # FastAPI API and persistence layer
 ├── installer/   # Inno Setup Windows installer
 ├── deploy/      # Current reverse-proxy example
+├── contracts/   # Versioned schemas and shared Go/Python canonical vectors
 ├── docs/        # Architecture, security, roadmap, and operations documents
 └── .github/     # CI, release automation, and contribution templates
 ```
 
-Future `dashboard/`, `contracts/`, and `tools/` directories are planned. No
+Future `dashboard/` and `tools/` directories are planned. No
 disruptive reorganization is part of the current planning change.
 
 ## Local development

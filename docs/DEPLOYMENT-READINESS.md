@@ -18,15 +18,15 @@ Statuses are:
 |---|---|---|
 | Outbound-only polling | Implemented | Agent initiates enroll, heartbeat/poll, and result requests |
 | Operator API authentication/RBAC | Implemented | Auth and authorization integration tests |
-| Signed command verification | Partial | Signature excludes expiry, version, nonce, and key ID |
+| Signed command verification | Partial | `command-v1`, negotiation, downgrade rejection, and shared vectors implemented; expiry, nonce, schema version, and key ID remain unsigned |
 | Agent replay/expiry checks | Partial | Persisted command IDs and delivered expiry; expiry is unsigned |
 | Production TLS | Partial | Caddy topology documented; app does not enforce production policy |
 | Agent credential protection/revocation | Open | Plaintext endpoint JSON; no revoke/quarantine state |
 | Execution limits | Partial | Five-minute timeout and sequential runtime; no output/queue policy |
 | Audit integrity | Partial | Hash chain and local Merkle anchors; ambiguous ordering and no external publisher |
-| Database lifecycle | Open | Debug auto-create only; no Alembic environment or revisions |
+| Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
 | Backup, restore, rollback | Open | No automated process or rehearsal evidence |
-| Windows lifecycle CI | Open | Linux cross-build/tests only; installer builds on Windows release runner |
+| Windows lifecycle CI | Partial | Go build/unit tests run on Windows; service and installer lifecycle automation remains open |
 | Release authenticity | Open | Checksums exist; artifacts are unsigned; no SBOM/provenance |
 | Soak evidence | Open | No documented multi-day test |
 
@@ -53,10 +53,10 @@ link to reproducible evidence in the release or pilot record.
 
 ### Command trust
 
-- [ ] A versioned contract defines every signed field and canonical encoding.
+- [x] A versioned contract defines the currently signed fields and canonical encoding.
 - [ ] `expires_at`, nonce, schema version, agent ID, operation/payload, and
       signing-key ID are bound into the signature.
-- [ ] Shared positive and negative vectors pass in server and agent tests.
+- [x] Shared positive and negative vectors pass in server and agent tests.
 - [ ] Unknown versions/keys, invalid times, duplicate nonces, and malformed
       payloads fail closed without execution.
 - [ ] Signing-key activation, overlap, retirement, compromise, and rollback are
@@ -102,9 +102,9 @@ link to reproducible evidence in the release or pilot record.
 
 ### Database and recovery
 
-- [ ] Alembic can create a fresh schema and upgrade every supported prior
+- [x] Alembic can create a fresh schema and upgrade every supported prior
       production revision.
-- [ ] Application startup refuses an unsupported schema state.
+- [x] Application startup refuses an unsupported schema state.
 - [ ] Automated encrypted backups run on schedule and failures alert.
 - [ ] Backup retention, access, encryption-key custody, and deletion are
       documented.
@@ -159,6 +159,27 @@ commands that:
 
 Do not treat copying a live database directory or SQLite file as a production
 backup plan.
+
+### Schema rollout and compatibility
+
+For a fresh database, run `alembic upgrade head` before starting a non-debug
+server. For an existing database made by the former debug `create_all` path:
+
+1. Stop writes and take a tested backup.
+2. Verify the live schema matches revision `0001`; `alembic stamp` performs no
+   validation.
+3. Run `alembic stamp 0001`, then `alembic upgrade head`.
+4. Start the server with `DEBUG=false` and confirm the revision guard passes.
+5. Upgrade agents to a build that advertises `command-v1`; command dispatch is
+   intentionally unavailable until each agent reports support.
+
+Revision `0002` preserves historical rows, labels existing commands
+`legacy-unversioned`, and expires queued legacy commands. A new agent refuses an
+old server's missing version, while a new server refuses enrollment/dispatch to
+an old agent. There is no dual-issue or downgrade mode. In-place database
+downgrade is unsupported; use a forward fix, or restore a pre-migration backup
+with the correspondingly old server and agent only after an explicit data-loss
+decision.
 
 ## Rollback outline (not yet validated)
 

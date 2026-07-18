@@ -169,6 +169,11 @@ class Agent(Base):
     os: Mapped[str] = mapped_column(String(100), default="")
     os_version: Mapped[str] = mapped_column(String(100), default="")
     agent_version: Mapped[str] = mapped_column(String(50), default="")
+    # Versions this agent most recently advertised. Empty means commands fail
+    # closed until a compatible agent checks in.
+    command_envelope_versions: Mapped[list[str]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
 
     status: Mapped[AgentStatus] = mapped_column(
         Enum(AgentStatus), default=AgentStatus.pending
@@ -215,6 +220,7 @@ class Command(Base):
     )
     kind: Mapped[CommandKind] = mapped_column(Enum(CommandKind), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    envelope_version: Mapped[str] = mapped_column(String(32), nullable=False)
     # Base64 Ed25519 signature over the canonical command bytes.
     signature: Mapped[str] = mapped_column(Text, default="")
 

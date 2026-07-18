@@ -1,0 +1,127 @@
+{
+  "contract": "command-v1",
+  "notes": "The public key is test-only. Canonical strings are UTF-8 JSON and signatures are Ed25519 over those exact bytes.",
+  "public_key_b64": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+  "valid": [
+    {
+      "name": "simple-script",
+      "envelope": {
+        "envelope_version": "command-v1",
+        "command_id": "00000000-0000-0000-0000-000000000001",
+        "agent_id": "10000000-0000-0000-0000-000000000001",
+        "kind": "powershell",
+        "payload": { "script": "Get-Date" }
+      },
+      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000001\",\"command_id\":\"00000000-0000-0000-0000-000000000001\",\"envelope_version\":\"command-v1\",\"kind\":\"powershell\",\"payload\":{\"script\":\"Get-Date\"}}",
+      "signature_b64": "Phn9j8dmEuVTJic+GHV5tO/xfLtreVcrWTUgpllOp5gHNeOmY73/8NCEnmfsLXaOP/DSL+U03r+k+Udk8X0yAg=="
+    },
+    {
+      "name": "unicode-and-nested",
+      "envelope": {
+        "envelope_version": "command-v1",
+        "command_id": "00000000-0000-0000-0000-000000000002",
+        "agent_id": "10000000-0000-0000-0000-000000000002",
+        "kind": "shell",
+        "payload": {
+          "args": ["café", "東京"],
+          "enabled": true,
+          "limits": {
+            "max": 9223372036854775807,
+            "min": -9223372036854775808
+          }
+        }
+      },
+      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000002\",\"command_id\":\"00000000-0000-0000-0000-000000000002\",\"envelope_version\":\"command-v1\",\"kind\":\"shell\",\"payload\":{\"args\":[\"café\",\"東京\"],\"enabled\":true,\"limits\":{\"max\":9223372036854775807,\"min\":-9223372036854775808}}}",
+      "signature_b64": "NegfKQF5FNZOw8ZdEq1vWRdcQxd3xCskWnvsb84tZV51KjCB2LXZkSALVdYPHGfYtujTuZ/jxWDZKG1EZXr0Aw=="
+    },
+    {
+      "name": "html-characters",
+      "envelope": {
+        "envelope_version": "command-v1",
+        "command_id": "00000000-0000-0000-0000-000000000003",
+        "agent_id": "10000000-0000-0000-0000-000000000003",
+        "kind": "collect_inventory",
+        "payload": { "filter": "cpu > 5 && name < z", "items": [] }
+      },
+      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000003\",\"command_id\":\"00000000-0000-0000-0000-000000000003\",\"envelope_version\":\"command-v1\",\"kind\":\"collect_inventory\",\"payload\":{\"filter\":\"cpu > 5 && name < z\",\"items\":[]}}",
+      "signature_b64": "EXLO6xurCOZDG11om0zq+tB3LMRFK4F5EzLE6Y8w1eJpJI9lZUQyKXPVZUvfZoxzvrRoUaSBsI6TP5AZuSvGCQ=="
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-version",
+      "envelope": {
+        "command_id": "bad-1",
+        "agent_id": "agent-1",
+        "kind": "shell",
+        "payload": {}
+      },
+      "error": "missing_version"
+    },
+    {
+      "name": "unknown-version",
+      "envelope": {
+        "envelope_version": "command-v2",
+        "command_id": "bad-2",
+        "agent_id": "agent-1",
+        "kind": "shell",
+        "payload": {}
+      },
+      "error": "unsupported_version"
+    },
+    {
+      "name": "downgrade-to-legacy",
+      "envelope": {
+        "envelope_version": "legacy-unversioned",
+        "command_id": "bad-3",
+        "agent_id": "agent-1",
+        "kind": "shell",
+        "payload": {}
+      },
+      "error": "unsupported_version"
+    },
+    {
+      "name": "missing-agent-id",
+      "envelope": {
+        "envelope_version": "command-v1",
+        "command_id": "bad-4",
+        "kind": "shell",
+        "payload": {}
+      },
+      "error": "malformed_envelope"
+    },
+    {
+      "name": "floating-point-payload",
+      "envelope": {
+        "envelope_version": "command-v1",
+        "command_id": "bad-5",
+        "agent_id": "agent-1",
+        "kind": "shell",
+        "payload": { "ratio": 1.5 }
+      },
+      "error": "floating_point_not_supported"
+    },
+    {
+      "name": "unsupported-command-kind",
+      "envelope": {
+        "envelope_version": "command-v1",
+        "command_id": "bad-kind",
+        "agent_id": "agent-1",
+        "kind": "delete-everything",
+        "payload": {}
+      },
+      "error": "unsupported_kind"
+    },
+    {
+      "name": "malformed-payload-json",
+      "envelope": {
+        "envelope_version": "command-v1",
+        "command_id": "bad-6",
+        "agent_id": "agent-1",
+        "kind": "shell"
+      },
+      "raw_payload": "{\"script\":",
+      "error": "malformed_json"
+    }
+  ]
+}

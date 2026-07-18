@@ -3,6 +3,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 )
 
@@ -31,36 +33,45 @@ func New(baseURL, agentToken string) *Client {
 
 // EnrollResponse mirrors the server schema.
 type EnrollResponse struct {
-	AgentID          string `json:"agent_id"`
-	AgentToken       string `json:"agent_token"`
-	HeartbeatSeconds int    `json:"heartbeat_interval_seconds"`
-	CommandPublicKey string `json:"command_public_key"`
+	AgentID                string `json:"agent_id"`
+	AgentToken             string `json:"agent_token"`
+	HeartbeatSeconds       int    `json:"heartbeat_interval_seconds"`
+	CommandPublicKey       string `json:"command_public_key"`
+	CommandEnvelopeVersion string `json:"command_envelope_version"`
 }
 
 // Enroll claims an identity using a one-time enrollment token.
-func (c *Client) Enroll(token string, host telemetry.HostInfo, agentVersion string) (*EnrollResponse, error) {
+func (c *Client) Enroll(ctx context.Context, token string, host telemetry.HostInfo, agentVersion string) (*EnrollResponse, error) {
 	body := map[string]any{
-		"enrollment_token": token,
-		"hostname":         host.Hostname,
-		"os":               host.OS,
-		"os_version":       host.OSVersion,
-		"agent_version":    agentVersion,
+		"enrollment_token":                    token,
+		"hostname":                            host.Hostname,
+		"os":                                  host.OS,
+		"os_version":                          host.OSVersion,
+		"agent_version":                       agentVersion,
+		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
 	}
 	var out EnrollResponse
-	if err := c.do("POST", "/api/v1/enroll", body, &out, false); err != nil {
+	if err := c.do(ctx, "POST", "/api/v1/enroll", body, &out, false); err != nil {
 		return nil, err
+	}
+	if out.CommandEnvelopeVersion != protocol.CommandEnvelopeV1 {
+		return nil, fmt.Errorf(
+			"server selected unsupported command envelope version %q",
+			out.CommandEnvelopeVersion,
+		)
 	}
 	return &out, nil
 }
 
 // Command mirrors the server's CommandOut schema.
 type Command struct {
-	ID        string          `json:"id"`
-	AgentID   string          `json:"agent_id"`
-	Kind      string          `json:"kind"`
-	Payload   json.RawMessage `json:"payload"`
-	Signature string          `json:"signature"`
-	Status    string          `json:"status"`
+	ID              string          `json:"id"`
+	AgentID         string          `json:"agent_id"`
+	Kind            string          `json:"kind"`
+	Payload         json.RawMessage `json:"payload"`
+	EnvelopeVersion string          `json:"envelope_version"`
+	Signature       string          `json:"signature"`
+	Status          string          `json:"status"`
 	// ExpiresAt is the server-set TTL deadline (Python isoformat UTC). It is kept
 	// as a raw string and parsed defensively in the runner so one malformed
 	// timestamp cannot break decoding of the whole heartbeat ack. Empty/absent
@@ -77,19 +88,20 @@ type HeartbeatAck struct {
 
 // Heartbeat posts telemetry and returns any queued commands. inventory may be
 // nil for ordinary beats.
-func (c *Client) Heartbeat(s telemetry.Sample, inventory map[string]any) (*HeartbeatAck, error) {
+func (c *Client) Heartbeat(ctx context.Context, s telemetry.Sample, inventory map[string]any) (*HeartbeatAck, error) {
 	body := map[string]any{
-		"cpu_percent":    s.CPUPercent,
-		"mem_percent":    s.MemPercent,
-		"disk_percent":   s.DiskPercent,
-		"uptime_seconds": s.UptimeSeconds,
-		"logged_in_user": s.LoggedInUser,
+		"cpu_percent":                         s.CPUPercent,
+		"mem_percent":                         s.MemPercent,
+		"disk_percent":                        s.DiskPercent,
+		"uptime_seconds":                      s.UptimeSeconds,
+		"logged_in_user":                      s.LoggedInUser,
+		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
 	}
 	if inventory != nil {
 		body["inventory"] = inventory
 	}
 	var ack HeartbeatAck
-	if err := c.do("POST", "/api/v1/heartbeat", body, &ack, true); err != nil {
+	if err := c.do(ctx, "POST", "/api/v1/heartbeat", body, &ack, true); err != nil {
 		return nil, err
 	}
 	return &ack, nil
@@ -103,13 +115,13 @@ type CommandResult struct {
 }
 
 // ReportResult sends the outcome of a command back to the server.
-func (c *Client) ReportResult(commandID string, r CommandResult) error {
+func (c *Client) ReportResult(ctx context.Context, commandID string, r CommandResult) error {
 	path := fmt.Sprintf("/api/v1/commands/%s/result", commandID)
-	return c.do("POST", path, r, nil, true)
+	return c.do(ctx, "POST", path, r, nil, true)
 }
 
 // do performs a JSON request. If auth is true, the agent bearer token is sent.
-func (c *Client) do(method, path string, in, out any, auth bool) error {
+func (c *Client) do(ctx context.Context, method, path string, in, out any, auth bool) error {
 	var reader io.Reader
 	if in != nil {
 		data, err := json.Marshal(in)
@@ -118,7 +130,7 @@ func (c *Client) do(method, path string, in, out any, auth bool) error {
 		}
 		reader = bytes.NewReader(data)
 	}
-	req, err := http.NewRequest(method, c.baseURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
 		return err
 	}
