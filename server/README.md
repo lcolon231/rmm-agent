@@ -65,12 +65,13 @@ queued commands. This is polling, not WebSocket or streaming transport.
 
 ### Signed commands
 
-The server signs the negotiated `command-v1` canonical JSON containing
-`envelope_version`, `command_id`, `agent_id`, `kind`, and `payload`. Agents
+The server signs the negotiated `command-v2` canonical JSON containing
+`envelope_version`, `schema_version`, `command_id`, `agent_id`, `kind`,
+`payload`, canonical UTC `issued_at`, `expires_at`, and a unique nonce. Agents
 advertise supported versions during enrollment and every heartbeat; dispatch
-returns `409` until `command-v1` is advertised. `expires_at` is delivered and
-enforced by server and agent, but is not covered by the current signature.
-There is no nonce, signing-key ID, or key rotation. See the
+returns `409` until `command-v2` is advertised. The agent verifies the complete
+signed time window and refuses replayed IDs or nonces. There is no signing-key
+ID or key rotation yet. See the
 [architecture](../docs/ARCHITECTURE.md#6-signed-command-envelope).
 
 ### Operator access

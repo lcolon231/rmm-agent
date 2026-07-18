@@ -97,7 +97,7 @@ async def test_readonly_can_read_but_not_dispatch(client):
     enr = (
         await client.post(
             "/api/v1/enroll",
-            json={"enrollment_token": et["token"], "hostname": "H", "os": "windows", "supported_command_envelope_versions": ["command-v1"]},
+            json={"enrollment_token": et["token"], "hostname": "H", "os": "windows", "supported_command_envelope_versions": ["command-v2"]},
         )
     ).json()
 
@@ -133,7 +133,7 @@ async def test_dispatch_records_operator_identity(client):
     enr = (
         await client.post(
             "/api/v1/enroll",
-            json={"enrollment_token": et["token"], "hostname": "H", "os": "windows", "supported_command_envelope_versions": ["command-v1"]},
+            json={"enrollment_token": et["token"], "hostname": "H", "os": "windows", "supported_command_envelope_versions": ["command-v2"]},
         )
     ).json()
 

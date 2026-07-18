@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // Package telemetry collects host metrics for heartbeats. Implementations are
 // split by OS with build tags; this file holds the shared types and helpers.
 package telemetry
 
 import (
+	"context"
 	"os"
 	"runtime"
 )
@@ -37,5 +39,11 @@ func BasicHostInfo() HostInfo {
 // Collect returns a metrics sample. Platform files provide the real numbers;
 // the fallback returns zeros so the agent still checks in on unsupported OSes.
 func Collect() Sample {
-	return collect()
+	return collect(context.Background())
+}
+
+// CollectContext is the cancellation-aware form used by the agent runtime.
+// Platform collectors must stop external work when ctx is cancelled.
+func CollectContext(ctx context.Context) Sample {
+	return collect(ctx)
 }

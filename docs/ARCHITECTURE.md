@@ -70,13 +70,13 @@ accept an action. It currently contains:
 - Enrollment-token and agent-token issuance; only token hashes are stored on
   the server.
 - A single deployment-wide Ed25519 command-signing keypair.
-- A negotiated `command-v1` envelope with shared Python/Go canonical vectors,
-  version downgrade rejection, and agent-side signature, delivered-expiry, and
-  replay-ID checks.
+- A negotiated `command-v2` envelope with shared Python/Go canonical vectors,
+  version downgrade rejection, and agent-side signature, signed time-window,
+  command-ID, and nonce replay checks.
 
 Known gaps include agent revocation/quarantine, Windows DPAPI protection for
-credentials, signed expiry/nonce/schema fields, signing-key identifiers and
-rotation, MFA/federation, tenant-scoped authorization, and certificate pinning.
+credentials, signing-key identifiers and rotation, MFA/federation,
+tenant-scoped authorization, and certificate pinning.
 
 ### 3.2 Operations plane
 
@@ -108,10 +108,12 @@ server compares the database's Alembic revision with its expected head and
 fails before serving traffic on an unversioned, older, or newer schema.
 
 Revision `0001` captures the pre-versioning schema. Revision `0002` adds agent
-envelope capabilities and persisted command envelope versions. Existing queued
-legacy commands are marked expired because their signatures do not cover a
-version. Migrations are forward-only; an existing debug-created database may
-be stamped `0001` only after backup and manual schema verification.
+envelope capabilities and persisted command envelope versions. Revision `0003`
+adds signed-command schema/timestamp/nonce columns and a per-agent nonce
+uniqueness index. Existing queued legacy commands are marked expired because
+their signatures do not cover the v2 contract. Migrations are forward-only; an
+existing debug-created database may be stamped `0001` only after backup and
+manual schema verification.
 
 ### 4.1 Current data model
 
@@ -176,7 +178,8 @@ Boot, TPM, or local administrator state.
 After enrollment, `identity.json` contains the plaintext agent token, server URL,
 and command public key. File mode `0600` is requested, but Windows credential
 protection and explicit ACL validation are absent. `seen_commands.json` stores
-executed IDs and expiry values for replay prevention.
+executed command IDs and accepted signed nonces with expiry values for replay
+prevention; both entries are reserved atomically before execution.
 
 The agent processes commands from a single heartbeat sequentially. This happens
 to limit concurrency to one per runtime, but there is no explicit policy,
@@ -185,7 +188,7 @@ contract. Stdout and stderr are held in memory without size limits.
 
 ## 6. Signed command envelope
 
-### 6.1 Implemented `command-v1` format
+### 6.1 Implemented `command-v2` format
 
 The server currently signs canonical JSON containing exactly:
 
@@ -193,7 +196,11 @@ The server currently signs canonical JSON containing exactly:
 {
   "agent_id": "...",
   "command_id": "...",
-  "envelope_version": "command-v1",
+  "envelope_version": "command-v2",
+  "schema_version": 1,
+  "issued_at": "2026-07-18T12:00:00Z",
+  "expires_at": "2026-07-18T12:05:00Z",
+  "nonce": "...",
   "kind": "powershell",
   "payload": {"script": "..."}
 }
@@ -205,30 +212,31 @@ to objects, arrays, strings, booleans, null, and signed 64-bit integers; floats
 are rejected to avoid cross-runtime formatting ambiguity. Payload nesting is
 limited to 16 levels, the API payload to 60 KiB, and the full canonical envelope
 to 64 KiB. Both runtimes consume the positive and negative vectors in
-`contracts/test-vectors/command-v1.json`; the JSON Schema is
-`contracts/command-v1.schema.json`.
+`contracts/test-vectors/command-v2.json`; the JSON Schema is
+`contracts/command-v2.schema.json`. The signed time window is canonical UTC,
+expires within 24 hours, and rejects timestamps more than two minutes in the
+future.
 
 Agents advertise supported versions during enrollment and every heartbeat.
 Enrollment returns the selected version and fails with `409` when there is no
 overlap. Command dispatch also returns `409` until the target has advertised
-`command-v1`. Missing, unknown, and `legacy-unversioned` commands fail closed in
+`command-v2`. Missing, unknown, and `legacy-unversioned` commands fail closed in
 the agent before signature verification. Capability changes are audited without
 secrets. Successful dispatch audit rows record the envelope version, payload
 key names, and a SHA-256 envelope digest, not potentially sensitive payload
 values. This deliberately prevents an implicit legacy fallback.
 
-`expires_at` is delivered beside the signature and enforced by the agent, but
-is not signed. There is no signed schema version, nonce field, issued-at time,
-signing-key ID, or rotation state. The persisted command ID acts as replay state
-but is not a distinct signed nonce.
+The signature binds the schema version, issued-at, expiry, and nonce. The agent
+persists both command IDs and nonces, and refuses execution if replay state
+cannot be durably written. Signing-key IDs and rotation are intentionally not
+part of v2 and remain a separate hardening issue.
 
-### 6.2 Planned `command-v1` extension
+### 6.2 Planned signing-key lifecycle
 
-Milestone 0 still needs to bind `schema_version`, `issued_at`, `expires_at`, a
-unique nonce, and `signing_key_id` into the signature, with persisted nonce
-replay state and key rotation. That change must extend or supersede the present
-contract with new shared vectors; it must not reinterpret already-issued
-`command-v1` bytes silently.
+Milestone 0 still needs signing-key IDs, overlapping verification keys, rotation,
+and compromise recovery. That change must extend or supersede the present
+contract with new shared vectors; it must not reinterpret already-issued v2
+bytes silently.
 
 ## 7. Audit architecture
 

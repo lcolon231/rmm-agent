@@ -18,8 +18,8 @@ Statuses are:
 |---|---|---|
 | Outbound-only polling | Implemented | Agent initiates enroll, heartbeat/poll, and result requests |
 | Operator API authentication/RBAC | Implemented | Auth and authorization integration tests |
-| Signed command verification | Partial | `command-v1`, negotiation, downgrade rejection, and shared vectors implemented; expiry, nonce, schema version, and key ID remain unsigned |
-| Agent replay/expiry checks | Partial | Persisted command IDs and delivered expiry; expiry is unsigned |
+| Signed command verification | Partial | `command-v2`, negotiation, downgrade rejection, signed schema/time/nonce, and shared vectors implemented; signing-key IDs remain open |
+| Agent replay/expiry checks | Implemented | Signed time-window validation plus durable command-ID and nonce replay state |
 | Production TLS | Partial | Caddy topology documented; app does not enforce production policy |
 | Agent credential protection/revocation | Open | Plaintext endpoint JSON; no revoke/quarantine state |
 | Execution limits | Partial | Five-minute timeout and sequential runtime; no output/queue policy |
@@ -54,10 +54,10 @@ link to reproducible evidence in the release or pilot record.
 ### Command trust
 
 - [x] A versioned contract defines the currently signed fields and canonical encoding.
-- [ ] `expires_at`, nonce, schema version, agent ID, operation/payload, and
-      signing-key ID are bound into the signature.
+- [x] `expires_at`, nonce, schema version, agent ID, operation/payload, and
+      issued-at time are bound into the signature.
 - [x] Shared positive and negative vectors pass in server and agent tests.
-- [ ] Unknown versions/keys, invalid times, duplicate nonces, and malformed
+- [x] Unknown versions, invalid times, duplicate nonces, and malformed
       payloads fail closed without execution.
 - [ ] Signing-key activation, overlap, retirement, compromise, and rollback are
       documented and audited.
@@ -170,7 +170,7 @@ server. For an existing database made by the former debug `create_all` path:
    validation.
 3. Run `alembic stamp 0001`, then `alembic upgrade head`.
 4. Start the server with `DEBUG=false` and confirm the revision guard passes.
-5. Upgrade agents to a build that advertises `command-v1`; command dispatch is
+5. Upgrade agents to a build that advertises `command-v2`; command dispatch is
    intentionally unavailable until each agent reports support.
 
 Revision `0002` preserves historical rows, labels existing commands
