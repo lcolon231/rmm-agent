@@ -116,8 +116,16 @@ Every command the agent receives carries an Ed25519 signature from the server.
 The agent recomputes the canonical command bytes and verifies the signature
 against the public key it got at enrollment. **A command that fails verification
 is refused and never executed** — the agent reports a failure result instead.
-The canonical encoding matches the server's exactly (sorted keys, no whitespace,
-no HTML escaping), which is covered by a test in `internal/verify`.
+The `command-v1` signature covers `envelope_version`, `command_id`, `agent_id`,
+`kind`, and `payload`. Canonical JSON is UTF-8 with sorted keys, no whitespace,
+no HTML escaping, signed 64-bit integers, no floating point, a 16-level nesting
+limit, and a 64 KiB envelope limit. Both runtimes consume
+`contracts/test-vectors/command-v1.json`.
+
+The agent advertises `command-v1` during enrollment and every heartbeat. It
+rejects a server that selects another version and refuses commands with a
+missing, unknown, or legacy version before signature verification. This is a
+fail-closed rollout boundary; it does not silently fall back to the old format.
 
 Two further checks run after signature verification, in the order
 signature → TTL → replay → execute:
@@ -161,7 +169,7 @@ agent/
 
 ## Roadmap
 
-- Versioned signed command envelope, key rotation, revocation/quarantine,
+- Signed expiry/nonce/schema/key fields, key rotation, revocation/quarantine,
   DPAPI-protected credentials, execution limits, and Windows lifecycle CI.
 - Complete Windows inventory, typed endpoint operations, and signed self-update.
 - An interactive transport for lower-latency/streaming workflows while keeping

@@ -21,6 +21,7 @@ import (
 
 	"github.com/lcolon231/rmm/agent/internal/client"
 	"github.com/lcolon231/rmm/agent/internal/executor"
+	"github.com/lcolon231/rmm/agent/internal/protocol"
 )
 
 func TestExtractScript(t *testing.T) {
@@ -170,6 +171,9 @@ func newTestSession(t *testing.T) (*Agent, *session, ed25519.PrivateKey, *result
 // encoding (sorted keys, no whitespace, no HTML escaping).
 func signCommand(t *testing.T, priv ed25519.PrivateKey, agentID string, cmd *client.Command) {
 	t.Helper()
+	if cmd.EnvelopeVersion == "" {
+		cmd.EnvelopeVersion = protocol.CommandEnvelopeV1
+	}
 	var payloadVal any
 	if len(cmd.Payload) == 0 {
 		payloadVal = map[string]any{}
@@ -177,10 +181,11 @@ func signCommand(t *testing.T, priv ed25519.PrivateKey, agentID string, cmd *cli
 		t.Fatal(err)
 	}
 	doc := map[string]any{
-		"command_id": cmd.ID,
-		"agent_id":   agentID,
-		"kind":       cmd.Kind,
-		"payload":    payloadVal,
+		"agent_id":         agentID,
+		"command_id":       cmd.ID,
+		"envelope_version": cmd.EnvelopeVersion,
+		"kind":             cmd.Kind,
+		"payload":          payloadVal,
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

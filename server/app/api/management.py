@@ -9,6 +9,7 @@ Authorization model:
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
 from app.core import anchor, audit
+from app.core.command_envelope import COMMAND_ENVELOPE_V1, canonical_command_bytes
 from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
 from app.models.models import (
@@ -159,6 +161,15 @@ async def dispatch_command(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if COMMAND_ENVELOPE_V1 not in (agent.command_envelope_versions or []):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "agent_command_envelope_version_unsupported",
+                "required": COMMAND_ENVELOPE_V1,
+                "agent_supported": agent.command_envelope_versions or [],
+            },
+        )
 
     now = _now()
     cmd = Command(
@@ -166,6 +177,7 @@ async def dispatch_command(
         agent_id=agent_id,
         kind=body.kind,
         payload=body.payload,
+        envelope_version=COMMAND_ENVELOPE_V1,
         status=CommandStatus.queued,
         created_at=now,
         expires_at=now + timedelta(seconds=body.ttl_seconds),
@@ -174,18 +186,34 @@ async def dispatch_command(
     await db.flush()  # persist before signing
 
     cmd.signature = sign_command(
+        envelope_version=cmd.envelope_version,
         command_id=cmd.id,
         agent_id=agent_id,
         kind=body.kind.value,
         payload=body.payload,
     )
+    envelope_sha256 = hashlib.sha256(
+        canonical_command_bytes(
+            cmd.envelope_version,
+            cmd.id,
+            agent_id,
+            body.kind.value,
+            body.payload,
+        )
+    ).hexdigest()
 
     await audit.record(
         db,
         action="command.dispatched",
         actor=operator.email,
         agent_id=agent_id,
-        detail={"command_id": cmd.id, "kind": body.kind.value, "payload": body.payload},
+        detail={
+            "command_id": cmd.id,
+            "kind": body.kind.value,
+            "payload_keys": sorted(body.payload),
+            "envelope_version": cmd.envelope_version,
+            "envelope_sha256": envelope_sha256,
+        },
     )
     return cmd
 

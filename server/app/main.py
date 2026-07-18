@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from app.api import agents, auth, management
 from app.core.config import settings
 from app.core.database import Base, engine
+from app.core.schema_revision import ensure_schema_current
 from app.core.tasks import offline_sweeper
 
 
@@ -19,6 +20,10 @@ async def lifespan(app: FastAPI):
     if settings.debug:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    else:
+        # Production and production-like starts fail closed when the database
+        # is unversioned, behind, or ahead of this server build.
+        await ensure_schema_current(engine)
 
     stop = asyncio.Event()
     sweeper = asyncio.create_task(offline_sweeper(stop))

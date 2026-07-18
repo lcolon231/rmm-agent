@@ -8,9 +8,10 @@ defines the controls and evidence required to strengthen them.
 
 Implemented controls include operator password authentication, global RBAC,
 JWT generation revocation, in-process login throttling, hashed server-side agent
-tokens, outbound-only polling, Ed25519 verification of a subset of command
-fields, delivered-expiry and replay-ID checks, Windows command timeouts, a
-hash-chained audit log, and local Merkle anchor verification.
+tokens, outbound-only polling, negotiated `command-v1` Ed25519 verification
+with shared cross-language vectors and downgrade rejection, delivered-expiry
+and replay-ID checks, Windows command timeouts, a hash-chained audit log, and
+local Merkle anchor verification.
 
 The system is not approved for production or regulated endpoints. Key gaps are
 listed below and tracked as separate GitHub issues.
@@ -19,16 +20,18 @@ listed below and tracked as separate GitHub issues.
 
 ### Version and bind the command envelope
 
-Define `command-v1` as a repository contract and sign every security-relevant
-field, including schema version, agent ID, command ID, typed operation/payload,
-issued-at, expiry, nonce, and signing-key ID. Both Python and Go must consume the
-same canonical test vectors. Unknown versions, unknown keys, malformed times,
-duplicate nonces, and downgraded envelopes must fail closed.
+`command-v1` now defines and signs envelope version, agent ID, command ID,
+operation, and a bounded payload. Python and Go consume the same canonical test
+vectors; missing, unknown, and downgraded envelope versions fail closed.
 
-Rollout needs a compatibility policy: servers may dual-issue only during a
-bounded migration; agents must report supported versions; removal of the legacy
-format requires fleet evidence. The current unversioned format is not `v1` by
-implication.
+The remaining trust work is to bind schema version, issued-at, expiry, nonce,
+and signing-key ID, then persist nonce replay state. Unknown keys, malformed
+times, duplicate nonces, and modified expiry must fail closed.
+
+The implemented rollout is fail closed, not dual issue: agents report supported
+versions, new servers reject incompatible enrollment/dispatch, new agents
+reject old unversioned commands, and migration expires queued legacy commands.
+There is no implicit legacy fallback.
 
 ### Add signing-key lifecycle
 
@@ -79,8 +82,10 @@ verification instructions. A local anchor is not external evidence.
 
 ### Make data and releases recoverable
 
-Use Alembic for every supported schema change. Automate encrypted backup and
-restore, document retention and key custody, and rehearse restore and rollback.
+Alembic now owns the baseline and command-envelope migration, and non-debug
+startup requires the exact expected revision. Continue using Alembic for every
+supported schema change. Automate encrypted backup and restore, document
+retention and key custody, and rehearse restore and rollback.
 Windows artifacts must be Authenticode-signed and timestamped. Releases must
 include checksums, SBOMs, provenance attestations, and verification steps.
 

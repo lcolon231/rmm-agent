@@ -288,7 +288,7 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 // possible future hardening (out of scope here); until then we treat the
 // delivered value as a best-effort staleness hint and fail closed on it.
 func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Command) {
-	if err := verify.Verify(s.pub, cmd.ID, s.agentID, cmd.Kind, cmd.Payload, cmd.Signature); err != nil {
+	if err := verify.Verify(s.pub, cmd.EnvelopeVersion, cmd.ID, s.agentID, cmd.Kind, cmd.Payload, cmd.Signature); err != nil {
 		a.log.Printf("REFUSING command %s: signature invalid: %v", cmd.ID, err)
 		_ = s.api.ReportResult(cmd.ID, client.CommandResult{
 			ExitCode: -1,
