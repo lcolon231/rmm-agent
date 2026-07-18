@@ -6,7 +6,14 @@ from datetime import datetime
 
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_serializer,
+    field_validator,
+)
 
 from app.models.models import (
     AgentStatus,
@@ -14,7 +21,7 @@ from app.models.models import (
     CommandStatus,
     OperatorRole,
 )
-from app.core.command_envelope import validate_command_payload
+from app.core.command_envelope import format_command_time, validate_command_payload
 
 
 # --------------------------------------------------------------------------- #
@@ -173,6 +180,11 @@ class CommandOut(BaseModel):
     status: CommandStatus
     created_at: datetime
     expires_at: datetime | None
+
+    @field_serializer("issued_at", "expires_at", when_used="unless-none")
+    def serialize_command_time(self, value: datetime) -> str:
+        """Keep signed command timestamps canonical on every API response."""
+        return format_command_time(value)
 
 
 class CommandResult(BaseModel):

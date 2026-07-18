@@ -56,12 +56,12 @@ func cpuPercent(ctx context.Context) float64 {
 }
 
 func memPercent(ctx context.Context) float64 {
-	return psFloat(ctx, `$o=Get-CimInstance Win32_OperatingSystem; ` +
+	return psFloat(ctx, `$o=Get-CimInstance Win32_OperatingSystem; `+
 		`[math]::Round((($o.TotalVisibleMemorySize - $o.FreePhysicalMemory) / $o.TotalVisibleMemorySize) * 100, 2)`)
 }
 
 func diskPercent(ctx context.Context) float64 {
-	return psFloat(ctx, `$d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; ` +
+	return psFloat(ctx, `$d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; `+
 		`[math]::Round((($d.Size - $d.FreeSpace) / $d.Size) * 100, 2)`)
 }
 

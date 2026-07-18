@@ -72,8 +72,8 @@ type Command struct {
 	Payload         json.RawMessage `json:"payload"`
 	EnvelopeVersion string          `json:"envelope_version"`
 	SchemaVersion   int             `json:"schema_version"`
-	IssuedAt       string          `json:"issued_at"`
-	Nonce          string          `json:"nonce"`
+	IssuedAt        string          `json:"issued_at"`
+	Nonce           string          `json:"nonce"`
 	Signature       string          `json:"signature"`
 	Status          string          `json:"status"`
 	// ExpiresAt is the server-set TTL deadline (Python isoformat UTC). It is kept
