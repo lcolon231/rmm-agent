@@ -22,12 +22,15 @@ from app.api.deps import require_role
 from app.core import anchor, audit
 from app.core.command_envelope import (
     ACTIVE_COMMAND_ENVELOPE_VERSION,
+    COMMAND_ENVELOPE_V3,
     COMMAND_SCHEMA_VERSION,
     canonical_command_bytes,
     format_command_time,
+    select_command_envelope_version,
 )
 from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
+from app.core.keyring import active_signing_key, load_keyring
 from app.models.models import (
     Agent,
     AuditAnchor,
@@ -152,6 +155,19 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
 # --------------------------------------------------------------------------- #
 # Commands
 # --------------------------------------------------------------------------- #
+@router.get("/signing-keys")
+async def list_signing_keys(db: AsyncSession = Depends(get_db)):
+    """Expose redacted key lifecycle state for operator verification."""
+    active_id, keys = load_keyring()
+    return {
+        "active_key_id": active_id,
+        "keys": [
+            {"key_id": key_id, "status": key.status, "active": key_id == active_id}
+            for key_id, key in sorted(keys.items())
+        ],
+    }
+
+
 @router.post("/agents/{agent_id}/commands", response_model=CommandOut)
 async def dispatch_command(
     agent_id: str,
@@ -167,7 +183,10 @@ async def dispatch_command(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
-    if ACTIVE_COMMAND_ENVELOPE_VERSION not in (agent.command_envelope_versions or []):
+    envelope_version = select_command_envelope_version(
+        agent.command_envelope_versions or []
+    )
+    if envelope_version is None:
         raise HTTPException(
             status_code=409,
             detail={
@@ -178,15 +197,17 @@ async def dispatch_command(
         )
 
     now = _now()
+    key_id = active_signing_key().key_id if envelope_version == COMMAND_ENVELOPE_V3 else None
     cmd = Command(
         id=str(uuid.uuid4()),
         agent_id=agent_id,
         kind=body.kind,
         payload=body.payload,
-        envelope_version=ACTIVE_COMMAND_ENVELOPE_VERSION,
+        envelope_version=envelope_version,
         schema_version=COMMAND_SCHEMA_VERSION,
         issued_at=now,
         nonce=generate_token(24),
+        signing_key_id=key_id,
         status=CommandStatus.queued,
         created_at=now,
         expires_at=now + timedelta(seconds=body.ttl_seconds),
@@ -204,6 +225,7 @@ async def dispatch_command(
         issued_at=format_command_time(cmd.issued_at),
         expires_at=format_command_time(cmd.expires_at),
         nonce=cmd.nonce,
+        signing_key_id=cmd.signing_key_id,
     )
     envelope_sha256 = hashlib.sha256(
         canonical_command_bytes(
@@ -216,6 +238,7 @@ async def dispatch_command(
             format_command_time(cmd.issued_at),
             format_command_time(cmd.expires_at),
             cmd.nonce,
+            cmd.signing_key_id,
         )
     ).hexdigest()
 
@@ -233,6 +256,7 @@ async def dispatch_command(
             "issued_at": format_command_time(cmd.issued_at),
             "expires_at": format_command_time(cmd.expires_at),
             "nonce": cmd.nonce,
+            "signing_key_id": cmd.signing_key_id,
             "envelope_sha256": envelope_sha256,
         },
     )

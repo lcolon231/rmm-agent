@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Agent-facing endpoints: enrollment, heartbeat, command pickup/result.
 
 These routes are called by the Go agent. Human/dashboard routes live in
@@ -14,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_agent
 from app.core import audit
 from app.core.command_envelope import (
-    ACTIVE_COMMAND_ENVELOPE_VERSION,
     SUPPORTED_COMMAND_ENVELOPE_VERSIONS,
     select_command_envelope_version,
 )
@@ -24,7 +24,9 @@ from app.core.security import (
     generate_token,
     hash_token,
     public_key_pem,
+    public_key_bundle_pem,
 )
+from app.core.keyring import active_signing_key
 from app.core.timeutil import ensure_utc
 from app.models.models import (
     Agent,
@@ -114,6 +116,8 @@ async def enroll(body: EnrollRequest, db: AsyncSession = Depends(get_db)):
         agent_token=agent_token,
         heartbeat_interval_seconds=settings.heartbeat_interval_seconds,
         command_public_key=public_key_pem(),
+        command_public_keys=public_key_bundle_pem(),
+        command_signing_key_id=active_signing_key().key_id,
         command_envelope_version=selected_version,
     )
 
@@ -163,12 +167,15 @@ async def heartbeat(
 
     # Expire stale commands, then fetch what's still deliverable.
     pending: list[Command] = []
-    if ACTIVE_COMMAND_ENVELOPE_VERSION in body.supported_command_envelope_versions:
+    selected_version = select_command_envelope_version(
+        body.supported_command_envelope_versions
+    )
+    if selected_version is not None:
         result = await db.execute(
             select(Command).where(
                 Command.agent_id == agent.id,
                 Command.status == CommandStatus.queued,
-                Command.envelope_version == ACTIVE_COMMAND_ENVELOPE_VERSION,
+                Command.envelope_version == selected_version,
             )
         )
         for cmd in result.scalars().all():
@@ -183,6 +190,7 @@ async def heartbeat(
     return HeartbeatAck(
         ok=True,
         pending_commands=[CommandOut.model_validate(c) for c in pending],
+        command_public_keys=public_key_bundle_pem(),
     )
 
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Application configuration loaded from environment variables."""
 from functools import lru_cache
 
@@ -34,6 +35,10 @@ class Settings(BaseSettings):
     # Agents hold the matching public key and verify every command before executing.
     # Generate a keypair with the helper in scripts/gen_command_keys.py
     command_signing_key_path: str = "command_signing_key.pem"
+    # Stable identifier for the single-key fallback. For staged rotation,
+    # point this at a JSON registry containing active/overlap/retired keys.
+    command_signing_key_id: str = "default"
+    command_signing_keyring_path: str | None = None
 
     # --- Agent policy ---
     heartbeat_interval_seconds: int = 60

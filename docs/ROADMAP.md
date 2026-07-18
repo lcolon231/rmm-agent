@@ -72,8 +72,8 @@ but a later milestone does not redefine an earlier safety gate as complete.
 ### Delivery order
 
 1. **Protocol trust:** define a versioned signed command envelope; bind expiry,
-   nonce, and schema version; publish shared vectors; add signing-key IDs and
-   rotation.
+   nonce, schema version, and signing-key IDs; publish shared vectors; operate
+   key rotation and compromise recovery.
 2. **Endpoint trust:** implement revocation/quarantine and DPAPI credential
    protection; define optional certificate pinning.
 3. **Execution safety:** enforce stdout/stderr limits, explicit per-agent

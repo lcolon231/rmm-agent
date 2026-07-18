@@ -8,7 +8,7 @@ defines the controls and evidence required to strengthen them.
 
 Implemented controls include operator password authentication, global RBAC,
 JWT generation revocation, in-process login throttling, hashed server-side agent
-tokens, outbound-only polling, negotiated `command-v2` Ed25519 verification
+tokens, outbound-only polling, negotiated `command-v3` Ed25519 verification
 with shared cross-language vectors and downgrade rejection, signed schema/time
 window/nonce checks, Windows command timeouts, a hash-chained audit log, and
 local Merkle anchor verification.
@@ -20,27 +20,29 @@ listed below and tracked as separate GitHub issues.
 
 ### Version and bind the command envelope
 
-`command-v2` defines and signs envelope version, schema version, agent ID,
+`command-v3` defines and signs envelope version, schema version, agent ID,
 command ID, operation, bounded payload, canonical issued-at/expiry, and nonce.
 Python and Go consume the same canonical test vectors; missing, unknown,
 malformed, expired, and downgraded envelopes fail closed. Both command IDs and
 nonces are durably reserved before execution.
 
-The remaining trust work is signing-key IDs, overlapping verification keys,
-rotation, and compromise recovery.
+Key IDs and active/overlap/retired registry states are implemented for v3.
+Remaining work is an operator-facing rotation workflow, compromise automation,
+and independent rollback rehearsal.
 
 The implemented rollout is fail closed, not dual issue: agents report supported
 versions, new servers reject incompatible enrollment/dispatch, new agents
 reject old unversioned commands, and migration expires queued legacy commands.
 There is no implicit legacy fallback.
 
-### Add signing-key lifecycle
+### Operate signing-key lifecycle
 
-Store an active key ID with each command, support overlapping verification keys,
-separate activation from retirement, and audit key lifecycle changes. Private
-keys must be loaded from an appropriate secret store with least privilege.
-Rotation, rollback, lost-key, and compromise procedures require tests and a
-runbook.
+The external key registry stores an active key ID, overlap keys, and retired
+keys. Every v3 command records the key ID in its signed envelope and audit
+detail; agents replace their public-key bundle on heartbeat and fail closed on
+unknown/retired keys. Private keys remain outside the database. Add an
+operator-facing activation/retirement workflow and rehearse rotation, rollback,
+lost-key, and compromise procedures before pilot use.
 
 ### Revoke and quarantine agents
 

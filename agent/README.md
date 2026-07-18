@@ -116,14 +116,15 @@ Every command the agent receives carries an Ed25519 signature from the server.
 The agent recomputes the canonical command bytes and verifies the signature
 against the public key it got at enrollment. **A command that fails verification
 is refused and never executed** — the agent reports a failure result instead.
-The `command-v2` signature covers `envelope_version`, `schema_version`,
+The `command-v3` signature covers `envelope_version`, `schema_version`,
 `command_id`, `agent_id`, `kind`, `payload`, canonical UTC `issued_at` and
 `expires_at`, and a unique nonce. Canonical JSON is UTF-8 with sorted keys, no
 whitespace, no HTML escaping, signed 64-bit integers, no floating point, a
 16-level nesting limit, and a 64 KiB envelope limit. Both runtimes consume
-`contracts/test-vectors/command-v2.json`.
+`contracts/command-v3.schema.json`; v2 remains a compatibility format without
+key IDs.
 
-The agent advertises `command-v2` during enrollment and every heartbeat. It
+The agent advertises `command-v3` and v2 during enrollment and every heartbeat. It
 rejects a server that selects another version and refuses commands with a
 missing, unknown, malformed, expired, future-dated, or legacy version before
 execution. This is a fail-closed rollout boundary; it does not silently fall
@@ -134,7 +135,11 @@ command-ID replay → nonce replay → execute. The agent persists both replay k
 to `seen_commands.json` (mode 0600, beside `identity.json`, written atomically)
 before starting a process. A replayed command ID is neither executed nor
 re-reported, so it cannot clobber the original result. Expired entries are
-pruned on load. Signing-key IDs and key rotation are not implemented yet.
+pruned on load. For v3 the agent replaces its trusted public-key bundle on every
+heartbeat, accepts only active/overlap key IDs supplied by the server, and
+refuses unknown or retired keys. The server-side registry supports staged
+activation and overlap; operators must preserve the registry and audit records
+when retiring or rolling back a key.
 
 Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
 (`cmd.exe` / `/bin/sh`), and `collect_inventory`. Commands run with a 5-minute

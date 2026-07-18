@@ -32,6 +32,7 @@ from jose import JWTError, jwt
 
 from app.core.config import settings
 from app.core.command_envelope import canonical_command_bytes
+from app.core.keyring import active_signing_key, public_key_bundle
 
 
 # --------------------------------------------------------------------------- #
@@ -119,7 +120,7 @@ def decode_access_token(token: str) -> dict | None:
 # Ed25519 command signing
 # --------------------------------------------------------------------------- #
 def _load_signing_key() -> Ed25519PrivateKey:
-    path = Path(settings.command_signing_key_path)
+    path = active_signing_key().private_path
     if not path.exists():
         raise FileNotFoundError(
             f"Command signing key not found at {path}. "
@@ -138,8 +139,13 @@ def sign_command(
     issued_at: str,
     expires_at: str,
     nonce: str,
+    signing_key_id: str | None = None,
 ) -> str:
-    key = _load_signing_key()
+    key_record = active_signing_key()
+    if signing_key_id is not None and signing_key_id != key_record.key_id:
+        raise ValueError("requested signing key is not active")
+    signing_key_id = key_record.key_id if envelope_version == "command-v3" else None
+    key = key_record.private_key
     signature = key.sign(
         canonical_command_bytes(
             envelope_version,
@@ -151,6 +157,7 @@ def sign_command(
             issued_at,
             expires_at,
             nonce,
+            signing_key_id,
         )
     )
     return base64.b64encode(signature).decode("ascii")
@@ -158,9 +165,10 @@ def sign_command(
 
 def public_key_pem() -> str:
     """Return the PEM-encoded public key, to be baked into / fetched by agents."""
-    key = _load_signing_key()
-    pub: Ed25519PublicKey = key.public_key()
-    return pub.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode("ascii")
+    bundle = public_key_bundle()
+    active_id = active_signing_key().key_id
+    return bundle[active_id]
+
+
+def public_key_bundle_pem() -> dict[str, str]:
+    return public_key_bundle()
