@@ -448,8 +448,10 @@ in the code. Fix opportunistically; listed here so nobody is misled.
   endpoints are "unauthenticated in Phase 1." They are **not** — full operator
   auth is implemented. Trust the code and `docs/threat-model.md`, not that note.
   The README's endpoint table also omits the three `/auth/*` routes.
-- **Root README shows a `dashboard/` (Next.js) and "WebSocket".** Neither exists.
-  The `websockets` dependency is unused; the transport is HTTP polling.
+- ~~**Root README shows a `dashboard/` (Next.js) and "WebSocket" as if present.**~~
+  **Fixed** — the README now marks the dashboard as Phase 2 / not-yet-in-repo and
+  describes the transport as HTTPS long-poll. The `websockets==14.1` server
+  dependency is still declared but unused (the transport is HTTP long-polling).
 - **`alembic` is in `requirements.txt` but there is no `alembic/` scaffold**
   (a `main.py` comment references one). `python-multipart` also appears unused.
 - **Inventory is half-wired.** The server accepts and stores `inventory`, and a
