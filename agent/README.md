@@ -49,6 +49,18 @@ means "keep trying quietly" until it comes back.
 
 ## Running as a Windows service
 
+### GUI install (recommended for endpoints)
+
+For hands-on installs by non-technical users there is a graphical installer
+(`NodeLinkAgentSetup-<version>.exe`, published with each release) that wraps
+this binary: it prompts for the server URL + enrollment token, writes
+`config.json`, and registers + starts the service by calling the CLI verbs
+below under the hood. See [`installer/README.md`](../installer/README.md).
+The CLI path that follows remains fully supported and is what scripted
+deployments should use.
+
+### CLI install
+
 On Windows the same binary can install itself as an auto-starting service so it
 survives reboots and crashes with nobody logged in. The service subcommands are
 Windows-only (on Linux/macOS, run the agent in the foreground under
