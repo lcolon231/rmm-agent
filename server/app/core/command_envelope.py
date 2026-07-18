@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Versioned command-envelope contract shared by signing and API code."""
 from __future__ import annotations
 

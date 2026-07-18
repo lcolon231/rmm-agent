@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // Package protocol contains wire-contract constants shared by the agent's
 // HTTP client and command verifier.
 package protocol

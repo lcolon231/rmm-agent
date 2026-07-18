@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // Package verify checks that commands received from the server are authentic,
 // i.e. signed by the server's Ed25519 private key. The canonical byte encoding
 // here MUST match the server's app/core/security.canonical_command_bytes.

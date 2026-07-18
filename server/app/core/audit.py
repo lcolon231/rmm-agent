@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Append-only, hash-chained audit log.
 
 Each event stores `prev_hash` (the hash of the previous event in the chain) and

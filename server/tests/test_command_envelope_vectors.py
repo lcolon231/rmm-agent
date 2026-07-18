@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Python consumer for the repository-owned command-v1 vectors."""
 from __future__ import annotations
 

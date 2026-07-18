@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Operator-facing endpoints: manage clients, sites, enrollment tokens, view
 agents, and dispatch commands.
 

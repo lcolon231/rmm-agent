@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Add command-envelope negotiation and persisted envelope versions.
 
 Revision ID: 0002

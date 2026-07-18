@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Agent-facing endpoints: enrollment, heartbeat, command pickup/result.
 
 These routes are called by the Go agent. Human/dashboard routes live in

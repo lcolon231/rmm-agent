@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // Package config handles agent configuration and the persisted identity that
 // results from enrollment.
 package config

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // Package client is the agent's HTTP interface to the RMM server.
 package client
 

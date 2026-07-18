@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """ORM models for NodeLink RMM.
 
 Entity overview:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Pydantic v2 request/response schemas."""
 from __future__ import annotations
 

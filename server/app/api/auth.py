@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Authentication endpoints: login and operator management.
 
 Login is the one place a caller is allowed in without already holding a token.

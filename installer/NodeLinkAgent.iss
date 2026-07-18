@@ -1,4 +1,5 @@
 ; NodeLink RMM Agent — graphical Windows installer.
+; SPDX-License-Identifier: AGPL-3.0-only
 ;
 ; Wraps the existing Go agent binary in an Inno Setup installer so a
 ; non-technical person can install the agent without touching a terminal:
@@ -33,6 +34,8 @@ AppId={{20580A78-1C58-45AA-B0FD-EE6C9B075F3A}
 AppName=NodeLink RMM Agent
 AppVersion={#MyVersion}
 AppPublisher=NodeLink
+AppCopyright=Copyright (c) 2026 Luis Colon
+LicenseFile=..\LICENSE
 DefaultDirName={autopf}\NodeLink\Agent
 DisableProgramGroupPage=yes
 ; Registering a Windows service requires elevation; run the whole installer

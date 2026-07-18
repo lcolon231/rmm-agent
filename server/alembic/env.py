@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Alembic environment for NodeLink's async SQLAlchemy database."""
 from __future__ import annotations
 

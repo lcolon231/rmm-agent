@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // Package service contains the OS-independent agent runtime plus the Windows
 // service integration (install/uninstall/start/stop, SCM lifecycle, and
 // auto-recovery). The same runtime backs both the foreground console process

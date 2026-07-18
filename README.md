@@ -144,4 +144,14 @@ See [CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ## License
 
-TBD — private during initial development.
+NodeLink RMM Community Edition is licensed under the GNU Affero General
+Public License v3.0 only. See [LICENSE](LICENSE).
+
+SPDX-License-Identifier: AGPL-3.0-only
+
+Commercial licensing may be offered separately for organizations that need
+to embed, redistribute, modify, or operate NodeLink under terms other than
+the AGPL.
+
+The NodeLink name, logos, product identity, and branding are not licensed
+under the AGPL. See [TRADEMARKS.md](TRADEMARKS.md).

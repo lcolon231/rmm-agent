@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Datetime helpers.
 
 SQLite returns naive datetimes even for TIMESTAMP columns, while PostgreSQL

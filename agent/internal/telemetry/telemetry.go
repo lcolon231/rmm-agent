@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // Package telemetry collects host metrics for heartbeats. Implementations are
 // split by OS with build tags; this file holds the shared types and helpers.
 package telemetry

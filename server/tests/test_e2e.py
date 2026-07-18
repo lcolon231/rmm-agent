@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """End-to-end API tests for the NodeLink RMM backend.
 
 Runs entirely in-process against an ephemeral SQLite database, so no Postgres

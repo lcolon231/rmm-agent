@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Security primitives: enrollment-token hashing, agent auth tokens, and
 Ed25519 command signing.
 
