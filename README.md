@@ -5,8 +5,7 @@ businesses and MSPs. It provides signed remote actions, outbound-only
 connectivity, and independently verifiable administrative audit records without
 the operational complexity of traditional RMM platforms.
 
-NodeLink is an early-stage, Windows-first project. It is not a full Tactical RMM
-clone, is not ready for production or regulated endpoints, and does not claim
+NodeLink is an early-stage, Windows-first project. It is not ready for production or regulated endpoints, and does not claim
 HIPAA compliance. The near-term goal is a controlled non-production pilot with
 HIPAA-supporting controls and defensible compliance evidence.
 
