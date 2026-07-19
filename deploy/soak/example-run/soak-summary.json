@@ -1,0 +1,44 @@
+{
+  "audit_intact_throughout": true,
+  "command_success_rate": 1.0,
+  "config": {
+    "agents": 20,
+    "dispatch_interval": 0.5,
+    "duration_seconds": 180.0,
+    "heartbeat_interval": 3.0,
+    "outage_every": 45.0,
+    "sample_interval": 15.0
+  },
+  "counters": {
+    "dispatch_errors": 0,
+    "dispatch_rejected_admission": 0,
+    "dispatched": 346,
+    "heartbeats_err": 0,
+    "heartbeats_ok": 1179,
+    "picked_up": 343,
+    "results_err": 0,
+    "results_ok": 343
+  },
+  "critical_findings": [],
+  "elapsed_seconds": 180.8,
+  "open_fds": {
+    "first": 18,
+    "last": 24,
+    "max": 27,
+    "min": 18,
+    "samples": 14
+  },
+  "outages_injected": 3,
+  "outages_recovered": 3,
+  "passed": true,
+  "rss_kb": {
+    "first": 103596,
+    "last": 108620,
+    "max": 108620,
+    "min": 103596,
+    "samples": 14
+  },
+  "samples": 14,
+  "started_utc": "2026-07-19T05:21:05.161650+00:00",
+  "warnings": []
+}
