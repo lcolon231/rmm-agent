@@ -23,7 +23,7 @@ Statuses are:
 | Production TLS | Partial | Caddy topology documented; ENVIRONMENT=production fails startup on debug/placeholder-secret/missing-key/non-HTTPS-URL config and proxy trust is explicit opt-in; certificate lifecycle monitoring and pinning remain open |
 | Agent credential protection/revocation | Partial | Trust states (quarantine/restore/revoke) with audited, reasoned operator transitions and fail-closed enforcement; DPAPI envelope + restricted ACL on Windows with atomic plaintext migration. Windows-runner evidence for migration/ACL paths ships with Windows CI (issue #23); certificate pinning remains open |
 | Execution limits | Partial | Five-minute timeout, sequential runtime, bounded stdout/stderr with audited truncation metadata, and dispatch payload caps; queue/admission and explicit concurrency policy remain open (#20) |
-| Audit integrity | Partial | Hash chain with monotonic, hash-bound sequence numbers appended under serialized transactions, plus local Merkle anchors; external anchor publication remains open (#76) |
+| Audit integrity | Implemented | Hash chain with monotonic, hash-bound sequence numbers under serialized append; local Merkle anchors; scheduled external anchor publication (filesystem/WORM or S3 Object Lock) with tamper-evident receipts, lag alerting, idempotent retry, and a clean-room verifier (`docs/AUDIT-ANCHORING.md`). Publication is opt-in and loud when unconfigured |
 | Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
 | Backup, restore, rollback | Partial | Encrypted streaming pg_dump with manifest/checksums, fail-closed off-host upload hook, isolated-restore script, and application-level restore validation, all exercised end to end in CI; scheduled production runs, retention monitoring, and a production rollback rehearsal remain operator evidence (#26) |
 | Windows lifecycle CI | Implemented | Windows CI builds the agent and installer and exercises service install/start/stop/restart/refuse-double-install/uninstall plus a silent installer install+uninstall smoke test |
@@ -118,10 +118,16 @@ link to reproducible evidence in the release or pilot record.
       gaps (seq is bound into the event hash for all post-0007 events; legacy
       events are explicitly marked hash_schema=1 and may not follow the
       cutover).
-- [ ] Anchors are published automatically to an external immutable destination.
-- [ ] Publication receipts, lag, retry, and failure alerts are retained.
-- [ ] A clean verifier can validate the chain and external anchor without write
-      access to the NodeLink database.
+- [x] Anchors are published automatically to an external immutable destination
+      (scheduled publisher; S3 Object Lock or a WORM filesystem; opt-in with a
+      loud warning when unconfigured).
+- [x] Publication receipts, lag, retry, and failure alerts are retained
+      (`AnchorPublication` rows with receipt + `receipt_sha256`; idempotent
+      retry; `GET /audit/publication-status` lag/alert; scheduler warns on lag).
+- [x] A clean verifier can validate the chain and external anchor without write
+      access to the NodeLink database (`scripts/verify_anchor_receipt.py`
+      recomputes the Merkle root from read-only event hashes and the downloaded
+      artifact; it does not import NodeLink).
 - [ ] Sensitive fields and secrets are redacted without removing accountability.
 
 ### Database and recovery

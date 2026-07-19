@@ -97,9 +97,13 @@ Introduce a database-backed monotonic sequence with serialized append behavior
 and uniqueness constraints. Include sequence data in event hashing and evidence
 formats. Migrate existing events with explicit legacy semantics.
 
-Publish audit anchors on a schedule to an external immutable destination. Store
-publication receipts, retry safely, alert on lag, and provide independent
-verification instructions. A local anchor is not external evidence.
+Implemented. A scheduled publisher writes each anchor's Merkle root to an
+external immutable destination — S3-compatible Object Lock or an append-only
+WORM filesystem — with tamper-evident receipts, idempotent retry, and lag
+alerting via `GET /audit/publication-status`. `scripts/verify_anchor_receipt.py`
+independently recomputes the root from read-only event hashes and the external
+artifact. Publication is opt-in and loud when unconfigured; the operator
+chooses and operates the destination. See `docs/AUDIT-ANCHORING.md`.
 
 ### Make data and releases recoverable
 

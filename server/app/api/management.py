@@ -19,7 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
-from app.core import anchor, audit
+from app.core import anchor, anchor_publish, audit
 from app.core.command_envelope import (
     ACTIVE_COMMAND_ENVELOPE_VERSION,
     COMMAND_ENVELOPE_V3,
@@ -35,6 +35,7 @@ from app.core.keyring import active_signing_key, load_keyring
 from app.models.models import (
     Agent,
     AgentTrustState,
+    AnchorPublication,
     AuditAnchor,
     Client,
     Command,
@@ -496,3 +497,57 @@ async def verify_audit_anchor(anchor_id: str, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail="Anchor not found")
     ok, reason = await anchor.verify_anchor(db, a)
     return AnchorVerifyOut(anchor_id=a.id, intact=ok, reason=reason)
+
+
+@router.get("/audit/publication-status")
+async def audit_publication_status(db: AsyncSession = Depends(get_db)):
+    """Operator-visible lag/health of external anchor publication.
+
+    `lag_alert` is true when the oldest unpublished anchor is older than the
+    configured threshold — the window in which a database-owning attacker could
+    rewrite history before any external copy exists. A null backend means
+    publication is disabled, in which case every anchor is unpublished."""
+    status = await anchor_publish.publication_status(db)
+    return {
+        "backend": status.backend,
+        "total_anchors": status.total_anchors,
+        "published": status.published,
+        "pending": status.pending,
+        "oldest_unpublished_age_seconds": status.oldest_unpublished_age_seconds,
+        "lag_alert": status.lag_alert,
+        "last_error": status.last_error,
+    }
+
+
+@router.get("/audit/anchors/{anchor_id}/receipt")
+async def audit_anchor_receipt(anchor_id: str, db: AsyncSession = Depends(get_db)):
+    """The external-publication receipt(s) for an anchor, with a tamper check.
+
+    Each receipt is the destination's proof of publication (e.g. an S3 object
+    version-id + ETag). `receipt_intact` recomputes the stored receipt digest —
+    false means the receipt row itself was altered. Receipts never contain
+    credentials."""
+    a = await db.get(AuditAnchor, anchor_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="Anchor not found")
+    rows = (
+        await db.execute(
+            select(AnchorPublication).where(AnchorPublication.anchor_id == anchor_id)
+        )
+    ).scalars().all()
+    out = []
+    for r in rows:
+        intact, reason = anchor_publish.verify_receipt(r)
+        out.append({
+            "backend": r.backend,
+            "status": r.status,
+            "uri": r.uri,
+            "receipt": r.receipt,
+            "receipt_sha256": r.receipt_sha256,
+            "receipt_intact": intact,
+            "receipt_reason": reason,
+            "attempts": r.attempts,
+            "last_error": r.last_error,
+            "published_at": r.published_at,
+        })
+    return {"anchor_id": anchor_id, "merkle_root": a.merkle_root, "publications": out}

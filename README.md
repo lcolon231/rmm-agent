@@ -52,7 +52,9 @@ The code in this repository currently provides:
   file ACL, atomic plaintext migration, no plaintext fallback).
 - A hash-chained audit log with serialized, hash-bound monotonic sequence
   numbers, plus APIs that create and verify local Merkle
-  anchors. Anchors are not automatically published outside the database.
+  anchors, plus a scheduled publisher that writes anchor roots to external
+  immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
+  clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
 - An Alembic baseline and forward migration, with exact revision enforcement
   on non-debug startup and a disposable PostgreSQL migration test in CI.
 - An Inno Setup Windows installer and tagged release workflow that publishes
@@ -67,9 +69,8 @@ the implementation and its security boundaries.
 ## In progress
 
 Milestone 0, Deployment Safety, is nearly complete. Remaining items are an
-automated external audit-anchor publisher (#76), Authenticode code signing
-(needs a paid certificate), and a multi-day soak test (#77) before a controlled
-non-production pilot.
+Authenticode code signing (needs a paid certificate) and a multi-day soak test
+(#77) before a controlled non-production pilot.
 
 ## Planned
 
@@ -100,10 +101,11 @@ The repository does **not** currently contain:
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
 - Certificate pinning or a least-privilege agent service account.
-- An automated external audit-anchor publisher, scheduled production backup
-  evidence (encrypted backup/restore tooling itself ships in `deploy/backup/`),
-  or Authenticode signing (checksums, an SPDX SBOM, and signed build
-  provenance are published; only certificate-based signing is missing).
+- Scheduled production backup evidence (encrypted backup/restore tooling ships
+  in `deploy/backup/`), or Authenticode signing (checksums, an SPDX SBOM, and
+  signed build provenance are published; only certificate-based signing is
+  missing). External audit-anchor publication ships (`docs/AUDIT-ANCHORING.md`)
+  but the operator must configure and operate the destination.
 - Tenant-scoped authorization, tenant-specific roles or retention, MFA,
   WebAuthn, OIDC/SAML, legal hold, or compliance evidence exports.
 
