@@ -53,3 +53,53 @@ async def offline_sweeper(stop: asyncio.Event) -> None:
             await asyncio.wait_for(stop.wait(), timeout=interval)
         except asyncio.TimeoutError:
             pass
+
+
+async def _publish_once() -> None:
+    from app.core import anchor_publish
+
+    backend = anchor_publish.build_publisher(settings)
+    if backend is None:
+        return
+    async with AsyncSessionLocal() as db:
+        await anchor_publish.ensure_current_anchor(db)
+        await anchor_publish.publish_pending(db, backend)
+        status = await anchor_publish.publication_status(db)
+        await db.commit()
+    if status.lag_alert:
+        age = status.oldest_unpublished_age_seconds
+        print(
+            f"[anchor_publisher] WARNING publication lag: {status.pending} anchor(s) "
+            f"unpublished, oldest {age:.0f}s old"
+            + (f"; last error: {status.last_error}" if status.last_error else "")
+        )
+
+
+async def anchor_publisher(stop: asyncio.Event) -> None:
+    """Create and externally publish audit anchors on a schedule.
+
+    Publication is opt-in: with no backend configured this logs a warning in
+    production (so the gap is visible) and otherwise does nothing.
+    """
+    from app.core.anchor_publish import build_publisher
+    from app.core.prodcheck import is_production
+
+    if build_publisher(settings) is None:
+        if is_production(settings):
+            print(
+                "[anchor_publisher] WARNING no anchor_publish_backend configured; "
+                "audit anchors are NOT externally published and a database-owning "
+                "attacker could rewrite history undetected (issue #76)"
+            )
+        return
+
+    interval = settings.anchor_publish_interval_seconds
+    while not stop.is_set():
+        try:
+            await _publish_once()
+        except Exception as exc:  # keep the loop alive on transient errors
+            print(f"[anchor_publisher] error: {exc}")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass

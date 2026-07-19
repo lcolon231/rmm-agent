@@ -27,6 +27,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     JSON,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -324,8 +325,49 @@ class AuditAnchor(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    # How many events (in (ts, id) order from the start of the chain) this
+    # How many events (in ascending seq order from the start of the chain) this
     # anchor covers, and the last covered event for a cheap consistency check.
     event_count: Mapped[int] = mapped_column(Integer, nullable=False)
     last_event_id: Mapped[str] = mapped_column(String(36), nullable=False)
     merkle_root: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    publications: Mapped[list["AnchorPublication"]] = relationship(
+        back_populates="anchor", cascade="all, delete-orphan"
+    )
+
+
+class AnchorPublication(Base):
+    """Record of publishing one anchor's Merkle root to one external immutable
+    destination — the thing that makes the root un-rewritable by an attacker
+    who owns this database.
+
+    `receipt` is the destination's proof of publication (an S3 object
+    version-id + ETag, a transparency-log inclusion proof, etc.), stored as
+    JSON with NO credentials in it. `receipt_sha256` is a hash over the
+    canonical receipt so a later tamper with the stored receipt is detectable.
+    A row is unique per (anchor, backend): re-publishing after a crash writes
+    the same deterministic destination key and reconciles onto this row rather
+    than forking.
+    """
+    __tablename__ = "anchor_publications"
+    __table_args__ = (
+        UniqueConstraint("anchor_id", "backend", name="ux_anchor_publication_backend"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    anchor_id: Mapped[str] = mapped_column(
+        ForeignKey("audit_anchors.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    backend: Mapped[str] = mapped_column(String(32), nullable=False)
+    # pending -> published; a failed attempt stays pending (with last_error set)
+    # so the scheduler retries it.
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    uri: Mapped[str | None] = mapped_column(String(1024))
+    receipt: Mapped[dict | None] = mapped_column(JSON)
+    receipt_sha256: Mapped[str | None] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    anchor: Mapped["AuditAnchor"] = relationship(back_populates="publications")

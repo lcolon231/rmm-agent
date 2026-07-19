@@ -71,6 +71,36 @@ class Settings(BaseSettings):
     def offline_threshold_seconds(self) -> int:
         return self.heartbeat_interval_seconds * self.offline_after_missed
 
+    # --- External audit-anchor publication (issue #76) ---
+    # Backend that publishes anchor Merkle roots to an external immutable
+    # destination. "none" disables publication (a loud warning is logged in
+    # production). "filesystem" writes to an append-only directory (real
+    # immutability only on a WORM/object-lock mount). "s3" writes to an
+    # S3-compatible bucket with Object Lock.
+    anchor_publish_backend: str = "none"  # none | filesystem | s3
+    # How often the scheduler creates a new anchor (if events accrued) and
+    # publishes any unpublished ones.
+    anchor_publish_interval_seconds: int = 3600
+    # Warn when the oldest unpublished anchor is older than this — the window
+    # during which a database-owning attacker could rewrite history unnoticed.
+    anchor_publish_lag_alert_seconds: int = 7200
+
+    # filesystem backend
+    anchor_publish_dir: str = "/var/lib/nodelink/anchors"
+
+    # s3 backend (credentials come from the standard AWS chain — env,
+    # instance profile, etc. — never from settings, never stored in receipts)
+    anchor_s3_bucket: str | None = None
+    anchor_s3_prefix: str = "nodelink/anchors"
+    anchor_s3_region: str | None = None
+    anchor_s3_endpoint_url: str | None = None  # set for MinIO/Backblaze/etc.
+    # Object Lock retention applied to each published object. GOVERNANCE lets a
+    # privileged user bypass with a special permission; COMPLIANCE cannot be
+    # bypassed by anyone until the window elapses. Days = 0 disables setting
+    # retention (bucket-default or none).
+    anchor_s3_object_lock_mode: str = "COMPLIANCE"  # GOVERNANCE | COMPLIANCE
+    anchor_s3_retain_days: int = 3650
+
 
 @lru_cache
 def get_settings() -> Settings:

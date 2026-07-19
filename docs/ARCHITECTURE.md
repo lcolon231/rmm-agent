@@ -172,6 +172,8 @@ All application routes except `/healthz` are under `/api/v1`.
 | GET | `/audit/verify` | Verify hash chain | Readonly |
 | POST/GET | `/audit/anchors` | Create/list local anchors | Operator / Readonly |
 | GET | `/audit/anchors/{id}/verify` | Verify local anchor | Readonly |
+| GET | `/audit/anchors/{id}/receipt` | External publication receipt + tamper check | Readonly |
+| GET | `/audit/publication-status` | External anchor publication lag/health | Readonly |
 
 There are no APIs yet for listing/revoking enrollment tokens,
 telemetry history, operator listing/editing, audit-event listing, monitoring,
@@ -303,13 +305,23 @@ walks `seq` order and detects gaps, duplicates, reordering, and edits.
 
 `AuditAnchor` stores a Merkle root over a prefix of event hashes. Local anchor
 verification is implemented and tested, including detection of a consistent
-chain rebuild. The root is not automatically sent to an external immutable
-destination, so an attacker controlling the database can rewrite events and
-anchors together. External publication, receipts, retry behavior, monitoring,
-and independent verification are Milestone 0 requirements.
+chain rebuild. A scheduled publisher (`app/core/anchor_publish.py`) carries
+each anchor's root to an external immutable destination — an S3-compatible
+bucket with Object Lock, or an append-only WORM filesystem — recording an
+`AnchorPublication` row with the destination URI, the backend's receipt, and a
+`receipt_sha256` tamper check. Publication is idempotent (content-addressed
+keys), retried on outage, and lag past a threshold alerts through
+`GET /audit/publication-status`. `scripts/verify_anchor_receipt.py` recomputes
+the root from read-only event hashes and the downloaded artifact, so a verifier
+needs no write access to (or trust in) the database. Publication is opt-in and
+logs a loud warning in production when unconfigured. Anchor-publication events
+are deliberately kept out of the hash chain so publishing does not itself force
+perpetual re-anchoring. See `docs/AUDIT-ANCHORING.md`.
 
-The audit system is tamper-evident by design; it is not yet immutable evidence
-storage and does not currently provide a signed evidence bundle.
+The audit system is tamper-evident and, once an external anchor destination is
+configured, externally verifiable against immutable storage. It does not yet
+provide a signed, exportable evidence bundle (a Milestone 3 compliance
+deliverable).
 
 ## 8. Tenant isolation roadmap
 

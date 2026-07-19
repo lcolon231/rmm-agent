@@ -146,7 +146,7 @@ jobs:
           cache: pip
           cache-dependency-path: server/requirements.txt
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-asyncio httpx aiosqlite
+        run: pip install -r requirements.txt pytest pytest-asyncio httpx aiosqlite "moto[s3]"
       - name: Generate command signing key (tests need it)
         run: python scripts/gen_command_keys.py
       - name: Run tests

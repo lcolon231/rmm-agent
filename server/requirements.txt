@@ -10,3 +10,6 @@ cryptography==44.0.0
 bcrypt==4.2.1
 python-multipart==0.0.20
 websockets==14.1
+# Only needed when anchor_publish_backend=s3 (issue #76); lazy-imported, so
+# deployments not publishing to S3 do not load it.
+boto3==1.35.99
