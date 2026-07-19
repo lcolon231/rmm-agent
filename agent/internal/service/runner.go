@@ -330,6 +330,12 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	if len(ack.PendingCommands) == 0 {
 		return nil
 	}
+	// Concurrency contract: exactly one command runs at a time per agent
+	// runtime. Commands in a heartbeat batch are executed strictly in the order
+	// the server delivered them (which is FIFO by creation), and the next beat
+	// is not issued until this batch drains, so there is no overlap between
+	// batches either. The server's per-heartbeat batch cap bounds how many
+	// arrive at once; this loop is what keeps them serialized.
 	a.log.Printf("received %d command(s)", len(ack.PendingCommands))
 	for i, cmd := range ack.PendingCommands {
 		a.processCommand(execCtx, s, cmd)

@@ -4,11 +4,14 @@ Releases are automated by `.github/workflows/release.yml`, which fires on a
 version tag. The server is run from source (uvicorn), so only the **agent** is
 released as a binary.
 
-The current release process is for development artifacts. It publishes
-checksums but does not Authenticode-sign the Windows agent or installer, produce
-an SBOM, emit a provenance attestation, run Windows service/installer lifecycle
-tests, or validate a rollback. Do not describe a tagged artifact as
-production-ready. See [`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md).
+The current release process publishes SHA-256 checksums, an SPDX SBOM, and
+signed SLSA build-provenance attestations for every artifact, and Windows
+service/installer lifecycle tests run in CI on every push. It does **not**
+Authenticode-sign the Windows agent or installer — that requires a paid
+code-signing certificate and is the one remaining release-authenticity gap —
+and a production rollback has not been validated against a real deployment. Do
+not describe a tagged artifact as production-ready. See
+[`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md).
 
 ## Cutting a release
 
@@ -41,6 +44,8 @@ printed in the startup log line (`NodeLink RMM agent <version> starting`).
 
 ## Verifying a download
 
+Checksums:
+
 ```bash
 sha256sum -c SHA256SUMS.txt      # from the folder containing the binaries
 ```
@@ -51,6 +56,18 @@ On Windows (PowerShell):
 Get-FileHash .\rmm-agent-windows-amd64.exe -Algorithm SHA256
 # compare against the matching line in SHA256SUMS.txt
 ```
+
+Build provenance (proves the artifact was built by this repo's release
+workflow from the tagged source, via a signed Sigstore attestation):
+
+```bash
+gh attestation verify rmm-agent-windows-amd64.exe --repo lcolon231/rmm-agent
+gh attestation verify NodeLinkAgentSetup-<version>.exe --repo lcolon231/rmm-agent
+```
+
+SBOM: `nodelink-<version>.spdx.json` is an SPDX 2.3 document listing the Go and
+Python dependencies the release was built from. Inspect it with any SPDX tool
+(e.g. `syft convert`, `grype sbom:...` for vulnerability matching).
 
 ## Code signing (not yet wired up)
 
@@ -75,22 +92,29 @@ job: sign the agent `.exe` before `ISCC` compiles it in, then sign the produced
 `NodeLinkAgentSetup-<version>.exe` before upload. Keep the certificate/keys in GitHub Actions secrets or a
 cloud HSM — never in the repo.
 
-## Required release evidence (not yet wired up)
+## Release evidence
 
-Milestone 0 must extend the workflow so each release publishes and verifies:
+Each release publishes and (where possible) verifies:
 
-- Authenticode signatures and trusted timestamps for the embedded agent and
-  final installer.
-- SHA-256 checksums generated after every signing step.
-- An SBOM covering the Go module, Python server dependency lock/input, installer
-  tooling, and released artifacts at an agreed format/granularity.
-- Build provenance attestations tied to the source ref, workflow, and artifact
-  digest.
-- Windows service and installer lifecycle results.
-- Compatibility, migration, backup, upgrade, and rollback notes.
+- **SHA-256 checksums** — `SHA256SUMS.txt` for the binaries and a `.sha256`
+  sidecar for the installer. *Done.*
+- **SBOM** — `nodelink-<version>.spdx.json`, an SPDX document covering the Go
+  module and Python server dependencies. *Done.*
+- **Build provenance** — signed SLSA attestations tying each artifact digest to
+  the source ref and workflow (`actions/attest-build-provenance`), verifiable
+  with `gh attestation verify`. *Done.*
+- **Windows service and installer lifecycle results** — exercised by the
+  `windows-lifecycle` CI job on every push (see `.github/workflows/ci.yml`).
+  *Done.*
+- **Authenticode signatures and trusted timestamps** for the embedded agent and
+  final installer. *Not done — requires a paid certificate (see below). This is
+  the remaining release-authenticity gap.*
+- **Compatibility, migration, backup, upgrade, and rollback notes** — see the
+  sections below and `docs/BACKUP-RESTORE.md`.
 
-The release job should fail closed if signature, checksum, SBOM, provenance, or
-required test verification fails.
+Because the SBOM, provenance, and checksum steps run inline, a failure in any of
+them fails the release job. The signing step will fail closed the same way once
+it is added.
 
 ## Current schema and agent compatibility
 

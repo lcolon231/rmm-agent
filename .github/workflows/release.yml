@@ -6,16 +6,23 @@ name: Release
 # Windows installer (installer/NodeLinkAgent.iss) on a Windows runner. The
 # server runs from source (uvicorn), so only the agent is released as a binary.
 #
-# Code signing (Authenticode) is not wired up yet — these binaries are
-# UNSIGNED. See docs/RELEASING.md for where the signing step slots in once a
-# certificate exists.
+# Each release also publishes an SPDX SBOM (Go + Python dependencies) and a
+# signed SLSA build-provenance attestation tying every artifact's digest to
+# this workflow and source ref, plus SHA-256 checksums.
+#
+# Code signing (Authenticode) is NOT wired up — these binaries are UNSIGNED,
+# because it requires a paid code-signing certificate. See docs/RELEASING.md
+# for where the signing step slots in once a certificate exists. Provenance +
+# SBOM + checksums are the supply-chain evidence available without one.
 
 on:
   push:
     tags: ['v*']
 
 permissions:
-  contents: write  # needed to create the GitHub Release
+  contents: write       # create the GitHub Release
+  id-token: write       # keyless signing for build-provenance attestations
+  attestations: write   # store the attestations
 
 jobs:
   test:
@@ -65,9 +72,32 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: ./build.sh "$VERSION"
 
+      # SPDX SBOM over the whole repo, so it captures both the Go module
+      # (agent go.mod) and the Python server dependencies (requirements.txt).
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: agent/bin/nodelink-${{ steps.version.outputs.version }}.spdx.json
+
+      # Checksums cover every published artifact, including the SBOM. Generated
+      # last so a future signing step (which rewrites the binaries) would land
+      # before this line and keep the checksums honest.
       - name: Checksums
         working-directory: agent/bin
         run: sha256sum * > SHA256SUMS.txt
+
+      # Signed, keyless SLSA provenance binding each binary's digest to this
+      # workflow + source ref. Verify with:
+      #   gh attestation verify <file> --repo lcolon231/rmm-agent
+      - name: Attest build provenance (agent binaries)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            agent/bin/rmm-agent-windows-amd64.exe
+            agent/bin/rmm-agent-linux-amd64
+            agent/bin/rmm-agent-darwin-arm64
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -76,14 +106,23 @@ jobs:
             agent/bin/rmm-agent-windows-amd64.exe
             agent/bin/rmm-agent-linux-amd64
             agent/bin/rmm-agent-darwin-arm64
+            agent/bin/nodelink-${{ steps.version.outputs.version }}.spdx.json
             agent/bin/SHA256SUMS.txt
           generate_release_notes: true
           body: |
             NodeLink RMM agent ${{ steps.version.outputs.version }}.
 
-            **These binaries are unsigned.** On Windows, SmartScreen may warn
-            on first run until Authenticode signing is added (see
-            docs/RELEASING.md). Verify downloads against `SHA256SUMS.txt`.
+            **These binaries are unsigned** (Authenticode signing needs a paid
+            certificate — see docs/RELEASING.md). Supply-chain evidence that
+            does not require one is published instead:
+
+            - `SHA256SUMS.txt` — verify downloads with `sha256sum -c`.
+            - `nodelink-<version>.spdx.json` — SPDX SBOM (Go + Python deps).
+            - Build provenance — verify with
+              `gh attestation verify <file> --repo ${{ github.repository }}`.
+
+            On Windows, SmartScreen may still warn on first run until signing
+            is added.
 
   installer:
     name: build windows installer
@@ -131,7 +170,22 @@ jobs:
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" NodeLinkAgent.iss
 
+      - name: Checksum the installer
+        working-directory: installer/Output
+        shell: pwsh
+        run: |
+          $f = "NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe"
+          (Get-FileHash $f -Algorithm SHA256).Hash.ToLower() + "  " + $f | Out-File -Encoding ascii "$f.sha256"
+
+      # Provenance for the installer, tying its digest to this workflow/ref.
+      - name: Attest build provenance (installer)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: installer/Output/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe
+
       - name: Attach installer to the release
         uses: softprops/action-gh-release@v2
         with:
-          files: installer/Output/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe
+          files: |
+            installer/Output/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe
+            installer/Output/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe.sha256

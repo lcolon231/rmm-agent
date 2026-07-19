@@ -56,6 +56,17 @@ class Settings(BaseSettings):
     # Endpoint is flagged offline after this many missed heartbeats.
     offline_after_missed: int = 3
 
+    # --- Command concurrency and admission ---
+    # Admission control: the maximum number of *outstanding* commands (queued,
+    # dispatched, or running — anything not in a terminal state) an agent may
+    # have at once. Dispatching past this is refused, so an operator or a bug
+    # cannot pile unbounded work on one endpoint.
+    max_outstanding_commands_per_agent: int = 100
+    # Delivery pacing: the most commands handed to an agent in a single
+    # heartbeat. The agent executes one at a time (its concurrency contract),
+    # so a large backlog drains over several beats instead of arriving at once.
+    max_commands_per_heartbeat: int = 10
+
     @property
     def offline_threshold_seconds(self) -> int:
         return self.heartbeat_interval_seconds * self.offline_after_missed

@@ -55,8 +55,9 @@ The code in this repository currently provides:
   anchors. Anchors are not automatically published outside the database.
 - An Alembic baseline and forward migration, with exact revision enforcement
   on non-debug startup and a disposable PostgreSQL migration test in CI.
-- An Inno Setup Windows installer and tagged release workflow. Windows
-  binaries and the installer are currently unsigned.
+- An Inno Setup Windows installer and tagged release workflow that publishes
+  checksums, an SPDX SBOM, and signed build-provenance attestations. Windows
+  binaries and the installer are not yet Authenticode-signed.
 - Linux and macOS development builds of the polling agent. Windows is the only
   primary support target; those builds are not a supported cross-platform RMM.
 
@@ -65,11 +66,10 @@ the implementation and its security boundaries.
 
 ## In progress
 
-Milestone 0, Deployment Safety, is the active program: hardening key-registry
-activation/retirement and rollback, enforcing
-production TLS policy, bounding execution resources, making audit ordering and
-anchoring operationally verifiable, adding migrations and recovery procedures,
-and strengthening Windows and release testing.
+Milestone 0, Deployment Safety, is nearly complete. Remaining items are an
+automated external audit-anchor publisher (#76), Authenticode code signing
+(needs a paid certificate), and a multi-day soak test (#77) before a controlled
+non-production pilot.
 
 ## Planned
 
@@ -99,10 +99,11 @@ The repository does **not** currently contain:
   webhook notifications.
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
-- Per-agent concurrency/queue admission policy or certificate pinning.
+- Certificate pinning or a least-privilege agent service account.
 - An automated external audit-anchor publisher, scheduled production backup
   evidence (encrypted backup/restore tooling itself ships in `deploy/backup/`),
-  release SBOM/provenance, or Authenticode signing.
+  or Authenticode signing (checksums, an SPDX SBOM, and signed build
+  provenance are published; only certificate-based signing is missing).
 - Tenant-scoped authorization, tenant-specific roles or retention, MFA,
   WebAuthn, OIDC/SAML, legal hold, or compliance evidence exports.
 

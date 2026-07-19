@@ -180,18 +180,24 @@ async def heartbeat(
             },
         )
 
-    # Expire stale commands, then fetch what's still deliverable.
+    # Expire stale commands, then hand out at most one batch of deliverable
+    # work. Oldest-first (FIFO) so nothing starves, and bounded by
+    # max_commands_per_heartbeat so a backlog drains over several beats rather
+    # than flooding one — the agent executes them one at a time.
     pending: list[Command] = []
     selected_version = select_command_envelope_version(
         body.supported_command_envelope_versions
     )
     if selected_version is not None:
+        batch = max(1, settings.max_commands_per_heartbeat)
         result = await db.execute(
-            select(Command).where(
+            select(Command)
+            .where(
                 Command.agent_id == agent.id,
                 Command.status == CommandStatus.queued,
                 Command.envelope_version == selected_version,
             )
+            .order_by(Command.created_at.asc(), Command.id.asc())
         )
         for cmd in result.scalars().all():
             expires = ensure_utc(cmd.expires_at)
@@ -201,6 +207,8 @@ async def heartbeat(
             cmd.status = CommandStatus.dispatched
             cmd.dispatched_at = now
             pending.append(cmd)
+            if len(pending) >= batch:
+                break
 
     return HeartbeatAck(
         ok=True,
