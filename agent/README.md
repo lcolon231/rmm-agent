@@ -146,8 +146,9 @@ before starting a process. A replayed command ID is neither executed nor
 re-reported, so it cannot clobber the original result. Expired entries are
 pruned on load. For v3 the agent replaces its trusted public-key bundle on every
 heartbeat, accepts only active/overlap key IDs supplied by the server, and
-refuses unknown or retired keys. The server-side registry supports staged
-activation and overlap; operators must preserve the registry and audit records
+refuses unknown or retired keys. Operators rotate the server-side registry with
+`scripts/rotate_command_key.py` (staged activation/overlap/retire, compromise,
+and rollback — see `docs/KEY-ROTATION.md`); they must preserve the registry and audit records
 when retiring or rolling back a key.
 
 Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
@@ -180,7 +181,7 @@ agent/
 
 ## Roadmap
 
-- Key-rotation operator workflow, per-agent concurrency limits, and Windows lifecycle CI.
+- Per-agent concurrency limits, typed endpoint operations, and signed releases.
 - Complete Windows inventory, typed endpoint operations, and signed self-update.
 - An interactive transport for lower-latency/streaming workflows while keeping
   heartbeat polling as a resilient fallback.

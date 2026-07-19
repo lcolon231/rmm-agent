@@ -94,6 +94,24 @@ begin
   ConfigPage.Values[0] := 'https://';
 end;
 
+{ ServerURL/Token prefer the command-line parameters (/SERVERURL= /TOKEN=),
+  falling back to the wizard inputs. This makes the installer scriptable for
+  unattended/CI deployment (`/VERYSILENT /SERVERURL=... /TOKEN=...`) while the
+  interactive wizard still works when no parameters are passed. }
+function ServerURL: String;
+begin
+  Result := Trim(ExpandConstant('{param:ServerURL|}'));
+  if Result = '' then
+    Result := Trim(ConfigPage.Values[0]);
+end;
+
+function EnrollToken: String;
+begin
+  Result := Trim(ExpandConstant('{param:Token|}'));
+  if Result = '' then
+    Result := Trim(ConfigPage.Values[1]);
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   URL, Token: String;
@@ -101,8 +119,8 @@ begin
   Result := True;
   if CurPageID = ConfigPage.ID then
   begin
-    URL := Trim(ConfigPage.Values[0]);
-    Token := Trim(ConfigPage.Values[1]);
+    URL := ServerURL;
+    Token := EnrollToken;
     { The bare prefill counts as empty. }
     if (URL = '') or (URL = 'https://') then
     begin
@@ -136,13 +154,21 @@ end;
   registered, so a malformed value fails loudly at install time. }
 procedure WriteConfig;
 var
-  Path, Json: String;
+  Path, Json, URL, Token: String;
 begin
+  URL := ServerURL;
+  Token := EnrollToken;
+  { In a silent/unattended install the wizard validation never runs, so guard
+    the values here too rather than write a config the agent will reject. }
+  if (URL = '') or (URL = 'https://') then
+    RaiseException('No server URL provided (pass /SERVERURL= for silent install)');
+  if Token = '' then
+    RaiseException('No enrollment token provided (pass /TOKEN= for silent install)');
   Path := ExpandConstant('{app}\config.json');
   Json :=
     '{' + #13#10 +
-    '  "server_url": "' + JsonEscape(Trim(ConfigPage.Values[0])) + '",' + #13#10 +
-    '  "enrollment_token": "' + JsonEscape(Trim(ConfigPage.Values[1])) + '"' + #13#10 +
+    '  "server_url": "' + JsonEscape(URL) + '",' + #13#10 +
+    '  "enrollment_token": "' + JsonEscape(Token) + '"' + #13#10 +
     '}' + #13#10;
   if not SaveStringToFile(Path, Json, False) then
     RaiseException('Could not write ' + Path);

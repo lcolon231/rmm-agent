@@ -30,7 +30,9 @@ The code in this repository currently provides:
   expiry, and nonce. Python and Go consume the same canonical vectors; agents
   reject missing, unknown, malformed, expired, replayed, and downgraded
   envelopes. Key IDs support active/overlap/retired registry states; v2 remains
-  available only for mixed-version rollout.
+  available only for mixed-version rollout. Staged key rotation, compromise
+  response, and rollback are operator-run via `scripts/rotate_command_key.py`
+  (`docs/KEY-ROTATION.md`).
 - Basic CPU, memory, system-disk, uptime, and logged-in-user telemetry.
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation

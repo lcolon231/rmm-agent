@@ -83,9 +83,11 @@ operator role; revocation requires admin. Every transition demands a reason
 and is audited, and revocation expires the agent's outstanding queued and
 dispatched commands.
 
-Known gaps include the key-registry operator workflow and compromise recovery,
-MFA/federation,
-tenant-scoped authorization, and certificate pinning.
+Signing-key rotation is an operator-run workflow (`scripts/rotate_command_key.py`
+with the `docs/KEY-ROTATION.md` runbook): staged active/overlap/retired
+transitions, a compromise fast path, and rollback, each written atomically to
+the registry and appended to a rotation journal. Known gaps include
+MFA/federation, tenant-scoped authorization, and certificate pinning.
 
 ### 3.2 Operations plane
 
@@ -181,7 +183,7 @@ The Go agent shares one runtime between foreground mode and the Windows service.
 Windows service support includes automatic start, SCM recovery actions, rotating
 logs, network retry with jitter, and graceful cancellation of a running child
 process. Go build and unit tests run on Windows CI, but Windows service and
-installer lifecycle behavior has only been manually exercised.
+installer lifecycle behavior is exercised in Windows CI: a lifecycle script drives install/start/stop/restart/refuse-double-install/uninstall against the SCM, and a silent installer install+uninstall smoke test builds and runs the Inno Setup package.
 
 The current Windows telemetry collector shells out to PowerShell/CIM once per
 heartbeat for CPU, memory, system drive, uptime, user, and OS version. It does
