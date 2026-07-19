@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
@@ -28,6 +28,7 @@ from app.core.command_envelope import (
     format_command_time,
     select_command_envelope_version,
 )
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
 from app.core.keyring import active_signing_key, load_keyring
@@ -320,6 +321,34 @@ async def dispatch_command(
             detail={
                 "code": "agent_not_trusted",
                 "trust_state": agent.trust_state.value,
+            },
+        )
+    # Admission control: cap the outstanding (non-terminal) work per agent so a
+    # runaway operator or client cannot pile unbounded commands on one
+    # endpoint. Terminal commands (succeeded/failed/expired) do not count.
+    outstanding = (
+        await db.execute(
+            select(func.count())
+            .select_from(Command)
+            .where(
+                Command.agent_id == agent_id,
+                Command.status.in_(
+                    [
+                        CommandStatus.queued,
+                        CommandStatus.dispatched,
+                        CommandStatus.running,
+                    ]
+                ),
+            )
+        )
+    ).scalar_one()
+    if outstanding >= settings.max_outstanding_commands_per_agent:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "agent_command_queue_full",
+                "outstanding": outstanding,
+                "limit": settings.max_outstanding_commands_per_agent,
             },
         )
     envelope_version = select_command_envelope_version(

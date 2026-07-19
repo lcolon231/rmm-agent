@@ -204,10 +204,15 @@ different account) fails closed with a delete-and-re-enroll instruction.
 executed command IDs and accepted signed nonces with expiry values for replay
 prevention; both entries are reserved atomically before execution.
 
-The agent processes commands from a single heartbeat sequentially. This happens
-to limit concurrency to one per runtime, but there is no explicit policy,
-server-side admission control, queue limit, or testable per-agent concurrency
-contract.
+Command concurrency and admission are explicit and configurable. The agent's
+contract is one command at a time per runtime: a heartbeat's batch is executed
+strictly in delivery order and the next beat is not issued until the batch
+drains. The server enforces two bounds: admission control refuses dispatch
+(HTTP 429, `agent_command_queue_full`) once an agent has
+`max_outstanding_commands_per_agent` non-terminal commands, and each heartbeat
+hands out at most `max_commands_per_heartbeat` queued commands oldest-first, so
+a backlog drains over several beats instead of flooding one. Terminal commands
+(succeeded/failed/expired) free admission slots.
 
 Command output capture is bounded: stdout and stderr are each captured up to
 256 KiB, with a 384 KiB combined cap. Bytes beyond a cap are counted but never
@@ -354,8 +359,8 @@ moved merely to match an aspirational tree.
 - Agent credentials are DPAPI-protected only on Windows; other platforms rely
   on file permissions. Revocation is server-side only — a revoked agent keeps
   its local identity file until uninstalled or re-enrolled.
-- Stdout/stderr and dispatch payloads are bounded, but queue depth and
-  per-agent concurrency/admission policy remain implicit (issue #20).
+- Stdout/stderr and dispatch payloads are bounded; per-agent outstanding-command
+  admission and per-heartbeat FIFO batch limits are configurable and enforced.
 - Backup/restore automation ships in `deploy/backup/` (encrypted streaming
   pg_dump with manifests, isolated restore, application-level validation via
   `scripts/verify_restore.py`) and is rehearsed in CI; production scheduling,

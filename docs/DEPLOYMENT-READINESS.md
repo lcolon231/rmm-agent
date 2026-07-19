@@ -27,7 +27,7 @@ Statuses are:
 | Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
 | Backup, restore, rollback | Partial | Encrypted streaming pg_dump with manifest/checksums, fail-closed off-host upload hook, isolated-restore script, and application-level restore validation, all exercised end to end in CI; scheduled production runs, retention monitoring, and a production rollback rehearsal remain operator evidence (#26) |
 | Windows lifecycle CI | Implemented | Windows CI builds the agent and installer and exercises service install/start/stop/restart/refuse-double-install/uninstall plus a silent installer install+uninstall smoke test |
-| Release authenticity | Open | Checksums exist; artifacts are unsigned; no SBOM/provenance |
+| Release authenticity | Partial | Checksums, an SPDX SBOM (Go + Python), and signed SLSA build-provenance attestations are published for every artifact; Authenticode signing is the one remaining gap (needs a paid certificate) |
 | Soak evidence | Open | No documented multi-day test |
 
 ## Controlled pilot gate
@@ -99,7 +99,9 @@ link to reproducible evidence in the release or pilot record.
       (structured flags plus original byte totals persisted on the command and
       in `command.completed` audit detail; stderr preserved over stdout when
       the combined cap binds).
-- [ ] Per-agent concurrency and queue/admission limits are configured and tested.
+- [x] Per-agent concurrency and queue/admission limits are configured and tested
+      (per-agent outstanding-command cap admits/refuses at the dispatch
+      boundary; per-heartbeat FIFO batch cap; agent executes one at a time).
 - [ ] Timeout, cancellation, service stop, server outage, and result retry do not
       orphan processes or duplicate execution.
 - [x] Payload and script-size limits exist at API and agent boundaries
@@ -147,10 +149,14 @@ link to reproducible evidence in the release or pilot record.
       driving the SCM) plus a silent installer install/uninstall smoke test.
 - [ ] Supported Windows versions and architectures are explicitly listed.
 - [ ] Agent and installer are Authenticode-signed and timestamped; signatures
-      are verified before publication.
-- [ ] Release checksums cover final signed artifacts.
-- [ ] An SBOM and provenance attestation are published and independently
-      verified.
+      are verified before publication (deferred: requires a paid code-signing
+      certificate; the workflow has a documented slot for it).
+- [x] Release checksums cover final artifacts (`SHA256SUMS.txt` over the
+      binaries and SBOM; a `.sha256` sidecar for the installer). They will move
+      to cover *signed* artifacts once signing lands.
+- [x] An SBOM and provenance attestation are published and independently
+      verified (SPDX SBOM; signed SLSA build provenance via
+      `actions/attest-build-provenance`, verifiable with `gh attestation verify`).
 - [ ] Release notes state known limitations, schema/agent compatibility, upgrade,
       rollback, and security impact.
 
