@@ -112,9 +112,16 @@ expired during migration because their legacy signatures do not cover the v2
 contract.
 
 **Key lifecycle.** Command-v3 binds a signing-key ID and the agent only trusts
-the active/overlap public-key bundle delivered by the server. Registry changes,
-compromise response, and rollback remain operator-run controls that require
-review and rehearsal.
+the active/overlap public-key bundle delivered by the server. Rotation is an
+operator-run workflow (`scripts/rotate_command_key.py`, `docs/KEY-ROTATION.md`):
+a new key is staged as `overlap` so the fleet learns its public key before it
+signs, promoted to `active` while the outgoing key steps down to `overlap` so
+its in-flight commands still verify, and `retired` only once nothing it signed
+is still in flight. Compromise skips the waits (generate + activate + retire
+immediately, deliberately refusing the compromised key's in-flight commands),
+and rollback re-activates the previous key while it remains `overlap`. Every
+mutation is written atomically and appended to a rotation journal, and the full
+lifecycle is rehearsed in tests.
 
 ### (4) Agent → Endpoint OS
 
@@ -185,7 +192,7 @@ not built in.
 |---|-----|----------|--------|
 | 1 | Management API unauthenticated | Critical | **Closed** — operator authN + role-based authZ |
 | 2 | No token revocation / login rate-limit | Medium | **Closed** — per-operator `token_generation` bump revokes all outstanding JWTs (self + admin endpoints, audited); sliding-window 429 throttle on `/auth/login` per (IP, email). Limiter is per-process — use a shared store when running multiple workers |
-| 3 | Command expiry/version/nonce are not signed | Critical | **Mostly closed** — `command-v3` binds schema version, issued-at, expiry, nonce, and signing-key ID with shared Go/Python verification; operator key lifecycle rehearsal remains open |
+| 3 | Command expiry/version/nonce are not signed | Critical | **Closed** — `command-v3` binds schema version, issued-at, expiry, nonce, and signing-key ID with shared Go/Python verification; staged key rotation/compromise/rollback are operator-run and rehearsed (`scripts/rotate_command_key.py`, `docs/KEY-ROTATION.md`) |
 | 4 | TLS not enforced by scaffold | High | **Mostly closed** — ENVIRONMENT=production fails startup on debug mode, placeholder/short SECRET_KEY, missing signing keys, or a missing/non-HTTPS/loopback PUBLIC_BASE_URL; X-Forwarded-For is ignored unless TRUST_PROXY_HEADERS is explicitly enabled (rightmost entry only). Deployment path documented (`docs/DEPLOYMENT-TLS.md`, `deploy/Caddyfile`); certificate lifecycle monitoring and agent cert pinning still open |
 | 5 | Audit chain not externally anchored | Medium | Partial — Merkle anchoring implemented (create/list/verify endpoints; detects consistent chain rebuilds). Publishing the root to an external append-only medium is an ops step and not automated |
 | 6 | Agent runs commands at its own privilege | By design | Partial — installable service (Gate 2) runs as `LocalSystem`; least-privilege service account still open |

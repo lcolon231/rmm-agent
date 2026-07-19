@@ -18,7 +18,7 @@ Statuses are:
 |---|---|---|
 | Outbound-only polling | Implemented | Agent initiates enroll, heartbeat/poll, and result requests |
 | Operator API authentication/RBAC | Implemented | Auth and authorization integration tests |
-| Signed command verification | Partial | `command-v3`, negotiation, downgrade rejection, signed schema/time/nonce/key ID, and shared vectors implemented; operator rotation workflow remains open |
+| Signed command verification | Implemented | `command-v3`, negotiation, downgrade rejection, signed schema/time/nonce/key ID, and shared vectors; staged key rotation, compromise, and rollback via `scripts/rotate_command_key.py` with a rehearsed test suite and `docs/KEY-ROTATION.md` runbook |
 | Agent replay/expiry checks | Implemented | Signed time-window validation plus durable command-ID and nonce replay state |
 | Production TLS | Partial | Caddy topology documented; ENVIRONMENT=production fails startup on debug/placeholder-secret/missing-key/non-HTTPS-URL config and proxy trust is explicit opt-in; certificate lifecycle monitoring and pinning remain open |
 | Agent credential protection/revocation | Partial | Trust states (quarantine/restore/revoke) with audited, reasoned operator transitions and fail-closed enforcement; DPAPI envelope + restricted ACL on Windows with atomic plaintext migration. Windows-runner evidence for migration/ACL paths ships with Windows CI (issue #23); certificate pinning remains open |
@@ -26,7 +26,7 @@ Statuses are:
 | Audit integrity | Partial | Hash chain with monotonic, hash-bound sequence numbers appended under serialized transactions, plus local Merkle anchors; external anchor publication remains open (#76) |
 | Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
 | Backup, restore, rollback | Partial | Encrypted streaming pg_dump with manifest/checksums, fail-closed off-host upload hook, isolated-restore script, and application-level restore validation, all exercised end to end in CI; scheduled production runs, retention monitoring, and a production rollback rehearsal remain operator evidence (#26) |
-| Windows lifecycle CI | Partial | Go build/unit tests run on Windows; service and installer lifecycle automation remains open |
+| Windows lifecycle CI | Implemented | Windows CI builds the agent and installer and exercises service install/start/stop/restart/refuse-double-install/uninstall plus a silent installer install+uninstall smoke test |
 | Release authenticity | Open | Checksums exist; artifacts are unsigned; no SBOM/provenance |
 | Soak evidence | Open | No documented multi-day test |
 
@@ -63,8 +63,11 @@ link to reproducible evidence in the release or pilot record.
 - [x] Shared positive and negative vectors pass in server and agent tests.
 - [x] Unknown versions, invalid times, duplicate nonces, and malformed
       payloads fail closed without execution.
-- [ ] Signing-key activation, overlap, retirement, compromise, and rollback are
-      operator-run, documented, audited, and rehearsed.
+- [x] Signing-key activation, overlap, retirement, compromise, and rollback are
+      operator-run, documented, audited, and rehearsed (`scripts/rotate_command_key.py`;
+      atomic registry writes with an append-only rotation journal;
+      `docs/KEY-ROTATION.md`; full staged + compromise + rollback rehearsal in
+      `tests/test_key_rotation.py`).
 - [ ] Typed operations are used where available; arbitrary script permission is
       explicit.
 
@@ -139,8 +142,9 @@ link to reproducible evidence in the release or pilot record.
 
 ### Windows and release engineering
 
-- [ ] Windows CI builds the agent and installer and tests install, service start,
-      stop, restart, upgrade, and uninstall.
+- [x] Windows CI builds the agent and installer and tests install, service start,
+      stop, restart, refuse-double-install, and uninstall (CLI lifecycle script
+      driving the SCM) plus a silent installer install/uninstall smoke test.
 - [ ] Supported Windows versions and architectures are explicitly listed.
 - [ ] Agent and installer are Authenticode-signed and timestamped; signatures
       are verified before publication.

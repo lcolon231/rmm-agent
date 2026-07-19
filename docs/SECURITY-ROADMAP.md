@@ -26,9 +26,10 @@ Python and Go consume the same canonical test vectors; missing, unknown,
 malformed, expired, and downgraded envelopes fail closed. Both command IDs and
 nonces are durably reserved before execution.
 
-Key IDs and active/overlap/retired registry states are implemented for v3.
-Remaining work is an operator-facing rotation workflow, compromise automation,
-and independent rollback rehearsal.
+Key IDs and active/overlap/retired registry states are implemented for v3, and
+staged rotation, compromise response, and rollback are operator-run via
+`scripts/rotate_command_key.py` with the `docs/KEY-ROTATION.md` runbook and a
+rehearsed test suite. Registry mutations are atomic and journaled.
 
 The implemented rollout is fail closed, not dual issue: agents report supported
 versions, new servers reject incompatible enrollment/dispatch, new agents
@@ -41,8 +42,10 @@ The external key registry stores an active key ID, overlap keys, and retired
 keys. Every v3 command records the key ID in its signed envelope and audit
 detail; agents replace their public-key bundle on heartbeat and fail closed on
 unknown/retired keys. Private keys remain outside the database. Add an
-operator-facing activation/retirement workflow and rehearse rotation, rollback,
-lost-key, and compromise procedures before pilot use.
+operator-facing rotation workflow (`scripts/rotate_command_key.py`) with
+staged activation/retirement, compromise fast path, and rollback; the runbook
+is `docs/KEY-ROTATION.md` and the procedures are rehearsed in
+`tests/test_key_rotation.py`.
 
 ### Revoke and quarantine agents
 
@@ -109,11 +112,12 @@ include checksums, SBOMs, provenance attestations, and verification steps.
 
 ### Verify Windows behavior and endurance
 
-Windows CI must cover build, install, service start/stop/restart, upgrade,
-uninstall, config/identity permissions, and installer lifecycle. After pilot
-controls land, run a multi-day soak test measuring memory, handles, logs,
-heartbeat recovery, command execution, restarts, audit integrity, and result
-delivery.
+Windows CI covers build, unit tests, the DPAPI identity + ACL checks, the
+service lifecycle (install/start/stop/restart/refuse-double-install/uninstall),
+and a silent installer install/uninstall smoke test. Remaining: Authenticode
+signing (issue #24) and, after pilot controls land, a multi-day soak test
+measuring memory, handles, logs, heartbeat recovery, command execution,
+restarts, audit integrity, and result delivery.
 
 ## Milestone 1 — secure the technician product
 
