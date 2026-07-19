@@ -48,7 +48,8 @@ The code in this repository currently provides:
   outstanding work is expired; quarantined agents get bare heartbeat acks only.
 - DPAPI-protected agent identity on Windows (versioned envelope, restricted
   file ACL, atomic plaintext migration, no plaintext fallback).
-- A hash-chained audit log plus APIs that create and verify local Merkle
+- A hash-chained audit log with serialized, hash-bound monotonic sequence
+  numbers, plus APIs that create and verify local Merkle
   anchors. Anchors are not automatically published outside the database.
 - An Alembic baseline and forward migration, with exact revision enforcement
   on non-debug startup and a disposable PostgreSQL migration test in CI.
@@ -97,7 +98,8 @@ The repository does **not** currently contain:
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
 - Per-agent concurrency/queue admission policy or certificate pinning.
-- Automated backup/restore, an automated external audit-anchor publisher,
+- An automated external audit-anchor publisher, scheduled production backup
+  evidence (encrypted backup/restore tooling itself ships in `deploy/backup/`),
   release SBOM/provenance, or Authenticode signing.
 - Tenant-scoped authorization, tenant-specific roles or retention, MFA,
   WebAuthn, OIDC/SAML, legal hold, or compliance evidence exports.

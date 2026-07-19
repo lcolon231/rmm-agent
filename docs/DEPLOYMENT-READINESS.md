@@ -23,9 +23,9 @@ Statuses are:
 | Production TLS | Partial | Caddy topology documented; ENVIRONMENT=production fails startup on debug/placeholder-secret/missing-key/non-HTTPS-URL config and proxy trust is explicit opt-in; certificate lifecycle monitoring and pinning remain open |
 | Agent credential protection/revocation | Partial | Trust states (quarantine/restore/revoke) with audited, reasoned operator transitions and fail-closed enforcement; DPAPI envelope + restricted ACL on Windows with atomic plaintext migration. Windows-runner evidence for migration/ACL paths ships with Windows CI (issue #23); certificate pinning remains open |
 | Execution limits | Partial | Five-minute timeout, sequential runtime, bounded stdout/stderr with audited truncation metadata, and dispatch payload caps; queue/admission and explicit concurrency policy remain open (#20) |
-| Audit integrity | Partial | Hash chain and local Merkle anchors; ambiguous ordering and no external publisher |
+| Audit integrity | Partial | Hash chain with monotonic, hash-bound sequence numbers appended under serialized transactions, plus local Merkle anchors; external anchor publication remains open (#76) |
 | Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
-| Backup, restore, rollback | Open | No automated process or rehearsal evidence |
+| Backup, restore, rollback | Partial | Encrypted streaming pg_dump with manifest/checksums, fail-closed off-host upload hook, isolated-restore script, and application-level restore validation, all exercised end to end in CI; scheduled production runs, retention monitoring, and a production rollback rehearsal remain operator evidence (#26) |
 | Windows lifecycle CI | Partial | Go build/unit tests run on Windows; service and installer lifecycle automation remains open |
 | Release authenticity | Open | Checksums exist; artifacts are unsigned; no SBOM/provenance |
 | Soak evidence | Open | No documented multi-day test |
@@ -106,10 +106,13 @@ link to reproducible evidence in the release or pilot record.
 
 ### Audit evidence
 
-- [ ] Every audit event receives a unique monotonic sequence in a serialized
-      append transaction.
-- [ ] Hash verification detects field changes, removal, reordering, and sequence
-      gaps.
+- [x] Every audit event receives a unique monotonic sequence in a serialized
+      append transaction (PostgreSQL advisory lock; unique constraint as the
+      fail-closed backstop; concurrency-tested).
+- [x] Hash verification detects field changes, removal, reordering, and sequence
+      gaps (seq is bound into the event hash for all post-0007 events; legacy
+      events are explicitly marked hash_schema=1 and may not follow the
+      cutover).
 - [ ] Anchors are published automatically to an external immutable destination.
 - [ ] Publication receipts, lag, retry, and failure alerts are retained.
 - [ ] A clean verifier can validate the chain and external anchor without write
@@ -121,11 +124,15 @@ link to reproducible evidence in the release or pilot record.
 - [x] Alembic can create a fresh schema and upgrade every supported prior
       production revision.
 - [x] Application startup refuses an unsupported schema state.
-- [ ] Automated encrypted backups run on schedule and failures alert.
-- [ ] Backup retention, access, encryption-key custody, and deletion are
-      documented.
-- [ ] A restore rehearsal validates data, authentication, queued work, and audit
-      verification.
+- [ ] Automated encrypted backups run on schedule and failures alert
+      (tooling shipped and CI-rehearsed — deploy/backup/ + docs/BACKUP-RESTORE.md;
+      the checked box requires evidence from the production schedule itself).
+- [x] Backup retention, access, encryption-key custody, and deletion are
+      documented (docs/BACKUP-RESTORE.md).
+- [x] A restore rehearsal validates data, authentication, queued work, and audit
+      verification (isolated restore + verify_restore.py checks row counts,
+      the audit chain in sequence order, and every stored anchor; rehearsed in
+      CI on every run).
 - [ ] Release rollback includes schema compatibility and a decision point for
       forward-fix versus restore.
 - [ ] Recovery objectives are selected and measured by the maintainer.
