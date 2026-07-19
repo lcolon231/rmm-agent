@@ -157,9 +157,10 @@ consistently and the chain check alone would pass. The anchoring layer closes
 this:
 
 - `POST /api/v1/audit/anchors` (operator+) computes a **Merkle root** over the
-  `event_hash` values of every event in the chain (in `(ts, id)` order) and
-  stores it as an `AuditAnchor` covering that prefix. The act of anchoring is
-  itself audited (`audit.anchored`).
+  `event_hash` values of every event in the chain (in ascending `seq` order;
+  the legacy prefix's `seq` was frozen from the historical `(ts, id)` order by
+  migration 0007) and stores it as an `AuditAnchor` covering that prefix. The
+  act of anchoring is itself audited (`audit.anchored`).
 - `GET /api/v1/audit/anchors/{id}/verify` recomputes the root over the covered
   prefix and compares — any alteration, removal, or reordering of covered
   events is detected, **including a fully consistent chain rebuild** (this is
@@ -191,7 +192,7 @@ not built in.
 | 7 | Agent was foreground-only (no unattended operation) | High | **Closed (Gate 2)** — installable Windows service: auto-start at boot, SCM crash-recovery, rotated file logging, and a network-resilient check-in loop (backoff + jitter) |
 | 8 | No agent revocation/quarantine or DPAPI credential protection | Critical | **Mostly closed** — explicit active/quarantined/revoked trust states with reasoned, audited operator transitions; revoked credentials fail auth without an oracle and outstanding work is expired; quarantined agents get bare acks only; identity is DPAPI-protected with a restricted DACL on Windows (envelope-versioned, atomic plaintext migration, no plaintext fallback). Windows service/installer lifecycle automation for these paths remains with issue #23 |
 | 9 | Command stdout/stderr and queue policy are unbounded | High | Partial — stdout/stderr are capped (256 KiB each, 384 KiB combined, excess counted not buffered) with deterministic UTF-8-safe truncation recorded in command and audit data, and dispatch payloads are capped at 64 KiB; queue/admission and explicit per-agent concurrency policy remain open (#20) |
-| 10 | Audit ordering is not monotonic and anchors remain local | High | Partial — hash chain and local Merkle anchors exist; sequence serialization and external immutable publication do not |
-| 11 | No production migrations, automated restore, or rollback rehearsal | High | Partial — Alembic baseline/forward migration and exact startup revision checks are implemented and tested on PostgreSQL in CI; backup automation and restore/rollback rehearsal remain open |
+| 10 | Audit ordering is not monotonic and anchors remain local | High | Partial — every event now carries a unique monotonic seq assigned under a serialized append (advisory lock + unique constraint) and bound into its hash; verification and anchoring walk seq order and detect gaps/reorders. External immutable publication remains open (#76) |
+| 11 | No production migrations, automated restore, or rollback rehearsal | High | **Mostly closed** — Alembic migrations with startup revision guard; encrypted streaming backups with manifests and off-host upload hook; isolated restore with checksum, schema, chain, and anchor validation, rehearsed in CI (`docs/BACKUP-RESTORE.md`). Production-schedule evidence and a release rollback drill (#26) remain |
 | 12 | Windows artifacts are unsigned and release evidence lacks SBOM/provenance | High | Open |
 | 13 | Client/site records are not authorization tenants | High | Open — roles and management access are global |

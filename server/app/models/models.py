@@ -287,6 +287,15 @@ class AuditEvent(Base):
     __tablename__ = "audit_events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # Strictly monotonic position in the chain, assigned in a serialized
+    # append (1, 2, 3, ... with no gaps). This — not the wall-clock ts — is
+    # the canonical order for verification and anchoring; a unique constraint
+    # makes a lost append race an error instead of a silent fork.
+    seq: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
+    # Hash schema 1 = legacy (seq not bound into event_hash, assigned by
+    # backfill); 2 = seq is part of the hashed document. Once the chain
+    # contains a schema-2 event, schema-1 events may not follow.
+    hash_schema: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
     # Canonical ISO-8601 string actually used to compute event_hash. Storing it
     # explicitly makes verification independent of how the DB round-trips

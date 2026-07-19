@@ -282,10 +282,17 @@ previous registry atomically and never reactivates an unknown key.
 their own SHA-256 hash. `/audit/verify` detects changes or deletion relative to
 the stored chain.
 
-Current ordering is by timestamp (and, for Merkle coverage, timestamp plus UUID).
-There is no monotonic sequence number, transactional serialization strategy, or
-database constraint that prevents concurrent writers from selecting the same
-previous hash. These limits prevent a strong total-order guarantee.
+Ordering is explicit: every event carries a strictly monotonic `seq`
+(1, 2, 3, … with no gaps) assigned inside a serialized append — a
+transaction-scoped PostgreSQL advisory lock serializes concurrent writers, and
+a unique constraint on `seq` turns any lost race into a failed transaction
+rather than a silently forked chain. For events appended after migration 0007,
+`seq` is bound into `event_hash` (`hash_schema=2`), so renumbering an event
+breaks its own hash. Pre-existing events were backfilled 1..N in their
+historical `(ts, id)` order and marked `hash_schema=1` — their hashes honestly
+do not cover a sequence that did not exist when they were written, and a
+schema-1 event appearing after the cutover fails verification. `/audit/verify`
+walks `seq` order and detects gaps, duplicates, reordering, and edits.
 
 `AuditAnchor` stores a Merkle root over a prefix of event hashes. Local anchor
 verification is implemented and tested, including detection of a consistent
@@ -347,7 +354,11 @@ moved merely to match an aspirational tree.
   its local identity file until uninstalled or re-enrolled.
 - Stdout/stderr and dispatch payloads are bounded, but queue depth and
   per-agent concurrency/admission policy remain implicit (issue #20).
-- Automated backup/restore and restore rehearsal remain absent; schema
+- Backup/restore automation ships in `deploy/backup/` (encrypted streaming
+  pg_dump with manifests, isolated restore, application-level validation via
+  `scripts/verify_restore.py`) and is rehearsed in CI; production scheduling,
+  retention monitoring, and the release rollback drill remain operator
+  evidence. Schema
   migrations and exact startup revision checks are implemented.
 - Audit anchors remain inside the same trust boundary as the audit database.
 - Roles are global; clients/sites are not authorization tenants.
