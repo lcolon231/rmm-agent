@@ -33,6 +33,7 @@ from app.core.security import generate_token, hash_token, sign_command
 from app.core.keyring import active_signing_key, load_keyring
 from app.models.models import (
     Agent,
+    AgentTrustState,
     AuditAnchor,
     Client,
     Command,
@@ -54,6 +55,7 @@ from app.schemas.schemas import (
     EnrollmentTokenOut,
     SiteCreate,
     SiteOut,
+    TrustStateChange,
 )
 
 # Router-level dependency: every route here needs at least a readonly operator.
@@ -153,6 +155,133 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
 
 
 # --------------------------------------------------------------------------- #
+# Agent trust state
+# --------------------------------------------------------------------------- #
+def _trust_conflict(agent: Agent, wanted: str) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "agent_trust_state_conflict",
+            "current": agent.trust_state.value,
+            "requested": wanted,
+        },
+    )
+
+
+async def _apply_trust_change(
+    db: AsyncSession,
+    agent: Agent,
+    new_state: AgentTrustState,
+    reason: str,
+    operator: Operator,
+    action: str,
+) -> Agent:
+    previous = agent.trust_state
+    agent.trust_state = new_state
+    agent.trust_state_reason = reason
+    agent.trust_state_changed_at = _now()
+    agent.trust_state_changed_by = operator.email
+    await audit.record(
+        db,
+        action=action,
+        actor=operator.email,
+        agent_id=agent.id,
+        detail={
+            "previous_trust_state": previous.value,
+            "trust_state": new_state.value,
+            "reason": reason,
+        },
+    )
+    return agent
+
+
+@router.post("/agents/{agent_id}/quarantine", response_model=AgentOut)
+async def quarantine_agent(
+    agent_id: str,
+    body: TrustStateChange,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suspend trust in an agent without destroying its identity.
+
+    A quarantined agent still authenticates and checks in (so the operator can
+    see it is alive), but receives no commands, may not submit results, and has
+    no telemetry or inventory recorded. Reversible via restore.
+    """
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.trust_state != AgentTrustState.active:
+        raise _trust_conflict(agent, AgentTrustState.quarantined.value)
+    return await _apply_trust_change(
+        db, agent, AgentTrustState.quarantined, body.reason, operator, "agent.quarantined"
+    )
+
+
+@router.post("/agents/{agent_id}/restore", response_model=AgentOut)
+async def restore_agent(
+    agent_id: str,
+    body: TrustStateChange,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a quarantined agent to active. Revoked agents cannot be restored —
+    revocation is terminal and the endpoint must re-enroll as a new identity."""
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.trust_state != AgentTrustState.quarantined:
+        raise _trust_conflict(agent, AgentTrustState.active.value)
+    return await _apply_trust_change(
+        db, agent, AgentTrustState.active, body.reason, operator, "agent.restored"
+    )
+
+
+@router.post("/agents/{agent_id}/revoke", response_model=AgentOut)
+async def revoke_agent(
+    agent_id: str,
+    body: TrustStateChange,
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently revoke an agent's credentials (admin only — irreversible).
+
+    The agent's bearer token stops authenticating entirely, and any still-queued
+    or dispatched-but-unreported commands are expired so nothing issued under
+    the old trust can be delivered or complete later.
+    """
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.trust_state == AgentTrustState.revoked:
+        raise _trust_conflict(agent, AgentTrustState.revoked.value)
+
+    result = await db.execute(
+        select(Command).where(
+            Command.agent_id == agent.id,
+            Command.status.in_([CommandStatus.queued, CommandStatus.dispatched]),
+        )
+    )
+    expired_ids = []
+    for cmd in result.scalars().all():
+        cmd.status = CommandStatus.expired
+        expired_ids.append(cmd.id)
+
+    agent = await _apply_trust_change(
+        db, agent, AgentTrustState.revoked, body.reason, operator, "agent.revoked"
+    )
+    if expired_ids:
+        await audit.record(
+            db,
+            action="agent.commands_expired_on_revoke",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail={"command_ids": sorted(expired_ids)},
+        )
+    return agent
+
+
+# --------------------------------------------------------------------------- #
 # Commands
 # --------------------------------------------------------------------------- #
 @router.get("/signing-keys")
@@ -183,6 +312,16 @@ async def dispatch_command(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    # Trust gate before capability negotiation: no new work may even be queued
+    # for an agent the server no longer fully trusts.
+    if agent.trust_state != AgentTrustState.active:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "agent_not_trusted",
+                "trust_state": agent.trust_state.value,
+            },
+        )
     envelope_version = select_command_envelope_version(
         agent.command_envelope_versions or []
     )

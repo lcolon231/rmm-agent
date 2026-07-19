@@ -74,8 +74,16 @@ accept an action. It currently contains:
   version downgrade rejection, and agent-side signature, signed time-window,
   command-ID, and nonce replay checks.
 
-Known gaps include agent revocation/quarantine, Windows DPAPI protection for
-credentials, key-registry operator workflow and compromise recovery,
+Agent trust state is explicit and separate from online status: `active`,
+`quarantined` (authenticates, but receives no commands, may not submit
+results, and has no telemetry/inventory recorded), and `revoked` (credentials
+fail authentication with the same response as an unknown token; terminal —
+the endpoint must re-enroll as a new identity). Quarantine/restore require the
+operator role; revocation requires admin. Every transition demands a reason
+and is audited, and revocation expires the agent's outstanding queued and
+dispatched commands.
+
+Known gaps include the key-registry operator workflow and compromise recovery,
 MFA/federation,
 tenant-scoped authorization, and certificate pinning.
 
@@ -154,13 +162,16 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/sites` | Create site | Operator |
 | POST | `/enrollment-tokens` | Create token | Operator |
 | GET | `/agents`, `/agents/{id}` | List/get endpoint | Readonly |
+| POST | `/agents/{id}/quarantine` | Suspend agent trust (reversible) | Operator |
+| POST | `/agents/{id}/restore` | Return quarantined agent to active | Operator |
+| POST | `/agents/{id}/revoke` | Permanently revoke agent credentials | Admin |
 | GET | `/signing-keys` | View redacted active/overlap/retired key state | Readonly |
 | POST/GET | `/agents/{id}/commands` | Dispatch/list commands | Operator / Readonly |
 | GET | `/audit/verify` | Verify hash chain | Readonly |
 | POST/GET | `/audit/anchors` | Create/list local anchors | Operator / Readonly |
 | GET | `/audit/anchors/{id}/verify` | Verify local anchor | Readonly |
 
-There are no APIs yet for listing/revoking enrollment tokens, agent quarantine,
+There are no APIs yet for listing/revoking enrollment tokens,
 telemetry history, operator listing/editing, audit-event listing, monitoring,
 alerts, scheduling, patching, or evidence export.
 
@@ -177,9 +188,17 @@ heartbeat for CPU, memory, system drive, uptime, user, and OS version. It does
 not collect complete hardware, installed software, Defender, BitLocker, Secure
 Boot, TPM, or local administrator state.
 
-After enrollment, `identity.json` contains the plaintext agent token, server URL,
-and command public key. File mode `0600` is requested, but Windows credential
-protection and explicit ACL validation are absent. `seen_commands.json` stores
+After enrollment, `identity.json` holds the agent token, server URL, and command
+public keys inside a versioned envelope that declares its protection scheme. On
+Windows the payload is DPAPI-encrypted in user scope under the account that
+enrolled (LocalSystem for the installed service) and the file's DACL is replaced
+with a protected SYSTEM+Administrators-only ACL; on other platforms the payload
+is stored with protection `none` and mode `0600`. A legacy plaintext
+`identity.json` is migrated to the envelope form on first load via an atomic
+replace; if protection or migration fails, the agent refuses to run rather than
+falling back to plaintext, and a scheme mismatch (e.g. a blob enrolled under a
+different account) fails closed with a delete-and-re-enroll instruction.
+`seen_commands.json` stores
 executed command IDs and accepted signed nonces with expiry values for replay
 prevention; both entries are reserved atomically before execution.
 
@@ -308,7 +327,9 @@ moved merely to match an aspirational tree.
   configuration.
 - Command expiry is not cryptographically bound to the current signature.
 - One deployment-wide signing key has no identifier or rotation mechanism.
-- Agent credentials are plaintext in endpoint JSON files and cannot be revoked.
+- Agent credentials are DPAPI-protected only on Windows; other platforms rely
+  on file permissions. Revocation is server-side only — a revoked agent keeps
+  its local identity file until uninstalled or re-enrolled.
 - Output and queues have no explicit resource limits.
 - Automated backup/restore and restore rehearsal remain absent; schema
   migrations and exact startup revision checks are implemented.

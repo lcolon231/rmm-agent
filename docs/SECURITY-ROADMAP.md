@@ -46,18 +46,28 @@ lost-key, and compromise procedures before pilot use.
 
 ### Revoke and quarantine agents
 
-Add explicit active, quarantined, and revoked trust states independent of online
-status. Authentication must reject revoked credentials; quarantine should allow
-only the minimum policy-defined diagnostic/enrollment recovery behavior. Queue
-delivery, result submission, re-enrollment, operator authorization, and audit
-semantics must be specified and tested.
+Implemented. Agents carry an explicit trust state (`active`, `quarantined`,
+`revoked`) independent of online status. Revoked credentials fail
+authentication with the same response as unknown tokens and outstanding
+queued/dispatched work is expired; quarantined agents receive only a minimal
+heartbeat ack (no commands, no signing keys, no recorded telemetry/inventory)
+and may not submit results. Quarantine/restore require the operator role,
+revocation requires admin, every transition records a mandatory reason, and
+all transitions and refusals are audited and covered by integration tests.
+Revocation is terminal; recovery is re-enrollment under a new identity.
 
 ### Protect endpoint credentials
 
-On Windows, protect the agent token and other sensitive identity material with
-DPAPI scoped to the service identity. Define migration from plaintext JSON,
-backup/restore behavior, ACL requirements, corruption recovery, uninstall
-cleanup, and diagnostic redaction. Avoid a silent fallback to plaintext.
+Implemented on Windows. The persisted identity is wrapped in a versioned
+envelope whose payload is DPAPI-encrypted in user scope under the enrolling
+account (LocalSystem for the installed service), with the file's DACL replaced
+by a protected SYSTEM+Administrators-only ACL. Legacy plaintext `identity.json`
+files migrate to the envelope atomically on first load; protection or
+migration failure refuses to run — there is no silent plaintext fallback, and
+a scheme mismatch fails closed with a delete-and-re-enroll instruction. The
+uninstaller removes `identity.json`. Non-Windows platforms remain
+`0600`-permission plaintext by declared scheme (`none`). Remaining work:
+least-privilege service account and installer lifecycle CI (issue #23).
 
 ### Enforce transport policy
 

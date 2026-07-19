@@ -125,9 +125,15 @@ admin on the endpoint, which is why boundary (1) matters so much. Running under 
 least-privilege service account is still future work.
 
 - Agent identity is a long-lived bearer token issued at enrollment. The server
-  stores only its SHA-256 hash. The plaintext lives in `identity.json` on the
-  endpoint; the agent requests mode 0600, but Windows DPAPI protection, explicit
-  ACL verification, and server-side agent revocation/quarantine are absent.
+  stores only its SHA-256 hash. On the endpoint the token lives in
+  `identity.json` inside a versioned envelope: DPAPI-encrypted (user scope,
+  under the enrolling account — LocalSystem for the installed service) with a
+  protected SYSTEM+Administrators-only DACL on Windows; protection `none` with
+  mode 0600 elsewhere. Legacy plaintext files are migrated atomically on first
+  load, and protection failures refuse to run rather than fall back to
+  plaintext. Server-side, operators can quarantine (reversible, operator role)
+  or revoke (terminal, admin role) an agent; revoked tokens fail
+  authentication with the same response as unknown tokens.
 - Enrollment tokens are one-time (configurable `max_uses`), can expire, and can
   be revoked. They are shown in plaintext only once, at creation.
 
@@ -183,7 +189,7 @@ not built in.
 | 5 | Audit chain not externally anchored | Medium | Partial — Merkle anchoring implemented (create/list/verify endpoints; detects consistent chain rebuilds). Publishing the root to an external append-only medium is an ops step and not automated |
 | 6 | Agent runs commands at its own privilege | By design | Partial — installable service (Gate 2) runs as `LocalSystem`; least-privilege service account still open |
 | 7 | Agent was foreground-only (no unattended operation) | High | **Closed (Gate 2)** — installable Windows service: auto-start at boot, SCM crash-recovery, rotated file logging, and a network-resilient check-in loop (backoff + jitter) |
-| 8 | No agent revocation/quarantine or DPAPI credential protection | Critical | Open |
+| 8 | No agent revocation/quarantine or DPAPI credential protection | Critical | **Mostly closed** — explicit active/quarantined/revoked trust states with reasoned, audited operator transitions; revoked credentials fail auth without an oracle and outstanding work is expired; quarantined agents get bare acks only; identity is DPAPI-protected with a restricted DACL on Windows (envelope-versioned, atomic plaintext migration, no plaintext fallback). Windows service/installer lifecycle automation for these paths remains with issue #23 |
 | 9 | Command stdout/stderr and queue policy are unbounded | High | Open — execution has a timeout and is sequential in one runtime, but output, admission, and explicit concurrency policy are absent |
 | 10 | Audit ordering is not monotonic and anchors remain local | High | Partial — hash chain and local Merkle anchors exist; sequence serialization and external immutable publication do not |
 | 11 | No production migrations, automated restore, or rollback rehearsal | High | Partial — Alembic baseline/forward migration and exact startup revision checks are implemented and tested on PostgreSQL in CI; backup automation and restore/rollback rehearsal remain open |
