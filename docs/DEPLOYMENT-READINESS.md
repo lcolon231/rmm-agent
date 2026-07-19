@@ -28,7 +28,7 @@ Statuses are:
 | Backup, restore, rollback | Partial | Encrypted streaming pg_dump with manifest/checksums, fail-closed off-host upload hook, isolated-restore script, and application-level restore validation, all exercised end to end in CI; scheduled production runs, retention monitoring, and a production rollback rehearsal remain operator evidence (#26) |
 | Windows lifecycle CI | Implemented | Windows CI builds the agent and installer and exercises service install/start/stop/restart/refuse-double-install/uninstall plus a silent installer install+uninstall smoke test |
 | Release authenticity | Partial | Checksums, an SPDX SBOM (Go + Python), and signed SLSA build-provenance attestations are published for every artifact; Authenticode signing is the one remaining gap (needs a paid certificate) |
-| Soak evidence | Open | No documented multi-day test |
+| Soak evidence | Partial | Soak harness with workload, fault injection, resource/audit/anchor sampling, and pass/fail reporting ships (`deploy/soak/`, `docs/SOAK-TEST.md`), CI-smoke-tested and demonstrated against a live server; the multi-day pilot run itself is operator evidence |
 
 ## Controlled pilot gate
 
@@ -174,7 +174,9 @@ link to reproducible evidence in the release or pilot record.
 - [ ] Monitoring covers server health, database, certificate, agents, queues,
       audit anchoring, backup, and disk capacity.
 - [ ] A multi-day soak test records versions, topology, workload, restarts,
-      outages, resource trends, commands, and audit verification.
+      outages, resource trends, commands, and audit verification (harness and
+      runbook ready — `deploy/soak/soak.py`, `docs/SOAK-TEST.md`; the checked
+      box requires the actual multi-day run's evidence).
 - [ ] Critical/high findings from the soak test are resolved or explicitly block
       the pilot.
 - [ ] Incident contacts, credential rotation, agent quarantine, server shutdown,

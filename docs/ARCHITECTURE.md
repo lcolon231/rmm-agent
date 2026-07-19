@@ -366,8 +366,6 @@ moved merely to match an aspirational tree.
   or short secrets, missing signing keys, and a missing/non-HTTPS/loopback
   PUBLIC_BASE_URL. X-Forwarded-For is ignored unless TRUST_PROXY_HEADERS is
   explicitly enabled for a proxy-only topology.
-- Command expiry is not cryptographically bound to the current signature.
-- One deployment-wide signing key has no identifier or rotation mechanism.
 - Agent credentials are DPAPI-protected only on Windows; other platforms rely
   on file permissions. Revocation is server-side only — a revoked agent keeps
   its local identity file until uninstalled or re-enrolled.
@@ -379,14 +377,18 @@ moved merely to match an aspirational tree.
   retention monitoring, and the release rollback drill remain operator
   evidence. Schema
   migrations and exact startup revision checks are implemented.
-- Audit anchors remain inside the same trust boundary as the audit database.
+- Audit anchors are published to external immutable storage when a backend is
+  configured (`docs/AUDIT-ANCHORING.md`); with none configured they remain
+  inside the database trust boundary and the publisher warns.
 - Roles are global; clients/sites are not authorization tenants.
 - The login limiter is process-local and weakens with multiple workers.
 - `CommandStatus.running` exists but is never assigned.
 - `websockets` and `python-multipart` are declared dependencies without
   corresponding implemented product behavior.
-- Release binaries are checksummed but unsigned and have no SBOM or provenance
-  attestation.
+- Release binaries are checksummed and carry an SBOM and signed build
+  provenance, but are not yet Authenticode-signed (needs a paid certificate).
+- Endurance is exercised by the soak harness (`deploy/soak/`, `docs/SOAK-TEST.md`),
+  smoke-tested in CI; the multi-day pilot run is operator evidence.
 
 ## 12. Change discipline
 

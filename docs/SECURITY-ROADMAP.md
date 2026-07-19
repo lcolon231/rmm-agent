@@ -118,10 +118,14 @@ include checksums, SBOMs, provenance attestations, and verification steps.
 
 Windows CI covers build, unit tests, the DPAPI identity + ACL checks, the
 service lifecycle (install/start/stop/restart/refuse-double-install/uninstall),
-and a silent installer install/uninstall smoke test. Remaining: Authenticode
-signing (issue #24) and, after pilot controls land, a multi-day soak test
-measuring memory, handles, logs, heartbeat recovery, command execution,
-restarts, audit integrity, and result delivery.
+and a silent installer install/uninstall smoke test. The soak harness and
+runbook ship (`deploy/soak/soak.py`, `docs/SOAK-TEST.md`) and are smoke-tested
+in CI: it drives a sustained workload with injected outages and samples memory,
+handles, heartbeat recovery, command execution, audit integrity, and anchor
+publication, failing on any audit break. Remaining: Authenticode signing
+(issue #24) and the actual multi-day soak run on the pilot topology (including
+server restarts and a mid-run backup/restore), whose evidence goes into the
+pilot record.
 
 ## Milestone 1 — secure the technician product
 

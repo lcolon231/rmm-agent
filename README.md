@@ -69,8 +69,9 @@ the implementation and its security boundaries.
 ## In progress
 
 Milestone 0, Deployment Safety, is nearly complete. Remaining items are an
-Authenticode code signing (needs a paid certificate) and a multi-day soak test
-(#77) before a controlled non-production pilot.
+Authenticode code signing (needs a paid certificate) and running the multi-day
+soak test (the harness and runbook ship in `deploy/soak/` and
+`docs/SOAK-TEST.md`) before a controlled non-production pilot.
 
 ## Planned
 
