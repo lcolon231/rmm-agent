@@ -155,9 +155,12 @@ Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
 timeout.
 
 Commands from one heartbeat are executed sequentially and stdout/stderr are
-buffered in memory, then uploaded after completion. Output streaming, explicit
-output-size limits, queue/admission limits, and a policy-configured concurrency
-contract are not implemented.
+captured in memory up to 256 KiB per stream (384 KiB combined), then uploaded
+after completion. Bytes past a cap are counted but never buffered; when the
+combined cap binds, stderr is kept whole and stdout trimmed. Truncation is
+UTF-8-safe and reported to the server as structured metadata alongside the
+original byte totals. Output streaming, queue/admission limits, and a
+policy-configured concurrency contract are not implemented.
 
 ## Layout
 
@@ -177,7 +180,7 @@ agent/
 
 ## Roadmap
 
-- Key-rotation operator workflow, execution limits, and Windows lifecycle CI.
+- Key-rotation operator workflow, per-agent concurrency limits, and Windows lifecycle CI.
 - Complete Windows inventory, typed endpoint operations, and signed self-update.
 - An interactive transport for lower-latency/streaming workflows while keeping
   heartbeat polling as a resilient fallback.

@@ -205,7 +205,19 @@ prevention; both entries are reserved atomically before execution.
 The agent processes commands from a single heartbeat sequentially. This happens
 to limit concurrency to one per runtime, but there is no explicit policy,
 server-side admission control, queue limit, or testable per-agent concurrency
-contract. Stdout and stderr are held in memory without size limits.
+contract.
+
+Command output capture is bounded: stdout and stderr are each captured up to
+256 KiB, with a 384 KiB combined cap. Bytes beyond a cap are counted but never
+buffered, so a runaway command cannot exhaust agent memory. When the combined
+cap binds, stderr is preserved and stdout trimmed to the remaining budget — a
+deterministic rule chosen because diagnostics matter most. Truncation is
+UTF-8-safe (no split runes) and reported as structured metadata
+(`stdout_truncated`, `stderr_truncated`, and the original byte totals) that
+the server persists, exposes on command records, and writes into the
+`command.completed` audit detail. NULL metadata means a pre-limits result:
+unknown, not complete. The server refuses results beyond the caps (they cannot
+have come from a compliant agent) and refuses dispatch payloads over 64 KiB.
 
 ## 6. Signed command envelope
 
@@ -323,14 +335,18 @@ moved merely to match an aspirational tree.
 - Polling is the only command transport; output is buffered, not streamed.
 - Dashboard, complete inventory, monitoring alerts, scheduling, patching,
   remediation, remote shell, and remote desktop are not implemented.
-- Production TLS is an operator-run topology, not enforced by application
-  configuration.
+- TLS termination itself remains an operator-run topology, but production
+  mode (ENVIRONMENT=production) now fails startup on debug mode, placeholder
+  or short secrets, missing signing keys, and a missing/non-HTTPS/loopback
+  PUBLIC_BASE_URL. X-Forwarded-For is ignored unless TRUST_PROXY_HEADERS is
+  explicitly enabled for a proxy-only topology.
 - Command expiry is not cryptographically bound to the current signature.
 - One deployment-wide signing key has no identifier or rotation mechanism.
 - Agent credentials are DPAPI-protected only on Windows; other platforms rely
   on file permissions. Revocation is server-side only — a revoked agent keeps
   its local identity file until uninstalled or re-enrolled.
-- Output and queues have no explicit resource limits.
+- Stdout/stderr and dispatch payloads are bounded, but queue depth and
+  per-agent concurrency/admission policy remain implicit (issue #20).
 - Automated backup/restore and restore rehearsal remain absent; schema
   migrations and exact startup revision checks are implemented.
 - Audit anchors remain inside the same trust boundary as the audit database.

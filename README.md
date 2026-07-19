@@ -32,8 +32,13 @@ The code in this repository currently provides:
   envelopes. Key IDs support active/overlap/retired registry states; v2 remains
   available only for mixed-version rollout.
 - Basic CPU, memory, system-disk, uptime, and logged-in-user telemetry.
-- Buffered PowerShell or shell execution with a five-minute timeout. Results
-  are uploaded only after execution finishes.
+- Buffered PowerShell or shell execution with a five-minute timeout and
+  bounded output capture (256 KiB per stream, 384 KiB combined, truncation
+  recorded in command and audit data). Results are uploaded only after
+  execution finishes.
+- Fail-closed production startup validation (`ENVIRONMENT=production` rejects
+  debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
+  URLs) with explicit opt-in proxy trust for client IPs.
 - Operator password authentication, JWT sessions, three global roles, token
   generation revocation, and in-process login throttling.
 - Client and site records, agent listing, command dispatch/history APIs, and an
@@ -91,7 +96,7 @@ The repository does **not** currently contain:
   webhook notifications.
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
-- Command output-size limits or certificate pinning.
+- Per-agent concurrency/queue admission policy or certificate pinning.
 - Automated backup/restore, an automated external audit-anchor publisher,
   release SBOM/provenance, or Authenticode signing.
 - Tenant-scoped authorization, tenant-specific roles or retention, MFA,
