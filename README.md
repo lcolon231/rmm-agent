@@ -38,6 +38,11 @@ The code in this repository currently provides:
   generation revocation, and in-process login throttling.
 - Client and site records, agent listing, command dispatch/history APIs, and an
   offline-status sweeper.
+- Agent quarantine/restore (operator) and terminal revocation (admin) with
+  mandatory reasons and audit events: revoked tokens fail authentication and
+  outstanding work is expired; quarantined agents get bare heartbeat acks only.
+- DPAPI-protected agent identity on Windows (versioned envelope, restricted
+  file ACL, atomic plaintext migration, no plaintext fallback).
 - A hash-chained audit log plus APIs that create and verify local Merkle
   anchors. Anchors are not automatically published outside the database.
 - An Alembic baseline and forward migration, with exact revision enforcement
@@ -53,8 +58,7 @@ the implementation and its security boundaries.
 ## In progress
 
 Milestone 0, Deployment Safety, is the active program: hardening key-registry
-activation/retirement and rollback, credential protection and agent quarantine,
-enforcing
+activation/retirement and rollback, enforcing
 production TLS policy, bounding execution resources, making audit ordering and
 anchoring operationally verifiable, adding migrations and recovery procedures,
 and strengthening Windows and release testing.
@@ -87,8 +91,7 @@ The repository does **not** currently contain:
   webhook notifications.
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
-- Agent revocation/quarantine, Windows DPAPI credential protection, command
-  output-size limits, or certificate pinning.
+- Command output-size limits or certificate pinning.
 - Automated backup/restore, an automated external audit-anchor publisher,
   release SBOM/provenance, or Authenticode signing.
 - Tenant-scoped authorization, tenant-specific roles or retention, MFA,

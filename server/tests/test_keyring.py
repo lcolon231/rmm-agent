@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Signing-key registry rotation and retirement behavior."""
 from __future__ import annotations
 

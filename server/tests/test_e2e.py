@@ -242,7 +242,7 @@ async def test_enrollment_negotiation_rejects_unknown_without_consuming_token(cl
 
     rejected = await client.post(
         "/enroll",
-        json={**base, "supported_command_envelope_versions": ["command-v3"]},
+        json={**base, "supported_command_envelope_versions": ["command-v99"]},
     )
     assert rejected.status_code == 409
     assert rejected.json()["detail"]["code"] == "no_common_command_envelope_version"

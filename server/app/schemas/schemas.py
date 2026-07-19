@@ -17,6 +17,7 @@ from pydantic import (
 
 from app.models.models import (
     AgentStatus,
+    AgentTrustState,
     CommandKind,
     CommandStatus,
     OperatorRole,
@@ -129,11 +130,11 @@ class EnrollRequest(CommandEnvelopeCapabilities):
 class EnrollResponse(BaseModel):
     agent_id: str
     agent_token: str  # long-lived bearer token, shown only here
-      heartbeat_interval_seconds: int
-      command_public_key: str  # PEM Ed25519 public key for verifying commands
-      command_envelope_version: EnvelopeVersion
-      command_public_keys: dict[str, str] = Field(default_factory=dict)
-      command_signing_key_id: str = "default"
+    heartbeat_interval_seconds: int
+    command_public_key: str  # PEM Ed25519 public key for verifying commands
+    command_envelope_version: EnvelopeVersion
+    command_public_keys: dict[str, str] = Field(default_factory=dict)
+    command_signing_key_id: str = "default"
 
 
 # --------------------------------------------------------------------------- #
@@ -153,6 +154,9 @@ class HeartbeatAck(BaseModel):
     # Commands the agent should pick up now (thin-poll model without WS).
     pending_commands: list["CommandOut"] = Field(default_factory=list)
     command_public_keys: dict[str, str] = Field(default_factory=dict)
+    # Additive: lets a quarantined agent see its own state so it can stop
+    # executing locally. Older agents ignore the field.
+    trust_state: AgentTrustState = AgentTrustState.active
 
 
 # --------------------------------------------------------------------------- #
@@ -208,8 +212,19 @@ class AgentOut(BaseModel):
     agent_version: str
     command_envelope_versions: list[EnvelopeVersion]
     status: AgentStatus
+    trust_state: AgentTrustState
+    trust_state_reason: str | None
+    trust_state_changed_at: datetime | None
+    trust_state_changed_by: str | None
     last_seen_at: datetime | None
     enrolled_at: datetime
+
+
+class TrustStateChange(BaseModel):
+    """Operator-supplied justification for a quarantine/restore/revoke action.
+    The reason is mandatory: every trust transition must be explainable in the
+    audit log."""
+    reason: Annotated[str, StringConstraints(min_length=3, max_length=500, strip_whitespace=True)]
 
 
 # --------------------------------------------------------------------------- #

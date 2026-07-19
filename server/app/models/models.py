@@ -59,6 +59,22 @@ class AgentStatus(str, enum.Enum):
     offline = "offline"
 
 
+class AgentTrustState(str, enum.Enum):
+    """Whether the server still trusts an agent's credentials. Deliberately
+    separate from AgentStatus: online/offline says whether the machine is
+    reachable, trust says whether we will act on its behalf at all.
+
+    active      -> normal operation
+    quarantined -> authenticates, but receives no commands and may not submit
+                   results; reversible by an operator
+    revoked     -> credentials fail authentication entirely; terminal — the
+                   machine must re-enroll under a new identity
+    """
+    active = "active"
+    quarantined = "quarantined"
+    revoked = "revoked"
+
+
 class CommandKind(str, enum.Enum):
     powershell = "powershell"
     shell = "shell"
@@ -179,6 +195,14 @@ class Agent(Base):
     status: Mapped[AgentStatus] = mapped_column(
         Enum(AgentStatus), default=AgentStatus.pending
     )
+    trust_state: Mapped[AgentTrustState] = mapped_column(
+        Enum(AgentTrustState), default=AgentTrustState.active, nullable=False
+    )
+    trust_state_reason: Mapped[str | None] = mapped_column(Text)
+    trust_state_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    trust_state_changed_by: Mapped[str | None] = mapped_column(String(320))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 

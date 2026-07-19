@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Operator-managed Ed25519 signing-key registry.
 
 The registry keeps private material outside the database while making key IDs,

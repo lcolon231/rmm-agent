@@ -86,17 +86,20 @@ func NewAgent(configPath, version string, logger *log.Logger) *Agent {
 
 // session holds the resolved per-run state after enrollment.
 type session struct {
-	api      *client.Client
-	pub      ed25519.PublicKey
-	pubKeys  map[string]ed25519.PublicKey
+	api          *client.Client
+	pub          ed25519.PublicKey
+	pubKeys      map[string]ed25519.PublicKey
 	identityPath string
 	identity     *config.Identity
-	agentID  string
-	interval time.Duration
+	agentID      string
+	interval     time.Duration
 	// seen is the persisted set of already-executed command IDs, used for replay
 	// protection. Commands are processed by the single check-in goroutine, so it
 	// needs no locking.
 	seen *SeenStore
+	// quarantined mirrors the server-reported trust state so transitions are
+	// logged once instead of on every beat.
+	quarantined bool
 }
 
 // Run enrolls if needed and then checks in until ctx is cancelled. On
@@ -173,7 +176,15 @@ func (a *Agent) loop(ctx, execCtx context.Context) error {
 		var wait time.Duration
 		if err != nil {
 			wait = b.Next()
-			a.log.Printf("check-in failed (%v); retrying in %s", err, wait.Round(time.Millisecond))
+			if client.IsUnauthorized(err) {
+				// A definitive credential rejection usually means the agent was
+				// revoked server-side. Keep the identity on disk for operator
+				// investigation and keep retrying at capped backoff — a server
+				// restored from backup can also cause a transient 401.
+				a.log.Printf("server rejected agent credentials (agent may be revoked); retrying in %s", wait.Round(time.Millisecond))
+			} else {
+				a.log.Printf("check-in failed (%v); retrying in %s", err, wait.Round(time.Millisecond))
+			}
 		} else {
 			b.Reset()
 			wait = sess.interval
@@ -221,14 +232,14 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	}
 	seen.Prune(time.Now().UTC())
 	return &session{
-		api:      client.New(identity.ServerURL, identity.AgentToken),
-		pub:      pub,
-		pubKeys:  pubKeys,
+		api:          client.New(identity.ServerURL, identity.AgentToken),
+		pub:          pub,
+		pubKeys:      pubKeys,
 		identityPath: idPath,
-		identity: identity,
-		agentID:  identity.AgentID,
-		interval: interval,
-		seen:     seen,
+		identity:     identity,
+		agentID:      identity.AgentID,
+		interval:     interval,
+		seen:         seen,
 	}, nil
 }
 
@@ -256,13 +267,13 @@ func (a *Agent) ensureEnrolled(ctx context.Context, cfg *config.Config, idPath s
 	}
 
 	id := &config.Identity{
-		AgentID:          resp.AgentID,
-		AgentToken:       resp.AgentToken,
-		CommandPublicKey: resp.CommandPublicKey,
-		CommandPublicKeys: resp.CommandPublicKeys,
+		AgentID:             resp.AgentID,
+		AgentToken:          resp.AgentToken,
+		CommandPublicKey:    resp.CommandPublicKey,
+		CommandPublicKeys:   resp.CommandPublicKeys,
 		CommandSigningKeyID: resp.CommandSigningKeyID,
-		HeartbeatSeconds: resp.HeartbeatSeconds,
-		ServerURL:        cfg.ServerURL,
+		HeartbeatSeconds:    resp.HeartbeatSeconds,
+		ServerURL:           cfg.ServerURL,
 	}
 	if err := id.Save(idPath); err != nil {
 		return nil, fatal(err)
@@ -286,6 +297,20 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	ack, err := s.api.Heartbeat(ctx, sample, nil)
 	if err != nil {
 		return err
+	}
+	// Quarantine: the server keeps answering our beats but has suspended trust.
+	// Execute nothing — even if commands were somehow present in the ack — and
+	// keep checking in so a restore takes effect on the next beat.
+	if ack.TrustState == client.TrustStateQuarantined {
+		if !s.quarantined {
+			a.log.Printf("server has QUARANTINED this agent; suspending command execution until restored")
+			s.quarantined = true
+		}
+		return nil
+	}
+	if s.quarantined {
+		a.log.Printf("server restored this agent from quarantine; resuming normal operation")
+		s.quarantined = false
 	}
 	if len(ack.CommandPublicKeys) > 0 {
 		updated := map[string]ed25519.PublicKey{}

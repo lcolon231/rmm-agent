@@ -41,16 +41,25 @@ cp config.example.json config.json
 ```
 
 - On first run the agent enrolls, receives its identity + the server's command
-  **public key**, and writes `identity.json` (mode 0600) next to the config.
-- On later runs it loads `identity.json` and skips enrollment. The
+  **public key**, and writes `identity.json` next to the config — a versioned
+  envelope whose payload is DPAPI-encrypted on Windows (mode 0600 plaintext
+  with a declared `none` scheme elsewhere).
+- On later runs it loads `identity.json` and skips enrollment; a pre-envelope
+  plaintext identity is migrated in place on first load. The
   `enrollment_token` in the config is only used once.
 - `-once` runs a single check-in and exits (useful for testing / cron-style use).
 - `run` is the default subcommand, so `./rmm-agent -config config.json` and
   `./rmm-agent run -config config.json` are equivalent.
 
-The persisted identity contains the plaintext long-lived agent token. Requested
-file mode alone is not Windows secret protection; DPAPI storage, explicit ACL
-validation, agent revocation, and quarantine are Milestone 0 work. The local
+On Windows the persisted identity is DPAPI-encrypted in user scope under the
+account that enrolled (LocalSystem for the installed service) and its DACL is
+restricted to SYSTEM and Administrators. Enrolling interactively as one user
+and then running the service as another yields a clear unprotect error — the
+recovery is to delete `identity.json` and re-enroll; there is no plaintext
+fallback. The server can quarantine this agent (it keeps beating but executes
+nothing) or revoke it (its token stops authenticating; the agent logs the
+rejection and retries at capped backoff, keeping the identity on disk for
+investigation). The local
 `heartbeat_seconds` config field is also not currently applied after enrollment;
 the saved server-provided interval is used.
 
@@ -168,8 +177,7 @@ agent/
 
 ## Roadmap
 
-- Signed expiry/nonce/schema/key fields, key rotation, revocation/quarantine,
-  DPAPI-protected credentials, execution limits, and Windows lifecycle CI.
+- Key-rotation operator workflow, execution limits, and Windows lifecycle CI.
 - Complete Windows inventory, typed endpoint operations, and signed self-update.
 - An interactive transport for lower-latency/streaming workflows while keeping
   heartbeat polling as a resilient fallback.

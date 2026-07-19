@@ -31,6 +31,7 @@ from app.core.timeutil import ensure_utc
 from app.models.models import (
     Agent,
     AgentStatus,
+    AgentTrustState,
     Command,
     CommandStatus,
     EnrollmentToken,
@@ -136,6 +137,20 @@ async def heartbeat(
     from app.models.models import Heartbeat  # local import avoids cycle noise
 
     now = _now()
+
+    # Quarantine: the only permitted behavior is a minimal check-in so the
+    # operator can see the endpoint is alive and the agent learns its state.
+    # No telemetry is recorded, no inventory accepted, no commands delivered,
+    # and no signing-key material handed out.
+    if agent.trust_state == AgentTrustState.quarantined:
+        agent.last_seen_at = now
+        return HeartbeatAck(
+            ok=True,
+            pending_commands=[],
+            command_public_keys={},
+            trust_state=agent.trust_state,
+        )
+
     db.add(
         Heartbeat(
             agent_id=agent.id,
@@ -191,6 +206,7 @@ async def heartbeat(
         ok=True,
         pending_commands=[CommandOut.model_validate(c) for c in pending],
         command_public_keys=public_key_bundle_pem(),
+        trust_state=agent.trust_state,
     )
 
 
@@ -202,6 +218,14 @@ async def submit_result(
     db: AsyncSession = Depends(get_db),
 ):
     """Agent reports the outcome of a command it executed."""
+    # A quarantined agent may not submit results. Failing closed here means a
+    # command already in flight when the operator quarantined the endpoint has
+    # its output rejected rather than trusted after the fact.
+    if agent.trust_state != AgentTrustState.active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "agent_quarantined"},
+        )
     result = await db.execute(
         select(Command).where(
             Command.id == command_id, Command.agent_id == agent.id

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import decode_access_token, hash_token
-from app.models.models import Agent, Operator, OperatorRole
+from app.models.models import Agent, AgentTrustState, Operator, OperatorRole
 
 
 async def get_current_agent(
@@ -36,7 +36,10 @@ async def get_current_agent(
         select(Agent).where(Agent.token_hash == hash_token(token))
     )
     agent = result.scalar_one_or_none()
-    if agent is None:
+    # A revoked agent's credentials fail authentication outright, with the same
+    # response as an unknown token — no oracle for a stolen credential to learn
+    # it was specifically revoked rather than never valid.
+    if agent is None or agent.trust_state == AgentTrustState.revoked:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token"
         )

@@ -21,7 +21,7 @@ Statuses are:
 | Signed command verification | Partial | `command-v3`, negotiation, downgrade rejection, signed schema/time/nonce/key ID, and shared vectors implemented; operator rotation workflow remains open |
 | Agent replay/expiry checks | Implemented | Signed time-window validation plus durable command-ID and nonce replay state |
 | Production TLS | Partial | Caddy topology documented; app does not enforce production policy |
-| Agent credential protection/revocation | Open | Plaintext endpoint JSON; no revoke/quarantine state |
+| Agent credential protection/revocation | Partial | Trust states (quarantine/restore/revoke) with audited, reasoned operator transitions and fail-closed enforcement; DPAPI envelope + restricted ACL on Windows with atomic plaintext migration. Windows-runner evidence for migration/ACL paths ships with Windows CI (issue #23); certificate pinning remains open |
 | Execution limits | Partial | Five-minute timeout and sequential runtime; no output/queue policy |
 | Audit integrity | Partial | Hash chain and local Merkle anchors; ambiguous ordering and no external publisher |
 | Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
@@ -66,17 +66,23 @@ link to reproducible evidence in the release or pilot record.
 
 ### Agent identity and endpoint storage
 
-- [ ] Operators can quarantine and revoke an agent with audited reason.
-- [ ] Revoked credentials fail authentication; quarantined agents receive only
-      policy-approved recovery behavior.
-- [ ] Windows agent secrets are DPAPI-protected under the intended service
-      identity and file ACLs are validated.
-- [ ] Plaintext identity migration fails safely and does not leave recoverable
-      secret copies.
+- [x] Operators can quarantine and revoke an agent with audited reason.
+- [x] Revoked credentials fail authentication; quarantined agents receive only
+      policy-approved recovery behavior (a bare heartbeat ack: no commands, no
+      key material, no recorded telemetry; result submission refused).
+- [x] Windows agent secrets are DPAPI-protected under the intended service
+      identity and file ACLs are validated (user-scope DPAPI under the
+      enrolling account; protected SYSTEM+Administrators DACL asserted by a
+      Windows CI test).
+- [x] Plaintext identity migration fails safely and does not leave recoverable
+      secret copies (atomic write-then-rename replacement; load refuses to
+      proceed if the protected form cannot be persisted).
 - [ ] Logs, diagnostics, command results, and uninstall paths do not expose
-      credentials.
-- [ ] Re-enrollment and lost-identity recovery procedures preserve audit
-      continuity or explicitly document a new identity.
+      credentials (code paths avoid logging tokens and the uninstaller removes
+      `identity.json`, but a dedicated redaction audit has not been run).
+- [x] Re-enrollment and lost-identity recovery procedures preserve audit
+      continuity or explicitly document a new identity (revocation is terminal;
+      recovery is re-enrollment as a new agent ID, tested end-to-end).
 
 ### Execution resource safety
 
