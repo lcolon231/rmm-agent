@@ -20,9 +20,9 @@ Statuses are:
 | Operator API authentication/RBAC | Implemented | Auth and authorization integration tests |
 | Signed command verification | Partial | `command-v3`, negotiation, downgrade rejection, signed schema/time/nonce/key ID, and shared vectors implemented; operator rotation workflow remains open |
 | Agent replay/expiry checks | Implemented | Signed time-window validation plus durable command-ID and nonce replay state |
-| Production TLS | Partial | Caddy topology documented; app does not enforce production policy |
+| Production TLS | Partial | Caddy topology documented; ENVIRONMENT=production fails startup on debug/placeholder-secret/missing-key/non-HTTPS-URL config and proxy trust is explicit opt-in; certificate lifecycle monitoring and pinning remain open |
 | Agent credential protection/revocation | Partial | Trust states (quarantine/restore/revoke) with audited, reasoned operator transitions and fail-closed enforcement; DPAPI envelope + restricted ACL on Windows with atomic plaintext migration. Windows-runner evidence for migration/ACL paths ships with Windows CI (issue #23); certificate pinning remains open |
-| Execution limits | Partial | Five-minute timeout and sequential runtime; no output/queue policy |
+| Execution limits | Partial | Five-minute timeout, sequential runtime, bounded stdout/stderr with audited truncation metadata, and dispatch payload caps; queue/admission and explicit concurrency policy remain open (#20) |
 | Audit integrity | Partial | Hash chain and local Merkle anchors; ambiguous ordering and no external publisher |
 | Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
 | Backup, restore, rollback | Open | No automated process or rehearsal evidence |
@@ -37,14 +37,18 @@ link to reproducible evidence in the release or pilot record.
 
 ### Configuration and topology
 
-- [ ] Production mode rejects `DEBUG=true`, placeholder `SECRET_KEY`, missing
-      signing keys, and non-HTTPS public URLs.
+- [x] Production mode rejects `DEBUG=true`, placeholder `SECRET_KEY`, missing
+      signing keys, and non-HTTPS public URLs (ENVIRONMENT=production fails
+      startup with every violation listed; covered by a configuration-matrix
+      test).
 - [ ] uvicorn is reachable only through the intended loopback/private proxy
       boundary.
 - [ ] TLS certificate issuance, renewal, expiration monitoring, and emergency
       replacement are documented and tested.
-- [ ] Proxy trust and client-IP handling are explicitly configured; spoofed
-      forwarding headers are tested.
+- [x] Proxy trust and client-IP handling are explicitly configured; spoofed
+      forwarding headers are tested (X-Forwarded-For is ignored unless
+      TRUST_PROXY_HEADERS=true; only the rightmost, proxy-appended entry is
+      trusted).
 - [ ] Firewall rules expose only required services.
 - [ ] Time synchronization and clock-skew assumptions for signed expiry are
       monitored.
@@ -86,12 +90,18 @@ link to reproducible evidence in the release or pilot record.
 
 ### Execution resource safety
 
-- [ ] Stdout and stderr have independent and combined byte limits.
-- [ ] Truncation is explicit, deterministic, and recorded in command/audit data.
+- [x] Stdout and stderr have independent and combined byte limits (256 KiB
+      per stream, 384 KiB combined; excess is counted, never buffered).
+- [x] Truncation is explicit, deterministic, and recorded in command/audit data
+      (structured flags plus original byte totals persisted on the command and
+      in `command.completed` audit detail; stderr preserved over stdout when
+      the combined cap binds).
 - [ ] Per-agent concurrency and queue/admission limits are configured and tested.
 - [ ] Timeout, cancellation, service stop, server outage, and result retry do not
       orphan processes or duplicate execution.
-- [ ] Payload and script-size limits exist at API and agent boundaries.
+- [x] Payload and script-size limits exist at API and agent boundaries
+      (64 KiB dispatch payload cap; server refuses over-cap results, and the
+      agent's script arrives inside the signed, capped payload).
 - [ ] Disk and log growth are bounded and observable.
 
 ### Audit evidence

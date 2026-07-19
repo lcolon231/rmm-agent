@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Enum,
@@ -259,6 +260,13 @@ class Command(Base):
     exit_code: Mapped[int | None] = mapped_column(Integer)
     stdout: Mapped[str | None] = mapped_column(Text)
     stderr: Mapped[str | None] = mapped_column(Text)
+    # Truncation evidence from the agent's bounded capture. NULL means the
+    # result predates output limits (or none was reported) — unknown, not
+    # "complete". The totals are the byte counts the child actually produced.
+    stdout_truncated: Mapped[bool | None] = mapped_column(Boolean)
+    stderr_truncated: Mapped[bool | None] = mapped_column(Boolean)
+    stdout_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    stderr_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

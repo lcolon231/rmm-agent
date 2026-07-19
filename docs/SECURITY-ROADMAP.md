@@ -71,10 +71,15 @@ least-privilege service account and installer lifecycle CI (issue #23).
 
 ### Enforce transport policy
 
-Production configuration must refuse plain HTTP, placeholder secrets, unsafe
-proxy assumptions, and untrusted certificate bypasses. Optional certificate
-pinning needs a rotation-safe trust model, multiple pins, expiry handling,
-recovery procedures, and tests. Pinning must not replace normal PKI validation.
+Implemented for configuration validation: `ENVIRONMENT=production` fails
+startup on debug mode, placeholder or short secrets, missing signing keys, and
+a missing/non-HTTPS/loopback public URL, listing every violation at once.
+Proxy trust is explicit opt-in (`TRUST_PROXY_HEADERS`), spoofed forwarding
+headers are ignored by default, and only the rightmost proxy-appended entry is
+used when trusted. Remaining: certificate lifecycle monitoring, and optional
+certificate pinning, which needs a rotation-safe trust model, multiple pins,
+expiry handling, recovery procedures, and tests — pinning must not replace
+normal PKI validation.
 
 ### Bound execution resources
 

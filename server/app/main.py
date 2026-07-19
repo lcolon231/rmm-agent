@@ -11,12 +11,18 @@ from fastapi import FastAPI
 from app.api import agents, auth, management
 from app.core.config import settings
 from app.core.database import Base, engine
+from app.core.prodcheck import ensure_safe_production_config
 from app.core.schema_revision import ensure_schema_current
 from app.core.tasks import offline_sweeper
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail closed before touching anything else: a production deployment with
+    # debug mode, placeholder secrets, missing signing keys, or a non-HTTPS
+    # public URL must not serve a single request.
+    ensure_safe_production_config(settings)
+
     # Dev convenience: create tables on startup. In production use Alembic
     # migrations instead (see alembic/).
     if settings.debug:

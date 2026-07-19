@@ -425,9 +425,13 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 	res := a.run(ctx, cmd.Kind, script)
 
 	if err := s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
-		ExitCode: res.ExitCode,
-		Stdout:   res.Stdout,
-		Stderr:   res.Stderr,
+		ExitCode:         res.ExitCode,
+		Stdout:           res.Stdout,
+		Stderr:           res.Stderr,
+		StdoutTruncated:  res.StdoutTruncated,
+		StderrTruncated:  res.StderrTruncated,
+		StdoutTotalBytes: res.StdoutTotalBytes,
+		StderrTotalBytes: res.StderrTotalBytes,
 	}); err != nil {
 		a.log.Printf("failed to report result for %s: %v", cmd.ID, err)
 	}

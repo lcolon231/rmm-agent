@@ -15,6 +15,17 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = True
 
+    # Public HTTPS base URL clients use to reach this deployment (through the
+    # TLS-terminating proxy), e.g. https://rmm.example.com. Required in
+    # production, where it must be https://.
+    public_base_url: str | None = None
+
+    # Whether to trust X-Forwarded-For from the immediate upstream when
+    # deriving the client IP (rate limiting, audit). Enable ONLY when uvicorn
+    # is reachable exclusively through the trusted proxy — with this on, a
+    # directly-reachable app port lets any caller spoof their address.
+    trust_proxy_headers: bool = False
+
     # --- Database ---
     # Example: postgresql+asyncpg://rmm:rmm@localhost:5432/rmm
     database_url: str = "postgresql+asyncpg://rmm:rmm@localhost:5432/rmm"

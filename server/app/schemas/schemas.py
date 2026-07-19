@@ -2,6 +2,7 @@
 """Pydantic v2 request/response schemas."""
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from typing import Annotated
@@ -13,6 +14,7 @@ from pydantic import (
     StringConstraints,
     field_serializer,
     field_validator,
+    model_validator,
 )
 
 from app.models.models import (
@@ -162,6 +164,11 @@ class HeartbeatAck(BaseModel):
 # --------------------------------------------------------------------------- #
 # Commands
 # --------------------------------------------------------------------------- #
+# Dispatch-side cap on the canonical payload (scripts included). Bounds what
+# an operator can push toward an agent in one command.
+MAX_COMMAND_PAYLOAD_BYTES = 64 * 1024
+
+
 class CommandCreate(BaseModel):
     kind: CommandKind
     payload: dict = Field(default_factory=dict)
@@ -170,7 +177,13 @@ class CommandCreate(BaseModel):
     @field_validator("payload")
     @classmethod
     def payload_must_be_canonicalizable(cls, value: dict) -> dict:
-        return validate_command_payload(value)
+        value = validate_command_payload(value)
+        size = len(json.dumps(value, separators=(",", ":")).encode("utf-8"))
+        if size > MAX_COMMAND_PAYLOAD_BYTES:
+            raise ValueError(
+                f"command payload exceeds {MAX_COMMAND_PAYLOAD_BYTES} bytes"
+            )
+        return value
 
 
 class CommandOut(BaseModel):
@@ -188,6 +201,10 @@ class CommandOut(BaseModel):
     status: CommandStatus
     created_at: datetime
     expires_at: datetime | None
+    stdout_truncated: bool | None = None
+    stderr_truncated: bool | None = None
+    stdout_total_bytes: int | None = None
+    stderr_total_bytes: int | None = None
 
     @field_serializer("issued_at", "expires_at", when_used="unless-none")
     def serialize_command_time(self, value: datetime) -> str:
@@ -195,11 +212,48 @@ class CommandOut(BaseModel):
         return format_command_time(value)
 
 
+# Server-side acceptance caps for reported command output. They mirror the
+# agent's capture limits (256 KiB per stream, 384 KiB combined) plus a small
+# allowance for agent-appended markers like "[command timed out]". A result
+# beyond these bounds cannot have come from a compliant agent, so it is
+# rejected outright rather than stored or re-truncated.
+MAX_RESULT_STREAM_BYTES = 256 * 1024 + 256
+MAX_RESULT_COMBINED_BYTES = 384 * 1024 + 256
+
+
 class CommandResult(BaseModel):
-    """Posted by the agent after execution."""
+    """Posted by the agent after execution.
+
+    The truncation fields are the agent's own report of its bounded capture;
+    None means an older agent that predates output limits (unknown, not
+    "complete"). Sizes are validated in bytes, not characters, because the
+    limits exist to bound storage and memory.
+    """
     exit_code: int
     stdout: str = ""
     stderr: str = ""
+    stdout_truncated: bool | None = None
+    stderr_truncated: bool | None = None
+    stdout_total_bytes: int | None = Field(default=None, ge=0)
+    stderr_total_bytes: int | None = Field(default=None, ge=0)
+
+    @field_validator("stdout", "stderr")
+    @classmethod
+    def stream_within_byte_limit(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > MAX_RESULT_STREAM_BYTES:
+            raise ValueError(
+                f"output stream exceeds {MAX_RESULT_STREAM_BYTES} bytes"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def combined_within_byte_limit(self) -> "CommandResult":
+        combined = len(self.stdout.encode("utf-8")) + len(self.stderr.encode("utf-8"))
+        if combined > MAX_RESULT_COMBINED_BYTES:
+            raise ValueError(
+                f"combined output exceeds {MAX_RESULT_COMBINED_BYTES} bytes"
+            )
+        return self
 
 
 class AgentOut(BaseModel):

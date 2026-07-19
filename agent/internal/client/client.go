@@ -143,11 +143,16 @@ func (c *Client) Heartbeat(ctx context.Context, s telemetry.Sample, inventory ma
 	return &ack, nil
 }
 
-// CommandResult is what the agent reports after execution.
+// CommandResult is what the agent reports after execution. The truncation
+// fields are additive: an older server ignores them.
 type CommandResult struct {
-	ExitCode int    `json:"exit_code"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
+	ExitCode         int    `json:"exit_code"`
+	Stdout           string `json:"stdout"`
+	Stderr           string `json:"stderr"`
+	StdoutTruncated  bool   `json:"stdout_truncated,omitempty"`
+	StderrTruncated  bool   `json:"stderr_truncated,omitempty"`
+	StdoutTotalBytes int64  `json:"stdout_total_bytes,omitempty"`
+	StderrTotalBytes int64  `json:"stderr_total_bytes,omitempty"`
 }
 
 // ReportResult sends the outcome of a command back to the server.

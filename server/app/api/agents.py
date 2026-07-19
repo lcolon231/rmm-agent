@@ -238,6 +238,10 @@ async def submit_result(
     cmd.exit_code = body.exit_code
     cmd.stdout = body.stdout
     cmd.stderr = body.stderr
+    cmd.stdout_truncated = body.stdout_truncated
+    cmd.stderr_truncated = body.stderr_truncated
+    cmd.stdout_total_bytes = body.stdout_total_bytes
+    cmd.stderr_total_bytes = body.stderr_total_bytes
     cmd.status = (
         CommandStatus.succeeded if body.exit_code == 0 else CommandStatus.failed
     )
@@ -253,5 +257,11 @@ async def submit_result(
             "kind": cmd.kind.value,
             "exit_code": body.exit_code,
             "status": cmd.status.value,
+            # Truncation is part of the accountability record: "what we stored"
+            # vs "what actually happened" must be distinguishable later.
+            "stdout_truncated": body.stdout_truncated,
+            "stderr_truncated": body.stderr_truncated,
+            "stdout_total_bytes": body.stdout_total_bytes,
+            "stderr_total_bytes": body.stderr_total_bytes,
         },
     )
