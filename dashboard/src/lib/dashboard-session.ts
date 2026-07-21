@@ -22,6 +22,7 @@ export async function getDashboardSession(): Promise<DashboardSessionState> {
     return {
       kind: "authenticated",
       operator: await currentOperator(sessionToken),
+      sessionToken,
     };
   } catch (error) {
     if (error instanceof NodelinkApiError && (error.status === 401 || error.status === 403)) {

@@ -14,9 +14,10 @@ import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_role
 from app.core import anchor, anchor_publish, audit
@@ -41,6 +42,7 @@ from app.models.models import (
     Command,
     CommandStatus,
     EnrollmentToken,
+    Heartbeat,
     Operator,
     OperatorRole,
     Site,
@@ -55,6 +57,11 @@ from app.schemas.schemas import (
     CommandOut,
     EnrollmentTokenCreate,
     EnrollmentTokenOut,
+    EndpointListItemOut,
+    EndpointListOut,
+    NavigationClientListOut,
+    NavigationClientOut,
+    NavigationSiteOut,
     SiteCreate,
     SiteOut,
     TrustStateChange,
@@ -69,6 +76,37 @@ router = APIRouter(
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+MAX_NAVIGATION_CLIENTS = 200
+
+
+async def _navigation_client(
+    db: AsyncSession, client: Client, site_counts: dict[str, int] | None = None
+) -> NavigationClientOut:
+    if site_counts is None:
+        site_counts = dict(
+            (
+                await db.execute(
+                    select(Agent.site_id, func.count(Agent.id))
+                    .where(Agent.site_id.in_([site.id for site in client.sites]))
+                    .group_by(Agent.site_id)
+                )
+            ).all()
+        ) if client.sites else {}
+    return NavigationClientOut(
+        id=client.id,
+        name=client.name,
+        sites=[
+            NavigationSiteOut(
+                id=site.id,
+                client_id=site.client_id,
+                name=site.name,
+                endpoint_count=site_counts.get(site.id, 0),
+            )
+            for site in client.sites
+        ],
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -92,6 +130,63 @@ async def list_clients(db: AsyncSession = Depends(get_db)):
     return list(result.scalars().all())
 
 
+@router.get("/clients/navigation", response_model=NavigationClientListOut)
+async def list_client_navigation(
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Client)
+        .options(selectinload(Client.sites))
+        .order_by(Client.created_at, Client.id)
+        .limit(MAX_NAVIGATION_CLIENTS + 1)
+    )
+    clients = list(result.scalars().unique().all())
+    truncated = len(clients) > MAX_NAVIGATION_CLIENTS
+    visible_clients = clients[:MAX_NAVIGATION_CLIENTS]
+    site_ids = [site.id for client in visible_clients for site in client.sites]
+    site_counts = dict(
+        (
+            await db.execute(
+                select(Agent.site_id, func.count(Agent.id))
+                .where(Agent.site_id.in_(site_ids))
+                .group_by(Agent.site_id)
+            )
+        ).all()
+    ) if site_ids else {}
+    items = [
+        await _navigation_client(db, client, site_counts) for client in visible_clients
+    ]
+    await audit.record(
+        db,
+        action="client_navigation.list_viewed",
+        actor=operator.email,
+        detail={"client_count": len(items), "truncated": truncated},
+    )
+    return NavigationClientListOut(items=items, truncated=truncated)
+
+
+@router.get("/clients/{client_id}", response_model=NavigationClientOut)
+async def get_client_navigation(
+    client_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Client).options(selectinload(Client.sites)).where(Client.id == client_id)
+    )
+    client = result.scalar_one_or_none()
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    await audit.record(
+        db,
+        action="client_navigation.client_viewed",
+        actor=operator.email,
+        detail={"client_id": client.id},
+    )
+    return await _navigation_client(db, client)
+
+
 @router.post("/sites", response_model=SiteOut)
 async def create_site(
     body: SiteCreate,
@@ -104,6 +199,36 @@ async def create_site(
     db.add(site)
     await db.flush()
     return site
+
+
+@router.get("/sites/{site_id}", response_model=NavigationSiteOut)
+async def get_site_navigation(
+    site_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Site, func.count(Agent.id))
+        .outerjoin(Agent, Agent.site_id == Site.id)
+        .where(Site.id == site_id)
+        .group_by(Site.id)
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Site not found")
+    site, endpoint_count = row
+    await audit.record(
+        db,
+        action="client_navigation.site_viewed",
+        actor=operator.email,
+        detail={"site_id": site.id, "client_id": site.client_id},
+    )
+    return NavigationSiteOut(
+        id=site.id,
+        client_id=site.client_id,
+        name=site.name,
+        endpoint_count=endpoint_count,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -146,6 +271,93 @@ async def create_enrollment_token(
 async def list_agents(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Agent).order_by(Agent.enrolled_at))
     return list(result.scalars().all())
+
+
+@router.get("/endpoints", response_model=EndpointListOut)
+async def list_endpoints(
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    client_id: str | None = Query(default=None, min_length=1, max_length=36),
+    site_id: str | None = Query(default=None, min_length=1, max_length=36),
+    status: AgentStatus | None = None,
+    search: str | None = Query(default=None, min_length=1, max_length=100),
+    sort: str = Query(default="last_seen", pattern="^(last_seen|hostname|status)$"),
+    direction: str = Query(default="desc", pattern="^(asc|desc)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    latest_heartbeat_id = (
+        select(Heartbeat.id)
+        .where(Heartbeat.agent_id == Agent.id)
+        .correlate(Agent)
+        .order_by(Heartbeat.ts.desc(), Heartbeat.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    filters = []
+    if client_id:
+        filters.append(Client.id == client_id)
+    if site_id:
+        filters.append(Site.id == site_id)
+    if status:
+        filters.append(Agent.status == status)
+    if search:
+        filters.append(Agent.hostname.ilike(f"%{search.strip()}%"))
+    base = select(Agent).join(Site).join(Client).where(*filters)
+    total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    sort_column = {
+        "hostname": Agent.hostname,
+        "status": Agent.status,
+        "last_seen": Agent.last_seen_at,
+    }[sort]
+    ordering = sort_column.asc() if direction == "asc" else sort_column.desc()
+    result = await db.execute(
+        select(Agent, Client, Site, Heartbeat)
+        .join(Site, Agent.site_id == Site.id)
+        .join(Client, Site.client_id == Client.id)
+        .outerjoin(Heartbeat, Heartbeat.id == latest_heartbeat_id)
+        .where(*filters)
+        .order_by(ordering, Agent.id.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = [
+        EndpointListItemOut(
+            id=agent.id,
+            hostname=agent.hostname,
+            os=agent.os,
+            os_version=agent.os_version,
+            agent_version=agent.agent_version,
+            status=agent.status,
+            last_seen_at=agent.last_seen_at,
+            client_id=client.id,
+            client_name=client.name,
+            site_id=site.id,
+            site_name=site.name,
+            cpu_percent=heartbeat.cpu_percent if heartbeat else None,
+            mem_percent=heartbeat.mem_percent if heartbeat else None,
+            disk_percent=heartbeat.disk_percent if heartbeat else None,
+            logged_in_user=heartbeat.logged_in_user if heartbeat else None,
+        )
+        for agent, client, site, heartbeat in result.all()
+    ]
+    await audit.record(
+        db,
+        action="endpoint_list.viewed",
+        actor=operator.email,
+        detail={
+            "client_id": client_id,
+            "site_id": site_id,
+            "status": status.value if status else None,
+            "search": bool(search),
+            "sort": sort,
+            "direction": direction,
+            "page": page,
+            "page_size": page_size,
+            "result_count": len(items),
+        },
+    )
+    return EndpointListOut(items=items, page=page, page_size=page_size, total=total)
 
 
 @router.get("/agents/{agent_id}", response_model=AgentOut)
