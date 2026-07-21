@@ -13,10 +13,12 @@ for regulated small businesses and MSPs. The primary support target is Windows.
 Linux and macOS binaries can be built, but cross-platform product support is a
 Milestone 4 goal.
 
-The current repository is an API and agent scaffold, not a complete RMM. There
-is no dashboard, patch engine, live remote shell, remote desktop, compliance
-exporter, or tenant-scoped authorization. Production and regulated endpoint use
-remain outside the supported boundary until the deployment-safety gates in
+The current repository is an API, agent, and dashboard-foundation scaffold, not
+a complete RMM. The dashboard requires an authenticated operator but remains
+fixture-backed and has no live management workflows. There is no production
+endpoint console, patch engine, live remote shell, remote desktop, compliance
+exporter, or tenant-scoped authorization. Production and regulated endpoint use remain outside the
+supported boundary until the deployment-safety gates in
 [DEPLOYMENT-READINESS.md](DEPLOYMENT-READINESS.md) are satisfied.
 
 ## 2. Current topology and transport
@@ -103,9 +105,15 @@ stronger policy and approval controls.
 
 ### 3.3 Product plane
 
-The product plane will provide the technician and customer experience. It does
-not exist in this repository today. Milestone 1 introduces the authenticated
-Next.js dashboard, endpoint and audit views, inventory, monitoring, alerts,
+The product plane provides the technician and customer experience. A Next.js
+dashboard foundation now exists in `dashboard/`: it has a responsive fixture
+overview, runtime configuration validation, a server-only NodeLink API client,
+a backend health route, and a same-origin login/logout flow. It stores the API
+JWT only in an HTTP-only, same-site cookie, revalidates the authenticated
+operator for each dashboard request, and does not display live management data.
+
+Milestone 1 adds live client/site and endpoint
+views, command and audit workflows, inventory, monitoring, alerts,
 notifications, script library, and recurring tasks. Later phases add patching,
 remediation, evidence workflows, and ecosystem integrations.
 
@@ -343,11 +351,10 @@ NodeLink's command signature or audit guarantees.
 
 ## 10. Repository evolution
 
-The current top-level structure is `agent/`, `server/`, `installer/`, `deploy/`,
-`docs/`, and `.github/`. Planned additions are:
+The current top-level structure is `agent/`, `dashboard/`, `server/`,
+`installer/`, `deploy/`, `docs/`, and `.github/`. Planned additions are:
 
 ```text
-dashboard/   technician web application (planned)
 contracts/   versioned schemas and canonical signature vectors (implemented)
 tools/       audit verification and operational utilities (planned)
 ```
@@ -359,8 +366,10 @@ moved merely to match an aspirational tree.
 ## 11. Known limitations and documentation corrections
 
 - Polling is the only command transport; output is buffered, not streamed.
-- Dashboard, complete inventory, monitoring alerts, scheduling, patching,
-  remediation, remote shell, and remote desktop are not implemented.
+- The dashboard requires an authenticated operator but its overview remains
+  fixture-backed; live management workflows, complete inventory, monitoring
+  alerts, scheduling, patching, remediation, remote shell, and remote desktop
+  are not implemented.
 - TLS termination itself remains an operator-run topology, but production
   mode (ENVIRONMENT=production) now fails startup on debug mode, placeholder
   or short secrets, missing signing keys, and a missing/non-HTTPS/loopback

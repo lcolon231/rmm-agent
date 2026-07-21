@@ -62,6 +62,9 @@ The code in this repository currently provides:
   binaries and the installer are not yet Authenticode-signed.
 - Linux and macOS development builds of the polling agent. Windows is the only
   primary support target; those builds are not a supported cross-platform RMM.
+- A fixture-backed Next.js dashboard foundation with a responsive operations
+  overview, environment-validated server-only API boundary, and same-origin
+  operator sessions. It does not yet display live API data.
 
 The [architecture document](docs/ARCHITECTURE.md) is the source of truth for
 the implementation and its security boundaries.
@@ -92,7 +95,7 @@ soak test (the harness and runbook ship in `deploy/soak/` and
 
 The repository does **not** currently contain:
 
-- A web dashboard, authentication UI, endpoint console, or audit UI.
+- An authenticated, live-data dashboard, endpoint console, or audit UI.
 - WebSocket or other live agent transport, interactive remote shell, or
   streaming command output. Polling remains the only transport.
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, TPM,
@@ -139,14 +142,16 @@ rmm-agent/
 └── .github/     # CI, release automation, and contribution templates
 ```
 
-Future `dashboard/` and `tools/` directories are planned. No
-disruptive reorganization is part of the current planning change.
+The `dashboard/` directory now contains a fixture-backed technician interface;
+`tools/` remains planned. No disruptive reorganization is part of the current
+planning change.
 
 ## Local development
 
 See [server/README.md](server/README.md) to run the backend,
 [agent/README.md](agent/README.md) to build and enroll an agent, and
-[installer/README.md](installer/README.md) for the Windows installer.
+[installer/README.md](installer/README.md) for the Windows installer. See
+[dashboard/README.md](dashboard/README.md) to run the dashboard foundation.
 
 Before any pilot, review the [threat model](docs/threat-model.md),
 [security roadmap](docs/SECURITY-ROADMAP.md), and
