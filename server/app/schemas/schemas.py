@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -315,6 +315,39 @@ class EndpointListOut(BaseModel):
     page: int = Field(ge=1)
     page_size: int = Field(ge=1, le=100)
     total: int = Field(ge=0)
+
+
+class EndpointTelemetrySampleOut(BaseModel):
+    ts: datetime
+    cpu_percent: float | None
+    mem_percent: float | None
+    disk_percent: float | None
+    uptime_seconds: int | None
+    logged_in_user: str | None
+
+
+class EndpointDetailOut(BaseModel):
+    id: str
+    hostname: str
+    os: str
+    os_version: str
+    agent_version: str
+    command_envelope_versions: list[EnvelopeVersion]
+    status: AgentStatus
+    trust_state: AgentTrustState
+    last_seen_at: datetime | None
+    enrolled_at: datetime
+    client_id: str
+    client_name: str
+    site_id: str
+    site_name: str
+    current_telemetry: EndpointTelemetrySampleOut | None
+    telemetry: list[EndpointTelemetrySampleOut] = Field(default_factory=list)
+    telemetry_freshness: Literal["current", "stale", "unavailable"]
+    stale_after_seconds: int = Field(ge=1)
+    history_hours: int = Field(ge=1, le=168)
+    history_limit: int = Field(ge=10, le=500)
+    history_truncated: bool = False
 
 
 class TrustStateChange(BaseModel):

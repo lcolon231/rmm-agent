@@ -13,6 +13,7 @@ Run just this file:  pytest tests/test_auth.py -q
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_auth.db")
 os.environ.setdefault("DEBUG", "false")
@@ -93,6 +94,7 @@ async def test_client_navigation_requires_auth(client):
     assert (await client.get("/api/v1/clients/missing")).status_code == 401
     assert (await client.get("/api/v1/sites/missing")).status_code == 401
     assert (await client.get("/api/v1/endpoints")).status_code == 401
+    assert (await client.get("/api/v1/endpoints/missing")).status_code == 401
 
 
 @pytest.mark.asyncio
@@ -104,6 +106,91 @@ async def test_endpoint_list_validates_filters_and_is_readonly(client):
     response = await client.get("/api/v1/endpoints?sort=hostname&direction=asc&page=1&page_size=25", headers=auth)
     assert response.status_code == 200
     assert response.json() == {"items": [], "page": 1, "page_size": 25, "total": 0}
+
+
+@pytest.mark.asyncio
+async def test_endpoint_detail_returns_bounded_telemetry_and_audits(client):
+    operator_token = (await _login(client, "admin@nodelink.test", "correct-horse")).json()["access_token"]
+    operator_auth = {"Authorization": f"Bearer {operator_token}"}
+    client_out = (await client.post("/api/v1/clients", json={"name": "Telemetry Clinic"}, headers=operator_auth)).json()
+    site_out = (
+        await client.post(
+            "/api/v1/sites",
+            json={"client_id": client_out["id"], "name": "Diagnostics"},
+            headers=operator_auth,
+        )
+    ).json()
+
+    from sqlalchemy import select
+    from app.models.models import Agent, AgentStatus, AuditEvent, Heartbeat
+
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as db:
+        endpoint = Agent(
+            site_id=site_out["id"],
+            token_hash="telemetry-endpoint-token",
+            hostname="LAB-WS-31",
+            os="windows",
+            os_version="11",
+            agent_version="0.1.0",
+            command_envelope_versions=["command-v3"],
+            status=AgentStatus.online,
+            last_seen_at=now,
+        )
+        db.add(endpoint)
+        await db.flush()
+        endpoint_id = endpoint.id
+        for index in range(12):
+            db.add(
+                Heartbeat(
+                    agent_id=endpoint_id,
+                    ts=now - timedelta(minutes=11 - index),
+                    cpu_percent=float(index),
+                    mem_percent=float(index + 20),
+                    disk_percent=float(index + 40),
+                    uptime_seconds=3_600 + index,
+                    logged_in_user="NODELINK\\technician",
+                )
+            )
+        await db.commit()
+
+    readonly_token = (await _login(client, "viewer@nodelink.test", "read-only-pass")).json()["access_token"]
+    readonly_auth = {"Authorization": f"Bearer {readonly_token}"}
+    assert (await client.get(f"/api/v1/endpoints/{endpoint_id}?history_hours=0", headers=readonly_auth)).status_code == 422
+    assert (await client.get(f"/api/v1/endpoints/{endpoint_id}?history_limit=501", headers=readonly_auth)).status_code == 422
+    assert (await client.get("/api/v1/endpoints/missing", headers=readonly_auth)).status_code == 404
+
+    response = await client.get(
+        f"/api/v1/endpoints/{endpoint_id}?history_hours=1&history_limit=10",
+        headers=readonly_auth,
+    )
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["hostname"] == "LAB-WS-31"
+    assert detail["client_name"] == "Telemetry Clinic"
+    assert detail["site_name"] == "Diagnostics"
+    assert detail["telemetry_freshness"] == "current"
+    assert detail["history_truncated"] is True
+    assert len(detail["telemetry"]) == 10
+    assert [sample["cpu_percent"] for sample in detail["telemetry"]] == [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0]
+    assert detail["current_telemetry"]["cpu_percent"] == 11.0
+    assert detail["current_telemetry"]["uptime_seconds"] == 3_611
+
+    async with AsyncSessionLocal() as db:
+        audit_event = await db.scalar(
+            select(AuditEvent)
+            .where(AuditEvent.action == "endpoint_detail.viewed")
+            .order_by(AuditEvent.ts.desc())
+        )
+    assert audit_event is not None
+    assert audit_event.actor == "viewer@nodelink.test"
+    assert audit_event.agent_id == endpoint_id
+    assert audit_event.detail == {
+        "history_hours": 1,
+        "history_limit": 10,
+        "history_count": 10,
+        "history_truncated": True,
+    }
 
 
 @pytest.mark.asyncio

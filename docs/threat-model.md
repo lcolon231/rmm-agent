@@ -59,6 +59,19 @@ Two hardening layers on top of that:
   multiple workers the effective limit multiplies by the worker count; move
   them to a shared store before scaling out.
 
+**Dashboard telemetry read boundary.** The browser never receives the operator
+bearer token; server-side dashboard code forwards it from an HTTP-only,
+same-site cookie only after revalidating the operator. Endpoint inventory and
+detail routes require at least the `readonly` role, and successful detail reads
+are audited as `endpoint_detail.viewed`. The endpoint ID is an opaque lookup key,
+not an authorization boundary: current roles are deployment-global and do not
+provide tenant-scoped isolation. A readonly operator can therefore see host
+identity, operational telemetry, and the latest logged-in username across the
+deployment. The detail response excludes agent credentials, token hashes, and
+raw inventory. History queries are constrained to 168 hours and 500 samples to
+reduce accidental or abusive bulk extraction and resource use. Missing metrics
+remain explicit so an absent value cannot be misread as a healthy zero.
+
 ### (2) Server ↔ Network (transport)
 
 Agents connect **outbound only**. There is no inbound agent port to open at a

@@ -141,6 +141,8 @@ real backend state before it is presented as complete.
   system.
 - Client scope and issue filters compose with search.
 - Selecting a row opens a quick endpoint preview.
+- The preview links to a dedicated URL-addressable endpoint detail page without
+  discarding the fleet context.
 - Export creates a CSV from the currently visible endpoint set.
 - Telemetry bars reserve red for values at or above 90 percent and amber for
   values at or above 68 percent.
@@ -151,6 +153,17 @@ real backend state before it is presented as complete.
 - It includes identity, status, last-seen time, user, endpoint group, trust,
   and telemetry.
 - Sensitive actions begin with review rather than immediate execution.
+
+### Endpoint detail
+
+- Identity and current state remain visible before telemetry history.
+- CPU, memory, and system-disk history share one UTC time axis while preserving
+  missing samples as gaps rather than zeros.
+- The operator can select bounded 6-hour, 24-hour, 3-day, or 7-day windows.
+- Current, stale, unavailable, and unsupported states use text and iconography,
+  not color alone.
+- Each chart has an accessible name and description, and an expandable
+  exact-values table provides the same information without graphics.
 
 ## Responsive behavior
 
@@ -179,8 +192,9 @@ The initial dashboard can map to the existing management API as follows:
 | Interface area | API |
 | --- | --- |
 | Client scope | `GET /api/v1/clients` |
-| Endpoint table | `GET /api/v1/agents` |
-| Endpoint preview | `GET /api/v1/agents/{agent_id}` |
+| Endpoint table | `GET /api/v1/endpoints` |
+| Endpoint preview | `GET /api/v1/endpoints/{endpoint_id}` |
+| Endpoint telemetry history | `GET /api/v1/endpoints/{endpoint_id}` with bounded history parameters |
 | Command history | `GET /api/v1/agents/{agent_id}/commands` |
 | Command review and dispatch | `POST /api/v1/agents/{agent_id}/commands` |
 | Signing-key status | `GET /api/v1/signing-keys` |
@@ -208,6 +222,18 @@ returns only the latest heartbeat telemetry and redacts inventory and agent
 credentials; successful reads create an audit event with filter metadata but
 not search text.
 
+The endpoint detail page is live read-only data from
+`GET /api/v1/endpoints/{endpoint_id}`. The service accepts a 1-to-168-hour
+window and 10-to-500 sample limit, returns a chronological bounded heartbeat
+history, and reports whether the result was truncated. It fetches the latest
+heartbeat independently of the selected window and labels telemetry current,
+stale, or unavailable. Stale means older than three configured heartbeat
+intervals with a five-minute minimum. Missing and unsupported metrics remain
+nullable; the UI displays them as unavailable and breaks chart lines across
+missing samples. Timestamps are explicitly UTC. Successful reads create a
+redacted `endpoint_detail.viewed` audit event with the actor, endpoint, bounded
+query values, and result count.
+
 This foundation performs no dashboard mutation. Navigation list and detail
 views are authorized for readonly operators and record redacted audit evidence;
 there is no persisted dashboard state or schema migration. The API does not
@@ -217,9 +243,10 @@ database schema changed.
 
 ## Delivery sequence
 
-1. Operations overview and responsive application shell.
-2. Endpoint table backed by live agents and telemetry.
-4. Endpoint detail with command history.
+1. Operations overview and responsive application shell. **Implemented.**
+2. Endpoint table backed by live agents and telemetry. **Implemented.**
+3. Endpoint identity, current telemetry, and bounded history. **Implemented.**
+4. Endpoint command history.
 5. Signed command review and dispatch.
 6. Audit verification and anchor management.
 7. Enrollment-token and operator administration.

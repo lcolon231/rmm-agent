@@ -112,9 +112,21 @@ overview, runtime configuration validation, a server-only NodeLink API client,
 a backend health route, and a same-origin login/logout flow. It stores the API
 JWT only in an HTTP-only, same-site cookie, revalidates the authenticated
 operator for each dashboard request, and displays bounded read-only client/site
-navigation and endpoint inventory from authorized APIs with redacted audit
-evidence. Endpoint rows expose only the latest heartbeat telemetry, never raw
-inventory snapshots or agent credentials.
+navigation, endpoint inventory, and endpoint telemetry detail from authorized
+APIs with redacted audit evidence. Endpoint list rows expose only the latest
+heartbeat. Endpoint detail adds a bounded chronological heartbeat history but
+never returns raw inventory snapshots, token hashes, or agent credentials.
+
+Endpoint telemetry detail accepts a 1-to-168-hour history window and a 10-to-500
+sample limit. The latest heartbeat is fetched independently of that window and
+is classified as current, stale, or unavailable; stale means older than three
+configured heartbeat intervals with a five-minute minimum. Nullable values
+represent missing or unsupported metrics and are not converted to zero. The
+dashboard labels timestamps in UTC and gives charts accessible text and tabular
+alternatives. The API records `endpoint_detail.viewed` with the actor, endpoint,
+bounded query values, and result count. It stores no new state, performs no
+automatic retry, and requires no database migration, so rollback is limited to
+the server and dashboard deployment.
 
 Milestone 1 adds live client/site and endpoint
 views, command and audit workflows, inventory, monitoring, alerts,
@@ -175,7 +187,9 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST/GET | `/clients` | Create/list clients | Operator / Readonly |
 | POST | `/sites` | Create site | Operator |
 | POST | `/enrollment-tokens` | Create token | Operator |
-| GET | `/agents`, `/agents/{id}` | List/get endpoint | Readonly |
+| GET | `/agents`, `/agents/{id}` | Legacy list/get endpoint | Readonly |
+| GET | `/endpoints` | Filtered, paginated endpoint inventory | Readonly |
+| GET | `/endpoints/{id}` | Endpoint identity, current telemetry, and bounded history | Readonly |
 | POST | `/agents/{id}/quarantine` | Suspend agent trust (reversible) | Operator |
 | POST | `/agents/{id}/restore` | Return quarantined agent to active | Operator |
 | POST | `/agents/{id}/revoke` | Permanently revoke agent credentials | Admin |
@@ -187,9 +201,10 @@ All application routes except `/healthz` are under `/api/v1`.
 | GET | `/audit/anchors/{id}/receipt` | External publication receipt + tamper check | Readonly |
 | GET | `/audit/publication-status` | External anchor publication lag/health | Readonly |
 
-There are no APIs yet for listing/revoking enrollment tokens,
-telemetry history, operator listing/editing, audit-event listing, monitoring,
-alerts, scheduling, patching, or evidence export.
+There are no APIs yet for listing/revoking enrollment tokens, operator
+listing/editing, audit-event listing, monitoring policies or alerts, scheduling,
+patching, or evidence export. Telemetry history is available only as a bounded
+read-only endpoint-detail query, not as a general analytics API.
 
 ## 5. Agent
 
