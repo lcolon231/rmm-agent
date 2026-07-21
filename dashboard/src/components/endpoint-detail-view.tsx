@@ -11,6 +11,7 @@ import {
   HardDrive,
   MemoryStick,
   ShieldCheck,
+  TerminalSquare,
   TriangleAlert,
   UserRound,
 } from "lucide-react";
@@ -154,6 +155,9 @@ export function EndpointDetailView({ endpoint, operator }: { endpoint: EndpointD
               {endpoint.status === "online" ? <CheckCircle2 size={16} /> : <Circle size={16} />}{statusLabel(endpoint.status)}
             </span>
             <span className={`detail-freshness ${endpoint.telemetry_freshness}`}><Activity size={15} /> Telemetry {freshnessLabel.toLowerCase()}</span>
+            <Link className="detail-console-link" href={`/endpoints/${encodeURIComponent(endpoint.id)}/commands`}>
+              <TerminalSquare size={15} /> Command console
+            </Link>
           </div>
         </section>
 

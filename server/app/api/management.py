@@ -54,6 +54,9 @@ from app.schemas.schemas import (
     ClientCreate,
     ClientOut,
     CommandCreate,
+    CommandDetailOut,
+    CommandHistoryItemOut,
+    CommandHistoryOut,
     CommandOut,
     EnrollmentTokenCreate,
     EnrollmentTokenOut,
@@ -742,14 +745,112 @@ async def dispatch_command(
     return cmd
 
 
-@router.get("/agents/{agent_id}/commands", response_model=list[CommandOut])
-async def list_commands(agent_id: str, db: AsyncSession = Depends(get_db)):
+def _effective_command_status(cmd: Command, now: datetime) -> CommandStatus:
+    """Report queued/dispatched work past expires_at as expired.
+
+    The stored row flips to expired at the next agent heartbeat sweep; until
+    then the operator view must not present dead work as pending. The rare
+    race where a dispatched command's result lands just after expiry keeps the
+    agent-reported terminal status, which is the truthful record of what ran.
+    """
+    if cmd.status in (CommandStatus.queued, CommandStatus.dispatched):
+        expires = cmd.expires_at
+        if expires is not None:
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if expires < now:
+                return CommandStatus.expired
+    return cmd.status
+
+
+@router.get("/agents/{agent_id}/commands", response_model=CommandHistoryOut)
+async def list_commands(
+    agent_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """Paginated command history for one endpoint, newest first."""
+    if await db.get(Agent, agent_id) is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    total = (
+        await db.execute(
+            select(func.count()).select_from(Command).where(Command.agent_id == agent_id)
+        )
+    ).scalar_one()
+    outstanding = (
+        await db.execute(
+            select(func.count())
+            .select_from(Command)
+            .where(
+                Command.agent_id == agent_id,
+                Command.status.in_(
+                    [
+                        CommandStatus.queued,
+                        CommandStatus.dispatched,
+                        CommandStatus.running,
+                    ]
+                ),
+            )
+        )
+    ).scalar_one()
     result = await db.execute(
         select(Command)
         .where(Command.agent_id == agent_id)
-        .order_by(Command.created_at.desc())
+        .order_by(Command.created_at.desc(), Command.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    return list(result.scalars().all())
+    now = _now()
+    items = []
+    for cmd in result.scalars().all():
+        item = CommandHistoryItemOut.model_validate(cmd)
+        item.status = _effective_command_status(cmd, now)
+        items.append(item)
+    return CommandHistoryOut(
+        items=items,
+        page=page,
+        page_size=page_size,
+        total=total,
+        outstanding=outstanding,
+        outstanding_limit=settings.max_outstanding_commands_per_agent,
+    )
+
+
+@router.get(
+    "/agents/{agent_id}/commands/{command_id}", response_model=CommandDetailOut
+)
+async def get_command(
+    agent_id: str,
+    command_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    """One command's signed-envelope evidence and bounded result streams.
+
+    Viewing is audited: the detail response includes captured stdout/stderr,
+    which can contain sensitive endpoint data, so the record must show who
+    read it.
+    """
+    cmd = (
+        await db.execute(
+            select(Command).where(
+                Command.id == command_id, Command.agent_id == agent_id
+            )
+        )
+    ).scalar_one_or_none()
+    if cmd is None:
+        raise HTTPException(status_code=404, detail="Command not found")
+    detail = CommandDetailOut.model_validate(cmd)
+    detail.status = _effective_command_status(cmd, _now())
+    await audit.record(
+        db,
+        action="command_detail.viewed",
+        actor=operator.email,
+        agent_id=agent_id,
+        detail={"command_id": cmd.id, "status": detail.status.value},
+    )
+    return detail
 
 
 # --------------------------------------------------------------------------- #

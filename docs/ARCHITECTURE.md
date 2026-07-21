@@ -111,7 +111,7 @@ dashboard foundation now exists in `dashboard/`: it has a responsive fixture
 overview, runtime configuration validation, a server-only NodeLink API client,
 a backend health route, and a same-origin login/logout flow. It stores the API
 JWT only in an HTTP-only, same-site cookie, revalidates the authenticated
-operator for each dashboard request, and displays bounded read-only client/site
+operator for each dashboard request, and displays bounded client/site
 navigation, endpoint inventory, and endpoint telemetry detail from authorized
 APIs with redacted audit evidence. Endpoint list rows expose only the latest
 heartbeat. Endpoint detail adds a bounded chronological heartbeat history but
@@ -128,10 +128,41 @@ bounded query values, and result count. It stores no new state, performs no
 automatic retry, and requires no database migration, so rollback is limited to
 the server and dashboard deployment.
 
-Milestone 1 adds live client/site and endpoint
-views, command and audit workflows, inventory, monitoring, alerts,
-notifications, script library, and recurring tasks. Later phases add patching,
-remediation, evidence workflows, and ecosystem integrations.
+The dashboard also has a per-endpoint command console at
+`/endpoints/{id}/commands` with a command detail record at
+`/endpoints/{id}/commands/{commandId}`. Dispatch is a two-step
+compose-then-confirm flow available only to `operator`/`admin` roles and only
+for endpoints in the `active` trust state; `readonly` operators see history and
+results with an explicit read-only notice, and the server enforces the same
+rules regardless of what the UI shows. Dispatch input is validated in the
+browser and again in a same-origin Next.js route handler (supported kinds only,
+script required for `powershell`/`shell` and refused for `collect_inventory`,
+56 KiB script bound under the 60 KiB signed-payload cap, 1s-24h TTL) before
+being forwarded to `POST /agents/{id}/commands`, whose admission, trust, and
+envelope-negotiation refusals are surfaced to the operator as distinct
+messages. Cancellation after dispatch is deliberately unsupported — the agent
+side has no cancel channel — so the UI states that unpicked work dies at its
+signed expiry and shows the queue admission meter instead.
+
+Two operator read APIs back these views, separate from the agent-facing
+`CommandOut` delivery contract so dashboard needs never grow the signed
+envelope: `GET /agents/{id}/commands` (paginated history, newest first, page
+size 1-100, with outstanding-queue counts) and
+`GET /agents/{id}/commands/{command_id}` (full record: payload, envelope
+version, schema version, nonce, signing key id, signature, lifecycle
+timestamps, exit code, and the bounded stdout/stderr with truncation flags and
+true total byte counts). Both report an *effective* status: stored
+queued/dispatched work past `expires_at` is returned as `expired` without
+mutating the row, which the next heartbeat sweep persists. Because captured
+output can contain sensitive endpoint data, reading a command detail is
+audited as `command_detail.viewed` with the actor and command id. Neither
+route stores new state and no schema change was required, so rollback is
+limited to the server and dashboard deployment. In-flight views poll by
+re-fetching bounded server data; output remains buffered, never streamed.
+
+Milestone 1 adds the remaining live audit workflows, inventory, monitoring,
+alerts, notifications, script library, and recurring tasks. Later phases add
+patching, remediation, evidence workflows, and ecosystem integrations.
 
 ## 4. Server
 
@@ -384,11 +415,12 @@ moved merely to match an aspirational tree.
 
 ## 11. Known limitations and documentation corrections
 
-- Polling is the only command transport; output is buffered, not streamed.
+- Polling is the only command transport; output is buffered, not streamed, and
+  a dispatched command cannot be cancelled — expiry is the only bound.
 - The dashboard requires an authenticated operator but its overview remains
-  fixture-backed; live management workflows, complete inventory, monitoring
-  alerts, scheduling, patching, remediation, remote shell, and remote desktop
-  are not implemented.
+  fixture-backed; beyond the endpoint telemetry and command console views,
+  live audit UI, complete inventory, monitoring alerts, scheduling, patching,
+  remediation, remote shell, and remote desktop are not implemented.
 - TLS termination itself remains an operator-run topology, but production
   mode (ENVIRONMENT=production) now fails startup on debug mode, placeholder
   or short secrets, missing signing keys, and a missing/non-HTTPS/loopback

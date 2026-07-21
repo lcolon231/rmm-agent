@@ -2,12 +2,14 @@
 
 The NodeLink dashboard is a Next.js technician interface. This foundation
 provides a responsive, accessible operations overview, a server-mediated
-operator sign-in boundary, and live read-only client/site navigation, endpoint
-inventory, and endpoint telemetry detail.
+operator sign-in boundary, live client/site navigation, endpoint inventory,
+endpoint telemetry detail, and a per-endpoint command console with role-gated
+compose-and-confirm dispatch, paginated command history, and per-command
+records (envelope evidence, exit code, bounded stdout/stderr with truncation
+totals).
 
-Aggregate overview and audit panels remain fixture-backed, and the interface
-does not dispatch commands or mutate endpoints. It must not be used to manage
-production or regulated endpoints.
+Aggregate overview and audit panels remain fixture-backed. It must not be used
+to manage production or regulated endpoints.
 
 ## Local development
 
@@ -79,14 +81,32 @@ nullable and render as unavailable rather than as zero. Timestamps are displayed
 explicitly in UTC, and every chart has a text alternative plus an exact-values
 table. Successful reads create a redacted `endpoint_detail.viewed` audit event.
 
+## Command console
+
+`/endpoints/{id}/commands` lists an endpoint's signed command history (newest
+first, paginated) with a queue admission meter, and `operator`/`admin` roles can
+dispatch `powershell`, `shell`, and `collect_inventory` commands through a
+compose-then-confirm flow; `readonly` operators get history and results with an
+explicit read-only notice. Dispatch is validated in the browser and again in a
+same-origin route handler before being forwarded to the NodeLink API, which
+independently enforces role, trust state, queue admission, and envelope
+negotiation. `/endpoints/{id}/commands/{commandId}` shows one command's full
+record: lifecycle timestamps, signed payload, envelope evidence (version,
+schema, nonce, signing key, signature), exit code, and bounded stdout/stderr
+with explicit truncation notes that state the true byte totals; unknown
+truncation state from older agents is labeled unknown, never complete.
+Commands cannot be cancelled after dispatch — unpicked work dies at its signed
+expiry — and in-flight pages re-fetch bounded server data on an interval.
+Reading a command record creates a `command_detail.viewed` audit event.
+
 ## Foundation boundary
 
-- No dashboard mutation, browser token, or persisted dashboard state exists.
-  Aggregate overview and audit panels remain fixture-backed; client/site
-  navigation, endpoint inventory, and endpoint telemetry detail are live and
-  read-only. No schema migration is required for these APIs.
-- The API client makes no automatic retry. Later mutation workflows must define
-  explicit idempotency and retry behavior before they use it.
+- The only dashboard mutation is command dispatch, which is forwarded
+  same-origin with the operator's HTTP-only session cookie; no browser token or
+  persisted dashboard state exists. Aggregate overview and audit panels remain
+  fixture-backed. No schema migration is required for these APIs.
+- The API client makes no automatic retry, and dispatch is not retried —
+  a failed dispatch is reported and the operator decides whether to resend.
 - Rollback is deployment-level: remove or disable the dashboard service without
   changing the agent, FastAPI server, or database schema.
 - The dashboard requires Node.js 24 and a compatible NodeLink API origin; it

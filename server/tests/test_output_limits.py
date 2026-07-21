@@ -130,9 +130,12 @@ async def test_exact_boundary_accepted_and_truncation_persisted(client):
     assert len(cmd.stdout) == MAX_RESULT_STREAM_BYTES
 
     # Exposed through the API and recorded in audit detail.
-    listed = (await client.get(f"/agents/{_agent_id}/commands")).json()
+    listed = (await client.get(f"/agents/{_agent_id}/commands")).json()["items"]
     assert listed[0]["stdout_truncated"] is True
-    assert listed[0]["stdout_total_bytes"] == 10_000_000_000
+    detail = (
+        await client.get(f"/agents/{_agent_id}/commands/{listed[0]['id']}")
+    ).json()
+    assert detail["stdout_total_bytes"] == 10_000_000_000
     async with AsyncSessionLocal() as db:
         ev = (
             await db.execute(
@@ -187,7 +190,7 @@ async def test_legacy_result_without_metadata_stays_unknown(client):
     token, cmd_id, agent_id = await _enrolled_command(client)
     r = await _post_result(client, token, cmd_id, {"exit_code": 1, "stderr": "boom"})
     assert r.status_code == 204
-    listed = (await client.get(f"/agents/{agent_id}/commands")).json()
+    listed = (await client.get(f"/agents/{agent_id}/commands")).json()["items"]
     assert listed[0]["stdout_truncated"] is None
     assert listed[0]["stderr_truncated"] is None
 
