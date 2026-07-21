@@ -57,8 +57,10 @@ from app.schemas.schemas import (
     CommandOut,
     EnrollmentTokenCreate,
     EnrollmentTokenOut,
+    EndpointDetailOut,
     EndpointListItemOut,
     EndpointListOut,
+    EndpointTelemetrySampleOut,
     NavigationClientListOut,
     NavigationClientOut,
     NavigationSiteOut,
@@ -358,6 +360,102 @@ async def list_endpoints(
         },
     )
     return EndpointListOut(items=items, page=page, page_size=page_size, total=total)
+
+
+@router.get("/endpoints/{endpoint_id}", response_model=EndpointDetailOut)
+async def get_endpoint_detail(
+    endpoint_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    history_hours: int = Query(default=24, ge=1, le=168),
+    history_limit: int = Query(default=144, ge=10, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    endpoint_result = await db.execute(
+        select(Agent, Client, Site)
+        .join(Site, Agent.site_id == Site.id)
+        .join(Client, Site.client_id == Client.id)
+        .where(Agent.id == endpoint_id)
+    )
+    endpoint_row = endpoint_result.one_or_none()
+    if endpoint_row is None:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+
+    agent, client, site = endpoint_row
+    latest_heartbeat = await db.scalar(
+        select(Heartbeat)
+        .where(Heartbeat.agent_id == agent.id)
+        .order_by(Heartbeat.ts.desc(), Heartbeat.id.desc())
+        .limit(1)
+    )
+    cutoff = _now() - timedelta(hours=history_hours)
+    heartbeat_result = await db.execute(
+        select(Heartbeat)
+        .where(Heartbeat.agent_id == agent.id, Heartbeat.ts >= cutoff)
+        .order_by(Heartbeat.ts.desc(), Heartbeat.id.desc())
+        .limit(history_limit + 1)
+    )
+    descending_heartbeats = list(heartbeat_result.scalars().all())
+    history_truncated = len(descending_heartbeats) > history_limit
+    history = list(reversed(descending_heartbeats[:history_limit]))
+
+    def telemetry_sample(heartbeat: Heartbeat) -> EndpointTelemetrySampleOut:
+        return EndpointTelemetrySampleOut(
+            ts=heartbeat.ts,
+            cpu_percent=heartbeat.cpu_percent,
+            mem_percent=heartbeat.mem_percent,
+            disk_percent=heartbeat.disk_percent,
+            uptime_seconds=heartbeat.uptime_seconds,
+            logged_in_user=heartbeat.logged_in_user,
+        )
+
+    stale_after_seconds = max(settings.heartbeat_interval_seconds * 3, 300)
+    if latest_heartbeat is None:
+        telemetry_freshness = "unavailable"
+    else:
+        latest_ts = latest_heartbeat.ts
+        if latest_ts.tzinfo is None:
+            latest_ts = latest_ts.replace(tzinfo=timezone.utc)
+        telemetry_freshness = (
+            "stale"
+            if _now() - latest_ts > timedelta(seconds=stale_after_seconds)
+            else "current"
+        )
+
+    await audit.record(
+        db,
+        action="endpoint_detail.viewed",
+        actor=operator.email,
+        agent_id=agent.id,
+        detail={
+            "history_hours": history_hours,
+            "history_limit": history_limit,
+            "history_count": len(history),
+            "history_truncated": history_truncated,
+        },
+    )
+    return EndpointDetailOut(
+        id=agent.id,
+        hostname=agent.hostname,
+        os=agent.os,
+        os_version=agent.os_version,
+        agent_version=agent.agent_version,
+        command_envelope_versions=agent.command_envelope_versions,
+        status=agent.status,
+        trust_state=agent.trust_state,
+        last_seen_at=agent.last_seen_at,
+        enrolled_at=agent.enrolled_at,
+        client_id=client.id,
+        client_name=client.name,
+        site_id=site.id,
+        site_name=site.name,
+        current_telemetry=telemetry_sample(latest_heartbeat) if latest_heartbeat else None,
+        telemetry=[telemetry_sample(heartbeat) for heartbeat in history],
+        telemetry_freshness=telemetry_freshness,
+        stale_after_seconds=stale_after_seconds,
+        history_hours=history_hours,
+        history_limit=history_limit,
+        history_truncated=history_truncated,
+    )
 
 
 @router.get("/agents/{agent_id}", response_model=AgentOut)

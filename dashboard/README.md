@@ -1,11 +1,13 @@
 # NodeLink dashboard
 
-The NodeLink dashboard is a Next.js technician interface. This first foundation
-provides a responsive, accessible operations overview with fixture data, a
-server-mediated operator sign-in boundary, and live client/site navigation.
+The NodeLink dashboard is a Next.js technician interface. This foundation
+provides a responsive, accessible operations overview, a server-mediated
+operator sign-in boundary, and live read-only client/site navigation, endpoint
+inventory, and endpoint telemetry detail.
 
-It is not yet a live endpoint console and must not be used to manage production
-or regulated endpoints.
+Aggregate overview and audit panels remain fixture-backed, and the interface
+does not dispatch commands or mutate endpoints. It must not be used to manage
+production or regulated endpoints.
 
 ## Local development
 
@@ -65,11 +67,24 @@ latest heartbeat telemetry is shown; raw inventory and agent credentials are
 never returned. The endpoint API is readonly, audited, and needs no migration;
 remove the dashboard deployment to roll it back without changing agents.
 
+Endpoint detail uses `GET /api/v1/endpoints/{endpoint_id}`. The dashboard asks
+for a selectable 6-hour, 24-hour, 3-day, or 7-day window and the API enforces a
+1-to-168-hour window plus a 10-to-500 sample limit. It returns endpoint identity,
+current state, the latest heartbeat, and a chronological bounded history from
+the existing heartbeat table. The latest sample is evaluated independently of
+the selected history window so the interface can distinguish current, stale,
+and unavailable telemetry. Telemetry is stale after three configured heartbeat
+intervals with a five-minute minimum. Missing or unsupported metrics remain
+nullable and render as unavailable rather than as zero. Timestamps are displayed
+explicitly in UTC, and every chart has a text alternative plus an exact-values
+table. Successful reads create a redacted `endpoint_detail.viewed` audit event.
+
 ## Foundation boundary
 
-- No dashboard mutation, browser token, or persisted dashboard state exists
-  yet. The signed-in overview remains fixture-backed, except for read-only
-  client/site navigation. No schema migration is required for that API.
+- No dashboard mutation, browser token, or persisted dashboard state exists.
+  Aggregate overview and audit panels remain fixture-backed; client/site
+  navigation, endpoint inventory, and endpoint telemetry detail are live and
+  read-only. No schema migration is required for these APIs.
 - The API client makes no automatic retry. Later mutation workflows must define
   explicit idempotency and retry behavior before they use it.
 - Rollback is deployment-level: remove or disable the dashboard service without

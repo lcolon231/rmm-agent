@@ -12,7 +12,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test test/runtime-config.test.ts test/dashboard-auth-core.test.ts",
+    "test": "node --experimental-strip-types --test test/runtime-config.test.ts test/dashboard-auth-core.test.ts test/endpoint-detail-core.test.ts",
     "validate:env": "node --experimental-strip-types scripts/validate-environment.ts"
   },
   "dependencies": {

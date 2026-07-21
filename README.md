@@ -62,18 +62,21 @@ The code in this repository currently provides:
   binaries and the installer are not yet Authenticode-signed.
 - Linux and macOS development builds of the polling agent. Windows is the only
   primary support target; those builds are not a supported cross-platform RMM.
-- A fixture-backed Next.js dashboard foundation with a responsive operations
-  overview, environment-validated server-only API boundary, and same-origin
-  operator sessions. It does not yet display live API data.
+- An authenticated Next.js dashboard foundation with a responsive operations
+  overview, environment-validated server-only API boundary, same-origin
+  operator sessions, and live read-only client, site, endpoint-list, and
+  endpoint-detail telemetry views. Aggregate overview and audit panels remain
+  fixture-backed, and the dashboard performs no endpoint mutations.
 
 The [architecture document](docs/ARCHITECTURE.md) is the source of truth for
 the implementation and its security boundaries.
 
 ## Dashboard preview
 
-The technician dashboard currently presents fixture data behind authenticated
-operator access; the screenshots illustrate the intended operations overview,
-not live endpoint or audit evidence.
+The technician dashboard combines an authenticated live read-only endpoint
+inventory and telemetry detail flow with fixture-backed aggregate operations
+and audit panels. The screenshots illustrate the current visual direction; they
+are not production or compliance evidence.
 
 ![NodeLink dashboard operations overview](docs/images/nodelink-dashboard-overview.png)
 
@@ -105,7 +108,10 @@ soak test (the harness and runbook ship in `deploy/soak/` and
 
 The repository does **not** currently contain:
 
-- An authenticated, live-data dashboard, endpoint console, or audit UI.
+- A complete endpoint command console, live audit UI, or production-ready
+  dashboard. The current authenticated dashboard is read-only and only its
+  client/site navigation, endpoint inventory, and endpoint telemetry detail use
+  live API data.
 - WebSocket or other live agent transport, interactive remote shell, or
   streaming command output. Polling remains the only transport.
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, TPM,
@@ -152,9 +158,9 @@ rmm-agent/
 └── .github/     # CI, release automation, and contribution templates
 ```
 
-The `dashboard/` directory now contains a fixture-backed technician interface;
-`tools/` remains planned. No disruptive reorganization is part of the current
-planning change.
+The `dashboard/` directory contains the authenticated technician interface with
+live read-only endpoint inventory and telemetry detail alongside fixture-backed
+aggregate operations panels; `tools/` remains planned.
 
 ## Local development
 

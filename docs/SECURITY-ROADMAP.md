@@ -129,6 +129,14 @@ pilot record.
 
 ## Milestone 1 — secure the technician product
 
+The read-only dashboard boundary is partially implemented: server-mediated
+HTTP-only sessions, API-enforced readonly authorization, redacted audited
+client/site/endpoint reads, and bounded endpoint telemetry history are in place.
+The endpoint-detail API limits history to 168 hours and 500 samples and excludes
+credentials, token hashes, and raw inventory. Tenant-scoped authorization,
+mutation-specific CSRF controls, command workflows, and the remaining
+administrative audit coverage are still required before this milestone closes.
+
 - Use server-mediated dashboard sessions with secure cookie, CSRF, expiration,
   logout, revocation, and role-change behavior. Do not persist operator bearer
   tokens in browser local storage.

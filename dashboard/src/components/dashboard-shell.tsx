@@ -304,7 +304,7 @@ function EndpointDrawer({ endpoint, onClose }: { endpoint: Endpoint | null; onCl
             ) : null}
             <div className="drawer-actions">
               <button className="primary-action"><Command size={17} /> Review action</button>
-              <button className="secondary-action">Open endpoint</button>
+              <Link className="secondary-action" href={`/endpoints/${encodeURIComponent(endpoint.id)}`}>Open endpoint</Link>
             </div>
           </>
         ) : null}
@@ -567,7 +567,7 @@ export function DashboardShell({
                       <td><Meter value={endpoint.cpu} /></td>
                       <td><Meter value={endpoint.memory} /></td>
                       <td><Meter value={endpoint.disk} /></td>
-                      <td><button className="work-button" onClick={(event) => { event.stopPropagation(); setSelectedEndpoint(endpoint); }} aria-label={`Open ${endpoint.name}`}><WorkIcon work={endpoint.work} /></button></td>
+                      <td><Link className="work-button" href={`/endpoints/${encodeURIComponent(endpoint.id)}`} onClick={(event) => event.stopPropagation()} aria-label={`Open ${endpoint.name}`}><WorkIcon work={endpoint.work} /></Link></td>
                     </tr>
                   ))}
                 </tbody>
