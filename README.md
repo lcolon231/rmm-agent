@@ -69,6 +69,16 @@ The code in this repository currently provides:
 The [architecture document](docs/ARCHITECTURE.md) is the source of truth for
 the implementation and its security boundaries.
 
+## Dashboard preview
+
+The technician dashboard currently presents fixture data behind authenticated
+operator access; the screenshots illustrate the intended operations overview,
+not live endpoint or audit evidence.
+
+![NodeLink dashboard operations overview](docs/images/nodelink-dashboard-overview.png)
+
+<img src="docs/images/nodelink-dashboard-mobile.png" alt="NodeLink dashboard operations overview on a mobile screen" width="360" />
+
 ## In progress
 
 Milestone 0, Deployment Safety, is nearly complete. Remaining items are an
