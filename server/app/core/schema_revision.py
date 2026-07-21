@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Production startup guard for Alembic schema revision compatibility."""
 from __future__ import annotations
 

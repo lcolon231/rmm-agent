@@ -98,6 +98,16 @@ Before committing, inspect the diff for generated binaries, local databases,
 keys, `.env`, `config.json`, `identity.json`, and replay-store files. Do not add
 them.
 
+## Contribution licensing
+
+By submitting a contribution to this repository, you agree that your
+contribution is licensed under the GNU Affero General Public License
+version 3 only, consistent with the rest of the project.
+
+Contributors must have the right to submit the code, documentation, or
+other material they provide. Do not submit proprietary, confidential,
+copied, or incompatibly licensed material.
+
 ## Pull requests
 
 Keep a pull request focused on its issue. The description must cover purpose,

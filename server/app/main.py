@@ -1,6 +1,8 @@
 """NodeLink RMM — FastAPI application entry point."""
 from __future__ import annotations
 
+# SPDX-License-Identifier: AGPL-3.0-only
+
 import asyncio
 from contextlib import asynccontextmanager
 

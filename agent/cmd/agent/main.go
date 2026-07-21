@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 // Command agent is the NodeLink RMM endpoint agent. It enrolls once, then
 // checks in on a fixed cadence: reporting telemetry, picking up commands,
 // verifying each command's signature before executing it, and reporting results.

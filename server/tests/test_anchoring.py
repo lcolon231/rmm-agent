@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Tests for Merkle anchoring of the audit chain.
 
 Behavior under test:

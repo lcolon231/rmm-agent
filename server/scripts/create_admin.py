@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Create an operator from the command line.
 
 Solves the bootstrap chicken-and-egg: the /auth/operators endpoint is admin-only,

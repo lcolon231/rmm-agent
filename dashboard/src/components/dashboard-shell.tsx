@@ -18,6 +18,7 @@ import {
   Command,
   Download,
   FileClock,
+  FlaskConical,
   KeyRound,
   Laptop,
   Menu,
@@ -33,6 +34,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import type { DashboardOperator } from "@/lib/dashboard-auth-core";
 import {
   attentionItems,
   clients,
@@ -176,14 +178,14 @@ function TrustRail() {
         <ShieldCheck size={27} />
         <div>
           <span>Trust status</span>
-          <small>System evidence</small>
+          <small>Fixture data · no live verification</small>
         </div>
       </header>
 
       <div className="trust-facts">
         <div className="trust-fact">
           <span className="fact-icon"><Shield size={17} /></span>
-          <div><small>Audit chain</small><strong>Verified</strong></div>
+          <div><small>Audit chain</small><strong className="neutral">Preview only</strong></div>
         </div>
         <div className="trust-fact">
           <span className="fact-icon"><Clock3 size={17} /></span>
@@ -211,7 +213,7 @@ function TrustRail() {
           </article>
         ))}
       </div>
-      <div className="chain-state"><CheckCircle2 size={16} /> Chain verified end-to-end</div>
+      <div className="chain-state"><FlaskConical size={16} /> Illustrative chain timeline</div>
     </aside>
   );
 }
@@ -271,13 +273,18 @@ function EndpointDrawer({ endpoint, onClose }: { endpoint: Endpoint | null; onCl
   );
 }
 
-export function DashboardShell() {
+type DashboardShellProps = {
+  operator: DashboardOperator;
+};
+
+export function DashboardShell({ operator }: DashboardShellProps) {
   const [scope, setScope] = useState("All clients");
   const [query, setQuery] = useState("");
   const [issueFilter, setIssueFilter] = useState<Endpoint["issue"] | "all">("all");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedEndpoint, setSelectedEndpoint] = useState<Endpoint | null>(null);
   const [refreshTime, setRefreshTime] = useState("10:25 AM");
+  const [signOutError, setSignOutError] = useState("");
 
   const visibleEndpoints = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -322,6 +329,24 @@ export function DashboardShell() {
     setRefreshTime(new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date()));
   };
 
+  const signOut = async () => {
+    setSignOutError("");
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      window.location.assign("/login");
+    } catch {
+      setSignOutError("Sign-out could not be confirmed. Try again.");
+    }
+  };
+
+  const operatorInitials = operator.email
+    .split("@")[0]
+    .split(/[._-]/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
   return (
     <div className="app-shell">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
@@ -349,12 +374,12 @@ export function DashboardShell() {
           <kbd>⌘ K</kbd>
         </label>
         <div className="topbar-spacer" />
-        <div className="audit-verified"><ShieldCheck size={19} /><span>Audit: Verified</span><i /></div>
+        <div className="audit-verified preview-status"><FlaskConical size={19} /><span>Preview data</span><i /></div>
         <button className="notification-button" aria-label="Notifications"><Bell size={19} /><span>5</span></button>
         <div className="profile-block">
-          <div><strong>Taylor Morgan</strong><span>Technician</span></div>
-          <span className="avatar">TM</span>
-          <ChevronDown size={15} />
+          <div><strong>{operator.email}</strong><span>{operator.role}</span></div>
+          <span className="avatar">{operatorInitials}</span>
+          <button className="sign-out" onClick={signOut}>Sign out</button>
         </div>
       </header>
 
@@ -365,6 +390,8 @@ export function DashboardShell() {
               <span className="eyebrow">Fleet operations</span>
               <h1>Operations overview</h1>
               <p>Risk and operational posture across your managed endpoints.</p>
+              <p className="preview-banner">Preview data only · Live endpoint and audit data require secure sign-in.</p>
+              {signOutError ? <p className="sign-out-error" role="alert">{signOutError}</p> : null}
             </div>
             <div className="freshness">
               <span>Data as of <strong>{refreshTime}</strong></span>

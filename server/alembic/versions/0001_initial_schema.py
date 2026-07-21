@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Baseline the pre-command-v1 application schema.
 
 Revision ID: 0001

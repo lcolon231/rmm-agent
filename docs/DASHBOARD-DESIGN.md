@@ -188,15 +188,22 @@ The initial dashboard can map to the existing management API as follows:
 | Anchor history | `GET /api/v1/audit/anchors` |
 
 The overview currently uses typed local fixtures so the interaction and visual
-system can be reviewed independently. The fixture boundary should be replaced
-with a server-side API client once dashboard authentication and cross-origin
-deployment behavior are defined.
+system can be reviewed independently. The dashboard foundation includes a
+server-only API client and validates its non-public API URL at runtime.
+Dashboard sign-in is a same-origin backend-for-frontend flow: the browser
+receives an HTTP-only, same-site cookie while server code verifies the current
+operator and forwards the bearer token to the API. Fixture data must remain
+visibly non-production until live API integration is complete.
+
+This foundation performs no dashboard mutation, so there is no
+dashboard-specific audit event, persisted dashboard state, schema migration,
+retry policy, or idempotency behavior to claim yet. Later workflows must define
+and test those properties before becoming available to technicians.
 
 ## Delivery sequence
 
 1. Operations overview and responsive application shell.
-2. Authenticated API client and session handling.
-3. Endpoint table backed by live agents and telemetry.
+2. Endpoint table backed by live agents and telemetry.
 4. Endpoint detail with command history.
 5. Signed command review and dispatch.
 6. Audit verification and anchor management.
