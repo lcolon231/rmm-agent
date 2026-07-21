@@ -284,7 +284,7 @@ async def test_revoke_expires_outstanding_commands_and_blocks_dispatch(client):
 
     await client.post(f"/agents/{agent_id}/revoke", json={"reason": "compromised"}, headers=admin)
 
-    cmds = (await client.get(f"/agents/{agent_id}/commands", headers=op)).json()
+    cmds = (await client.get(f"/agents/{agent_id}/commands", headers=op)).json()["items"]
     assert {c["status"] for c in cmds} == {"expired"}
     assert queued["id"] in {c["id"] for c in cmds}
 

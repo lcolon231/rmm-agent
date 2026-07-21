@@ -64,18 +64,21 @@ The code in this repository currently provides:
   primary support target; those builds are not a supported cross-platform RMM.
 - An authenticated Next.js dashboard foundation with a responsive operations
   overview, environment-validated server-only API boundary, same-origin
-  operator sessions, and live read-only client, site, endpoint-list, and
-  endpoint-detail telemetry views. Aggregate overview and audit panels remain
-  fixture-backed, and the dashboard performs no endpoint mutations.
+  operator sessions, and live client, site, endpoint-list, and endpoint-detail
+  telemetry views, plus a per-endpoint command console: role-gated
+  compose-and-confirm dispatch of the supported signed command kinds, paginated
+  command history, and per-command records showing envelope evidence, exit
+  code, and bounded stdout/stderr with truncation totals. Aggregate overview
+  and audit panels remain fixture-backed.
 
 The [architecture document](docs/ARCHITECTURE.md) is the source of truth for
 the implementation and its security boundaries.
 
 ## Dashboard preview
 
-The technician dashboard combines an authenticated live read-only endpoint
-inventory and telemetry detail flow with fixture-backed aggregate operations
-and audit panels. The screenshots illustrate the current visual direction; they
+The technician dashboard combines authenticated live endpoint inventory,
+telemetry detail, and command console flows with fixture-backed aggregate
+operations and audit panels. The screenshots illustrate the current visual direction; they
 are not production or compliance evidence.
 
 ![NodeLink dashboard operations overview](docs/images/nodelink-dashboard-overview.png)
@@ -108,12 +111,12 @@ soak test (the harness and runbook ship in `deploy/soak/` and
 
 The repository does **not** currently contain:
 
-- A complete endpoint command console, live audit UI, or production-ready
-  dashboard. The current authenticated dashboard is read-only and only its
-  client/site navigation, endpoint inventory, and endpoint telemetry detail use
-  live API data.
-- WebSocket or other live agent transport, interactive remote shell, or
-  streaming command output. Polling remains the only transport.
+- A live audit UI or production-ready dashboard. The client/site navigation,
+  endpoint inventory, endpoint telemetry detail, and endpoint command console
+  use live API data; aggregate overview panels remain fixture-backed.
+- WebSocket or other live agent transport, interactive remote shell, streaming
+  command output, or command cancellation. Polling remains the only transport
+  and a dispatched command is bounded only by its signed expiry.
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, TPM,
   or local-administrator inventory.
 - Monitoring policy/check/alert models, alert acknowledgement, email, or
@@ -159,8 +162,8 @@ rmm-agent/
 ```
 
 The `dashboard/` directory contains the authenticated technician interface with
-live read-only endpoint inventory and telemetry detail alongside fixture-backed
-aggregate operations panels; `tools/` remains planned.
+live endpoint inventory, telemetry detail, and the per-endpoint command console
+alongside fixture-backed aggregate operations panels; `tools/` remains planned.
 
 ## Local development
 

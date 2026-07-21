@@ -15,12 +15,23 @@ type RequestDependencies = {
 
 export class NodelinkApiError extends Error {
   public readonly status: number;
+  /** Stable machine code from the API's error detail, when it sent one. */
+  public readonly code: string | null;
 
-  constructor(status: number, message = "NodeLink API request failed.") {
+  constructor(status: number, message = "NodeLink API request failed.", code: string | null = null) {
     super(message);
     this.name = "NodelinkApiError";
     this.status = status;
+    this.code = code;
   }
+}
+
+export function extractNodelinkErrorCode(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const detail = (body as Record<string, unknown>).detail;
+  if (!detail || typeof detail !== "object") return null;
+  const code = (detail as Record<string, unknown>).code;
+  return typeof code === "string" ? code : null;
 }
 
 export async function requestNodelinkApi<T>(
@@ -48,7 +59,12 @@ export async function requestNodelinkApi<T>(
   });
 
   if (!response.ok) {
-    throw new NodelinkApiError(response.status);
+    const errorBody = await response.json().catch(() => null);
+    throw new NodelinkApiError(
+      response.status,
+      undefined,
+      extractNodelinkErrorCode(errorBody),
+    );
   }
 
   return response.json() as Promise<T>;

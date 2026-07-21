@@ -230,6 +230,64 @@ class CommandOut(BaseModel):
         return format_command_time(value)
 
 
+# Operator-facing command views. These are separate from CommandOut, which is
+# part of the signed agent delivery contract inside HeartbeatAck and must not
+# grow dashboard-only fields.
+class CommandHistoryItemOut(BaseModel):
+    """One row of an endpoint's command history.
+
+    `status` is the effective status: a stored queued/dispatched command whose
+    expires_at has passed is reported as expired even before the next agent
+    heartbeat persists that transition, so operators never see an expired
+    command still presented as pending work.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    agent_id: str
+    kind: CommandKind
+    status: CommandStatus
+    envelope_version: EnvelopeVersion
+    schema_version: int | None
+    signing_key_id: str | None
+    exit_code: int | None
+    stdout_truncated: bool | None
+    stderr_truncated: bool | None
+    created_at: datetime
+    issued_at: datetime | None
+    dispatched_at: datetime | None
+    completed_at: datetime | None
+    expires_at: datetime | None
+
+    @field_serializer("issued_at", "expires_at", when_used="unless-none")
+    def serialize_command_time(self, value: datetime) -> str:
+        """Keep signed command timestamps canonical on every API response."""
+        return format_command_time(value)
+
+
+class CommandHistoryOut(BaseModel):
+    items: list[CommandHistoryItemOut] = Field(default_factory=list)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total: int = Field(ge=0)
+    # Queue admission state so the dispatch UI can explain a 429 before it
+    # happens instead of surprising the operator.
+    outstanding: int = Field(ge=0)
+    outstanding_limit: int = Field(ge=1)
+
+
+class CommandDetailOut(CommandHistoryItemOut):
+    """Full command record: signed envelope evidence plus the bounded result."""
+
+    payload: dict
+    nonce: str | None
+    signature: str
+    stdout: str | None
+    stderr: str | None
+    stdout_total_bytes: int | None
+    stderr_total_bytes: int | None
+
+
 # Server-side acceptance caps for reported command output. They mirror the
 # agent's capture limits (256 KiB per stream, 384 KiB combined) plus a small
 # allowance for agent-appended markers like "[command timed out]". A result

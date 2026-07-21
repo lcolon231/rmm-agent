@@ -164,7 +164,7 @@ async def test_command_dispatch_pickup_and_signature(client):
         headers=auth,
     )
     assert r.status_code == 204
-    cmds = (await client.get(f"/agents/{agent_id}/commands")).json()
+    cmds = (await client.get(f"/agents/{agent_id}/commands")).json()["items"]
     assert cmds[0]["status"] == "succeeded"
 
 
