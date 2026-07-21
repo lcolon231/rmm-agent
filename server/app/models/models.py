@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Enum,
@@ -26,6 +27,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     JSON,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -57,6 +59,22 @@ class AgentStatus(str, enum.Enum):
     pending = "pending"      # enrolled, no heartbeat yet
     online = "online"
     offline = "offline"
+
+
+class AgentTrustState(str, enum.Enum):
+    """Whether the server still trusts an agent's credentials. Deliberately
+    separate from AgentStatus: online/offline says whether the machine is
+    reachable, trust says whether we will act on its behalf at all.
+
+    active      -> normal operation
+    quarantined -> authenticates, but receives no commands and may not submit
+                   results; reversible by an operator
+    revoked     -> credentials fail authentication entirely; terminal — the
+                   machine must re-enroll under a new identity
+    """
+    active = "active"
+    quarantined = "quarantined"
+    revoked = "revoked"
 
 
 class CommandKind(str, enum.Enum):
@@ -179,6 +197,14 @@ class Agent(Base):
     status: Mapped[AgentStatus] = mapped_column(
         Enum(AgentStatus), default=AgentStatus.pending
     )
+    trust_state: Mapped[AgentTrustState] = mapped_column(
+        Enum(AgentTrustState), default=AgentTrustState.active, nullable=False
+    )
+    trust_state_reason: Mapped[str | None] = mapped_column(Text)
+    trust_state_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    trust_state_changed_by: Mapped[str | None] = mapped_column(String(320))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -235,6 +261,13 @@ class Command(Base):
     exit_code: Mapped[int | None] = mapped_column(Integer)
     stdout: Mapped[str | None] = mapped_column(Text)
     stderr: Mapped[str | None] = mapped_column(Text)
+    # Truncation evidence from the agent's bounded capture. NULL means the
+    # result predates output limits (or none was reported) — unknown, not
+    # "complete". The totals are the byte counts the child actually produced.
+    stdout_truncated: Mapped[bool | None] = mapped_column(Boolean)
+    stderr_truncated: Mapped[bool | None] = mapped_column(Boolean)
+    stdout_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    stderr_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -255,6 +288,15 @@ class AuditEvent(Base):
     __tablename__ = "audit_events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # Strictly monotonic position in the chain, assigned in a serialized
+    # append (1, 2, 3, ... with no gaps). This — not the wall-clock ts — is
+    # the canonical order for verification and anchoring; a unique constraint
+    # makes a lost append race an error instead of a silent fork.
+    seq: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
+    # Hash schema 1 = legacy (seq not bound into event_hash, assigned by
+    # backfill); 2 = seq is part of the hashed document. Once the chain
+    # contains a schema-2 event, schema-1 events may not follow.
+    hash_schema: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
     # Canonical ISO-8601 string actually used to compute event_hash. Storing it
     # explicitly makes verification independent of how the DB round-trips
@@ -283,8 +325,49 @@ class AuditAnchor(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    # How many events (in (ts, id) order from the start of the chain) this
+    # How many events (in ascending seq order from the start of the chain) this
     # anchor covers, and the last covered event for a cheap consistency check.
     event_count: Mapped[int] = mapped_column(Integer, nullable=False)
     last_event_id: Mapped[str] = mapped_column(String(36), nullable=False)
     merkle_root: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    publications: Mapped[list["AnchorPublication"]] = relationship(
+        back_populates="anchor", cascade="all, delete-orphan"
+    )
+
+
+class AnchorPublication(Base):
+    """Record of publishing one anchor's Merkle root to one external immutable
+    destination — the thing that makes the root un-rewritable by an attacker
+    who owns this database.
+
+    `receipt` is the destination's proof of publication (an S3 object
+    version-id + ETag, a transparency-log inclusion proof, etc.), stored as
+    JSON with NO credentials in it. `receipt_sha256` is a hash over the
+    canonical receipt so a later tamper with the stored receipt is detectable.
+    A row is unique per (anchor, backend): re-publishing after a crash writes
+    the same deterministic destination key and reconciles onto this row rather
+    than forking.
+    """
+    __tablename__ = "anchor_publications"
+    __table_args__ = (
+        UniqueConstraint("anchor_id", "backend", name="ux_anchor_publication_backend"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    anchor_id: Mapped[str] = mapped_column(
+        ForeignKey("audit_anchors.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    backend: Mapped[str] = mapped_column(String(32), nullable=False)
+    # pending -> published; a failed attempt stays pending (with last_error set)
+    # so the scheduler retries it.
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    uri: Mapped[str | None] = mapped_column(String(1024))
+    receipt: Mapped[dict | None] = mapped_column(JSON)
+    receipt_sha256: Mapped[str | None] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    anchor: Mapped["AuditAnchor"] = relationship(back_populates="publications")

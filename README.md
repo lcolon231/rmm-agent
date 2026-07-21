@@ -5,8 +5,7 @@ businesses and MSPs. It provides signed remote actions, outbound-only
 connectivity, and independently verifiable administrative audit records without
 the operational complexity of traditional RMM platforms.
 
-NodeLink is an early-stage, Windows-first project. It is not a full Tactical RMM
-clone, is not ready for production or regulated endpoints, and does not claim
+NodeLink is an early-stage, Windows-first project. It is not ready for production or regulated endpoints, and does not claim
 HIPAA compliance. The near-term goal is a controlled non-production pilot with
 HIPAA-supporting controls and defensible compliance evidence.
 
@@ -31,20 +30,36 @@ The code in this repository currently provides:
   expiry, and nonce. Python and Go consume the same canonical vectors; agents
   reject missing, unknown, malformed, expired, replayed, and downgraded
   envelopes. Key IDs support active/overlap/retired registry states; v2 remains
-  available only for mixed-version rollout.
+  available only for mixed-version rollout. Staged key rotation, compromise
+  response, and rollback are operator-run via `scripts/rotate_command_key.py`
+  (`docs/KEY-ROTATION.md`).
 - Basic CPU, memory, system-disk, uptime, and logged-in-user telemetry.
-- Buffered PowerShell or shell execution with a five-minute timeout. Results
-  are uploaded only after execution finishes.
+- Buffered PowerShell or shell execution with a five-minute timeout and
+  bounded output capture (256 KiB per stream, 384 KiB combined, truncation
+  recorded in command and audit data). Results are uploaded only after
+  execution finishes.
+- Fail-closed production startup validation (`ENVIRONMENT=production` rejects
+  debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
+  URLs) with explicit opt-in proxy trust for client IPs.
 - Operator password authentication, JWT sessions, three global roles, token
   generation revocation, and in-process login throttling.
 - Client and site records, agent listing, command dispatch/history APIs, and an
   offline-status sweeper.
-- A hash-chained audit log plus APIs that create and verify local Merkle
-  anchors. Anchors are not automatically published outside the database.
+- Agent quarantine/restore (operator) and terminal revocation (admin) with
+  mandatory reasons and audit events: revoked tokens fail authentication and
+  outstanding work is expired; quarantined agents get bare heartbeat acks only.
+- DPAPI-protected agent identity on Windows (versioned envelope, restricted
+  file ACL, atomic plaintext migration, no plaintext fallback).
+- A hash-chained audit log with serialized, hash-bound monotonic sequence
+  numbers, plus APIs that create and verify local Merkle
+  anchors, plus a scheduled publisher that writes anchor roots to external
+  immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
+  clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
 - An Alembic baseline and forward migration, with exact revision enforcement
   on non-debug startup and a disposable PostgreSQL migration test in CI.
-- An Inno Setup Windows installer and tagged release workflow. Windows
-  binaries and the installer are currently unsigned.
+- An Inno Setup Windows installer and tagged release workflow that publishes
+  checksums, an SPDX SBOM, and signed build-provenance attestations. Windows
+  binaries and the installer are not yet Authenticode-signed.
 - Linux and macOS development builds of the polling agent. Windows is the only
   primary support target; those builds are not a supported cross-platform RMM.
 - A fixture-backed Next.js dashboard foundation with a responsive operations
@@ -56,12 +71,10 @@ the implementation and its security boundaries.
 
 ## In progress
 
-Milestone 0, Deployment Safety, is the active program: hardening key-registry
-activation/retirement and rollback, credential protection and agent quarantine,
-enforcing
-production TLS policy, bounding execution resources, making audit ordering and
-anchoring operationally verifiable, adding migrations and recovery procedures,
-and strengthening Windows and release testing.
+Milestone 0, Deployment Safety, is nearly complete. Remaining items are an
+Authenticode code signing (needs a paid certificate) and running the multi-day
+soak test (the harness and runbook ship in `deploy/soak/` and
+`docs/SOAK-TEST.md`) before a controlled non-production pilot.
 
 ## Planned
 
@@ -91,10 +104,12 @@ The repository does **not** currently contain:
   webhook notifications.
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
-- Agent revocation/quarantine, Windows DPAPI credential protection, command
-  output-size limits, or certificate pinning.
-- Automated backup/restore, an automated external audit-anchor publisher,
-  release SBOM/provenance, or Authenticode signing.
+- Certificate pinning or a least-privilege agent service account.
+- Scheduled production backup evidence (encrypted backup/restore tooling ships
+  in `deploy/backup/`), or Authenticode signing (checksums, an SPDX SBOM, and
+  signed build provenance are published; only certificate-based signing is
+  missing). External audit-anchor publication ships (`docs/AUDIT-ANCHORING.md`)
+  but the operator must configure and operate the destination.
 - Tenant-scoped authorization, tenant-specific roles or retention, MFA,
   WebAuthn, OIDC/SAML, legal hold, or compliance evidence exports.
 

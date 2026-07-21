@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import type { RuntimeConfig } from "@/lib/runtime-config";
 
 export type NodelinkRequestOptions = Omit<RequestInit, "headers" | "signal"> & {

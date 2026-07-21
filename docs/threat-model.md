@@ -112,9 +112,16 @@ expired during migration because their legacy signatures do not cover the v2
 contract.
 
 **Key lifecycle.** Command-v3 binds a signing-key ID and the agent only trusts
-the active/overlap public-key bundle delivered by the server. Registry changes,
-compromise response, and rollback remain operator-run controls that require
-review and rehearsal.
+the active/overlap public-key bundle delivered by the server. Rotation is an
+operator-run workflow (`scripts/rotate_command_key.py`, `docs/KEY-ROTATION.md`):
+a new key is staged as `overlap` so the fleet learns its public key before it
+signs, promoted to `active` while the outgoing key steps down to `overlap` so
+its in-flight commands still verify, and `retired` only once nothing it signed
+is still in flight. Compromise skips the waits (generate + activate + retire
+immediately, deliberately refusing the compromised key's in-flight commands),
+and rollback re-activates the previous key while it remains `overlap`. Every
+mutation is written atomically and appended to a rotation journal, and the full
+lifecycle is rehearsed in tests.
 
 ### (4) Agent → Endpoint OS
 
@@ -125,9 +132,15 @@ admin on the endpoint, which is why boundary (1) matters so much. Running under 
 least-privilege service account is still future work.
 
 - Agent identity is a long-lived bearer token issued at enrollment. The server
-  stores only its SHA-256 hash. The plaintext lives in `identity.json` on the
-  endpoint; the agent requests mode 0600, but Windows DPAPI protection, explicit
-  ACL verification, and server-side agent revocation/quarantine are absent.
+  stores only its SHA-256 hash. On the endpoint the token lives in
+  `identity.json` inside a versioned envelope: DPAPI-encrypted (user scope,
+  under the enrolling account — LocalSystem for the installed service) with a
+  protected SYSTEM+Administrators-only DACL on Windows; protection `none` with
+  mode 0600 elsewhere. Legacy plaintext files are migrated atomically on first
+  load, and protection failures refuse to run rather than fall back to
+  plaintext. Server-side, operators can quarantine (reversible, operator role)
+  or revoke (terminal, admin role) an agent; revoked tokens fail
+  authentication with the same response as unknown tokens.
 - Enrollment tokens are one-time (configurable `max_uses`), can expire, and can
   be revoked. They are shown in plaintext only once, at creation.
 
@@ -151,9 +164,10 @@ consistently and the chain check alone would pass. The anchoring layer closes
 this:
 
 - `POST /api/v1/audit/anchors` (operator+) computes a **Merkle root** over the
-  `event_hash` values of every event in the chain (in `(ts, id)` order) and
-  stores it as an `AuditAnchor` covering that prefix. The act of anchoring is
-  itself audited (`audit.anchored`).
+  `event_hash` values of every event in the chain (in ascending `seq` order;
+  the legacy prefix's `seq` was frozen from the historical `(ts, id)` order by
+  migration 0007) and stores it as an `AuditAnchor` covering that prefix. The
+  act of anchoring is itself audited (`audit.anchored`).
 - `GET /api/v1/audit/anchors/{id}/verify` recomputes the root over the covered
   prefix and compares — any alteration, removal, or reordering of covered
   events is detected, **including a fully consistent chain rebuild** (this is
@@ -166,11 +180,18 @@ this:
 
 **The root must leave the building.** An anchor row in the same database
 proves nothing against an attacker who owns that database — they can rebuild
-anchors too. The 64-char `merkle_root` returned at creation is the unit to
-publish externally on a schedule: a transparency log, an on-chain anchor (as
-in the NodeLink thesis work), or even the monthly compliance report. Automated
-publication to a specific external medium is an ops/deployment choice and is
-not built in.
+anchors too. A scheduled publisher (`app/core/anchor_publish.py`, issue #76)
+carries each anchor's Merkle root to an external immutable destination and
+records a tamper-evident receipt. Two backends ship: an S3-compatible bucket
+with Object Lock (COMPLIANCE mode — un-deletable until its retention date, even
+by the account root) and an append-only filesystem/WORM directory. Publication
+is idempotent (content-addressed keys), retried on outage, and lag past a
+threshold alerts. Credentials never enter a receipt. A standalone verifier
+(`scripts/verify_anchor_receipt.py`) recomputes the root from read-only event
+hashes and the artifact downloaded from the destination, so history can be
+validated without trusting — or writing to — the NodeLink database. Publication
+is opt-in (the operator chooses and operates the destination) and logs a loud
+warning in production when unconfigured. See `docs/AUDIT-ANCHORING.md`.
 
 ## Summary of gaps to close before production
 
@@ -178,14 +199,14 @@ not built in.
 |---|-----|----------|--------|
 | 1 | Management API unauthenticated | Critical | **Closed** — operator authN + role-based authZ |
 | 2 | No token revocation / login rate-limit | Medium | **Closed** — per-operator `token_generation` bump revokes all outstanding JWTs (self + admin endpoints, audited); sliding-window 429 throttle on `/auth/login` per (IP, email). Limiter is per-process — use a shared store when running multiple workers |
-| 3 | Command expiry/version/nonce are not signed | Critical | **Mostly closed** — `command-v3` binds schema version, issued-at, expiry, nonce, and signing-key ID with shared Go/Python verification; operator key lifecycle rehearsal remains open |
-| 4 | TLS not enforced by scaffold | High | Partial — deployment path documented (`docs/DEPLOYMENT-TLS.md`, `deploy/Caddyfile`): TLS-terminating proxy with uvicorn bound to localhost; agent cert pinning still open |
-| 5 | Audit chain not externally anchored | Medium | Partial — Merkle anchoring implemented (create/list/verify endpoints; detects consistent chain rebuilds). Publishing the root to an external append-only medium is an ops step and not automated |
+| 3 | Command expiry/version/nonce are not signed | Critical | **Closed** — `command-v3` binds schema version, issued-at, expiry, nonce, and signing-key ID with shared Go/Python verification; staged key rotation/compromise/rollback are operator-run and rehearsed (`scripts/rotate_command_key.py`, `docs/KEY-ROTATION.md`) |
+| 4 | TLS not enforced by scaffold | High | **Mostly closed** — ENVIRONMENT=production fails startup on debug mode, placeholder/short SECRET_KEY, missing signing keys, or a missing/non-HTTPS/loopback PUBLIC_BASE_URL; X-Forwarded-For is ignored unless TRUST_PROXY_HEADERS is explicitly enabled (rightmost entry only). Deployment path documented (`docs/DEPLOYMENT-TLS.md`, `deploy/Caddyfile`); certificate lifecycle monitoring and agent cert pinning still open |
+| 5 | Audit chain not externally anchored | Medium | **Mostly closed** — a scheduled publisher writes each anchor's Merkle root to an external immutable destination (S3 Object Lock or a WORM filesystem) with tamper-evident receipts, idempotent retry, lag alerting, and a clean-room verifier. Publication is opt-in (loud when unconfigured); the operator still chooses and operates the destination |
 | 6 | Agent runs commands at its own privilege | By design | Partial — installable service (Gate 2) runs as `LocalSystem`; least-privilege service account still open |
 | 7 | Agent was foreground-only (no unattended operation) | High | **Closed (Gate 2)** — installable Windows service: auto-start at boot, SCM crash-recovery, rotated file logging, and a network-resilient check-in loop (backoff + jitter) |
-| 8 | No agent revocation/quarantine or DPAPI credential protection | Critical | Open |
-| 9 | Command stdout/stderr and queue policy are unbounded | High | Open — execution has a timeout and is sequential in one runtime, but output, admission, and explicit concurrency policy are absent |
-| 10 | Audit ordering is not monotonic and anchors remain local | High | Partial — hash chain and local Merkle anchors exist; sequence serialization and external immutable publication do not |
-| 11 | No production migrations, automated restore, or rollback rehearsal | High | Partial — Alembic baseline/forward migration and exact startup revision checks are implemented and tested on PostgreSQL in CI; backup automation and restore/rollback rehearsal remain open |
-| 12 | Windows artifacts are unsigned and release evidence lacks SBOM/provenance | High | Open |
+| 8 | No agent revocation/quarantine or DPAPI credential protection | Critical | **Mostly closed** — explicit active/quarantined/revoked trust states with reasoned, audited operator transitions; revoked credentials fail auth without an oracle and outstanding work is expired; quarantined agents get bare acks only; identity is DPAPI-protected with a restricted DACL on Windows (envelope-versioned, atomic plaintext migration, no plaintext fallback). Windows service/installer lifecycle automation for these paths remains with issue #23 |
+| 9 | Command stdout/stderr and queue policy are unbounded | High | **Closed** — stdout/stderr are capped (256 KiB each, 384 KiB combined, excess counted not buffered) with deterministic UTF-8-safe truncation recorded in command and audit data; dispatch payloads are capped at 64 KiB; per-agent outstanding-command admission (configurable, refuses at dispatch) and a per-heartbeat FIFO batch cap bound queue depth, with the agent executing one command at a time |
+| 10 | Audit ordering is not monotonic and anchors remain local | High | **Closed** — every event carries a unique monotonic seq assigned under a serialized append (advisory lock + unique constraint) and bound into its hash; verification/anchoring walk seq order and detect gaps/reorders; anchors are published to external immutable storage with receipts and clean-room verification (`docs/AUDIT-ANCHORING.md`) |
+| 11 | No production migrations, automated restore, or rollback rehearsal | High | **Mostly closed** — Alembic migrations with startup revision guard; encrypted streaming backups with manifests and off-host upload hook; isolated restore with checksum, schema, chain, and anchor validation, rehearsed in CI (`docs/BACKUP-RESTORE.md`). Production-schedule evidence and a release rollback drill (#26) remain |
+| 12 | Windows artifacts are unsigned and release evidence lacks SBOM/provenance | High | Partial — releases publish an SPDX SBOM (Go + Python), signed SLSA build-provenance attestations, and checksums for every artifact; Authenticode signing remains open (needs a paid certificate) |
 | 13 | Client/site records are not authorization tenants | High | Open — roles and management access are global |

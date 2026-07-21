@@ -26,9 +26,10 @@ Python and Go consume the same canonical test vectors; missing, unknown,
 malformed, expired, and downgraded envelopes fail closed. Both command IDs and
 nonces are durably reserved before execution.
 
-Key IDs and active/overlap/retired registry states are implemented for v3.
-Remaining work is an operator-facing rotation workflow, compromise automation,
-and independent rollback rehearsal.
+Key IDs and active/overlap/retired registry states are implemented for v3, and
+staged rotation, compromise response, and rollback are operator-run via
+`scripts/rotate_command_key.py` with the `docs/KEY-ROTATION.md` runbook and a
+rehearsed test suite. Registry mutations are atomic and journaled.
 
 The implemented rollout is fail closed, not dual issue: agents report supported
 versions, new servers reject incompatible enrollment/dispatch, new agents
@@ -41,30 +42,47 @@ The external key registry stores an active key ID, overlap keys, and retired
 keys. Every v3 command records the key ID in its signed envelope and audit
 detail; agents replace their public-key bundle on heartbeat and fail closed on
 unknown/retired keys. Private keys remain outside the database. Add an
-operator-facing activation/retirement workflow and rehearse rotation, rollback,
-lost-key, and compromise procedures before pilot use.
+operator-facing rotation workflow (`scripts/rotate_command_key.py`) with
+staged activation/retirement, compromise fast path, and rollback; the runbook
+is `docs/KEY-ROTATION.md` and the procedures are rehearsed in
+`tests/test_key_rotation.py`.
 
 ### Revoke and quarantine agents
 
-Add explicit active, quarantined, and revoked trust states independent of online
-status. Authentication must reject revoked credentials; quarantine should allow
-only the minimum policy-defined diagnostic/enrollment recovery behavior. Queue
-delivery, result submission, re-enrollment, operator authorization, and audit
-semantics must be specified and tested.
+Implemented. Agents carry an explicit trust state (`active`, `quarantined`,
+`revoked`) independent of online status. Revoked credentials fail
+authentication with the same response as unknown tokens and outstanding
+queued/dispatched work is expired; quarantined agents receive only a minimal
+heartbeat ack (no commands, no signing keys, no recorded telemetry/inventory)
+and may not submit results. Quarantine/restore require the operator role,
+revocation requires admin, every transition records a mandatory reason, and
+all transitions and refusals are audited and covered by integration tests.
+Revocation is terminal; recovery is re-enrollment under a new identity.
 
 ### Protect endpoint credentials
 
-On Windows, protect the agent token and other sensitive identity material with
-DPAPI scoped to the service identity. Define migration from plaintext JSON,
-backup/restore behavior, ACL requirements, corruption recovery, uninstall
-cleanup, and diagnostic redaction. Avoid a silent fallback to plaintext.
+Implemented on Windows. The persisted identity is wrapped in a versioned
+envelope whose payload is DPAPI-encrypted in user scope under the enrolling
+account (LocalSystem for the installed service), with the file's DACL replaced
+by a protected SYSTEM+Administrators-only ACL. Legacy plaintext `identity.json`
+files migrate to the envelope atomically on first load; protection or
+migration failure refuses to run — there is no silent plaintext fallback, and
+a scheme mismatch fails closed with a delete-and-re-enroll instruction. The
+uninstaller removes `identity.json`. Non-Windows platforms remain
+`0600`-permission plaintext by declared scheme (`none`). Remaining work:
+least-privilege service account and installer lifecycle CI (issue #23).
 
 ### Enforce transport policy
 
-Production configuration must refuse plain HTTP, placeholder secrets, unsafe
-proxy assumptions, and untrusted certificate bypasses. Optional certificate
-pinning needs a rotation-safe trust model, multiple pins, expiry handling,
-recovery procedures, and tests. Pinning must not replace normal PKI validation.
+Implemented for configuration validation: `ENVIRONMENT=production` fails
+startup on debug mode, placeholder or short secrets, missing signing keys, and
+a missing/non-HTTPS/loopback public URL, listing every violation at once.
+Proxy trust is explicit opt-in (`TRUST_PROXY_HEADERS`), spoofed forwarding
+headers are ignored by default, and only the rightmost proxy-appended entry is
+used when trusted. Remaining: certificate lifecycle monitoring, and optional
+certificate pinning, which needs a rotation-safe trust model, multiple pins,
+expiry handling, recovery procedures, and tests — pinning must not replace
+normal PKI validation.
 
 ### Bound execution resources
 
@@ -79,9 +97,13 @@ Introduce a database-backed monotonic sequence with serialized append behavior
 and uniqueness constraints. Include sequence data in event hashing and evidence
 formats. Migrate existing events with explicit legacy semantics.
 
-Publish audit anchors on a schedule to an external immutable destination. Store
-publication receipts, retry safely, alert on lag, and provide independent
-verification instructions. A local anchor is not external evidence.
+Implemented. A scheduled publisher writes each anchor's Merkle root to an
+external immutable destination — S3-compatible Object Lock or an append-only
+WORM filesystem — with tamper-evident receipts, idempotent retry, and lag
+alerting via `GET /audit/publication-status`. `scripts/verify_anchor_receipt.py`
+independently recomputes the root from read-only event hashes and the external
+artifact. Publication is opt-in and loud when unconfigured; the operator
+chooses and operates the destination. See `docs/AUDIT-ANCHORING.md`.
 
 ### Make data and releases recoverable
 
@@ -94,11 +116,16 @@ include checksums, SBOMs, provenance attestations, and verification steps.
 
 ### Verify Windows behavior and endurance
 
-Windows CI must cover build, install, service start/stop/restart, upgrade,
-uninstall, config/identity permissions, and installer lifecycle. After pilot
-controls land, run a multi-day soak test measuring memory, handles, logs,
-heartbeat recovery, command execution, restarts, audit integrity, and result
-delivery.
+Windows CI covers build, unit tests, the DPAPI identity + ACL checks, the
+service lifecycle (install/start/stop/restart/refuse-double-install/uninstall),
+and a silent installer install/uninstall smoke test. The soak harness and
+runbook ship (`deploy/soak/soak.py`, `docs/SOAK-TEST.md`) and are smoke-tested
+in CI: it drives a sustained workload with injected outages and samples memory,
+handles, heartbeat recovery, command execution, audit integrity, and anchor
+publication, failing on any audit break. Remaining: Authenticode signing
+(issue #24) and the actual multi-day soak run on the pilot topology (including
+server restarts and a mid-run backup/restore), whose evidence goes into the
+pilot record.
 
 ## Milestone 1 — secure the technician product
 

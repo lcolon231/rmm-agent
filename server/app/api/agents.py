@@ -31,6 +31,7 @@ from app.core.timeutil import ensure_utc
 from app.models.models import (
     Agent,
     AgentStatus,
+    AgentTrustState,
     Command,
     CommandStatus,
     EnrollmentToken,
@@ -136,6 +137,20 @@ async def heartbeat(
     from app.models.models import Heartbeat  # local import avoids cycle noise
 
     now = _now()
+
+    # Quarantine: the only permitted behavior is a minimal check-in so the
+    # operator can see the endpoint is alive and the agent learns its state.
+    # No telemetry is recorded, no inventory accepted, no commands delivered,
+    # and no signing-key material handed out.
+    if agent.trust_state == AgentTrustState.quarantined:
+        agent.last_seen_at = now
+        return HeartbeatAck(
+            ok=True,
+            pending_commands=[],
+            command_public_keys={},
+            trust_state=agent.trust_state,
+        )
+
     db.add(
         Heartbeat(
             agent_id=agent.id,
@@ -165,18 +180,24 @@ async def heartbeat(
             },
         )
 
-    # Expire stale commands, then fetch what's still deliverable.
+    # Expire stale commands, then hand out at most one batch of deliverable
+    # work. Oldest-first (FIFO) so nothing starves, and bounded by
+    # max_commands_per_heartbeat so a backlog drains over several beats rather
+    # than flooding one — the agent executes them one at a time.
     pending: list[Command] = []
     selected_version = select_command_envelope_version(
         body.supported_command_envelope_versions
     )
     if selected_version is not None:
+        batch = max(1, settings.max_commands_per_heartbeat)
         result = await db.execute(
-            select(Command).where(
+            select(Command)
+            .where(
                 Command.agent_id == agent.id,
                 Command.status == CommandStatus.queued,
                 Command.envelope_version == selected_version,
             )
+            .order_by(Command.created_at.asc(), Command.id.asc())
         )
         for cmd in result.scalars().all():
             expires = ensure_utc(cmd.expires_at)
@@ -186,11 +207,14 @@ async def heartbeat(
             cmd.status = CommandStatus.dispatched
             cmd.dispatched_at = now
             pending.append(cmd)
+            if len(pending) >= batch:
+                break
 
     return HeartbeatAck(
         ok=True,
         pending_commands=[CommandOut.model_validate(c) for c in pending],
         command_public_keys=public_key_bundle_pem(),
+        trust_state=agent.trust_state,
     )
 
 
@@ -202,6 +226,14 @@ async def submit_result(
     db: AsyncSession = Depends(get_db),
 ):
     """Agent reports the outcome of a command it executed."""
+    # A quarantined agent may not submit results. Failing closed here means a
+    # command already in flight when the operator quarantined the endpoint has
+    # its output rejected rather than trusted after the fact.
+    if agent.trust_state != AgentTrustState.active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "agent_quarantined"},
+        )
     result = await db.execute(
         select(Command).where(
             Command.id == command_id, Command.agent_id == agent.id
@@ -214,6 +246,10 @@ async def submit_result(
     cmd.exit_code = body.exit_code
     cmd.stdout = body.stdout
     cmd.stderr = body.stderr
+    cmd.stdout_truncated = body.stdout_truncated
+    cmd.stderr_truncated = body.stderr_truncated
+    cmd.stdout_total_bytes = body.stdout_total_bytes
+    cmd.stderr_total_bytes = body.stderr_total_bytes
     cmd.status = (
         CommandStatus.succeeded if body.exit_code == 0 else CommandStatus.failed
     )
@@ -229,5 +265,11 @@ async def submit_result(
             "kind": cmd.kind.value,
             "exit_code": body.exit_code,
             "status": cmd.status.value,
+            # Truncation is part of the accountability record: "what we stored"
+            # vs "what actually happened" must be distinguishable later.
+            "stdout_truncated": body.stdout_truncated,
+            "stderr_truncated": body.stderr_truncated,
+            "stdout_total_bytes": body.stdout_total_bytes,
+            "stderr_total_bytes": body.stderr_total_bytes,
         },
     )

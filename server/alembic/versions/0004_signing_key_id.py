@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Bind signing-key IDs to command-v3 envelopes.
 
 Revision ID: 0004

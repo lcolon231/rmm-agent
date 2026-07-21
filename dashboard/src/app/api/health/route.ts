@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { getNodelinkHealth } from "@/lib/nodelink-health-core";
 import { getRuntimeConfig } from "@/lib/runtime-config";
 

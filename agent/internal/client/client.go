@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,22 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 )
+
+// StatusError is an HTTP-level rejection from the server. Keeping the status
+// code typed lets the runtime distinguish "server is unreachable" from "server
+// answered and refused" (e.g. 401 after credential revocation).
+type StatusError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *StatusError) Error() string { return e.Message }
+
+// IsUnauthorized reports whether err is a definitive credential rejection.
+func IsUnauthorized(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.StatusCode == http.StatusUnauthorized
+}
 
 // Client talks to the RMM server API.
 type Client struct {
@@ -34,13 +51,13 @@ func New(baseURL, agentToken string) *Client {
 
 // EnrollResponse mirrors the server schema.
 type EnrollResponse struct {
-	AgentID                string `json:"agent_id"`
-	AgentToken             string `json:"agent_token"`
-	HeartbeatSeconds       int    `json:"heartbeat_interval_seconds"`
-	CommandPublicKey       string `json:"command_public_key"`
+	AgentID                string            `json:"agent_id"`
+	AgentToken             string            `json:"agent_token"`
+	HeartbeatSeconds       int               `json:"heartbeat_interval_seconds"`
+	CommandPublicKey       string            `json:"command_public_key"`
 	CommandPublicKeys      map[string]string `json:"command_public_keys"`
-	CommandSigningKeyID    string `json:"command_signing_key_id"`
-	CommandEnvelopeVersion string `json:"command_envelope_version"`
+	CommandSigningKeyID    string            `json:"command_signing_key_id"`
+	CommandEnvelopeVersion string            `json:"command_envelope_version"`
 }
 
 // Enroll claims an identity using a one-time enrollment token.
@@ -87,11 +104,22 @@ type Command struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
+// Trust states the server may report in a heartbeat ack. An empty string (an
+// older server) means active.
+const (
+	TrustStateActive      = "active"
+	TrustStateQuarantined = "quarantined"
+)
+
 // HeartbeatAck is the server's response to a heartbeat.
 type HeartbeatAck struct {
-	OK              bool      `json:"ok"`
-	PendingCommands []Command `json:"pending_commands"`
+	OK                bool              `json:"ok"`
+	PendingCommands   []Command         `json:"pending_commands"`
 	CommandPublicKeys map[string]string `json:"command_public_keys"`
+	// TrustState reports how the server currently trusts this agent. When it is
+	// "quarantined" the agent must not execute anything, even if commands were
+	// somehow present in the ack.
+	TrustState string `json:"trust_state"`
 }
 
 // Heartbeat posts telemetry and returns any queued commands. inventory may be
@@ -115,11 +143,16 @@ func (c *Client) Heartbeat(ctx context.Context, s telemetry.Sample, inventory ma
 	return &ack, nil
 }
 
-// CommandResult is what the agent reports after execution.
+// CommandResult is what the agent reports after execution. The truncation
+// fields are additive: an older server ignores them.
 type CommandResult struct {
-	ExitCode int    `json:"exit_code"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
+	ExitCode         int    `json:"exit_code"`
+	Stdout           string `json:"stdout"`
+	Stderr           string `json:"stderr"`
+	StdoutTruncated  bool   `json:"stdout_truncated,omitempty"`
+	StderrTruncated  bool   `json:"stderr_truncated,omitempty"`
+	StdoutTotalBytes int64  `json:"stdout_total_bytes,omitempty"`
+	StderrTotalBytes int64  `json:"stderr_total_bytes,omitempty"`
 }
 
 // ReportResult sends the outcome of a command back to the server.
@@ -158,7 +191,10 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, auth 
 
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("%s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b)))
+		return &StatusError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("%s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b))),
+		}
 	}
 	if out != nil && resp.StatusCode != http.StatusNoContent {
 		return json.NewDecoder(resp.Body).Decode(out)

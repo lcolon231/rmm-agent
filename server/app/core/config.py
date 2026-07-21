@@ -15,6 +15,17 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = True
 
+    # Public HTTPS base URL clients use to reach this deployment (through the
+    # TLS-terminating proxy), e.g. https://rmm.example.com. Required in
+    # production, where it must be https://.
+    public_base_url: str | None = None
+
+    # Whether to trust X-Forwarded-For from the immediate upstream when
+    # deriving the client IP (rate limiting, audit). Enable ONLY when uvicorn
+    # is reachable exclusively through the trusted proxy — with this on, a
+    # directly-reachable app port lets any caller spoof their address.
+    trust_proxy_headers: bool = False
+
     # --- Database ---
     # Example: postgresql+asyncpg://rmm:rmm@localhost:5432/rmm
     database_url: str = "postgresql+asyncpg://rmm:rmm@localhost:5432/rmm"
@@ -45,9 +56,50 @@ class Settings(BaseSettings):
     # Endpoint is flagged offline after this many missed heartbeats.
     offline_after_missed: int = 3
 
+    # --- Command concurrency and admission ---
+    # Admission control: the maximum number of *outstanding* commands (queued,
+    # dispatched, or running — anything not in a terminal state) an agent may
+    # have at once. Dispatching past this is refused, so an operator or a bug
+    # cannot pile unbounded work on one endpoint.
+    max_outstanding_commands_per_agent: int = 100
+    # Delivery pacing: the most commands handed to an agent in a single
+    # heartbeat. The agent executes one at a time (its concurrency contract),
+    # so a large backlog drains over several beats instead of arriving at once.
+    max_commands_per_heartbeat: int = 10
+
     @property
     def offline_threshold_seconds(self) -> int:
         return self.heartbeat_interval_seconds * self.offline_after_missed
+
+    # --- External audit-anchor publication (issue #76) ---
+    # Backend that publishes anchor Merkle roots to an external immutable
+    # destination. "none" disables publication (a loud warning is logged in
+    # production). "filesystem" writes to an append-only directory (real
+    # immutability only on a WORM/object-lock mount). "s3" writes to an
+    # S3-compatible bucket with Object Lock.
+    anchor_publish_backend: str = "none"  # none | filesystem | s3
+    # How often the scheduler creates a new anchor (if events accrued) and
+    # publishes any unpublished ones.
+    anchor_publish_interval_seconds: int = 3600
+    # Warn when the oldest unpublished anchor is older than this — the window
+    # during which a database-owning attacker could rewrite history unnoticed.
+    anchor_publish_lag_alert_seconds: int = 7200
+
+    # filesystem backend
+    anchor_publish_dir: str = "/var/lib/nodelink/anchors"
+
+    # s3 backend (credentials come from the standard AWS chain — env,
+    # instance profile, etc. — never from settings, never stored in receipts)
+    anchor_s3_bucket: str | None = None
+    anchor_s3_prefix: str = "nodelink/anchors"
+    anchor_s3_region: str | None = None
+    anchor_s3_endpoint_url: str | None = None  # set for MinIO/Backblaze/etc.
+    # Object Lock retention applied to each published object. GOVERNANCE lets a
+    # privileged user bypass with a special permission; COMPLIANCE cannot be
+    # bypassed by anyone until the window elapses. Days = 0 disables setting
+    # retention (bucket-default or none).
+    anchor_s3_object_lock_mode: str = "COMPLIANCE"  # GOVERNANCE | COMPLIANCE
+    anchor_s3_retain_days: int = 3650
 
 
 @lru_cache

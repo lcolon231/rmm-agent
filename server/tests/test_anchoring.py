@@ -131,23 +131,25 @@ async def test_consistent_rebuild_defeats_chain_check_but_not_anchor(client):
     anchor_id = (await client.post("/audit/anchors")).json()["id"]
 
     # Simulate a privileged attacker: alter one covered event and REBUILD the
-    # whole hash chain so it is internally consistent again.
+    # whole hash chain — including the sequence binding — so it is internally
+    # consistent again. Sequence numbers stop sloppy tampering, not an
+    # attacker who reruns the full hashing algorithm; the anchor is what
+    # stops them.
     from sqlalchemy import select
     from app.core.audit import _hash_event, _GENESIS
     from app.models.models import AuditEvent
 
     async with AsyncSessionLocal() as db:
         events = (
-            await db.execute(
-                select(AuditEvent).order_by(AuditEvent.ts.asc(), AuditEvent.id.asc())
-            )
+            await db.execute(select(AuditEvent).order_by(AuditEvent.seq.asc()))
         ).scalars().all()
         events[1].actor = "attacker"
         prev = _GENESIS
         for ev in events:
             ev.prev_hash = prev
             ev.event_hash = _hash_event(
-                prev, ev.ts_iso, ev.actor, ev.action, ev.agent_id, ev.detail
+                prev, ev.ts_iso, ev.actor, ev.action, ev.agent_id, ev.detail,
+                seq=ev.seq, hash_schema=ev.hash_schema,
             )
             prev = ev.event_hash
         await db.commit()

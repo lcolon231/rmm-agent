@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { DashboardShell } from "@/components/dashboard-shell";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import Link from "next/link";

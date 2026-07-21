@@ -53,6 +53,69 @@ jobs:
       - run: go build ./...
       - run: go test ./...
 
+  windows-lifecycle:
+    name: windows service + installer lifecycle
+    needs: agent-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: agent/go.sum
+
+      - name: Build the Windows agent
+        working-directory: agent
+        run: |
+          $env:GOOS = 'windows'; $env:GOARCH = 'amd64'
+          go build -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
+
+      # GitHub windows-latest runners run elevated, so the SCM operations the
+      # agent performs (register/start/stop/delete a service) are permitted.
+      - name: Service lifecycle (install/start/stop/restart/uninstall)
+        shell: pwsh
+        run: agent/test/service_lifecycle.ps1 -Exe (Resolve-Path agent/bin/rmm-agent-windows-amd64.exe)
+
+      # Pinned to the 6.x line to match installer/NodeLinkAgent.iss and the
+      # release workflow (bump both together when moving to IS7).
+      - name: Install Inno Setup
+        run: choco install innosetup --version=6.7.1 -y
+
+      - name: Compile the installer
+        working-directory: installer
+        env:
+          NODELINK_VERSION: 0.0.0-ci
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAgentExe=..\agent\bin\rmm-agent-windows-amd64.exe NodeLinkAgent.iss
+
+      - name: Silent install + uninstall smoke test
+        shell: pwsh
+        run: |
+          $setup = Resolve-Path installer/Output/NodeLinkAgentSetup-0.0.0-ci.exe
+          $dir = Join-Path $env:RUNNER_TEMP 'nodelink-agent'
+          Write-Host "== silent install =="
+          $p = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList `
+            '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART', `
+            '/SERVERURL=https://nodelink-ci.invalid','/TOKEN=ci-token',"/DIR=$dir"
+          if ($p.ExitCode -ne 0) { throw "installer exited $($p.ExitCode)" }
+          $svc = Get-Service -Name NodeLinkAgent -ErrorAction SilentlyContinue
+          if ($null -eq $svc) { throw 'service not registered by installer' }
+          Write-Host "  ok: service registered (state $($svc.Status))"
+          if (-not (Test-Path (Join-Path $dir 'config.json'))) { throw 'config.json not written' }
+          Write-Host "  ok: config.json written from /SERVERURL and /TOKEN"
+
+          Write-Host "== silent uninstall =="
+          $unins = Join-Path $dir 'unins000.exe'
+          if (-not (Test-Path $unins)) { throw "uninstaller missing at $unins" }
+          $u = Start-Process -FilePath $unins -Wait -PassThru -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          if ($u.ExitCode -ne 0) { throw "uninstaller exited $($u.ExitCode)" }
+          Start-Sleep -Seconds 2
+          if ($null -ne (Get-Service -Name NodeLinkAgent -ErrorAction SilentlyContinue)) {
+            throw 'service still present after uninstall'
+          }
+          Write-Host "  ok: service removed by uninstaller"
+          Write-Host "WINDOWS INSTALLER SMOKE OK"
+
   server:
     name: server (Python)
     runs-on: ubuntu-latest
@@ -83,7 +146,7 @@ jobs:
           cache: pip
           cache-dependency-path: server/requirements.txt
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-asyncio httpx aiosqlite
+        run: pip install -r requirements.txt pytest pytest-asyncio httpx aiosqlite "moto[s3]"
       - name: Generate command signing key (tests need it)
         run: python scripts/gen_command_keys.py
       - name: Run tests

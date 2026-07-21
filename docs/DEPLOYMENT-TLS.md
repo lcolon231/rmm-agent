@@ -17,10 +17,33 @@ Agent ── https:// ──► Caddy (:443, TLS) ── http:// ──► uvico
 > **Current limitation:** this is an operator-run topology, not an
 > application-enforced production mode. The server does not reject unsafe
 > production configuration, and the agent accepts an `http://` server URL.
-> Production TLS policy, proxy-trust validation, renewal monitoring, and
-> optional certificate pinning remain Milestone 0 work. Completing this runbook
-> alone does not make a deployment production-ready; use
-> [`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md).
+> Certificate renewal monitoring and optional certificate pinning remain
+> Milestone 0 work. Completing this runbook alone does not make a deployment
+> production-ready; use [`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md).
+
+## Production settings
+
+A production deployment sets, at minimum:
+
+```bash
+ENVIRONMENT=production        # turns on fail-closed startup validation
+DEBUG=false
+SECRET_KEY=<48+ random chars> # python -c "import secrets; print(secrets.token_urlsafe(48))"
+PUBLIC_BASE_URL=https://rmm.example.com
+TRUST_PROXY_HEADERS=true      # ONLY with the proxy topology below
+```
+
+With `ENVIRONMENT=production` the server refuses to start on debug mode, a
+placeholder or short `SECRET_KEY`, missing command-signing keys, or a missing,
+non-HTTPS, or loopback `PUBLIC_BASE_URL` — every violation is listed in the
+startup error at once.
+
+`TRUST_PROXY_HEADERS` controls whether `X-Forwarded-For` is believed when
+deriving client IPs for login rate limiting and audit. Leave it `false` (the
+default) unless uvicorn is reachable *only* through your proxy: when the app
+port is directly reachable, trusting the header lets any caller spoof its
+address. Only the rightmost entry — the one appended by your own proxy — is
+ever used.
 
 ## Option A (recommended): Caddy with a public DNS name
 

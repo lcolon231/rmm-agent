@@ -1,4 +1,6 @@
- export type RuntimeConfig = {
+// SPDX-License-Identifier: AGPL-3.0-only
+
+export type RuntimeConfig = {
   apiBaseUrl: string;
   apiTimeoutMs: number;
 };

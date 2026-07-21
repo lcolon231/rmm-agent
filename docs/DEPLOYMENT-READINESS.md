@@ -18,17 +18,17 @@ Statuses are:
 |---|---|---|
 | Outbound-only polling | Implemented | Agent initiates enroll, heartbeat/poll, and result requests |
 | Operator API authentication/RBAC | Implemented | Auth and authorization integration tests |
-| Signed command verification | Partial | `command-v3`, negotiation, downgrade rejection, signed schema/time/nonce/key ID, and shared vectors implemented; operator rotation workflow remains open |
+| Signed command verification | Implemented | `command-v3`, negotiation, downgrade rejection, signed schema/time/nonce/key ID, and shared vectors; staged key rotation, compromise, and rollback via `scripts/rotate_command_key.py` with a rehearsed test suite and `docs/KEY-ROTATION.md` runbook |
 | Agent replay/expiry checks | Implemented | Signed time-window validation plus durable command-ID and nonce replay state |
-| Production TLS | Partial | Caddy topology documented; app does not enforce production policy |
-| Agent credential protection/revocation | Open | Plaintext endpoint JSON; no revoke/quarantine state |
-| Execution limits | Partial | Five-minute timeout and sequential runtime; no output/queue policy |
-| Audit integrity | Partial | Hash chain and local Merkle anchors; ambiguous ordering and no external publisher |
+| Production TLS | Partial | Caddy topology documented; ENVIRONMENT=production fails startup on debug/placeholder-secret/missing-key/non-HTTPS-URL config and proxy trust is explicit opt-in; certificate lifecycle monitoring and pinning remain open |
+| Agent credential protection/revocation | Partial | Trust states (quarantine/restore/revoke) with audited, reasoned operator transitions and fail-closed enforcement; DPAPI envelope + restricted ACL on Windows with atomic plaintext migration. Windows-runner evidence for migration/ACL paths ships with Windows CI (issue #23); certificate pinning remains open |
+| Execution limits | Partial | Five-minute timeout, sequential runtime, bounded stdout/stderr with audited truncation metadata, and dispatch payload caps; queue/admission and explicit concurrency policy remain open (#20) |
+| Audit integrity | Implemented | Hash chain with monotonic, hash-bound sequence numbers under serialized append; local Merkle anchors; scheduled external anchor publication (filesystem/WORM or S3 Object Lock) with tamper-evident receipts, lag alerting, idempotent retry, and a clean-room verifier (`docs/AUDIT-ANCHORING.md`). Publication is opt-in and loud when unconfigured |
 | Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
-| Backup, restore, rollback | Open | No automated process or rehearsal evidence |
-| Windows lifecycle CI | Partial | Go build/unit tests run on Windows; service and installer lifecycle automation remains open |
-| Release authenticity | Open | Checksums exist; artifacts are unsigned; no SBOM/provenance |
-| Soak evidence | Open | No documented multi-day test |
+| Backup, restore, rollback | Partial | Encrypted streaming pg_dump with manifest/checksums, fail-closed off-host upload hook, isolated-restore script, and application-level restore validation, all exercised end to end in CI; scheduled production runs, retention monitoring, and a production rollback rehearsal remain operator evidence (#26) |
+| Windows lifecycle CI | Implemented | Windows CI builds the agent and installer and exercises service install/start/stop/restart/refuse-double-install/uninstall plus a silent installer install+uninstall smoke test |
+| Release authenticity | Partial | Checksums, an SPDX SBOM (Go + Python), and signed SLSA build-provenance attestations are published for every artifact; Authenticode signing is the one remaining gap (needs a paid certificate) |
+| Soak evidence | Partial | Soak harness with workload, fault injection, resource/audit/anchor sampling, and pass/fail reporting ships (`deploy/soak/`, `docs/SOAK-TEST.md`), CI-smoke-tested and demonstrated against a live server; the multi-day pilot run itself is operator evidence |
 
 ## Controlled pilot gate
 
@@ -37,14 +37,18 @@ link to reproducible evidence in the release or pilot record.
 
 ### Configuration and topology
 
-- [ ] Production mode rejects `DEBUG=true`, placeholder `SECRET_KEY`, missing
-      signing keys, and non-HTTPS public URLs.
+- [x] Production mode rejects `DEBUG=true`, placeholder `SECRET_KEY`, missing
+      signing keys, and non-HTTPS public URLs (ENVIRONMENT=production fails
+      startup with every violation listed; covered by a configuration-matrix
+      test).
 - [ ] uvicorn is reachable only through the intended loopback/private proxy
       boundary.
 - [ ] TLS certificate issuance, renewal, expiration monitoring, and emergency
       replacement are documented and tested.
-- [ ] Proxy trust and client-IP handling are explicitly configured; spoofed
-      forwarding headers are tested.
+- [x] Proxy trust and client-IP handling are explicitly configured; spoofed
+      forwarding headers are tested (X-Forwarded-For is ignored unless
+      TRUST_PROXY_HEADERS=true; only the rightmost, proxy-appended entry is
+      trusted).
 - [ ] Firewall rules expose only required services.
 - [ ] Time synchronization and clock-skew assumptions for signed expiry are
       monitored.
@@ -59,45 +63,71 @@ link to reproducible evidence in the release or pilot record.
 - [x] Shared positive and negative vectors pass in server and agent tests.
 - [x] Unknown versions, invalid times, duplicate nonces, and malformed
       payloads fail closed without execution.
-- [ ] Signing-key activation, overlap, retirement, compromise, and rollback are
-      operator-run, documented, audited, and rehearsed.
+- [x] Signing-key activation, overlap, retirement, compromise, and rollback are
+      operator-run, documented, audited, and rehearsed (`scripts/rotate_command_key.py`;
+      atomic registry writes with an append-only rotation journal;
+      `docs/KEY-ROTATION.md`; full staged + compromise + rollback rehearsal in
+      `tests/test_key_rotation.py`).
 - [ ] Typed operations are used where available; arbitrary script permission is
       explicit.
 
 ### Agent identity and endpoint storage
 
-- [ ] Operators can quarantine and revoke an agent with audited reason.
-- [ ] Revoked credentials fail authentication; quarantined agents receive only
-      policy-approved recovery behavior.
-- [ ] Windows agent secrets are DPAPI-protected under the intended service
-      identity and file ACLs are validated.
-- [ ] Plaintext identity migration fails safely and does not leave recoverable
-      secret copies.
+- [x] Operators can quarantine and revoke an agent with audited reason.
+- [x] Revoked credentials fail authentication; quarantined agents receive only
+      policy-approved recovery behavior (a bare heartbeat ack: no commands, no
+      key material, no recorded telemetry; result submission refused).
+- [x] Windows agent secrets are DPAPI-protected under the intended service
+      identity and file ACLs are validated (user-scope DPAPI under the
+      enrolling account; protected SYSTEM+Administrators DACL asserted by a
+      Windows CI test).
+- [x] Plaintext identity migration fails safely and does not leave recoverable
+      secret copies (atomic write-then-rename replacement; load refuses to
+      proceed if the protected form cannot be persisted).
 - [ ] Logs, diagnostics, command results, and uninstall paths do not expose
-      credentials.
-- [ ] Re-enrollment and lost-identity recovery procedures preserve audit
-      continuity or explicitly document a new identity.
+      credentials (code paths avoid logging tokens and the uninstaller removes
+      `identity.json`, but a dedicated redaction audit has not been run).
+- [x] Re-enrollment and lost-identity recovery procedures preserve audit
+      continuity or explicitly document a new identity (revocation is terminal;
+      recovery is re-enrollment as a new agent ID, tested end-to-end).
 
 ### Execution resource safety
 
-- [ ] Stdout and stderr have independent and combined byte limits.
-- [ ] Truncation is explicit, deterministic, and recorded in command/audit data.
-- [ ] Per-agent concurrency and queue/admission limits are configured and tested.
+- [x] Stdout and stderr have independent and combined byte limits (256 KiB
+      per stream, 384 KiB combined; excess is counted, never buffered).
+- [x] Truncation is explicit, deterministic, and recorded in command/audit data
+      (structured flags plus original byte totals persisted on the command and
+      in `command.completed` audit detail; stderr preserved over stdout when
+      the combined cap binds).
+- [x] Per-agent concurrency and queue/admission limits are configured and tested
+      (per-agent outstanding-command cap admits/refuses at the dispatch
+      boundary; per-heartbeat FIFO batch cap; agent executes one at a time).
 - [ ] Timeout, cancellation, service stop, server outage, and result retry do not
       orphan processes or duplicate execution.
-- [ ] Payload and script-size limits exist at API and agent boundaries.
+- [x] Payload and script-size limits exist at API and agent boundaries
+      (64 KiB dispatch payload cap; server refuses over-cap results, and the
+      agent's script arrives inside the signed, capped payload).
 - [ ] Disk and log growth are bounded and observable.
 
 ### Audit evidence
 
-- [ ] Every audit event receives a unique monotonic sequence in a serialized
-      append transaction.
-- [ ] Hash verification detects field changes, removal, reordering, and sequence
-      gaps.
-- [ ] Anchors are published automatically to an external immutable destination.
-- [ ] Publication receipts, lag, retry, and failure alerts are retained.
-- [ ] A clean verifier can validate the chain and external anchor without write
-      access to the NodeLink database.
+- [x] Every audit event receives a unique monotonic sequence in a serialized
+      append transaction (PostgreSQL advisory lock; unique constraint as the
+      fail-closed backstop; concurrency-tested).
+- [x] Hash verification detects field changes, removal, reordering, and sequence
+      gaps (seq is bound into the event hash for all post-0007 events; legacy
+      events are explicitly marked hash_schema=1 and may not follow the
+      cutover).
+- [x] Anchors are published automatically to an external immutable destination
+      (scheduled publisher; S3 Object Lock or a WORM filesystem; opt-in with a
+      loud warning when unconfigured).
+- [x] Publication receipts, lag, retry, and failure alerts are retained
+      (`AnchorPublication` rows with receipt + `receipt_sha256`; idempotent
+      retry; `GET /audit/publication-status` lag/alert; scheduler warns on lag).
+- [x] A clean verifier can validate the chain and external anchor without write
+      access to the NodeLink database (`scripts/verify_anchor_receipt.py`
+      recomputes the Merkle root from read-only event hashes and the downloaded
+      artifact; it does not import NodeLink).
 - [ ] Sensitive fields and secrets are redacted without removing accountability.
 
 ### Database and recovery
@@ -105,25 +135,34 @@ link to reproducible evidence in the release or pilot record.
 - [x] Alembic can create a fresh schema and upgrade every supported prior
       production revision.
 - [x] Application startup refuses an unsupported schema state.
-- [ ] Automated encrypted backups run on schedule and failures alert.
-- [ ] Backup retention, access, encryption-key custody, and deletion are
-      documented.
-- [ ] A restore rehearsal validates data, authentication, queued work, and audit
-      verification.
+- [ ] Automated encrypted backups run on schedule and failures alert
+      (tooling shipped and CI-rehearsed — deploy/backup/ + docs/BACKUP-RESTORE.md;
+      the checked box requires evidence from the production schedule itself).
+- [x] Backup retention, access, encryption-key custody, and deletion are
+      documented (docs/BACKUP-RESTORE.md).
+- [x] A restore rehearsal validates data, authentication, queued work, and audit
+      verification (isolated restore + verify_restore.py checks row counts,
+      the audit chain in sequence order, and every stored anchor; rehearsed in
+      CI on every run).
 - [ ] Release rollback includes schema compatibility and a decision point for
       forward-fix versus restore.
 - [ ] Recovery objectives are selected and measured by the maintainer.
 
 ### Windows and release engineering
 
-- [ ] Windows CI builds the agent and installer and tests install, service start,
-      stop, restart, upgrade, and uninstall.
+- [x] Windows CI builds the agent and installer and tests install, service start,
+      stop, restart, refuse-double-install, and uninstall (CLI lifecycle script
+      driving the SCM) plus a silent installer install/uninstall smoke test.
 - [ ] Supported Windows versions and architectures are explicitly listed.
 - [ ] Agent and installer are Authenticode-signed and timestamped; signatures
-      are verified before publication.
-- [ ] Release checksums cover final signed artifacts.
-- [ ] An SBOM and provenance attestation are published and independently
-      verified.
+      are verified before publication (deferred: requires a paid code-signing
+      certificate; the workflow has a documented slot for it).
+- [x] Release checksums cover final artifacts (`SHA256SUMS.txt` over the
+      binaries and SBOM; a `.sha256` sidecar for the installer). They will move
+      to cover *signed* artifacts once signing lands.
+- [x] An SBOM and provenance attestation are published and independently
+      verified (SPDX SBOM; signed SLSA build provenance via
+      `actions/attest-build-provenance`, verifiable with `gh attestation verify`).
 - [ ] Release notes state known limitations, schema/agent compatibility, upgrade,
       rollback, and security impact.
 
@@ -135,7 +174,9 @@ link to reproducible evidence in the release or pilot record.
 - [ ] Monitoring covers server health, database, certificate, agents, queues,
       audit anchoring, backup, and disk capacity.
 - [ ] A multi-day soak test records versions, topology, workload, restarts,
-      outages, resource trends, commands, and audit verification.
+      outages, resource trends, commands, and audit verification (harness and
+      runbook ready — `deploy/soak/soak.py`, `docs/SOAK-TEST.md`; the checked
+      box requires the actual multi-day run's evidence).
 - [ ] Critical/high findings from the soak test are resolved or explicitly block
       the pilot.
 - [ ] Incident contacts, credential rotation, agent quarantine, server shutdown,

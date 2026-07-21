@@ -24,7 +24,7 @@ def tracked_files() -> list[Path]:
 
 
 def has_spdx(path: Path) -> bool:
-    lines = path.read_text(encoding="utf-8").splitlines()[:12]
+    lines = path.read_text(encoding="utf-8").splitlines()[:16]
     return any("SPDX-License-Identifier: AGPL-3.0-only" in line for line in lines)
 
 
@@ -51,7 +51,7 @@ def main() -> int:
     for path in tracked_files():
         if path.suffix not in SOURCE_SUFFIXES or any(part in EXCLUDED_PARTS for part in path.parts):
             continue
-        if path.name in {"__init__.py"}:
+        if path.name == "__init__.py":
             continue
         if not has_spdx(path):
             missing.append(str(path.relative_to(ROOT)))

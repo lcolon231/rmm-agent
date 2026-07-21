@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import "server-only";
 
 import type { DashboardOperator, LoginCredentials } from "@/lib/dashboard-auth-core";

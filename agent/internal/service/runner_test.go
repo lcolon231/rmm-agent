@@ -23,6 +23,7 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/client"
 	"github.com/lcolon231/rmm/agent/internal/executor"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
+	"github.com/lcolon231/rmm/agent/internal/telemetry"
 )
 
 func TestExtractScript(t *testing.T) {
@@ -369,5 +370,108 @@ func writeFakeIdentity(t *testing.T, path, serverURL string) {
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestCheckInQuarantineSuspendsExecution: a quarantined ack must execute
+// nothing — even if commands are present in it — and the transition must be
+// logged once, not on every beat, then cleared when the server restores trust.
+func TestCheckInQuarantineSuspendsExecution(t *testing.T) {
+	var (
+		mu         sync.Mutex
+		trustState = "quarantined"
+		resultPost = false
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/result") {
+			mu.Lock()
+			resultPost = true
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		mu.Lock()
+		state := trustState
+		mu.Unlock()
+		// A malicious/buggy server state could still include commands in a
+		// quarantined ack; the agent must ignore them.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":          true,
+			"trust_state": state,
+			"pending_commands": []map[string]any{{
+				"id": "cmd-q", "agent_id": "agent-1", "kind": "shell",
+				"payload": map[string]any{"script": "echo pwned"}, "signature": "x",
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	executed := false
+	var buf bytes.Buffer
+	a := &Agent{
+		log: log.New(&buf, "", 0),
+		run: func(ctx context.Context, kind, script string) executor.Result {
+			executed = true
+			return executor.Result{}
+		},
+	}
+	seen, err := LoadSeenStore(filepath.Join(t.TempDir(), seenFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &session{api: client.New(srv.URL, "tok"), agentID: "agent-1", seen: seen}
+
+	for i := 0; i < 2; i++ { // two beats: the transition must be logged once
+		if err := a.checkIn(context.Background(), context.Background(), s); err != nil {
+			t.Fatalf("checkIn while quarantined: %v", err)
+		}
+	}
+	if executed {
+		t.Fatal("quarantined agent executed a command")
+	}
+	if resultPost {
+		t.Fatal("quarantined agent reported a result")
+	}
+	if got := strings.Count(buf.String(), "QUARANTINED"); got != 1 {
+		t.Fatalf("expected exactly one quarantine log line, got %d:\n%s", got, buf.String())
+	}
+	if !s.quarantined {
+		t.Fatal("session did not record quarantine state")
+	}
+
+	mu.Lock()
+	trustState = "active"
+	mu.Unlock()
+	// Restored: the beat still refuses the unsigned command above (signature
+	// verification), but the quarantine flag must clear and be logged.
+	if err := a.checkIn(context.Background(), context.Background(), s); err != nil {
+		t.Fatalf("checkIn after restore: %v", err)
+	}
+	if s.quarantined {
+		t.Fatal("session did not clear quarantine state after restore")
+	}
+	if !strings.Contains(buf.String(), "restored") {
+		t.Fatalf("expected a restore log line:\n%s", buf.String())
+	}
+	if executed {
+		t.Fatal("unsigned command executed after restore")
+	}
+}
+
+// TestUnauthorizedIsTyped: a 401 from the server must be recognizable so the
+// runtime can log the may-be-revoked hint instead of a generic failure.
+func TestUnauthorizedIsTyped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	api := client.New(srv.URL, "revoked-token")
+	_, err := api.Heartbeat(context.Background(), telemetry.Sample{}, nil)
+	if err == nil {
+		t.Fatal("expected error from 401 heartbeat")
+	}
+	if !client.IsUnauthorized(err) {
+		t.Fatalf("401 not detected as unauthorized: %v", err)
 	}
 }

@@ -41,16 +41,25 @@ cp config.example.json config.json
 ```
 
 - On first run the agent enrolls, receives its identity + the server's command
-  **public key**, and writes `identity.json` (mode 0600) next to the config.
-- On later runs it loads `identity.json` and skips enrollment. The
+  **public key**, and writes `identity.json` next to the config — a versioned
+  envelope whose payload is DPAPI-encrypted on Windows (mode 0600 plaintext
+  with a declared `none` scheme elsewhere).
+- On later runs it loads `identity.json` and skips enrollment; a pre-envelope
+  plaintext identity is migrated in place on first load. The
   `enrollment_token` in the config is only used once.
 - `-once` runs a single check-in and exits (useful for testing / cron-style use).
 - `run` is the default subcommand, so `./rmm-agent -config config.json` and
   `./rmm-agent run -config config.json` are equivalent.
 
-The persisted identity contains the plaintext long-lived agent token. Requested
-file mode alone is not Windows secret protection; DPAPI storage, explicit ACL
-validation, agent revocation, and quarantine are Milestone 0 work. The local
+On Windows the persisted identity is DPAPI-encrypted in user scope under the
+account that enrolled (LocalSystem for the installed service) and its DACL is
+restricted to SYSTEM and Administrators. Enrolling interactively as one user
+and then running the service as another yields a clear unprotect error — the
+recovery is to delete `identity.json` and re-enroll; there is no plaintext
+fallback. The server can quarantine this agent (it keeps beating but executes
+nothing) or revoke it (its token stops authenticating; the agent logs the
+rejection and retries at capped backoff, keeping the identity on disk for
+investigation). The local
 `heartbeat_seconds` config field is also not currently applied after enrollment;
 the saved server-provided interval is used.
 
@@ -137,8 +146,9 @@ before starting a process. A replayed command ID is neither executed nor
 re-reported, so it cannot clobber the original result. Expired entries are
 pruned on load. For v3 the agent replaces its trusted public-key bundle on every
 heartbeat, accepts only active/overlap key IDs supplied by the server, and
-refuses unknown or retired keys. The server-side registry supports staged
-activation and overlap; operators must preserve the registry and audit records
+refuses unknown or retired keys. Operators rotate the server-side registry with
+`scripts/rotate_command_key.py` (staged activation/overlap/retire, compromise,
+and rollback — see `docs/KEY-ROTATION.md`); they must preserve the registry and audit records
 when retiring or rolling back a key.
 
 Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
@@ -146,9 +156,12 @@ Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
 timeout.
 
 Commands from one heartbeat are executed sequentially and stdout/stderr are
-buffered in memory, then uploaded after completion. Output streaming, explicit
-output-size limits, queue/admission limits, and a policy-configured concurrency
-contract are not implemented.
+captured in memory up to 256 KiB per stream (384 KiB combined), then uploaded
+after completion. Bytes past a cap are counted but never buffered; when the
+combined cap binds, stderr is kept whole and stdout trimmed. Truncation is
+UTF-8-safe and reported to the server as structured metadata alongside the
+original byte totals. Output streaming, queue/admission limits, and a
+policy-configured concurrency contract are not implemented.
 
 ## Layout
 
@@ -168,8 +181,7 @@ agent/
 
 ## Roadmap
 
-- Signed expiry/nonce/schema/key fields, key rotation, revocation/quarantine,
-  DPAPI-protected credentials, execution limits, and Windows lifecycle CI.
+- Per-agent concurrency limits, typed endpoint operations, and signed releases.
 - Complete Windows inventory, typed endpoint operations, and signed self-update.
 - An interactive transport for lower-latency/streaming workflows while keeping
   heartbeat polling as a resilient fallback.

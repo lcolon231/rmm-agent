@@ -15,11 +15,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
-from app.core import anchor, audit
+from app.core import anchor, anchor_publish, audit
 from app.core.command_envelope import (
     ACTIVE_COMMAND_ENVELOPE_VERSION,
     COMMAND_ENVELOPE_V3,
@@ -28,11 +28,14 @@ from app.core.command_envelope import (
     format_command_time,
     select_command_envelope_version,
 )
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
 from app.core.keyring import active_signing_key, load_keyring
 from app.models.models import (
     Agent,
+    AgentTrustState,
+    AnchorPublication,
     AuditAnchor,
     Client,
     Command,
@@ -54,6 +57,7 @@ from app.schemas.schemas import (
     EnrollmentTokenOut,
     SiteCreate,
     SiteOut,
+    TrustStateChange,
 )
 
 # Router-level dependency: every route here needs at least a readonly operator.
@@ -153,6 +157,133 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
 
 
 # --------------------------------------------------------------------------- #
+# Agent trust state
+# --------------------------------------------------------------------------- #
+def _trust_conflict(agent: Agent, wanted: str) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "agent_trust_state_conflict",
+            "current": agent.trust_state.value,
+            "requested": wanted,
+        },
+    )
+
+
+async def _apply_trust_change(
+    db: AsyncSession,
+    agent: Agent,
+    new_state: AgentTrustState,
+    reason: str,
+    operator: Operator,
+    action: str,
+) -> Agent:
+    previous = agent.trust_state
+    agent.trust_state = new_state
+    agent.trust_state_reason = reason
+    agent.trust_state_changed_at = _now()
+    agent.trust_state_changed_by = operator.email
+    await audit.record(
+        db,
+        action=action,
+        actor=operator.email,
+        agent_id=agent.id,
+        detail={
+            "previous_trust_state": previous.value,
+            "trust_state": new_state.value,
+            "reason": reason,
+        },
+    )
+    return agent
+
+
+@router.post("/agents/{agent_id}/quarantine", response_model=AgentOut)
+async def quarantine_agent(
+    agent_id: str,
+    body: TrustStateChange,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suspend trust in an agent without destroying its identity.
+
+    A quarantined agent still authenticates and checks in (so the operator can
+    see it is alive), but receives no commands, may not submit results, and has
+    no telemetry or inventory recorded. Reversible via restore.
+    """
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.trust_state != AgentTrustState.active:
+        raise _trust_conflict(agent, AgentTrustState.quarantined.value)
+    return await _apply_trust_change(
+        db, agent, AgentTrustState.quarantined, body.reason, operator, "agent.quarantined"
+    )
+
+
+@router.post("/agents/{agent_id}/restore", response_model=AgentOut)
+async def restore_agent(
+    agent_id: str,
+    body: TrustStateChange,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a quarantined agent to active. Revoked agents cannot be restored —
+    revocation is terminal and the endpoint must re-enroll as a new identity."""
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.trust_state != AgentTrustState.quarantined:
+        raise _trust_conflict(agent, AgentTrustState.active.value)
+    return await _apply_trust_change(
+        db, agent, AgentTrustState.active, body.reason, operator, "agent.restored"
+    )
+
+
+@router.post("/agents/{agent_id}/revoke", response_model=AgentOut)
+async def revoke_agent(
+    agent_id: str,
+    body: TrustStateChange,
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently revoke an agent's credentials (admin only — irreversible).
+
+    The agent's bearer token stops authenticating entirely, and any still-queued
+    or dispatched-but-unreported commands are expired so nothing issued under
+    the old trust can be delivered or complete later.
+    """
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.trust_state == AgentTrustState.revoked:
+        raise _trust_conflict(agent, AgentTrustState.revoked.value)
+
+    result = await db.execute(
+        select(Command).where(
+            Command.agent_id == agent.id,
+            Command.status.in_([CommandStatus.queued, CommandStatus.dispatched]),
+        )
+    )
+    expired_ids = []
+    for cmd in result.scalars().all():
+        cmd.status = CommandStatus.expired
+        expired_ids.append(cmd.id)
+
+    agent = await _apply_trust_change(
+        db, agent, AgentTrustState.revoked, body.reason, operator, "agent.revoked"
+    )
+    if expired_ids:
+        await audit.record(
+            db,
+            action="agent.commands_expired_on_revoke",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail={"command_ids": sorted(expired_ids)},
+        )
+    return agent
+
+
+# --------------------------------------------------------------------------- #
 # Commands
 # --------------------------------------------------------------------------- #
 @router.get("/signing-keys")
@@ -183,6 +314,44 @@ async def dispatch_command(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    # Trust gate before capability negotiation: no new work may even be queued
+    # for an agent the server no longer fully trusts.
+    if agent.trust_state != AgentTrustState.active:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "agent_not_trusted",
+                "trust_state": agent.trust_state.value,
+            },
+        )
+    # Admission control: cap the outstanding (non-terminal) work per agent so a
+    # runaway operator or client cannot pile unbounded commands on one
+    # endpoint. Terminal commands (succeeded/failed/expired) do not count.
+    outstanding = (
+        await db.execute(
+            select(func.count())
+            .select_from(Command)
+            .where(
+                Command.agent_id == agent_id,
+                Command.status.in_(
+                    [
+                        CommandStatus.queued,
+                        CommandStatus.dispatched,
+                        CommandStatus.running,
+                    ]
+                ),
+            )
+        )
+    ).scalar_one()
+    if outstanding >= settings.max_outstanding_commands_per_agent:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "agent_command_queue_full",
+                "outstanding": outstanding,
+                "limit": settings.max_outstanding_commands_per_agent,
+            },
+        )
     envelope_version = select_command_envelope_version(
         agent.command_envelope_versions or []
     )
@@ -328,3 +497,57 @@ async def verify_audit_anchor(anchor_id: str, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail="Anchor not found")
     ok, reason = await anchor.verify_anchor(db, a)
     return AnchorVerifyOut(anchor_id=a.id, intact=ok, reason=reason)
+
+
+@router.get("/audit/publication-status")
+async def audit_publication_status(db: AsyncSession = Depends(get_db)):
+    """Operator-visible lag/health of external anchor publication.
+
+    `lag_alert` is true when the oldest unpublished anchor is older than the
+    configured threshold — the window in which a database-owning attacker could
+    rewrite history before any external copy exists. A null backend means
+    publication is disabled, in which case every anchor is unpublished."""
+    status = await anchor_publish.publication_status(db)
+    return {
+        "backend": status.backend,
+        "total_anchors": status.total_anchors,
+        "published": status.published,
+        "pending": status.pending,
+        "oldest_unpublished_age_seconds": status.oldest_unpublished_age_seconds,
+        "lag_alert": status.lag_alert,
+        "last_error": status.last_error,
+    }
+
+
+@router.get("/audit/anchors/{anchor_id}/receipt")
+async def audit_anchor_receipt(anchor_id: str, db: AsyncSession = Depends(get_db)):
+    """The external-publication receipt(s) for an anchor, with a tamper check.
+
+    Each receipt is the destination's proof of publication (e.g. an S3 object
+    version-id + ETag). `receipt_intact` recomputes the stored receipt digest —
+    false means the receipt row itself was altered. Receipts never contain
+    credentials."""
+    a = await db.get(AuditAnchor, anchor_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="Anchor not found")
+    rows = (
+        await db.execute(
+            select(AnchorPublication).where(AnchorPublication.anchor_id == anchor_id)
+        )
+    ).scalars().all()
+    out = []
+    for r in rows:
+        intact, reason = anchor_publish.verify_receipt(r)
+        out.append({
+            "backend": r.backend,
+            "status": r.status,
+            "uri": r.uri,
+            "receipt": r.receipt,
+            "receipt_sha256": r.receipt_sha256,
+            "receipt_intact": intact,
+            "receipt_reason": reason,
+            "attempts": r.attempts,
+            "last_error": r.last_error,
+            "published_at": r.published_at,
+        })
+    return {"anchor_id": anchor_id, "merkle_root": a.merkle_root, "publications": out}

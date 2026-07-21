@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
 from app.core import audit
+from app.core.clientip import client_ip
 from app.core.database import get_db
 from app.core.ratelimit import login_limiter
 from app.core.security import (
@@ -45,8 +46,7 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
         slows brute force without letting a remote attacker lock the real user
         out from a different address.
     """
-    client_ip = request.client.host if request.client else "unknown"
-    limit_key = f"{client_ip}:{body.email}"
+    limit_key = f"{client_ip(request)}:{body.email}"
     retry_after = login_limiter.retry_after(limit_key)
     if retry_after is not None:
         raise HTTPException(

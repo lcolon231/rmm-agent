@@ -16,7 +16,10 @@ report). See docs/threat-model.md.
 
 Merkle construction (documented so external verifiers can reimplement it):
 leaves are the `event_hash` values, hex-decoded, of the first `event_count`
-events in (ts, id) order. Each level pairs nodes left to right and hashes
+events in ascending `seq` order (the chain's explicit monotonic sequence;
+for events predating sequences, migration 0007 froze the historical (ts, id)
+order into `seq`, so the two orders agree on the legacy prefix). Each level
+pairs nodes left to right and hashes
 SHA-256(left || right); an unpaired trailing node is carried up unchanged.
 The root of a single leaf is the leaf itself.
 """
@@ -46,8 +49,8 @@ def merkle_root(leaf_hashes: list[str]) -> str:
 
 
 async def _covered_events(db: AsyncSession, limit: int | None = None) -> list[AuditEvent]:
-    """Events in canonical anchoring order: (ts, id), oldest first."""
-    stmt = select(AuditEvent).order_by(AuditEvent.ts.asc(), AuditEvent.id.asc())
+    """Events in canonical anchoring order: ascending seq, oldest first."""
+    stmt = select(AuditEvent).order_by(AuditEvent.seq.asc())
     if limit is not None:
         stmt = stmt.limit(limit)
     result = await db.execute(stmt)

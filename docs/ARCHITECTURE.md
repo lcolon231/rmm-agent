@@ -76,10 +76,20 @@ accept an action. It currently contains:
   version downgrade rejection, and agent-side signature, signed time-window,
   command-ID, and nonce replay checks.
 
-Known gaps include agent revocation/quarantine, Windows DPAPI protection for
-credentials, key-registry operator workflow and compromise recovery,
-MFA/federation,
-tenant-scoped authorization, and certificate pinning.
+Agent trust state is explicit and separate from online status: `active`,
+`quarantined` (authenticates, but receives no commands, may not submit
+results, and has no telemetry/inventory recorded), and `revoked` (credentials
+fail authentication with the same response as an unknown token; terminal —
+the endpoint must re-enroll as a new identity). Quarantine/restore require the
+operator role; revocation requires admin. Every transition demands a reason
+and is audited, and revocation expires the agent's outstanding queued and
+dispatched commands.
+
+Signing-key rotation is an operator-run workflow (`scripts/rotate_command_key.py`
+with the `docs/KEY-ROTATION.md` runbook): staged active/overlap/retired
+transitions, a compromise fast path, and rollback, each written atomically to
+the registry and appended to a rotation journal. Known gaps include
+MFA/federation, tenant-scoped authorization, and certificate pinning.
 
 ### 3.2 Operations plane
 
@@ -162,13 +172,18 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/sites` | Create site | Operator |
 | POST | `/enrollment-tokens` | Create token | Operator |
 | GET | `/agents`, `/agents/{id}` | List/get endpoint | Readonly |
+| POST | `/agents/{id}/quarantine` | Suspend agent trust (reversible) | Operator |
+| POST | `/agents/{id}/restore` | Return quarantined agent to active | Operator |
+| POST | `/agents/{id}/revoke` | Permanently revoke agent credentials | Admin |
 | GET | `/signing-keys` | View redacted active/overlap/retired key state | Readonly |
 | POST/GET | `/agents/{id}/commands` | Dispatch/list commands | Operator / Readonly |
 | GET | `/audit/verify` | Verify hash chain | Readonly |
 | POST/GET | `/audit/anchors` | Create/list local anchors | Operator / Readonly |
 | GET | `/audit/anchors/{id}/verify` | Verify local anchor | Readonly |
+| GET | `/audit/anchors/{id}/receipt` | External publication receipt + tamper check | Readonly |
+| GET | `/audit/publication-status` | External anchor publication lag/health | Readonly |
 
-There are no APIs yet for listing/revoking enrollment tokens, agent quarantine,
+There are no APIs yet for listing/revoking enrollment tokens,
 telemetry history, operator listing/editing, audit-event listing, monitoring,
 alerts, scheduling, patching, or evidence export.
 
@@ -178,23 +193,48 @@ The Go agent shares one runtime between foreground mode and the Windows service.
 Windows service support includes automatic start, SCM recovery actions, rotating
 logs, network retry with jitter, and graceful cancellation of a running child
 process. Go build and unit tests run on Windows CI, but Windows service and
-installer lifecycle behavior has only been manually exercised.
+installer lifecycle behavior is exercised in Windows CI: a lifecycle script drives install/start/stop/restart/refuse-double-install/uninstall against the SCM, and a silent installer install+uninstall smoke test builds and runs the Inno Setup package.
 
 The current Windows telemetry collector shells out to PowerShell/CIM once per
 heartbeat for CPU, memory, system drive, uptime, user, and OS version. It does
 not collect complete hardware, installed software, Defender, BitLocker, Secure
 Boot, TPM, or local administrator state.
 
-After enrollment, `identity.json` contains the plaintext agent token, server URL,
-and command public key. File mode `0600` is requested, but Windows credential
-protection and explicit ACL validation are absent. `seen_commands.json` stores
+After enrollment, `identity.json` holds the agent token, server URL, and command
+public keys inside a versioned envelope that declares its protection scheme. On
+Windows the payload is DPAPI-encrypted in user scope under the account that
+enrolled (LocalSystem for the installed service) and the file's DACL is replaced
+with a protected SYSTEM+Administrators-only ACL; on other platforms the payload
+is stored with protection `none` and mode `0600`. A legacy plaintext
+`identity.json` is migrated to the envelope form on first load via an atomic
+replace; if protection or migration fails, the agent refuses to run rather than
+falling back to plaintext, and a scheme mismatch (e.g. a blob enrolled under a
+different account) fails closed with a delete-and-re-enroll instruction.
+`seen_commands.json` stores
 executed command IDs and accepted signed nonces with expiry values for replay
 prevention; both entries are reserved atomically before execution.
 
-The agent processes commands from a single heartbeat sequentially. This happens
-to limit concurrency to one per runtime, but there is no explicit policy,
-server-side admission control, queue limit, or testable per-agent concurrency
-contract. Stdout and stderr are held in memory without size limits.
+Command concurrency and admission are explicit and configurable. The agent's
+contract is one command at a time per runtime: a heartbeat's batch is executed
+strictly in delivery order and the next beat is not issued until the batch
+drains. The server enforces two bounds: admission control refuses dispatch
+(HTTP 429, `agent_command_queue_full`) once an agent has
+`max_outstanding_commands_per_agent` non-terminal commands, and each heartbeat
+hands out at most `max_commands_per_heartbeat` queued commands oldest-first, so
+a backlog drains over several beats instead of flooding one. Terminal commands
+(succeeded/failed/expired) free admission slots.
+
+Command output capture is bounded: stdout and stderr are each captured up to
+256 KiB, with a 384 KiB combined cap. Bytes beyond a cap are counted but never
+buffered, so a runaway command cannot exhaust agent memory. When the combined
+cap binds, stderr is preserved and stdout trimmed to the remaining budget — a
+deterministic rule chosen because diagnostics matter most. Truncation is
+UTF-8-safe (no split runes) and reported as structured metadata
+(`stdout_truncated`, `stderr_truncated`, and the original byte totals) that
+the server persists, exposes on command records, and writes into the
+`command.completed` audit detail. NULL metadata means a pre-limits result:
+unknown, not complete. The server refuses results beyond the caps (they cannot
+have come from a compliant agent) and refuses dispatch payloads over 64 KiB.
 
 ## 6. Signed command envelope
 
@@ -259,20 +299,37 @@ previous registry atomically and never reactivates an unknown key.
 their own SHA-256 hash. `/audit/verify` detects changes or deletion relative to
 the stored chain.
 
-Current ordering is by timestamp (and, for Merkle coverage, timestamp plus UUID).
-There is no monotonic sequence number, transactional serialization strategy, or
-database constraint that prevents concurrent writers from selecting the same
-previous hash. These limits prevent a strong total-order guarantee.
+Ordering is explicit: every event carries a strictly monotonic `seq`
+(1, 2, 3, … with no gaps) assigned inside a serialized append — a
+transaction-scoped PostgreSQL advisory lock serializes concurrent writers, and
+a unique constraint on `seq` turns any lost race into a failed transaction
+rather than a silently forked chain. For events appended after migration 0007,
+`seq` is bound into `event_hash` (`hash_schema=2`), so renumbering an event
+breaks its own hash. Pre-existing events were backfilled 1..N in their
+historical `(ts, id)` order and marked `hash_schema=1` — their hashes honestly
+do not cover a sequence that did not exist when they were written, and a
+schema-1 event appearing after the cutover fails verification. `/audit/verify`
+walks `seq` order and detects gaps, duplicates, reordering, and edits.
 
 `AuditAnchor` stores a Merkle root over a prefix of event hashes. Local anchor
 verification is implemented and tested, including detection of a consistent
-chain rebuild. The root is not automatically sent to an external immutable
-destination, so an attacker controlling the database can rewrite events and
-anchors together. External publication, receipts, retry behavior, monitoring,
-and independent verification are Milestone 0 requirements.
+chain rebuild. A scheduled publisher (`app/core/anchor_publish.py`) carries
+each anchor's root to an external immutable destination — an S3-compatible
+bucket with Object Lock, or an append-only WORM filesystem — recording an
+`AnchorPublication` row with the destination URI, the backend's receipt, and a
+`receipt_sha256` tamper check. Publication is idempotent (content-addressed
+keys), retried on outage, and lag past a threshold alerts through
+`GET /audit/publication-status`. `scripts/verify_anchor_receipt.py` recomputes
+the root from read-only event hashes and the downloaded artifact, so a verifier
+needs no write access to (or trust in) the database. Publication is opt-in and
+logs a loud warning in production when unconfigured. Anchor-publication events
+are deliberately kept out of the hash chain so publishing does not itself force
+perpetual re-anchoring. See `docs/AUDIT-ANCHORING.md`.
 
-The audit system is tamper-evident by design; it is not yet immutable evidence
-storage and does not currently provide a signed evidence bundle.
+The audit system is tamper-evident and, once an external anchor destination is
+configured, externally verifiable against immutable storage. It does not yet
+provide a signed, exportable evidence bundle (a Milestone 3 compliance
+deliverable).
 
 ## 8. Tenant isolation roadmap
 
@@ -309,26 +366,38 @@ moved merely to match an aspirational tree.
 ## 11. Known limitations and documentation corrections
 
 - Polling is the only command transport; output is buffered, not streamed.
-- Authenticated live dashboard workflows, complete inventory, monitoring
+- The dashboard requires an authenticated operator but its overview remains
+  fixture-backed; live management workflows, complete inventory, monitoring
   alerts, scheduling, patching, remediation, remote shell, and remote desktop
-  are not implemented. The fixture-backed dashboard foundation does not change
-  those support boundaries.
-- Production TLS is an operator-run topology, not enforced by application
-  configuration.
-- Command expiry is not cryptographically bound to the current signature.
-- One deployment-wide signing key has no identifier or rotation mechanism.
-- Agent credentials are plaintext in endpoint JSON files and cannot be revoked.
-- Output and queues have no explicit resource limits.
-- Automated backup/restore and restore rehearsal remain absent; schema
+  are not implemented.
+- TLS termination itself remains an operator-run topology, but production
+  mode (ENVIRONMENT=production) now fails startup on debug mode, placeholder
+  or short secrets, missing signing keys, and a missing/non-HTTPS/loopback
+  PUBLIC_BASE_URL. X-Forwarded-For is ignored unless TRUST_PROXY_HEADERS is
+  explicitly enabled for a proxy-only topology.
+- Agent credentials are DPAPI-protected only on Windows; other platforms rely
+  on file permissions. Revocation is server-side only — a revoked agent keeps
+  its local identity file until uninstalled or re-enrolled.
+- Stdout/stderr and dispatch payloads are bounded; per-agent outstanding-command
+  admission and per-heartbeat FIFO batch limits are configurable and enforced.
+- Backup/restore automation ships in `deploy/backup/` (encrypted streaming
+  pg_dump with manifests, isolated restore, application-level validation via
+  `scripts/verify_restore.py`) and is rehearsed in CI; production scheduling,
+  retention monitoring, and the release rollback drill remain operator
+  evidence. Schema
   migrations and exact startup revision checks are implemented.
-- Audit anchors remain inside the same trust boundary as the audit database.
+- Audit anchors are published to external immutable storage when a backend is
+  configured (`docs/AUDIT-ANCHORING.md`); with none configured they remain
+  inside the database trust boundary and the publisher warns.
 - Roles are global; clients/sites are not authorization tenants.
 - The login limiter is process-local and weakens with multiple workers.
 - `CommandStatus.running` exists but is never assigned.
 - `websockets` and `python-multipart` are declared dependencies without
   corresponding implemented product behavior.
-- Release binaries are checksummed but unsigned and have no SBOM or provenance
-  attestation.
+- Release binaries are checksummed and carry an SBOM and signed build
+  provenance, but are not yet Authenticode-signed (needs a paid certificate).
+- Endurance is exercised by the soak harness (`deploy/soak/`, `docs/SOAK-TEST.md`),
+  smoke-tested in CI; the multi-day pilot run is operator evidence.
 
 ## 12. Change discipline
 
