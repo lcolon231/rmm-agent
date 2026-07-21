@@ -16,7 +16,7 @@ export type LoginCredentials = {
 
 export type DashboardSessionState =
   | { kind: "anonymous" }
-  | { kind: "authenticated"; operator: DashboardOperator }
+  | { kind: "authenticated"; operator: DashboardOperator; sessionToken: string }
   | { kind: "unavailable" };
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

@@ -14,8 +14,9 @@ Linux and macOS binaries can be built, but cross-platform product support is a
 Milestone 4 goal.
 
 The current repository is an API, agent, and dashboard-foundation scaffold, not
-a complete RMM. The dashboard requires an authenticated operator but remains
-fixture-backed and has no live management workflows. There is no production
+a complete RMM. The dashboard requires an authenticated operator; client/site
+navigation is live and read-only, while the overview remains fixture-backed.
+There is no production
 endpoint console, patch engine, live remote shell, remote desktop, compliance
 exporter, or tenant-scoped authorization. Production and regulated endpoint use remain outside the
 supported boundary until the deployment-safety gates in
@@ -110,7 +111,10 @@ dashboard foundation now exists in `dashboard/`: it has a responsive fixture
 overview, runtime configuration validation, a server-only NodeLink API client,
 a backend health route, and a same-origin login/logout flow. It stores the API
 JWT only in an HTTP-only, same-site cookie, revalidates the authenticated
-operator for each dashboard request, and does not display live management data.
+operator for each dashboard request, and displays bounded read-only client/site
+navigation and endpoint inventory from authorized APIs with redacted audit
+evidence. Endpoint rows expose only the latest heartbeat telemetry, never raw
+inventory snapshots or agent credentials.
 
 Milestone 1 adds live client/site and endpoint
 views, command and audit workflows, inventory, monitoring, alerts,

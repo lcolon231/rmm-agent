@@ -88,6 +88,60 @@ async def test_management_requires_auth(client):
 
 
 @pytest.mark.asyncio
+async def test_client_navigation_requires_auth(client):
+    assert (await client.get("/api/v1/clients/navigation")).status_code == 401
+    assert (await client.get("/api/v1/clients/missing")).status_code == 401
+    assert (await client.get("/api/v1/sites/missing")).status_code == 401
+    assert (await client.get("/api/v1/endpoints")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_endpoint_list_validates_filters_and_is_readonly(client):
+    token = (await _login(client, "admin@nodelink.test", "correct-horse")).json()["access_token"]
+    auth = {"Authorization": f"Bearer {token}"}
+    assert (await client.get("/api/v1/endpoints?page=0", headers=auth)).status_code == 422
+    assert (await client.get("/api/v1/endpoints?page_size=101", headers=auth)).status_code == 422
+    response = await client.get("/api/v1/endpoints?sort=hostname&direction=asc&page=1&page_size=25", headers=auth)
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "page": 1, "page_size": 25, "total": 0}
+
+
+@pytest.mark.asyncio
+async def test_readonly_client_navigation_lists_details_and_audits(client):
+    operator_token = (await _login(client, "admin@nodelink.test", "correct-horse")).json()["access_token"]
+    operator_auth = {"Authorization": f"Bearer {operator_token}"}
+    client_out = (await client.post("/api/v1/clients", json={"name": "Navigation Clinic"}, headers=operator_auth)).json()
+    site_out = (
+        await client.post(
+            "/api/v1/sites",
+            json={"client_id": client_out["id"], "name": "HQ"},
+            headers=operator_auth,
+        )
+    ).json()
+    readonly_token = (await _login(client, "viewer@nodelink.test", "read-only-pass")).json()["access_token"]
+    readonly_auth = {"Authorization": f"Bearer {readonly_token}"}
+
+    navigation = await client.get("/api/v1/clients/navigation", headers=readonly_auth)
+    assert navigation.status_code == 200
+    assert navigation.json() == {
+        "items": [{"id": client_out["id"], "name": "Navigation Clinic", "sites": [{"id": site_out["id"], "client_id": client_out["id"], "name": "HQ", "endpoint_count": 0}]}],
+        "truncated": False,
+    }
+    assert (await client.get(f"/api/v1/clients/{client_out['id']}", headers=readonly_auth)).status_code == 200
+    assert (await client.get(f"/api/v1/sites/{site_out['id']}", headers=readonly_auth)).status_code == 200
+    assert (await client.get("/api/v1/clients/missing", headers=readonly_auth)).status_code == 404
+
+    from sqlalchemy import select
+    from app.models.models import AuditEvent
+
+    async with AsyncSessionLocal() as db:
+        events = (await db.execute(select(AuditEvent.action, AuditEvent.actor))).all()
+    assert ("client_navigation.list_viewed", "viewer@nodelink.test") in events
+    assert ("client_navigation.client_viewed", "viewer@nodelink.test") in events
+    assert ("client_navigation.site_viewed", "viewer@nodelink.test") in events
+
+
+@pytest.mark.asyncio
 async def test_readonly_can_read_but_not_dispatch(client):
     # An operator-role user does the provisioning (read-only can't).
     op_tok = (await _login(client, "admin@nodelink.test", "correct-horse")).json()["access_token"]

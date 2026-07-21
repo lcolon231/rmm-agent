@@ -192,13 +192,28 @@ system can be reviewed independently. The dashboard foundation includes a
 server-only API client and validates its non-public API URL at runtime.
 Dashboard sign-in is a same-origin backend-for-frontend flow: the browser
 receives an HTTP-only, same-site cookie while server code verifies the current
-operator and forwards the bearer token to the API. Fixture data must remain
-visibly non-production until live API integration is complete.
+operator and forwards the bearer token to the API. Client/site navigation is
+the first live read-only integration: `GET /api/v1/clients/navigation` returns
+at most 200 clients, each with site IDs, names, and endpoint counts. The
+selection is URL-addressable as `?client=<id>&site=<id>`; unknown selections,
+empty data, and backend unavailability have explicit accessible states. The
+overview fixture data remains visibly non-production until its own live API
+integration is complete.
 
-This foundation performs no dashboard mutation, so there is no
-dashboard-specific audit event, persisted dashboard state, schema migration,
-retry policy, or idempotency behavior to claim yet. Later workflows must define
-and test those properties before becoming available to technicians.
+The endpoint table is live read-only data from `GET /api/v1/endpoints`. It
+accepts bounded client/site/status/search filters, stable sort keys, and pages
+of at most 100 rows. The dashboard uses URL parameters for scope, filters,
+sort direction, and page so a technician can reproduce a view. The service
+returns only the latest heartbeat telemetry and redacts inventory and agent
+credentials; successful reads create an audit event with filter metadata but
+not search text.
+
+This foundation performs no dashboard mutation. Navigation list and detail
+views are authorized for readonly operators and record redacted audit evidence;
+there is no persisted dashboard state or schema migration. The API does not
+retry automatically, and callers should not retry mutations without explicit
+idempotency rules. Rollback is deployment-level because no agent protocol or
+database schema changed.
 
 ## Delivery sequence
 

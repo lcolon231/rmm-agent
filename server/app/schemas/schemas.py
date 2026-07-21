@@ -82,6 +82,24 @@ class SiteOut(BaseModel):
     created_at: datetime
 
 
+class NavigationSiteOut(BaseModel):
+    id: str
+    client_id: str
+    name: str
+    endpoint_count: int = Field(ge=0)
+
+
+class NavigationClientOut(BaseModel):
+    id: str
+    name: str
+    sites: list[NavigationSiteOut] = Field(default_factory=list)
+
+
+class NavigationClientListOut(BaseModel):
+    items: list[NavigationClientOut] = Field(default_factory=list)
+    truncated: bool = False
+
+
 # --------------------------------------------------------------------------- #
 # Enrollment
 # --------------------------------------------------------------------------- #
@@ -272,6 +290,31 @@ class AgentOut(BaseModel):
     trust_state_changed_by: str | None
     last_seen_at: datetime | None
     enrolled_at: datetime
+
+
+class EndpointListItemOut(BaseModel):
+    id: str
+    hostname: str
+    os: str
+    os_version: str
+    agent_version: str
+    status: AgentStatus
+    last_seen_at: datetime | None
+    client_id: str
+    client_name: str
+    site_id: str
+    site_name: str
+    cpu_percent: float | None
+    mem_percent: float | None
+    disk_percent: float | None
+    logged_in_user: str | None
+
+
+class EndpointListOut(BaseModel):
+    items: list[EndpointListItemOut] = Field(default_factory=list)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total: int = Field(ge=0)
 
 
 class TrustStateChange(BaseModel):

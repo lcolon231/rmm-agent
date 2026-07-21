@@ -213,7 +213,7 @@ select:focus-visible {
   content: "";
 }
 
-.site-list button {
+.site-list a {
   display: flex;
   width: 100%;
   min-height: 30px;
@@ -228,7 +228,7 @@ select:focus-visible {
   border-radius: 4px;
 }
 
-.site-list button.active {
+.site-list a.active {
   color: white;
   background: #173b56;
 }
@@ -270,9 +270,68 @@ select:focus-visible {
 }
 
 .main-nav > button:hover,
-.site-list button:hover {
+.site-list a:hover {
   color: white;
   background: #173650;
+}
+
+.client-name.active,
+.client-name:hover,
+.client-name:focus-visible,
+.site-list a:focus-visible {
+  color: white;
+  background: #173650;
+  outline: 2px solid #5ecfc8;
+  outline-offset: 1px;
+}
+
+.navigation-state {
+  color: #c3d1db;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 8px 3px;
+}
+
+.navigation-state button {
+  background: transparent;
+  border: 0;
+  color: #7ddbd5;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 3px 0;
+  text-decoration: underline;
+}
+
+.sidebar-label small {
+  color: #8ec3bf;
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+
+.dashboard-loading {
+  align-items: center;
+  background: #0a2030;
+  color: #cfe5ed;
+  display: flex;
+  flex-direction: column;
+  font-size: 14px;
+  gap: 14px;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.dashboard-loading-mark {
+  animation: dashboard-loading-pulse 900ms ease-in-out infinite alternate;
+  background: #59c9c4;
+  border-radius: 50%;
+  height: 14px;
+  width: 14px;
+}
+
+@keyframes dashboard-loading-pulse {
+  to { opacity: 0.35; transform: scale(0.75); }
 }
 
 .nav-count {

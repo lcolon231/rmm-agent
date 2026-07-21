@@ -34,12 +34,16 @@ import {
   TerminalSquare,
   X,
 } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import type { DashboardOperator } from "@/lib/dashboard-auth-core";
+import type { NavigationData } from "@/lib/client-navigation";
+import type { EndpointListData } from "@/lib/endpoint-list";
 import {
   attentionItems,
-  clients,
+  clients as fixtureClients,
   endpoints,
   signedActions,
   type Endpoint,
@@ -108,7 +112,27 @@ function WorkIcon({ work }: { work: Endpoint["work"] }) {
   return <FileClock size={17} />;
 }
 
-function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+type SidebarProps = {
+  navigation: NavigationData | null;
+  navigationError: boolean;
+  onClose: () => void;
+  open: boolean;
+  operator: DashboardOperator;
+  selectedClientId?: string;
+  selectedSiteId?: string;
+  selectionError: boolean;
+};
+
+function Sidebar({
+  navigation,
+  navigationError,
+  onClose,
+  open,
+  operator,
+  selectedClientId,
+  selectedSiteId,
+  selectionError,
+}: SidebarProps) {
   return (
     <>
       <button
@@ -128,28 +152,42 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
         <div className="sidebar-section client-section">
           <div className="sidebar-label">
             <span>Clients</span>
-            <button aria-label="Add client">+</button>
+            {operator.role === "readonly" ? <small>View only</small> : <button aria-label="Add client" disabled title="Client provisioning is not available yet">+</button>}
           </div>
-          {clients.map((client, clientIndex) => (
-            <div className="client-tree" key={client.name}>
-              <button className="client-name">
-                <span className="client-avatar">{client.short}</span>
-                <span>{client.name}</span>
-                <ChevronDown size={15} />
-              </button>
-              <div className="site-list">
-                {client.sites.map((site, siteIndex) => (
-                  <button
-                    className={clientIndex === 0 && siteIndex === 0 ? "active" : ""}
-                    key={site}
-                  >
-                    <span>{site}</span>
-                    {clientIndex === 0 && siteIndex === 0 && <span className="site-count">84</span>}
-                  </button>
-                ))}
-              </div>
+          {navigationError ? (
+            <div className="navigation-state" role="alert">
+              <span>Client navigation is unavailable.</span>
+              <button onClick={() => window.location.reload()}>Retry</button>
             </div>
-          ))}
+          ) : navigation?.items.length === 0 ? (
+            <p className="navigation-state">No clients are available to this operator.</p>
+          ) : (
+            navigation?.items.map((client) => (
+              <div className="client-tree" key={client.id}>
+                <Link className={`client-name ${selectedClientId === client.id && !selectedSiteId ? "active" : ""}`} href={`/?client=${encodeURIComponent(client.id)}`} onClick={onClose}>
+                  <span className="client-avatar">{client.name.slice(0, 2).toUpperCase()}</span>
+                  <span>{client.name}</span>
+                  <ChevronDown size={15} />
+                </Link>
+                <div className="site-list">
+                  {client.sites.map((site) => (
+                    <Link
+                      aria-current={selectedSiteId === site.id ? "page" : undefined}
+                      className={selectedSiteId === site.id ? "active" : ""}
+                      href={`/?client=${encodeURIComponent(client.id)}&site=${encodeURIComponent(site.id)}`}
+                      key={site.id}
+                      onClick={onClose}
+                    >
+                      <span>{site.name}</span>
+                      <span className="site-count">{site.endpoint_count}</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+          {navigation?.truncated ? <p className="navigation-state">Only the first 200 clients are shown.</p> : null}
+          {selectionError ? <p className="navigation-state" role="alert">The requested client or site is unavailable.</p> : null}
         </div>
 
         <nav className="sidebar-section main-nav" aria-label="Primary navigation">
@@ -276,10 +314,25 @@ function EndpointDrawer({ endpoint, onClose }: { endpoint: Endpoint | null; onCl
 }
 
 type DashboardShellProps = {
+  endpointList: EndpointListData | null;
+  navigation: NavigationData | null;
+  navigationError: boolean;
   operator: DashboardOperator;
+  selectedClientId?: string;
+  selectedSiteId?: string;
+  selectionError: boolean;
 };
 
-export function DashboardShell({ operator }: DashboardShellProps) {
+export function DashboardShell({
+  endpointList,
+  navigation,
+  navigationError,
+  operator,
+  selectedClientId,
+  selectedSiteId,
+  selectionError,
+}: DashboardShellProps) {
+  const router = useRouter();
   const [scope, setScope] = useState("All clients");
   const [query, setQuery] = useState("");
   const [issueFilter, setIssueFilter] = useState<Endpoint["issue"] | "all">("all");
@@ -288,9 +341,26 @@ export function DashboardShell({ operator }: DashboardShellProps) {
   const [refreshTime, setRefreshTime] = useState("10:25 AM");
   const [signOutError, setSignOutError] = useState("");
 
+  const serverEndpoints: Endpoint[] = useMemo(() => endpointList?.items.map((endpoint) => ({
+    id: endpoint.id,
+    name: endpoint.hostname,
+    os: [endpoint.os, endpoint.os_version].filter(Boolean).join(" "),
+    client: endpoint.client_name,
+    site: endpoint.site_name,
+    group: endpoint.agent_version || "Agent",
+    status: endpoint.status === "online" ? "online" : endpoint.status === "offline" ? "offline" : "warning",
+    lastSeen: endpoint.last_seen_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(endpoint.last_seen_at)) : "Never",
+    user: endpoint.logged_in_user ?? "—",
+    cpu: endpoint.cpu_percent,
+    memory: endpoint.mem_percent,
+    disk: endpoint.disk_percent,
+    work: "none",
+    issue: null,
+  })) ?? endpoints, [endpointList]);
+
   const visibleEndpoints = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    return endpoints.filter((endpoint) => {
+    return serverEndpoints.filter((endpoint) => {
       const matchesScope = scope === "All clients" || endpoint.client === scope;
       const matchesIssue = issueFilter === "all" || endpoint.issue === issueFilter;
       const matchesQuery =
@@ -301,7 +371,7 @@ export function DashboardShell({ operator }: DashboardShellProps) {
           .includes(normalizedQuery);
       return matchesScope && matchesIssue && matchesQuery;
     });
-  }, [issueFilter, query, scope]);
+  }, [issueFilter, query, scope, serverEndpoints]);
 
   const exportCsv = () => {
     const rows = [
@@ -341,6 +411,16 @@ export function DashboardShell({ operator }: DashboardShellProps) {
     }
   };
 
+  const updateEndpointQuery = (changes: Record<string, string | undefined>) => {
+    const params = new URLSearchParams(window.location.search);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
+    if (!("page" in changes)) params.delete("page");
+    router.push(`/?${params.toString()}`);
+  };
+
   const operatorInitials = operator.email
     .split("@")[0]
     .split(/[._-]/)
@@ -351,7 +431,16 @@ export function DashboardShell({ operator }: DashboardShellProps) {
 
   return (
     <div className="app-shell">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar
+        navigation={navigation}
+        navigationError={navigationError}
+        onClose={() => setSidebarOpen(false)}
+        open={sidebarOpen}
+        operator={operator}
+        selectedClientId={selectedClientId}
+        selectedSiteId={selectedSiteId}
+        selectionError={selectionError}
+      />
 
       <header className="topbar">
         <button className="mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">
@@ -361,7 +450,7 @@ export function DashboardShell({ operator }: DashboardShellProps) {
           <Building2 size={17} />
           <select value={scope} onChange={(event) => setScope(event.target.value)} aria-label="Client scope">
             <option>All clients</option>
-            {clients.map((client) => <option key={client.name}>{client.name}</option>)}
+            {fixtureClients.map((client) => <option key={client.name}>{client.name}</option>)}
           </select>
           <ChevronDown size={15} />
         </label>
@@ -372,6 +461,7 @@ export function DashboardShell({ operator }: DashboardShellProps) {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search endpoints, users, or sites…"
             aria-label="Search endpoints, users, or sites"
+            onKeyDown={(event) => { if (event.key === "Enter") updateEndpointQuery({ search: query }); }}
           />
           <kbd>⌘ K</kbd>
         </label>
@@ -434,9 +524,15 @@ export function DashboardShell({ operator }: DashboardShellProps) {
                 <h2>Fleet status</h2>
               </div>
               <button className="export-button" onClick={exportCsv}><Download size={16} /><span>Export CSV</span></button>
+              <select aria-label="Endpoint status" defaultValue={new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("status") ?? ""} onChange={(event) => updateEndpointQuery({ status: event.target.value || undefined })}>
+                <option value="">All statuses</option><option value="online">Online</option><option value="offline">Offline</option><option value="pending">Pending</option>
+              </select>
+              <select aria-label="Endpoint sort order" defaultValue={new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("sort") ?? "last_seen"} onChange={(event) => updateEndpointQuery({ sort: event.target.value })}>
+                <option value="last_seen">Last seen</option><option value="hostname">Hostname</option><option value="status">Status</option>
+              </select>
             </header>
             <div className="fleet-summary">
-              <div className="total-stat"><small>Total endpoints</small><strong>156</strong></div>
+              <div className="total-stat"><small>Total endpoints</small><strong>{endpointList?.total ?? 156}</strong></div>
               <div className="summary-stat online"><CheckCircle2 size={19} /><span><small>Online</small><strong>132 <em>84.6%</em></strong></span></div>
               <div className="summary-stat warning"><AlertTriangle size={19} /><span><small>Warnings</small><strong>12 <em>7.7%</em></strong></span></div>
               <div className="summary-stat critical"><CircleAlert size={19} /><span><small>Critical</small><strong>7 <em>4.5%</em></strong></span></div>
@@ -481,8 +577,8 @@ export function DashboardShell({ operator }: DashboardShellProps) {
               ) : null}
             </div>
             <footer className="table-footer">
-              <span>Showing {visibleEndpoints.length} of 156 endpoints</span>
-              <div className="pagination"><button disabled><ChevronLeft size={15} /></button><button className="active">1</button><button>2</button><button>3</button><span>…</span><button>7</button><button><ChevronRight size={15} /></button></div>
+              <span>Showing {visibleEndpoints.length} of {endpointList?.total ?? 156} endpoints</span>
+              <div className="pagination"><button disabled={(endpointList?.page ?? 1) <= 1} onClick={() => updateEndpointQuery({ page: String((endpointList?.page ?? 1) - 1) })}><ChevronLeft size={15} /></button><button className="active">{endpointList?.page ?? 1}</button><button disabled={!endpointList || endpointList.page * endpointList.page_size >= endpointList.total} onClick={() => updateEndpointQuery({ page: String((endpointList?.page ?? 1) + 1) })}><ChevronRight size={15} /></button></div>
               <button className="page-size">25 / page <ChevronDown size={14} /></button>
             </footer>
           </section>
