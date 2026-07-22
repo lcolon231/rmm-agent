@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""End-to-end encrypted backup/restore rehearsal (issue #22).
+"""End-to-end encrypted backup/restore and release rollback rehearsal.
 
 Requires the disposable CI PostgreSQL (TEST_POSTGRES_URL) plus pg_dump,
 pg_restore, psql, and openssl on PATH. The rehearsal is the real flow:
 
   migrate -> seed -> encrypted backup (deploy/backup/nodelink-backup.sh)
   -> restore into an isolated fresh database (nodelink-restore.sh)
-  -> application-level validation (scripts/verify_restore.py)
+  -> simulate an incompatible bad release -> make the fail-closed rollback
+  decision -> restore into an isolated fresh database (nodelink-restore.sh)
+  -> application-level validation with machine-readable evidence
 
 plus the fail-closed paths: tampered artifact, wrong passphrase, and a
 non-empty restore target.
@@ -16,6 +18,7 @@ Run just this file:  TEST_POSTGRES_URL=... pytest tests/test_backup_restore.py -
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -39,6 +42,7 @@ SERVER_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = SERVER_ROOT.parent
 BACKUP_SH = REPO_ROOT / "deploy" / "backup" / "nodelink-backup.sh"
 RESTORE_SH = REPO_ROOT / "deploy" / "backup" / "nodelink-restore.sh"
+ROLLBACK_PLANNER = SERVER_ROOT / "scripts" / "plan_release_rollback.py"
 
 _TOOLS = all(shutil.which(t) for t in ("pg_dump", "pg_restore", "psql", "openssl"))
 
@@ -103,6 +107,38 @@ async def _seed(asyncpg_url: str) -> None:
         await engine.dispose()
 
 
+async def _simulate_bad_release(asyncpg_url: str) -> None:
+    """Add post-backup evidence, then simulate an unsupported N+1 revision."""
+    from app.core import audit as audit_mod
+
+    engine = create_async_engine(asyncpg_url)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with maker() as db:
+            await audit_mod.record(db, action="rollback.bad_release_n_plus_1")
+            await db.commit()
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE alembic_version "
+                    "SET version_num = 'rollback-rehearsal-n-plus-1'"
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _schema_guard_fails(asyncpg_url: str) -> None:
+    from app.core.schema_revision import SchemaRevisionMismatch, ensure_schema_current
+
+    engine = create_async_engine(asyncpg_url)
+    try:
+        with pytest.raises(SchemaRevisionMismatch):
+            await ensure_schema_current(engine)
+    finally:
+        await engine.dispose()
+
+
 @pytest.fixture
 def prepared_db(tmp_path: Path):
     """Migrated + seeded source DB; guarantees both DBs are cleaned up so the
@@ -134,7 +170,11 @@ def _run_backup(tmp_path: Path, src_async: str, passfile: Path, extra_env=None):
         **(extra_env or {}),
     )
     return subprocess.run(
-        ["bash", str(BACKUP_SH)], env=env, capture_output=True, text=True
+        ["bash", str(BACKUP_SH)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
 
@@ -150,37 +190,123 @@ def _run_restore(enc: Path, manifest: Path, passfile: Path, dbname="nodelink_res
     env.update(
         NODELINK_RESTORE_DB_URL=_plain_url(os.environ["TEST_POSTGRES_URL"], dbname),
         NODELINK_BACKUP_PASSPHRASE_FILE=str(passfile),
+        PYTHON=sys.executable,
     )
     return subprocess.run(
         ["bash", str(RESTORE_SH), str(enc), str(manifest)],
-        env=env, capture_output=True, text=True,
+        env=env, capture_output=True, text=True, timeout=60,
     )
 
 
-def test_backup_restore_verify_roundtrip(prepared_db, tmp_path: Path):
+def test_release_rollback_rehearsal(prepared_db, tmp_path: Path):
     src_async, passfile = prepared_db
 
+    # Release N: create and retain the encrypted recovery point.
     bk = _run_backup(tmp_path, src_async, passfile)
     assert bk.returncode == 0, bk.stderr
     enc, manifest = _artifacts(tmp_path)
     # Plaintext must not leak into the encrypted artifact.
     assert b"backup@nodelink.test" not in enc.read_bytes()
 
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    release_n_revision = manifest_data["schema_revision"]
+
+    # Bad release N+1: write one event after the recovery point and present a
+    # schema no checked-out server supports. The normal startup guard refuses.
+    asyncio.run(_simulate_bad_release(src_async))
+    asyncio.run(_schema_guard_fails(src_async))
+
+    # The planner fails closed unless rollout is paused, target component
+    # versions are named, the backup matches N, and data loss is accepted.
+    plan_evidence = tmp_path / "rollback-plan.json"
+    plan = subprocess.run(
+        [
+            sys.executable,
+            str(ROLLBACK_PLANNER),
+            "--backup-manifest",
+            str(manifest),
+            "--current-schema-revision",
+            "rollback-rehearsal-n-plus-1",
+            "--target-schema-revision",
+            release_n_revision,
+            "--target-server-version",
+            "server-n-rehearsal",
+            "--target-agent-version",
+            "agent-n-rehearsal",
+            "--target-installer-version",
+            "installer-n-rehearsal",
+            "--agent-rollout-paused",
+            "--accept-data-loss",
+            "--evidence-output",
+            str(plan_evidence),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=SERVER_ROOT,
+        timeout=15,
+    )
+    assert plan.returncode == 0, plan.stderr + plan.stdout
+    plan_record = json.loads(plan_evidence.read_text(encoding="utf-8"))
+    assert plan_record["action"] == "restore_backup_then_redeploy"
+    assert plan_record["target"]["schema_revision"] == release_n_revision
+
+    # Roll back to N in isolation, then verify the database before promotion.
     _psql(_admin_url(), "CREATE DATABASE nodelink_restore_test")
     rs = _run_restore(enc, manifest, passfile)
     assert rs.returncode == 0, rs.stderr
 
+    wrong_schema_evidence = tmp_path / "wrong-schema-verification.json"
+    wrong_schema = subprocess.run(
+        [
+            sys.executable,
+            str(SERVER_ROOT / "scripts" / "verify_restore.py"),
+            "--database-url",
+            _plain_url(
+                os.environ["TEST_POSTGRES_URL"], "nodelink_restore_test"
+            ).replace("postgresql://", "postgresql+asyncpg://", 1),
+            "--expected-schema-revision",
+            "not-release-n",
+            "--evidence-output",
+            str(wrong_schema_evidence),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=SERVER_ROOT,
+        timeout=60,
+    )
+    assert wrong_schema.returncode == 1
+    wrong_record = json.loads(wrong_schema_evidence.read_text(encoding="utf-8"))
+    assert wrong_record["status"] == "failed"
+    assert any("does not match" in reason for reason in wrong_record["failures"])
+
+    restore_evidence = tmp_path / "restore-verification.json"
     vr = subprocess.run(
         [sys.executable, str(SERVER_ROOT / "scripts" / "verify_restore.py"),
          "--database-url", _plain_url(os.environ["TEST_POSTGRES_URL"], "nodelink_restore_test")
             .replace("postgresql://", "postgresql+asyncpg://", 1),
          "--min-operators", "1", "--min-agents", "1",
-         "--min-commands", "1", "--min-audit-events", "5"],
-        capture_output=True, text=True, cwd=SERVER_ROOT,
+         "--min-commands", "1", "--min-audit-events", "5",
+         "--expected-schema-revision", release_n_revision,
+         "--evidence-output", str(restore_evidence)],
+        capture_output=True, text=True, cwd=SERVER_ROOT, timeout=60,
     )
     assert vr.returncode == 0, vr.stderr + vr.stdout
     assert "audit chain intact" in vr.stdout
     assert "anchor" in vr.stdout and "intact" in vr.stdout
+    restore_record = json.loads(restore_evidence.read_text(encoding="utf-8"))
+    assert restore_record["status"] == "verified"
+    assert restore_record["schema_revision"] == release_n_revision
+    assert restore_record["audit_chain_intact"] is True
+
+    # The explicit data-loss decision is real: the N+1 event is absent from N.
+    restored_url = _plain_url(
+        os.environ["TEST_POSTGRES_URL"], "nodelink_restore_test"
+    )
+    assert _psql(
+        restored_url,
+        "SELECT count(*) FROM audit_events "
+        "WHERE action = 'rollback.bad_release_n_plus_1'",
+    ) == "0"
 
 
 def test_tampered_artifact_is_refused(prepared_db, tmp_path: Path):

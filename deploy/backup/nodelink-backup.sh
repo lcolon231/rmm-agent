@@ -74,7 +74,9 @@ pg_dump --format=custom --no-owner "$NODELINK_DB_URL" \
         -pass "file:$NODELINK_BACKUP_PASSPHRASE_FILE" -out "$ENC"
 
 PLAIN_SHA256="$(cat "$PLAIN_SUM_FILE")"
-ENC_SHA256="$(sha256sum "$ENC" | cut -d' ' -f1)"
+# Hash stdin so GNU coreutils never prefixes the digest with a backslash to
+# signal an escaped Windows filename; the manifest must remain valid JSON.
+ENC_SHA256="$(sha256sum < "$ENC" | cut -d' ' -f1)"
 ENC_BYTES="$(stat -c %s "$ENC")"
 if [ "$ENC_BYTES" -eq 0 ]; then
     echo "backup: encrypted artifact is empty" >&2

@@ -24,16 +24,34 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import func, select  # noqa: E402
+from sqlalchemy import func, select, text  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
 
-async def run(database_url: str, min_counts: dict[str, int]) -> int:
+def _atomic_write_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+async def run(
+    database_url: str,
+    min_counts: dict[str, int],
+    expected_schema_revision: str | None = None,
+    evidence_output: Path | None = None,
+) -> int:
     # Imported here so --help works without app config being loadable.
     from app.core import anchor as anchor_mod
     from app.core import audit as audit_mod
@@ -48,11 +66,14 @@ async def run(database_url: str, min_counts: dict[str, int]) -> int:
     )
 
     failures: list[str] = []
+    counts: dict[str, int] = {}
+    schema_revision = "unknown"
+    anchor_results: list[dict] = []
+    chain_intact = False
     engine = create_async_engine(database_url)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with maker() as db:
-            counts = {}
             for name, model in (
                 ("operators", Operator),
                 ("agents", Agent),
@@ -67,6 +88,18 @@ async def run(database_url: str, min_counts: dict[str, int]) -> int:
                 ).scalar_one()
                 print(f"verify-restore: {name} = {counts[name]}")
 
+            revision_result = await db.execute(text("SELECT version_num FROM alembic_version"))
+            schema_revision = revision_result.scalar_one()
+            print(f"verify-restore: schema_revision = {schema_revision}")
+            if (
+                expected_schema_revision is not None
+                and schema_revision != expected_schema_revision
+            ):
+                failures.append(
+                    "schema revision "
+                    f"{schema_revision} does not match expected {expected_schema_revision}"
+                )
+
             for name, minimum in min_counts.items():
                 if counts.get(name, 0) < minimum:
                     failures.append(
@@ -75,6 +108,7 @@ async def run(database_url: str, min_counts: dict[str, int]) -> int:
 
             ok, broken = await audit_mod.verify_chain(db)
             if ok:
+                chain_intact = True
                 print("verify-restore: audit chain intact")
             else:
                 failures.append(f"audit chain broken at event {broken}")
@@ -85,11 +119,31 @@ async def run(database_url: str, min_counts: dict[str, int]) -> int:
             for a in anchors:
                 a_ok, reason = await anchor_mod.verify_anchor(db, a)
                 if a_ok:
+                    anchor_results.append({"id": str(a.id), "intact": True})
                     print(f"verify-restore: anchor {a.id} intact ({a.event_count} events)")
                 else:
+                    anchor_results.append(
+                        {"id": str(a.id), "intact": False, "reason": reason}
+                    )
                     failures.append(f"anchor {a.id} failed: {reason}")
     finally:
         await engine.dispose()
+
+    evidence = {
+        "format": "nodelink-restore-verification",
+        "version": 1,
+        "created_at_utc": datetime.now(UTC).isoformat(),
+        "status": "failed" if failures else "verified",
+        "schema_revision": schema_revision,
+        "expected_schema_revision": expected_schema_revision,
+        "counts": counts,
+        "audit_chain_intact": chain_intact,
+        "anchors": anchor_results,
+        "failures": failures,
+    }
+    if evidence_output is not None:
+        _atomic_write_json(evidence_output, evidence)
+        print(f"verify-restore: evidence wrote {evidence_output}")
 
     if failures:
         for f in failures:
@@ -107,6 +161,15 @@ def main() -> None:
     parser.add_argument("--min-agents", type=int, default=0)
     parser.add_argument("--min-commands", type=int, default=0)
     parser.add_argument("--min-audit-events", type=int, default=0)
+    parser.add_argument(
+        "--expected-schema-revision",
+        help="fail unless the restored database has this exact Alembic revision",
+    )
+    parser.add_argument(
+        "--evidence-output",
+        type=Path,
+        help="atomically write a JSON verification record (contains counts, no secrets)",
+    )
     args = parser.parse_args()
     minimums = {
         "operators": args.min_operators,
@@ -114,7 +177,16 @@ def main() -> None:
         "commands": args.min_commands,
         "audit_events": args.min_audit_events,
     }
-    sys.exit(asyncio.run(run(args.database_url, minimums)))
+    sys.exit(
+        asyncio.run(
+            run(
+                args.database_url,
+                minimums,
+                expected_schema_revision=args.expected_schema_revision,
+                evidence_output=args.evidence_output,
+            )
+        )
+    )
 
 
 if __name__ == "__main__":

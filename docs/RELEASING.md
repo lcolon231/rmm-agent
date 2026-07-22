@@ -9,15 +9,20 @@ signed SLSA build-provenance attestations for every artifact, and Windows
 service/installer lifecycle tests run in CI on every push. It does **not**
 Authenticode-sign the Windows agent or installer — that requires a paid
 code-signing certificate and is the one remaining release-authenticity gap —
-and a production rollback has not been validated against a real deployment. Do
-not describe a tagged artifact as production-ready. See
+and a production rollback has not been validated against a real deployment.
+The release rollback path is automated and CI-rehearsed, but a timed operator
+drill is still required. Do not describe a tagged artifact as production-ready. See
 [`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md).
 
 ## Cutting a release
 
 1. Make sure `main` is green (the CI workflow runs the Go and Python suites on
    every push/PR).
-2. Tag and push:
+2. Fill the release and last-known-good compatibility record in
+   [`ROLLBACK.md`](ROLLBACK.md): immutable server commit/tag, agent and installer
+   versions/digests, Alembic head, backup manifest, and protocol versions.
+   Confirm the rollback backup has passed `verify_restore.py`.
+3. Tag and push:
 
    ```bash
    git checkout main && git pull
@@ -25,7 +30,7 @@ not describe a tagged artifact as production-ready. See
    git push origin v0.1.0
    ```
 
-3. The workflow runs the Go tests, cross-builds with the version stamped in
+4. The workflow runs the Go tests, cross-builds with the version stamped in
    (`-ldflags "-X main.version=<tag without v>"`), and publishes a GitHub
    Release with:
    - `rmm-agent-windows-amd64.exe`
@@ -118,26 +123,31 @@ it is added.
 
 ## Current schema and agent compatibility
 
-Server releases containing Alembic revision `0004` require `alembic upgrade
-head` before non-debug startup. Roll out the database revision and server first,
+Current server releases require Alembic revision `0008`; non-debug startup
+requires `alembic upgrade head`. Roll out the database revision and server first,
 then upgrade agents. Command dispatch returns `409` until an agent advertises
 `command-v3`; old queued commands are expired by the migration. A new agent
 refuses commands from an old server because they lack an envelope version, and
 a new server rejects enrollment when no supported version overlaps.
 
 There is no in-place schema or protocol downgrade. Prefer a forward fix. A
-restore to the pre-`0004` database and old components is an explicit destructive
+restore to an older database and matching old components is an explicit destructive
 recovery choice and discards post-backup data; it is not a normal release
 rollback.
 
-## Rollback (not yet validated)
+## Rollback
 
-Every production-intended release needs a version-specific rollback procedure
-that names compatible server, agent, installer, and schema versions; states
-whether migrations are reversible; pauses automatic update; preserves audit
-evidence; and verifies the restored service. The generic acceptance checklist is
-in [`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md). There is no supported
-production rollback procedure today.
+The operator runbook is [`ROLLBACK.md`](ROLLBACK.md). It requires a
+release-specific record naming the compatible server, agent, installer, and
+schema; fails closed until external agent rollout is paused; treats migrations
+as forward-only; preserves the failed-state backup and audit evidence; and
+defines post-rollback checks. `scripts/plan_release_rollback.py` records the
+forward-fix/redeploy/restore decision, and the PostgreSQL CI suite rehearses the
+restore path through `verify_restore.py`.
+
+This is reproducible automated evidence, not a claim that a production
+deployment or operator response has been drilled. Perform and retain a timed
+production-topology rehearsal before treating the release as production-ready.
 
 ## What is intentionally NOT released here
 

@@ -10,6 +10,8 @@ promoted.
 The scripts live in `deploy/backup/`; application-level validation lives in
 `server/scripts/verify_restore.py`. The full flow is exercised end to end in
 CI against a disposable PostgreSQL (`server/tests/test_backup_restore.py`).
+For release rollback decisions and component redeployment, use
+[`ROLLBACK.md`](ROLLBACK.md); restore alone is not a complete rollback.
 
 ## Taking a backup
 
@@ -77,12 +79,17 @@ validation:
 cd server
 python scripts/verify_restore.py \
   --database-url 'postgresql+asyncpg://rmm:...@127.0.0.1:5432/nodelink_restore' \
-  --min-operators 1 --min-agents 1 --min-audit-events 1
+  --expected-schema-revision 0008 \
+  --min-operators 1 --min-agents 1 --min-audit-events 1 \
+  --evidence-output ../incident/restore-verification.json
 ```
 
 `verify_restore.py` counts operators, agents, commands, tokens, heartbeats,
 and audit rows; verifies the audit hash chain in sequence order; and
-recomputes every stored Merkle anchor. Exit 0 means fit to promote.
+recomputes every stored Merkle anchor. When requested, it also requires an
+exact Alembic revision and atomically writes a JSON evidence record containing
+the counts and verification results (never the database URL or credentials).
+Exit 0 means fit to promote.
 
 ## Promotion and rollback decisions
 
@@ -98,6 +105,12 @@ the revision guard will refuse to start otherwise. Never downgrade a schema
 in place; NodeLink migrations are forward-only, and going backward means
 restoring an older backup with the matching older build after an explicit
 data-loss decision.
+
+For a release rollback, do not automatically migrate an N backup to N+1: that
+would reintroduce the schema under investigation. Use
+`scripts/plan_release_rollback.py` and the release compatibility record in
+`ROLLBACK.md` to select a forward fix, component-only redeploy, or exact-revision
+restore.
 
 ## What this does not cover yet
 

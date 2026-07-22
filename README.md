@@ -57,6 +57,10 @@ The code in this repository currently provides:
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
 - An Alembic baseline and forward migration, with exact revision enforcement
   on non-debug startup and a disposable PostgreSQL migration test in CI.
+- Encrypted PostgreSQL backup/isolated restore plus a fail-closed release
+  rollback planner; CI rehearses an incompatible bad release, exact-revision
+  restore, explicit data loss, component selection, and audit verification
+  (`docs/ROLLBACK.md`).
 - An Inno Setup Windows installer and tagged release workflow that publishes
   checksums, an SPDX SBOM, and signed build-provenance attestations. Windows
   binaries and the installer are not yet Authenticode-signed.
@@ -124,8 +128,9 @@ The repository does **not** currently contain:
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
 - Certificate pinning or a least-privilege agent service account.
-- Scheduled production backup evidence (encrypted backup/restore tooling ships
-  in `deploy/backup/`), or Authenticode signing (checksums, an SPDX SBOM, and
+- Scheduled production backup and timed operator rollback-drill evidence (the
+  tooling and automated PostgreSQL rehearsal ship in `deploy/backup/` and
+  `docs/ROLLBACK.md`), or Authenticode signing (checksums, an SPDX SBOM, and
   signed build provenance are published; only certificate-based signing is
   missing). External audit-anchor publication ships (`docs/AUDIT-ANCHORING.md`)
   but the operator must configure and operate the destination.
