@@ -173,6 +173,15 @@ coverage are still required before this milestone closes.
   typed operations with narrow validation and least privilege where feasible.
 - Apply stronger session authorization, idle/absolute timeouts, recording
   metadata, and rate limits to interactive shell and streaming transport.
+- Constrain technician-to-end-user chat as a message-only channel: the chat
+  window the agent surfaces on the endpoint must carry text between the
+  machine's user and an authorized technician and nothing else — no command
+  execution, file transfer, or remote control piggybacked on it. Require
+  operator-role authorization to open a session, visible technician identity
+  on the endpoint, endpoint-side accept/close, per-message participant
+  identity, size/rate bounds on messages, audited session open/close, and
+  bounded transcript retention with the same redaction discipline as command
+  output (transcripts can contain sensitive endpoint-user content).
 - Treat MeshCentral as a separate trust boundary; synchronize least-privilege
   access and audit NodeLink's session authorization and launch.
 - Sign self-updates, stage rollout, enforce anti-rollback policy, and retain a

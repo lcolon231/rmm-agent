@@ -147,9 +147,15 @@ Workstreams, in order:
    shutdown operations.
 4. Interactive remote shell and streaming command output over a live transport,
    retaining polling fallback.
-5. MeshCentral remote desktop integration with explicit authorization and audit
+5. Technician-to-end-user chat over the same live transport: the agent surfaces
+   a chat window on the endpoint so the machine's user can talk to the
+   technician from their computer, with sessions initiated or accepted
+   endpoint-side, participant identity on every message, complete audit of
+   session lifecycle, bounded/retained transcripts, and no remote-control
+   capability piggybacked on the chat channel.
+6. MeshCentral remote desktop integration with explicit authorization and audit
    boundaries.
-6. Signed, staged, rollback-capable agent self-update.
+7. Signed, staged, rollback-capable agent self-update.
 
 Exit requires maintenance-window and reboot safety tests, idempotent remediation
 where appropriate, complete audit coverage, and Windows end-to-end evidence.

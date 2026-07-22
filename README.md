@@ -106,7 +106,9 @@ soak test (the harness and runbook ship in `deploy/soak/` and
   library, and recurring tasks.
 - **Milestone 2 — Patch and Remediation:** Windows Update policies and
   installation, software deployment, endpoint operations, interactive shell,
-  streaming output, MeshCentral integration, and agent self-update.
+  streaming output, technician-to-end-user chat (a chat window on the endpoint
+  so the machine's user can talk to the technician from their computer),
+  MeshCentral integration, and agent self-update.
 - **Milestone 3 — Compliance Productization:** evidence bundles, approval
   workflows, tenant-scoped authorization, stronger identity controls,
   immutable retention, audit verification tools, and a customer audit portal.
@@ -122,8 +124,9 @@ The repository does **not** currently contain:
   endpoint inventory, endpoint telemetry detail, and endpoint command console
   use live API data; aggregate overview panels remain fixture-backed.
 - WebSocket or other live agent transport, interactive remote shell, streaming
-  command output, or command cancellation. Polling remains the only transport
-  and a dispatched command is bounded only by its signed expiry.
+  command output, technician-to-end-user chat, or command cancellation. Polling
+  remains the only transport and a dispatched command is bounded only by its
+  signed expiry.
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, TPM,
   or local-administrator inventory.
 - Monitoring policy/check/alert models, alert acknowledgement, email, or

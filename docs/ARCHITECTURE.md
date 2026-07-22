@@ -162,7 +162,13 @@ re-fetching bounded server data; output remains buffered, never streamed.
 
 Milestone 1 adds the remaining live audit workflows, inventory, monitoring,
 alerts, notifications, script library, and recurring tasks. Later phases add
-patching, remediation, evidence workflows, and ecosystem integrations.
+patching, remediation, technician-to-end-user chat (planned for Milestone 2:
+the agent surfaces a chat window on the endpoint so the machine's user can
+talk to the technician from their computer, carried over the same planned live
+transport as the interactive shell, with endpoint-side session
+initiation/acceptance, per-message participant identity, audited session
+lifecycle, bounded retained transcripts, and no remote-control capability on
+the chat channel), evidence workflows, and ecosystem integrations.
 
 ## 4. Server
 

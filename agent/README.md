@@ -203,3 +203,8 @@ agent/
 - Complete Windows inventory, typed endpoint operations, and signed self-update.
 - An interactive transport for lower-latency/streaming workflows while keeping
   heartbeat polling as a resilient fallback.
+- Technician-to-end-user chat: a message-only chat window the agent surfaces on
+  the endpoint so the machine's user can talk to the technician, carried over
+  the interactive transport with endpoint-side accept/close and audited
+  sessions — deliberately no command execution or remote control on that
+  channel.
