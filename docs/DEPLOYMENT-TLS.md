@@ -17,8 +17,9 @@ Agent ── https:// ──► Caddy (:443, TLS) ── http:// ──► uvico
 > **Current limitation:** this is an operator-run topology, not an
 > application-enforced production mode. The server does not reject unsafe
 > production configuration, and the agent accepts an `http://` server URL.
-> Certificate renewal monitoring and optional certificate pinning remain
-> Milestone 0 work. Completing this runbook alone does not make a deployment
+> Certificate renewal monitoring remains Milestone 0 deployment evidence;
+> optional SPKI pinning is implemented but requires operator rotation/recovery
+> rehearsal. Completing this runbook alone does not make a deployment
 > production-ready; use [`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md).
 
 ## Production settings
@@ -116,19 +117,31 @@ alone changes nothing. Either:
 
 The first option keeps the agent's identity and history; prefer it.
 
+## Optional SPKI pinning
+
+For high-assurance deployments, `config.json` may contain multiple
+`tls_spki_pins` in `sha256/<base64>` form. The agent first performs ordinary OS
+trust-chain, validity, and hostname verification, then requires the leaf SPKI to
+match at least one pin. Empty/omitted pins preserve ordinary TLS behavior.
+
+Always stage current+next pins before changing a server key. An expired pinned
+certificate is still rejected; recover by reissuing a valid certificate with a
+pinned key or by changing pins out-of-band. The complete derivation, rotation,
+rollback, and stale-pin recovery procedure is
+[`CERTIFICATE-PINNING.md`](CERTIFICATE-PINNING.md).
+
 ## Checklist
 
 - [ ] `https://<host>/healthz` returns OK from another machine, no cert warnings
 - [ ] uvicorn is bound to `127.0.0.1` (Option A) — plain HTTP unreachable externally
 - [ ] uvicorn started with `--proxy-headers`
 - [ ] agent `identity.json` / `config.json` use `https://`
+- [ ] if pinning is enabled, current+next pins and out-of-band recovery are tested
 - [ ] agent log shows check-ins succeeding (silence after startup = success)
 - [ ] server marks the agent `online`
 
-## Future hardening (out of scope here)
+## Future hardening
 
-- **Certificate pinning in the agent** for high-assurance clients (threat
-  model, boundary 2), including overlapping pins and recovery-safe rotation.
 - **HSTS / redirect** of any legacy plain-HTTP listeners.
 - **Production startup validation** for HTTPS public URL, trusted proxy scope,
   placeholder secrets, and certificate/renewal monitoring.

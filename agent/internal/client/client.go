@@ -5,11 +5,16 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -47,6 +52,103 @@ func New(baseURL, agentToken string) *Client {
 		agentToken: agentToken,
 		http:       &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// NewWithTLSSPKIPins creates a client that performs normal PKI validation and
+// additionally requires the leaf certificate's SPKI SHA-256 to match one of
+// tlsSPKIPins. Pins use the conventional "sha256/<base64>" form. An empty
+// slice preserves the ordinary Go/OS TLS behavior.
+func NewWithTLSSPKIPins(baseURL, agentToken string, tlsSPKIPins []string) (*Client, error) {
+	return newWithTLSConfig(baseURL, agentToken, tlsSPKIPins, nil)
+}
+
+func newWithTLSConfig(baseURL, agentToken string, pinStrings []string, tlsConfig *tls.Config) (*Client, error) {
+	pins, err := parseSPKIPins(pinStrings)
+	if err != nil {
+		return nil, err
+	}
+
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("default HTTP transport does not support TLS pinning")
+	}
+	transport := defaultTransport.Clone()
+	if len(pins) > 0 {
+		parsedURL, parseErr := url.Parse(baseURL)
+		if parseErr != nil || !strings.EqualFold(parsedURL.Scheme, "https") || parsedURL.Host == "" {
+			return nil, fmt.Errorf("tls_spki_pins require a valid https server_url")
+		}
+	}
+	if tlsConfig != nil {
+		transport.TLSClientConfig = tlsConfig.Clone()
+	} else if transport.TLSClientConfig != nil {
+		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+	} else {
+		transport.TLSClientConfig = &tls.Config{}
+	}
+	if len(pins) > 0 {
+		if transport.TLSClientConfig.InsecureSkipVerify {
+			return nil, fmt.Errorf("tls_spki_pins cannot be used with InsecureSkipVerify")
+		}
+		previousVerify := transport.TLSClientConfig.VerifyConnection
+		transport.TLSClientConfig.VerifyConnection = func(state tls.ConnectionState) error {
+			// VerifyConnection runs after Go's standard chain and hostname checks
+			// because InsecureSkipVerify remains false. Preserve any callback a
+			// supplied TLS config already had before applying the additional pin.
+			if previousVerify != nil {
+				if verifyErr := previousVerify(state); verifyErr != nil {
+					return verifyErr
+				}
+			}
+			return verifyLeafSPKI(state, pins)
+		}
+	}
+
+	return &Client{
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		agentToken: agentToken,
+		http:       &http.Client{Timeout: 30 * time.Second, Transport: transport},
+	}, nil
+}
+
+func parseSPKIPins(values []string) ([][]byte, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	pins := make([][]byte, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for i, value := range values {
+		if !strings.HasPrefix(value, "sha256/") {
+			return nil, fmt.Errorf("tls_spki_pins[%d]: expected sha256/<base64>", i)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(value, "sha256/"))
+		if err != nil || len(decoded) != sha256.Size {
+			return nil, fmt.Errorf("tls_spki_pins[%d]: expected base64 of a 32-byte SHA-256 digest", i)
+		}
+		key := string(decoded)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		pins = append(pins, decoded)
+	}
+	return pins, nil
+}
+
+func verifyLeafSPKI(state tls.ConnectionState, pins [][]byte) error {
+	if len(state.PeerCertificates) == 0 {
+		return fmt.Errorf("tls SPKI pin verification: server supplied no certificate")
+	}
+	digest := sha256.Sum256(state.PeerCertificates[0].RawSubjectPublicKeyInfo)
+	for _, pin := range pins {
+		if subtle.ConstantTimeCompare(digest[:], pin) == 1 {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"tls SPKI pin mismatch (observed sha256/%s)",
+		base64.StdEncoding.EncodeToString(digest[:]),
+	)
 }
 
 // EnrollResponse mirrors the server schema.

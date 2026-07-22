@@ -82,7 +82,11 @@ an application-enforced invariant.
 **Before production:** terminate TLS at the server (or a reverse proxy) with a
 valid certificate — the supported pattern (Caddy in front of uvicorn bound to
 localhost) is documented in `docs/DEPLOYMENT-TLS.md` with `deploy/Caddyfile`.
-Consider certificate pinning in the agent for high-assurance clients.
+For high-assurance clients, optional `tls_spki_pins` adds leaf-SPKI SHA-256
+matching after normal chain/hostname/time validation. Multiple pins provide
+current+next overlap; mismatch fails closed. Stale/expired recovery requires a
+valid certificate using a pinned key or out-of-band config change, never a TLS
+verification bypass (`docs/CERTIFICATE-PINNING.md`).
 
 ### (3) Network → Agent (command authenticity)
 
@@ -213,7 +217,7 @@ warning in production when unconfigured. See `docs/AUDIT-ANCHORING.md`.
 | 1 | Management API unauthenticated | Critical | **Closed** — operator authN + role-based authZ |
 | 2 | No token revocation / login rate-limit | Medium | **Closed** — per-operator `token_generation` bump revokes all outstanding JWTs (self + admin endpoints, audited); sliding-window 429 throttle on `/auth/login` per (IP, email). Limiter is per-process — use a shared store when running multiple workers |
 | 3 | Command expiry/version/nonce are not signed | Critical | **Closed** — `command-v3` binds schema version, issued-at, expiry, nonce, and signing-key ID with shared Go/Python verification; staged key rotation/compromise/rollback are operator-run and rehearsed (`scripts/rotate_command_key.py`, `docs/KEY-ROTATION.md`) |
-| 4 | TLS not enforced by scaffold | High | **Mostly closed** — ENVIRONMENT=production fails startup on debug mode, placeholder/short SECRET_KEY, missing signing keys, or a missing/non-HTTPS/loopback PUBLIC_BASE_URL; X-Forwarded-For is ignored unless TRUST_PROXY_HEADERS is explicitly enabled (rightmost entry only). Deployment path documented (`docs/DEPLOYMENT-TLS.md`, `deploy/Caddyfile`); certificate lifecycle monitoring and agent cert pinning still open |
+| 4 | TLS not enforced by scaffold | High | **Mostly closed** — ENVIRONMENT=production fails startup on unsafe config; proxy trust is explicit; deployment path is documented; optional agent SPKI pinning retains normal PKI, supports overlap, and fails closed (`docs/CERTIFICATE-PINNING.md`). Certificate lifecycle monitoring and deployment evidence remain |
 | 5 | Audit chain not externally anchored | Medium | **Mostly closed** — a scheduled publisher writes each anchor's Merkle root to an external immutable destination (S3 Object Lock or a WORM filesystem) with tamper-evident receipts, idempotent retry, lag alerting, and a clean-room verifier. Publication is opt-in (loud when unconfigured); the operator still chooses and operates the destination |
 | 6 | Agent runs commands at its own privilege | By design | Partial — installable service (Gate 2) runs as `LocalSystem`; least-privilege service account still open |
 | 7 | Agent was foreground-only (no unattended operation) | High | **Closed (Gate 2)** — installable Windows service: auto-start at boot, SCM crash-recovery, rotated file logging, and a network-resilient check-in loop (backoff + jitter) |
