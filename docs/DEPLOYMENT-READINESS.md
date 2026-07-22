@@ -27,7 +27,7 @@ Statuses are:
 | Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
 | Backup, restore, rollback | Partial | Encrypted streaming pg_dump with manifest/checksums, fail-closed off-host upload hook, isolated-restore script, and application-level restore validation, all exercised end to end in CI; scheduled production runs, retention monitoring, and a production rollback rehearsal remain operator evidence (#26) |
 | Windows lifecycle CI | Implemented | Windows CI builds the agent and installer and exercises service install/start/stop/restart/refuse-double-install/uninstall plus a silent installer install+uninstall smoke test |
-| Release authenticity | Partial | Checksums, an SPDX SBOM (Go + Python), and signed SLSA build-provenance attestations are published for every artifact; Authenticode signing is the one remaining gap (needs a paid certificate) |
+| Release authenticity | Partial | The tag workflow generates checksums covering the agent binaries, SBOM, and installer; an SPDX SBOM (Go + Python); and signed SLSA build provenance for every executable artifact. A post-change tagged evidence run is still required. Authenticode signing (#24) is the one remaining implementation gap and retains its documented workflow slot |
 | Soak evidence | Partial | Soak harness with workload, fault injection, resource/audit/anchor sampling, and pass/fail reporting ships (`deploy/soak/`, `docs/SOAK-TEST.md`), CI-smoke-tested and demonstrated against a live server; the multi-day pilot run itself is operator evidence |
 
 ## Controlled pilot gate
@@ -160,9 +160,13 @@ link to reproducible evidence in the release or pilot record.
 - [x] Release checksums cover final artifacts (`SHA256SUMS.txt` over the
       binaries and SBOM; a `.sha256` sidecar for the installer). They will move
       to cover *signed* artifacts once signing lands.
-- [x] An SBOM and provenance attestation are published and independently
-      verified (SPDX SBOM; signed SLSA build provenance via
-      `actions/attest-build-provenance`, verifiable with `gh attestation verify`).
+- [x] The release workflow generates an SPDX SBOM and signed SLSA build
+      provenance for all three agent binaries and the Windows installer via
+      `actions/attest-build-provenance`.
+- [ ] A tag created after the SBOM/provenance workflow change has published the
+      expected assets and each attestation has been independently verified with
+      `gh attestation verify` (the existing `v0.1.0`/`v0.1.1` releases predate
+      the change).
 - [ ] Release notes state known limitations, schema/agent compatibility, upgrade,
       rollback, and security impact.
 

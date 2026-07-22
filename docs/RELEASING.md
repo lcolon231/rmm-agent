@@ -4,9 +4,10 @@ Releases are automated by `.github/workflows/release.yml`, which fires on a
 version tag. The server is run from source (uvicorn), so only the **agent** is
 released as a binary.
 
-The current release process publishes SHA-256 checksums, an SPDX SBOM, and
-signed SLSA build-provenance attestations for every artifact, and Windows
-service/installer lifecycle tests run in CI on every push. It does **not**
+The tag-triggered release workflow is configured to publish SHA-256 checksums,
+an SPDX SBOM, and signed SLSA build-provenance attestations for every executable
+artifact, and Windows service/installer lifecycle tests run in CI on every
+push. It does **not**
 Authenticode-sign the Windows agent or installer — that requires a paid
 code-signing certificate and is the one remaining release-authenticity gap —
 and a production rollback has not been validated against a real deployment. Do
@@ -94,15 +95,16 @@ cloud HSM — never in the repo.
 
 ## Release evidence
 
-Each release publishes and (where possible) verifies:
+The workflow publishes and (where possible) verifies:
 
-- **SHA-256 checksums** — `SHA256SUMS.txt` for the binaries and a `.sha256`
-  sidecar for the installer. *Done.*
+- **SHA-256 checksums** — `SHA256SUMS.txt` covers all three agent binaries and
+  the SBOM; a `.sha256` sidecar covers the installer. *Workflow implemented.*
 - **SBOM** — `nodelink-<version>.spdx.json`, an SPDX document covering the Go
-  module and Python server dependencies. *Done.*
+  module and Python server dependencies. *Workflow implemented.*
 - **Build provenance** — signed SLSA attestations tying each artifact digest to
-  the source ref and workflow (`actions/attest-build-provenance`), verifiable
-  with `gh attestation verify`. *Done.*
+  the source ref and workflow (`actions/attest-build-provenance`) for all three
+  agent binaries and the Windows installer, verifiable with
+  `gh attestation verify`. *Workflow implemented.*
 - **Windows service and installer lifecycle results** — exercised by the
   `windows-lifecycle` CI job on every push (see `.github/workflows/ci.yml`).
   *Done.*
@@ -115,6 +117,29 @@ Each release publishes and (where possible) verifies:
 Because the SBOM, provenance, and checksum steps run inline, a failure in any of
 them fails the release job. The signing step will fail closed the same way once
 it is added.
+
+### Tagged-release evidence status
+
+SBOM generation and provenance attestation were added after the existing
+`v0.1.0` and `v0.1.1` releases. Those releases therefore do not prove this
+workflow path: their asset lists contain neither an SPDX SBOM nor the installer
+checksum sidecar. The first tag cut after this workflow change must be treated
+as the evidence run. For that tag, retain the workflow URL and verify:
+
+```bash
+gh release view <tag> --repo lcolon231/rmm-agent --json assets,url
+gh attestation verify rmm-agent-windows-amd64.exe --repo lcolon231/rmm-agent
+gh attestation verify rmm-agent-linux-amd64 --repo lcolon231/rmm-agent
+gh attestation verify rmm-agent-darwin-arm64 --repo lcolon231/rmm-agent
+gh attestation verify NodeLinkAgentSetup-<version>.exe --repo lcolon231/rmm-agent
+sha256sum -c SHA256SUMS.txt
+```
+
+On Windows, separately compare the installer digest with
+`NodeLinkAgentSetup-<version>.exe.sha256`. Do not mark the tagged evidence as
+verified until every command succeeds. Provenance and SBOM evidence can only
+come from an actual tag push because the release workflow does not run on pull
+requests.
 
 ## Current schema and agent compatibility
 
