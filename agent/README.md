@@ -51,6 +51,24 @@ cp config.example.json config.json
 - `run` is the default subcommand, so `./rmm-agent -config config.json` and
   `./rmm-agent run -config config.json` are equivalent.
 
+### Optional TLS SPKI pinning
+
+High-assurance deployments may add multiple `tls_spki_pins` to `config.json`:
+
+```json
+"tls_spki_pins": [
+  "sha256/<base64 SHA-256 of current leaf SPKI>",
+  "sha256/<base64 SHA-256 of next leaf SPKI>"
+]
+```
+
+Pinning is off when the field is absent or empty. When enabled, `server_url`
+must use HTTPS; the agent still requires the normal OS trust chain, certificate
+validity, and hostname match, then additionally requires one SPKI pin. Pins
+stay in `config.json`, so an existing agent picks up an overlap/recovery set on
+restart without re-enrollment. Use current+next overlap and rehearse the
+out-of-band stale-pin path in [`CERTIFICATE-PINNING.md`](../docs/CERTIFICATE-PINNING.md).
+
 On Windows the persisted identity is DPAPI-encrypted in user scope under the
 account that enrolled (LocalSystem for the installed service) and its DACL is
 restricted to SYSTEM and Administrators. Enrolling interactively as one user

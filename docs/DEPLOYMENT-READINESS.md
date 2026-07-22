@@ -20,8 +20,9 @@ Statuses are:
 | Operator API authentication/RBAC | Implemented | Auth and authorization integration tests |
 | Signed command verification | Implemented | `command-v3`, negotiation, downgrade rejection, signed schema/time/nonce/key ID, and shared vectors; staged key rotation, compromise, and rollback via `scripts/rotate_command_key.py` with a rehearsed test suite and `docs/KEY-ROTATION.md` runbook |
 | Agent replay/expiry checks | Implemented | Signed time-window validation plus durable command-ID and nonce replay state |
-| Production TLS | Partial | Caddy topology documented; ENVIRONMENT=production fails startup on debug/placeholder-secret/missing-key/non-HTTPS-URL config and proxy trust is explicit opt-in; certificate lifecycle monitoring and pinning remain open |
-| Agent credential protection/revocation | Partial | Trust states (quarantine/restore/revoke) with audited, reasoned operator transitions and fail-closed enforcement; DPAPI envelope + restricted ACL on Windows with atomic plaintext migration. Windows-runner evidence for migration/ACL paths ships with Windows CI (issue #23); certificate pinning remains open |
+| Production TLS | Partial | Caddy topology documented; ENVIRONMENT=production fails startup on debug/placeholder-secret/missing-key/non-HTTPS-URL config and proxy trust is explicit opt-in; certificate lifecycle monitoring remains operator evidence |
+| Optional certificate pinning | Implemented | Agent `tls_spki_pins` adds strict multi-pin leaf-SPKI SHA-256 matching after normal PKI validation; off by default, fail-closed mismatch/config tests, current+next rotation, and stale/expired recovery runbook |
+| Agent credential protection/revocation | Partial | Trust states (quarantine/restore/revoke) with audited, reasoned operator transitions and fail-closed enforcement; DPAPI envelope + restricted ACL on Windows with atomic plaintext migration. Windows-runner evidence for migration/ACL paths ships with Windows CI (issue #23) |
 | Execution limits | Partial | Five-minute timeout, sequential runtime, bounded stdout/stderr with audited truncation metadata, and dispatch payload caps; queue/admission and explicit concurrency policy remain open (#20) |
 | Audit integrity | Implemented | Hash chain with monotonic, hash-bound sequence numbers under serialized append; local Merkle anchors; scheduled external anchor publication (filesystem/WORM or S3 Object Lock) with tamper-evident receipts, lag alerting, idempotent retry, and a clean-room verifier (`docs/AUDIT-ANCHORING.md`). Publication is opt-in and loud when unconfigured |
 | Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
@@ -52,8 +53,10 @@ link to reproducible evidence in the release or pilot record.
 - [ ] Firewall rules expose only required services.
 - [ ] Time synchronization and clock-skew assumptions for signed expiry are
       monitored.
-- [ ] Optional certificate pinning, if enabled, has overlapping pins and a
-      documented rotation/recovery path.
+- [x] Optional certificate pinning, if enabled, supports overlapping leaf-SPKI
+      SHA-256 pins while retaining normal PKI validation and has documented
+      rotation, rollback, expired-certificate, and stale-pin recovery paths
+      (`docs/CERTIFICATE-PINNING.md`).
 
 ### Command trust
 

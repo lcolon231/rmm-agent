@@ -1,5 +1,6 @@
 {
   "server_url": "https://rmm.nodelink.example",
   "enrollment_token": "PASTE_ONE_TIME_ENROLLMENT_TOKEN_HERE",
-  "heartbeat_seconds": 60
+  "heartbeat_seconds": 60,
+  "tls_spki_pins": []
 }

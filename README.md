@@ -64,6 +64,9 @@ The code in this repository currently provides:
 - An Inno Setup Windows installer and tagged release workflow that publishes
   checksums, an SPDX SBOM, and signed build-provenance attestations. Windows
   binaries and the installer are not yet Authenticode-signed.
+- Optional rotation-safe TLS pinning for high-assurance agents: multiple leaf
+  SPKI SHA-256 pins are checked after normal PKI validation, with documented
+  overlap and stale/expired recovery (`docs/CERTIFICATE-PINNING.md`).
 - Linux and macOS development builds of the polling agent. Windows is the only
   primary support target; those builds are not a supported cross-platform RMM.
 - An authenticated Next.js dashboard foundation with a responsive operations
@@ -127,11 +130,12 @@ The repository does **not** currently contain:
   webhook notifications.
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
-- Certificate pinning or a least-privilege agent service account.
-- Scheduled production backup and timed operator rollback-drill evidence (the
-  tooling and automated PostgreSQL rehearsal ship in `deploy/backup/` and
-  `docs/ROLLBACK.md`), or Authenticode signing (checksums, an SPDX SBOM, and
-  signed build provenance are published; only certificate-based signing is
+- A least-privilege agent service account.
+- Scheduled production backup and timed operator rollback-drill evidence
+  (encrypted backup/restore tooling and the automated PostgreSQL rehearsal ship
+  in `deploy/backup/` and `docs/ROLLBACK.md`), or Authenticode signing
+  (checksums, an SPDX SBOM, and signed build provenance are published; only
+  certificate-based signing is
   missing). External audit-anchor publication ships (`docs/AUDIT-ANCHORING.md`)
   but the operator must configure and operate the destination.
 - Tenant-scoped authorization, tenant-specific roles or retention, MFA,
