@@ -79,10 +79,12 @@ startup on debug mode, placeholder or short secrets, missing signing keys, and
 a missing/non-HTTPS/loopback public URL, listing every violation at once.
 Proxy trust is explicit opt-in (`TRUST_PROXY_HEADERS`), spoofed forwarding
 headers are ignored by default, and only the rightmost proxy-appended entry is
-used when trusted. Remaining: certificate lifecycle monitoring, and optional
-certificate pinning, which needs a rotation-safe trust model, multiple pins,
-expiry handling, recovery procedures, and tests — pinning must not replace
-normal PKI validation.
+used when trusted. Optional high-assurance pinning is implemented in the agent:
+strict `sha256/<base64>` leaf-SPKI pins, current+next overlap, constant-time
+matching after normal PKI validation, fail-closed configuration/mismatch tests,
+and expired/stale recovery procedures (`docs/CERTIFICATE-PINNING.md`).
+Certificate lifecycle monitoring remains deployment evidence; pinning does not
+replace it or normal PKI validation.
 
 ### Bound execution resources
 

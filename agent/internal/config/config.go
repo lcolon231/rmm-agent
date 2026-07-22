@@ -20,6 +20,9 @@ type Config struct {
 	// HeartbeatSeconds may be overridden locally; otherwise the server value
 	// received at enrollment is used.
 	HeartbeatSeconds int `json:"heartbeat_seconds,omitempty"`
+	// TLSSPKIPins optionally adds an SPKI pin requirement after normal TLS
+	// chain and hostname verification. Multiple pins support key rotation.
+	TLSSPKIPins []string `json:"tls_spki_pins,omitempty"`
 }
 
 // Identity is what the agent persists after a successful enrollment. It is

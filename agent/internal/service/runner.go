@@ -231,8 +231,16 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 		return nil, fatal(fmt.Errorf("load replay store: %w", err))
 	}
 	seen.Prune(time.Now().UTC())
+	api, err := client.NewWithTLSSPKIPins(
+		identity.ServerURL,
+		identity.AgentToken,
+		cfg.TLSSPKIPins,
+	)
+	if err != nil {
+		return nil, fatal(fmt.Errorf("agent HTTP client: %w", err))
+	}
 	return &session{
-		api:          client.New(identity.ServerURL, identity.AgentToken),
+		api:          api,
 		pub:          pub,
 		pubKeys:      pubKeys,
 		identityPath: idPath,
@@ -260,7 +268,10 @@ func (a *Agent) ensureEnrolled(ctx context.Context, cfg *config.Config, idPath s
 
 	a.log.Printf("enrolling with server %s", cfg.ServerURL)
 	host := telemetry.BasicHostInfo()
-	api := client.New(cfg.ServerURL, "")
+	api, err := client.NewWithTLSSPKIPins(cfg.ServerURL, "", cfg.TLSSPKIPins)
+	if err != nil {
+		return nil, fatal(fmt.Errorf("agent HTTP client: %w", err))
+	}
 	resp, err := api.Enroll(ctx, cfg.EnrollmentToken, host, a.version)
 	if err != nil {
 		return nil, err // network/enroll error: retryable

@@ -66,6 +66,12 @@ installer itself calls under the hood. Scripted/mass deployments can keep using
 the CLI or drive this setup silently (`/VERYSILENT` is **not** wired to the
 config prompts — silent installs should use the CLI path instead).
 
+The graphical installer does not prompt for optional `tls_spki_pins`.
+High-assurance deployments should provision `config.json` through the CLI/mass
+deployment path, or add the verified current+next pins to the installed config
+and restart the service before relying on pin enforcement. See
+[`docs/CERTIFICATE-PINNING.md`](../docs/CERTIFICATE-PINNING.md).
+
 Like the raw binaries, the installer is currently **unsigned** — SmartScreen
 may warn on first run until Authenticode signing is added (see
 `docs/RELEASING.md`).
