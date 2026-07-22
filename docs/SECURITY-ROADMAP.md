@@ -111,8 +111,12 @@ chooses and operates the destination. See `docs/AUDIT-ANCHORING.md`.
 
 Alembic now owns the baseline and command-envelope migration, and non-debug
 startup requires the exact expected revision. Continue using Alembic for every
-supported schema change. Automate encrypted backup and restore, document
-retention and key custody, and rehearse restore and rollback.
+supported schema change. Encrypted backup/isolated restore and a fail-closed
+release rollback planner now ship with retention/key-custody documentation. CI
+rehearses N→bad N+1→N against PostgreSQL, including rollout pause, explicit
+data-loss acceptance, exact schema verification, component version selection,
+and audit evidence. Scheduled production backup evidence and a timed operator
+rollback drill remain deployment responsibilities (`docs/ROLLBACK.md`).
 Windows artifacts must be Authenticode-signed and timestamped. Releases must
 include checksums, SBOMs, provenance attestations, and verification steps.
 

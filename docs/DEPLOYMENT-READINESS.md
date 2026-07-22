@@ -26,7 +26,7 @@ Statuses are:
 | Execution limits | Partial | Five-minute timeout, sequential runtime, bounded stdout/stderr with audited truncation metadata, and dispatch payload caps; queue/admission and explicit concurrency policy remain open (#20) |
 | Audit integrity | Implemented | Hash chain with monotonic, hash-bound sequence numbers under serialized append; local Merkle anchors; scheduled external anchor publication (filesystem/WORM or S3 Object Lock) with tamper-evident receipts, lag alerting, idempotent retry, and a clean-room verifier (`docs/AUDIT-ANCHORING.md`). Publication is opt-in and loud when unconfigured |
 | Database lifecycle | Implemented | Alembic baseline/forward revision, fresh PostgreSQL CI migration, data-preservation test, and exact non-debug startup revision check |
-| Backup, restore, rollback | Partial | Encrypted streaming pg_dump with manifest/checksums, fail-closed off-host upload hook, isolated-restore script, and application-level restore validation, all exercised end to end in CI; scheduled production runs, retention monitoring, and a production rollback rehearsal remain operator evidence (#26) |
+| Backup, restore, rollback | Partial | Encrypted backup/isolated restore plus a fail-closed release compatibility planner and N→bad N+1→N PostgreSQL rehearsal verify schema, operators, agents, commands, audit chain, anchors, and explicit data loss in CI. Scheduled production evidence, retention monitoring, and a timed operator drill remain |
 | Windows lifecycle CI | Implemented | Windows CI builds the agent and installer and exercises service install/start/stop/restart/refuse-double-install/uninstall plus a silent installer install+uninstall smoke test |
 | Release authenticity | Partial | Checksums, an SPDX SBOM (Go + Python), and signed SLSA build-provenance attestations are published for every artifact; Authenticode signing is the one remaining gap (needs a paid certificate) |
 | Soak evidence | Partial | Soak harness with workload, fault injection, resource/audit/anchor sampling, and pass/fail reporting ships (`deploy/soak/`, `docs/SOAK-TEST.md`), CI-smoke-tested and demonstrated against a live server; the multi-day pilot run itself is operator evidence |
@@ -147,8 +147,10 @@ link to reproducible evidence in the release or pilot record.
       verification (isolated restore + verify_restore.py checks row counts,
       the audit chain in sequence order, and every stored anchor; rehearsed in
       CI on every run).
-- [ ] Release rollback includes schema compatibility and a decision point for
-      forward-fix versus restore.
+- [x] Release rollback includes schema compatibility and a fail-closed decision
+      point for forward-fix versus component redeploy versus exact-revision
+      restore (`scripts/plan_release_rollback.py`; N→bad N+1→N is rehearsed in
+      the PostgreSQL suite with explicit rollout pause and data-loss approval).
 - [ ] Recovery objectives are selected and measured by the maintainer.
 
 ### Windows and release engineering
@@ -185,11 +187,9 @@ link to reproducible evidence in the release or pilot record.
 - [ ] Incident contacts, credential rotation, agent quarantine, server shutdown,
       restore, rollback, and evidence preservation procedures are rehearsed.
 
-## Backup and restore outline (not yet automated)
+## Backup, restore, and rollback evidence
 
-Until the tracked backup issue is complete, there is no supported production
-procedure. The implementation must eventually provide scripts or documented
-commands that:
+The shipped procedure and automated rehearsal provide:
 
 1. Quiesce or consistently snapshot PostgreSQL without silently losing command
    or audit transactions.
@@ -225,14 +225,19 @@ downgrade is unsupported; use a forward fix, or restore a pre-migration backup
 with the correspondingly old server and agent only after an explicit data-loss
 decision.
 
-## Rollback outline (not yet validated)
+## Rollback procedure
 
-Every release needs a release-specific rollback section. At minimum it must
-identify the last compatible server, agent, installer, and schema; state whether
-the database migration is reversible; prevent an automatic agent rollout from
-reapplying the bad version; preserve audit evidence; and define verification
-after rollback. A schema restore is a destructive recovery action and must use a
-tested backup with an explicit operator decision.
+Every release needs the release-specific compatibility record in
+`docs/ROLLBACK.md`. The planner fails closed unless it identifies the target
+server, agent, installer, and schema and confirms external agent rollout is
+paused. Migrations are forward-only; a schema restore requires a matching tested
+backup and explicit acceptance of post-backup data loss. The runbook preserves
+failed-state and audit evidence and defines post-rollback verification.
+
+The automated PostgreSQL rehearsal is complete and reproducible in CI. The
+incident-response checkbox under Pilot operations remains open until operators
+perform a timed drill against the production topology and actual external
+software-deployment controls.
 
 ## Progression after the gate
 
