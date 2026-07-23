@@ -87,9 +87,15 @@ link to reproducible evidence in the release or pilot record.
 - [x] Plaintext identity migration fails safely and does not leave recoverable
       secret copies (atomic write-then-rename replacement; load refuses to
       proceed if the protected form cannot be persisted).
-- [ ] Logs, diagnostics, command results, and uninstall paths do not expose
-      credentials (code paths avoid logging tokens and the uninstaller removes
-      `identity.json`, but a dedicated redaction audit has not been run).
+- [x] Logs, diagnostics, command results, and uninstall paths do not expose
+      credentials (dedicated redaction audit in
+      [`REDACTION-AUDIT.md`](REDACTION-AUDIT.md): a central server boundary
+      (`app/core/redaction.py`) and agent `redact` package scrub credential
+      shapes from logs/errors; command output is classified sensitive and only
+      read through the role-gated, audited command-detail endpoint; the
+      uninstaller removes `config.json`, `identity.json`, and
+      `seen_commands.json`; sentinel-secret tests cover server, agent, and the
+      audit chain).
 - [x] Re-enrollment and lost-identity recovery procedures preserve audit
       continuity or explicitly document a new identity (revocation is terminal;
       recovery is re-enrollment as a new agent ID, tested end-to-end).
@@ -131,7 +137,14 @@ link to reproducible evidence in the release or pilot record.
       access to the NodeLink database (`scripts/verify_anchor_receipt.py`
       recomputes the Merkle root from read-only event hashes and the downloaded
       artifact; it does not import NodeLink).
-- [ ] Sensitive fields and secrets are redacted without removing accountability.
+- [x] Sensitive fields and secrets are redacted without removing accountability
+      (every `audit.record` runs `detail` through the deterministic
+      `app/core/redaction.py` boundary before hashing; secrets are removed by
+      key name plus PEM/JWT value shapes while accountable public values —
+      Merkle roots, event hashes, nonces, envelope digests, actor/action/target
+      IDs — are preserved, so chain and anchor verification stay reproducible;
+      tested against every existing producer and clean-room anchor
+      verification — see [`REDACTION-AUDIT.md`](REDACTION-AUDIT.md)).
 
 ### Database and recovery
 

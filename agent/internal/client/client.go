@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/protocol"
+	"github.com/lcolon231/rmm/agent/internal/redact"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 )
 
@@ -293,9 +294,13 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, auth 
 
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
+		// The server error body is untrusted free text that gets logged; scrub
+		// any credential-shaped substrings before it enters an error message.
 		return &StatusError{
 			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("%s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b))),
+			Message: redact.Text(fmt.Sprintf(
+				"%s %s: %d %s", method, path, resp.StatusCode,
+				strings.TrimSpace(string(b)))),
 		}
 	}
 	if out != nil && resp.StatusCode != http.StatusNoContent {
