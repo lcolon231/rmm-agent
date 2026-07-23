@@ -259,6 +259,11 @@ class Command(Base):
         Enum(CommandStatus), default=CommandStatus.queued, index=True
     )
     exit_code: Mapped[int | None] = mapped_column(Integer)
+    # SENSITIVE (issue #112): captured command output can contain endpoint
+    # secrets. It is classified sensitive data: only ever returned through the
+    # role-gated, audited command-detail read (command_detail.viewed), never
+    # copied into audit-event detail, logs, or diagnostics. Do not add it to an
+    # audit `detail`, a log line, or an error message.
     stdout: Mapped[str | None] = mapped_column(Text)
     stderr: Mapped[str | None] = mapped_column(Text)
     # Truncation evidence from the agent's bounded capture. NULL means the

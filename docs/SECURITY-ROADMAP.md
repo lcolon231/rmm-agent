@@ -107,6 +107,16 @@ independently recomputes the root from read-only event hashes and the external
 artifact. Publication is opt-in and loud when unconfigured; the operator
 chooses and operates the destination. See `docs/AUDIT-ANCHORING.md`.
 
+Audit detail passes through one deterministic redaction boundary
+(`app/core/redaction.py`) before hashing: `audit.record` redacts credential
+values by key name plus PEM/JWT value shapes, while high-entropy public values
+(Merkle roots, event hashes, nonces, envelope digests) and accountability
+fields are preserved so chain and anchor verification stay reproducible over
+the stored form. Every existing producer, nested/array/casing variants, and
+malformed detail are tested, and clean-room verification still passes. General
+logs, diagnostics, command results, and uninstall paths are covered by a
+separate redaction audit (`docs/REDACTION-AUDIT.md`).
+
 ### Make data and releases recoverable
 
 Alembic now owns the baseline and command-envelope migration, and non-debug

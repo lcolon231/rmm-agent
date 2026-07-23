@@ -173,6 +173,28 @@ that point forward.
 any. This is demonstrated by a test that mutates one field of one row and
 confirms detection.
 
+### Detail redaction: no secret enters the chain (issue #115)
+
+The audit chain is durable and externally published, so a secret written into
+an event's `detail` would be *permanently* preserved and hard to expunge.
+`audit.record` therefore runs every event's `detail` through one central,
+deterministic boundary (`app/core/redaction.py`) **before** the value is hashed
+and stored. A value is redacted when its key names a credential
+(`password`, `agent_token`, `enrollment_token`, `*passphrase`, `authorization`,
+…) or when its string shape is unmistakably a secret that never legitimately
+appears in audit detail (a PEM private-key block or a JWT).
+
+Redaction is deliberately *not* shape-based for high-entropy blobs: this log
+legitimately records Merkle roots and event hashes (64-hex) and replay nonces
+(URL-safe base64, the same shape as bearer tokens). Redacting those would both
+erase accountability and break anchor verification, so they are preserved.
+Because redaction is deterministic and happens before hashing, the stored
+(redacted) form is the only representation ever hashed, and clean-room chain and
+anchor verification remain reproducible. Accountability fields — actor, action,
+target IDs, decision, reason, counts, digests — are untouched. The reviewed
+producer inventory and residual limitations are in
+[`REDACTION-AUDIT.md`](REDACTION-AUDIT.md).
+
 ### External verifiability: Merkle anchoring
 
 The local hash chain proves internal consistency but not *when* an event

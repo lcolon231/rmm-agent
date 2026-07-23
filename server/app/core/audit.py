@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.redaction import redact_detail
 from app.models.models import AuditEvent
 
 _GENESIS = "0" * 64
@@ -99,8 +100,15 @@ async def record(
     detail: dict | None = None,
 ) -> AuditEvent:
     """Append a new audit event to the chain. Caller is responsible for the
-    surrounding transaction/commit."""
-    detail = detail or {}
+    surrounding transaction/commit.
+
+    Every event's ``detail`` passes through the central redaction boundary
+    (:func:`app.core.redaction.redact_detail`) before it is hashed and stored,
+    so no producer can commit a secret into the tamper-evident chain. Redaction
+    is deterministic, so the stored (redacted) representation is the only one
+    that is ever hashed and chain/anchor verification stays reproducible.
+    """
+    detail = redact_detail(detail or {})
     await _serialize_append(db)
     prev, prev_seq = await _chain_tail(db)
     seq = prev_seq + 1
