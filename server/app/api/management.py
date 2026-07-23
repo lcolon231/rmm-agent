@@ -21,6 +21,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_role
 from app.core import anchor, anchor_publish, audit
+from app.core.command_authz import operator_may_dispatch, requires_script_permission
 from app.core.command_envelope import (
     ACTIVE_COMMAND_ENVELOPE_VERSION,
     COMMAND_ENVELOPE_V3,
@@ -627,6 +628,31 @@ async def dispatch_command(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    # Arbitrary-script authorization (issue #111): default-deny before the
+    # command is signed or queued. Even operator/admin role is insufficient for
+    # powershell/shell without the explicit per-operator grant. A denial is
+    # audited (actor, kind, agent) without ever recording the script body.
+    if not operator_may_dispatch(operator, body.kind):
+        await audit.record(
+            db,
+            action="command.dispatch_denied",
+            actor=operator.email,
+            agent_id=agent_id,
+            detail={
+                "kind": body.kind.value,
+                "reason": "arbitrary_script_execution_not_authorized",
+                "requires_permission": "can_execute_scripts",
+            },
+        )
+        await db.commit()  # persist the denial audit event
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "script_execution_not_authorized",
+                "kind": body.kind.value,
+                "required_permission": "can_execute_scripts",
+            },
+        )
     # Trust gate before capability negotiation: no new work may even be queued
     # for an agent the server no longer fully trusts.
     if agent.trust_state != AgentTrustState.active:

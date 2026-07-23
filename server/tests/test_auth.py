@@ -42,6 +42,7 @@ async def client():
                 email="admin@nodelink.test",
                 password_hash=hash_password("correct-horse"),
                 role=OperatorRole.operator,
+                can_execute_scripts=True,  # arbitrary-script grant (#111)
             )
         )
         db.add(

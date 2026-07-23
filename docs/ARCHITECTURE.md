@@ -101,8 +101,18 @@ buffered result submission, command history, and offline status transitions.
 The current command kinds are `powershell`, `shell`, and `collect_inventory`.
 `collect_inventory` is only another script execution path; no built-in complete
 inventory collector exists. Prefer typed endpoint operations as new behavior is
-added. Arbitrary scripts remain powerful escape hatches and should receive
-stronger policy and approval controls.
+added. Arbitrary scripts remain powerful escape hatches and receive a dedicated
+authorization gate (issue #111): `powershell` and `shell` are classified as
+arbitrary-script kinds and require an explicit per-operator
+`can_execute_scripts` grant that is **default-deny and not implied by any
+role**, not even `admin`; `collect_inventory` is a typed kind authorized by
+role alone. The gate lives in `app/core/command_authz.py`; the server refuses an
+unauthorized dispatch with `403` **before the command is signed or queued** and
+records a `command.dispatch_denied` audit event (actor, kind, agent — never the
+script body). The grant is set through an admin-only, audited endpoint
+(`PATCH /auth/operators/{id}/script-permission`,
+`operator.script_permission_changed`). Classification is fail-closed: any future
+kind not explicitly listed as typed is treated as an arbitrary script.
 
 ### 3.3 Product plane
 

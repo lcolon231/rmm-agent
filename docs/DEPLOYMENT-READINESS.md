@@ -71,8 +71,13 @@ link to reproducible evidence in the release or pilot record.
       atomic registry writes with an append-only rotation journal;
       `docs/KEY-ROTATION.md`; full staged + compromise + rollback rehearsal in
       `tests/test_key_rotation.py`).
-- [ ] Typed operations are used where available; arbitrary script permission is
-      explicit.
+- [x] Typed operations are used where available; arbitrary script permission is
+      explicit (issue #111: `powershell`/`shell` require the per-operator
+      `can_execute_scripts` grant, default-deny and not implied by any role —
+      not even admin; `collect_inventory` is authorized by role. Unauthorized
+      dispatch is refused `403` before the command is signed or queued and the
+      denial is audited without the script body; the grant is set by an
+      admin-only, audited endpoint. Covered by `tests/test_script_authz.py`).
 
 ### Agent identity and endpoint storage
 

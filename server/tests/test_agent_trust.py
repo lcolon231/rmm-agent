@@ -54,7 +54,8 @@ async def client():
             ("trust-op@nodelink.test", "op-pass", OperatorRole.operator),
             ("trust-viewer@nodelink.test", "viewer-pass", OperatorRole.readonly),
         ):
-            db.add(Operator(email=email, password_hash=hash_password(password), role=role))
+            db.add(Operator(email=email, password_hash=hash_password(password),
+                            role=role, can_execute_scripts=True))  # script grant (#111)
         await db.commit()
 
     transport = httpx.ASGITransport(app=app)

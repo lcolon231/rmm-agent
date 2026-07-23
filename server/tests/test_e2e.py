@@ -46,6 +46,7 @@ async def client():
                 email="e2e@nodelink.test",
                 password_hash=hash_password("e2e-password"),
                 role=OperatorRole.operator,
+                can_execute_scripts=True,  # arbitrary-script grant (#111)
             )
         )
         await db.commit()

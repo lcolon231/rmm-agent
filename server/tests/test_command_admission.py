@@ -48,6 +48,7 @@ async def client(monkeypatch):
                 email="adm@nodelink.test",
                 password_hash=hash_password("pw"),
                 role=OperatorRole.operator,
+                can_execute_scripts=True,  # arbitrary-script grant (#111)
             )
         )
         await db.commit()

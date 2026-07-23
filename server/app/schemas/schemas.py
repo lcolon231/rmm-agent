@@ -51,8 +51,15 @@ class OperatorOut(BaseModel):
     id: str
     email: str
     role: OperatorRole
+    can_execute_scripts: bool
     disabled: bool
     created_at: datetime
+
+
+class ScriptPermissionUpdate(BaseModel):
+    """Admin grant/revoke of arbitrary-script execution for an operator (#111)."""
+    can_execute_scripts: bool
+    reason: str = Field(min_length=1, max_length=500)
 
 
 # --------------------------------------------------------------------------- #

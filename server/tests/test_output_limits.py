@@ -50,6 +50,7 @@ async def client():
                 email="limits@nodelink.test",
                 password_hash=hash_password("limits-pass"),
                 role=OperatorRole.operator,
+                can_execute_scripts=True,  # arbitrary-script grant (#111)
             )
         )
         await db.commit()

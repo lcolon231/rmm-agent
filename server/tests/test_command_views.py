@@ -40,6 +40,7 @@ async def client():
                 email="views@nodelink.test",
                 password_hash=hash_password("views-password"),
                 role=OperatorRole.operator,
+                can_execute_scripts=True,  # arbitrary-script grant (#111)
             )
         )
         db.add(

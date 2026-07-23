@@ -93,6 +93,13 @@ structured result, and avoid unbounded memory growth. Define explicit per-agent
 command concurrency and queue admission; default to one until a safe policy is
 designed. Test timeout, cancellation, truncation, retry, and shutdown races.
 
+Arbitrary-script execution is gated separately from role (issue #111):
+`powershell`/`shell` require an explicit per-operator `can_execute_scripts`
+grant that is default-deny and not implied by any role; typed kinds
+(`collect_inventory`) are authorized by role. Unauthorized dispatch fails closed
+with `403` before signing/queueing and is audited without the script body; the
+grant is admin-only and audited. See `app/core/command_authz.py`.
+
 ### Strengthen audit ordering and external verification
 
 Introduce a database-backed monotonic sequence with serialized append behavior

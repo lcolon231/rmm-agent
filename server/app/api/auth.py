@@ -26,6 +26,7 @@ from app.schemas.schemas import (
     LoginRequest,
     OperatorCreate,
     OperatorOut,
+    ScriptPermissionUpdate,
     TokenResponse,
 )
 
@@ -102,6 +103,42 @@ async def create_operator(
     db.add(operator)
     await db.flush()
     return operator
+
+
+@router.patch(
+    "/auth/operators/{operator_id}/script-permission", response_model=OperatorOut
+)
+async def set_script_permission(
+    operator_id: str,
+    body: ScriptPermissionUpdate,
+    admin: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Grant or revoke arbitrary-script execution for an operator. Admin-only.
+
+    This is the explicit, auditable grant behind the default-deny script gate
+    (issue #111). The transition records the acting admin, the target, the new
+    value, and a mandatory reason.
+    """
+    target = await db.get(Operator, operator_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Operator not found")
+
+    previous = target.can_execute_scripts
+    target.can_execute_scripts = body.can_execute_scripts
+    await audit.record(
+        db,
+        action="operator.script_permission_changed",
+        actor=admin.email,
+        detail={
+            "operator_id": target.id,
+            "previous": previous,
+            "granted": body.can_execute_scripts,
+            "reason": body.reason,
+        },
+    )
+    await db.flush()
+    return target
 
 
 @router.get("/auth/me", response_model=OperatorOut)

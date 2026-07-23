@@ -29,6 +29,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     JSON,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -113,6 +114,15 @@ class Operator(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[OperatorRole] = mapped_column(
         Enum(OperatorRole), default=OperatorRole.readonly, nullable=False
+    )
+    # Arbitrary-script execution (powershell/shell) is a distinct, high-blast-
+    # radius privilege gated separately from role (issue #111). It is
+    # default-deny and NOT implied by any role — not even admin — so a fresh
+    # deployment cannot dispatch arbitrary scripts until an admin explicitly
+    # grants this to a specific operator. Typed operations are authorized by
+    # role alone.
+    can_execute_scripts: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=false()
     )
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # Monotonic token version. Every JWT carries the generation it was minted
