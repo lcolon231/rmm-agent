@@ -97,6 +97,10 @@ type session struct {
 	// protection. Commands are processed by the single check-in goroutine, so it
 	// needs no locking.
 	seen *SeenStore
+	// outbox durably holds completed command results until the server
+	// acknowledges delivery, so a result survives an outage or restart and is
+	// retried (issue #113).
+	outbox *Outbox
 	// quarantined mirrors the server-reported trust state so transitions are
 	// logged once instead of on every beat.
 	quarantined bool
@@ -231,6 +235,12 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 		return nil, fatal(fmt.Errorf("load replay store: %w", err))
 	}
 	seen.Prune(time.Now().UTC())
+	// Load the durable result outbox (empty on first run). Any results left
+	// undelivered by a previous run are retried on the next check-in.
+	outbox, err := LoadOutbox(OutboxPath(a.configPath))
+	if err != nil {
+		return nil, fatal(fmt.Errorf("load result outbox: %w", err))
+	}
 	api, err := client.NewWithTLSSPKIPins(
 		identity.ServerURL,
 		identity.AgentToken,
@@ -248,6 +258,7 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 		agentID:      identity.AgentID,
 		interval:     interval,
 		seen:         seen,
+		outbox:       outbox,
 	}, nil
 }
 
@@ -338,6 +349,10 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 			a.log.Printf("failed to persist signing-key bundle: %v", err)
 		}
 	}
+	// Retry any results a previous beat or run left undelivered before taking on
+	// new work, so a completed command's result is not starved by fresh commands.
+	a.flushOutbox(execCtx, s)
+
 	if len(ack.PendingCommands) == 0 {
 		return nil
 	}
@@ -441,7 +456,12 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 	a.log.Printf("executing command %s (kind=%s)", cmd.ID, cmd.Kind)
 	res := a.run(ctx, cmd.Kind, script)
 
-	if err := s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
+	// Persist the completed result to the durable outbox BEFORE attempting to
+	// upload it. This is the crash-safety boundary for issue #113: if the agent
+	// dies or the server is unreachable right after execution, the result is on
+	// disk and will be retried on the next check-in / restart. If it cannot be
+	// persisted, still try a direct upload rather than silently dropping it.
+	result := client.CommandResult{
 		ExitCode:         res.ExitCode,
 		Stdout:           res.Stdout,
 		Stderr:           res.Stderr,
@@ -449,8 +469,43 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		StderrTruncated:  res.StderrTruncated,
 		StdoutTotalBytes: res.StdoutTotalBytes,
 		StderrTotalBytes: res.StderrTotalBytes,
-	}); err != nil {
-		a.log.Printf("failed to report result for %s: %v", cmd.ID, err)
+	}
+	s.outbox.Add(cmd.ID, result, time.Now().UTC())
+	if err := s.outbox.Save(); err != nil {
+		a.log.Printf("failed to persist result outbox for %s: %v", cmd.ID, err)
+	}
+	a.deliverResult(ctx, s, cmd.ID, result)
+}
+
+// deliverResult uploads a single queued result and, on success, removes it from
+// the durable outbox. A failure leaves it queued for retry on a later beat.
+func (a *Agent) deliverResult(ctx context.Context, s *session, commandID string, result client.CommandResult) {
+	if err := s.api.ReportResult(ctx, commandID, result); err != nil {
+		a.log.Printf("failed to report result for %s (queued for retry): %v", commandID, err)
+		return
+	}
+	s.outbox.Remove(commandID)
+	if err := s.outbox.Save(); err != nil {
+		a.log.Printf("failed to persist result outbox after delivering %s: %v", commandID, err)
+	}
+}
+
+// flushOutbox retries delivery of every result left undelivered by a previous
+// beat or a previous run. It runs once per active check-in, before new commands
+// are processed, so pending results drain as soon as the server is reachable
+// again. Delivery is at-least-once and the server is idempotent, so a result
+// whose acknowledgement was lost is safely re-sent.
+func (a *Agent) flushOutbox(ctx context.Context, s *session) {
+	pending := s.outbox.Pending()
+	if len(pending) == 0 {
+		return
+	}
+	a.log.Printf("delivering %d queued result(s)", len(pending))
+	for _, item := range pending {
+		if ctx.Err() != nil {
+			return
+		}
+		a.deliverResult(ctx, s, item.CommandID, item.Result)
 	}
 }
 

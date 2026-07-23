@@ -100,6 +100,15 @@ grant that is default-deny and not implied by any role; typed kinds
 with `403` before signing/queueing and is audited without the script body; the
 grant is admin-only and audited. See `app/core/command_authz.py`.
 
+Result delivery and process termination are crash/outage-safe (issue #113).
+Completed results are persisted to a durable agent-side outbox before upload and
+retried across outages and restarts until acknowledged; execution stays
+exactly-once while delivery is at-least-once, and the result endpoint is
+idempotent so a duplicate cannot corrupt terminal state. Commands run inside a
+Windows Job Object (kill-on-close) or a POSIX process group so timeout,
+cancellation, and service stop terminate the whole tree. On-Windows descendant
+termination is verified by the service-lifecycle CI (issue #23).
+
 ### Strengthen audit ordering and external verification
 
 Introduce a database-backed monotonic sequence with serialized append behavior

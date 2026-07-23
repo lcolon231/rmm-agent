@@ -75,6 +75,9 @@ Filename: "{app}\rmm-agent.exe"; Parameters: "uninstall"; Flags: runhidden waitu
 Type: files; Name: "{app}\config.json"
 Type: files; Name: "{app}\identity.json"
 Type: files; Name: "{app}\seen_commands.json"
+; result_outbox.json can hold captured command stdout/stderr (sensitive), so it
+; must not survive uninstall.
+Type: files; Name: "{app}\result_outbox.json"
 Type: dirifempty; Name: "{app}"
 
 [Code]

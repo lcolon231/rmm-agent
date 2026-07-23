@@ -116,8 +116,17 @@ link to reproducible evidence in the release or pilot record.
 - [x] Per-agent concurrency and queue/admission limits are configured and tested
       (per-agent outstanding-command cap admits/refuses at the dispatch
       boundary; per-heartbeat FIFO batch cap; agent executes one at a time).
-- [ ] Timeout, cancellation, service stop, server outage, and result retry do not
-      orphan processes or duplicate execution.
+- [x] Timeout, cancellation, service stop, server outage, and result retry do not
+      orphan processes or duplicate execution (issue #113: completed results are
+      written to a durable outbox before upload and retried across outages and
+      restarts until the server acknowledges them; delivery is idempotent
+      server-side so a lost ack cannot duplicate execution or corrupt terminal
+      state; commands run inside a Windows Job Object with kill-on-close, and a
+      process group on POSIX, so timeout/cancel/stop terminate descendants, not
+      just the direct child. Covered by `agent/internal/service/outbox_test.go`,
+      `agent/internal/executor/cancel_test.go`, and
+      `server/tests/test_result_delivery.py`; on-Windows descendant termination
+      is asserted by the service-lifecycle CI, issue #23).
 - [x] Payload and script-size limits exist at API and agent boundaries
       (64 KiB dispatch payload cap; server refuses over-cap results, and the
       agent's script arrives inside the signed, capped payload).

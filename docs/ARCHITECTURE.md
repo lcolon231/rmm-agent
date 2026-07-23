@@ -114,6 +114,22 @@ script body). The grant is set through an admin-only, audited endpoint
 `operator.script_permission_changed`). Classification is fail-closed: any future
 kind not explicitly listed as typed is treated as an arbitrary script.
 
+Command execution is crash- and outage-safe (issue #113). Each command runs
+inside a process-tree container — a Windows Job Object with kill-on-close, a
+POSIX process group elsewhere — so a timeout, cancellation, or service stop
+terminates the whole tree rather than orphaning descendants that would otherwise
+hold the output pipe open. A completed result is written to a durable agent-side
+outbox (`result_outbox.json`) **before** upload and retried on every check-in
+and across restarts until acknowledged. Execution is exactly-once (the replay
+reservation is persisted before the process starts) while delivery is
+at-least-once; `POST /commands/{id}/result` is therefore idempotent — a
+duplicate delivery of a command already in a delivered-terminal state
+(`succeeded`/`failed`) is acknowledged without overwriting the recorded result
+or appending a second `command.completed` event. The server's terminal status is
+the operator-visible boundary between execution completion and result-delivery
+completion: `dispatched`/`running` means "sent, result not yet delivered";
+`succeeded`/`failed` means "result delivered and recorded".
+
 ### 3.3 Product plane
 
 The product plane provides the technician and customer experience. A Next.js
@@ -228,9 +244,10 @@ All application routes except `/healthz` are under `/api/v1`.
 | GET | `/auth/me` | Current operator | Readonly+ |
 | POST | `/auth/revoke-tokens` | Revoke caller sessions | Readonly+ |
 | POST | `/auth/operators/{id}/revoke-tokens` | Revoke operator sessions | Admin |
+| PATCH | `/auth/operators/{id}/script-permission` | Grant/revoke arbitrary-script execution | Admin |
 | POST | `/enroll` | Enroll with site token | Enrollment token |
 | POST | `/heartbeat` | Store telemetry and poll commands | Agent token |
-| POST | `/commands/{id}/result` | Submit buffered result | Agent token |
+| POST | `/commands/{id}/result` | Submit buffered result (idempotent) | Agent token |
 | POST/GET | `/clients` | Create/list clients | Operator / Readonly |
 | POST | `/sites` | Create site | Operator |
 | POST | `/enrollment-tokens` | Create token | Operator |

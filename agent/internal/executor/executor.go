@@ -4,6 +4,7 @@ package executor
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -20,6 +21,24 @@ type Result struct {
 	StderrTruncated  bool   `json:"stderr_truncated,omitempty"`
 	StdoutTotalBytes int64  `json:"stdout_total_bytes,omitempty"`
 	StderrTotalBytes int64  `json:"stderr_total_bytes,omitempty"`
+}
+
+// containment binds a running command and any processes it spawns so they can
+// all be terminated together. The Windows implementation is a Job Object with
+// kill-on-close; other platforms put the command in its own process group and
+// signal the whole group. See executor_contain_*.go.
+type containment interface {
+	// prepare configures cmd before it starts (e.g. a new process group on
+	// POSIX). Called once, before cmd.Start.
+	prepare(cmd *exec.Cmd)
+	// assign places p — and its descendants — under containment. Called
+	// immediately after the process starts.
+	assign(p *os.Process) error
+	// terminate kills the contained process tree/group.
+	terminate()
+	// release frees containment resources. On Windows this also kills any
+	// surviving processes (kill-on-close), so it is a safe cleanup backstop.
+	release()
 }
 
 // Kind mirrors the server's CommandKind values.
@@ -56,7 +75,41 @@ func RunContext(parent context.Context, kind string, script string) Result {
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	err := cmd.Run()
+	// Contain the command and any descendants so a timeout, cancellation, or
+	// service stop takes down the whole process tree rather than orphaning
+	// grandchildren (issue #113). On Windows this is a Job Object with
+	// kill-on-close; on other platforms it is a no-op and exec.CommandContext
+	// still terminates the direct child.
+	jail, err := newContainment()
+	if err != nil {
+		return Result{ExitCode: -1, Stderr: "process containment setup failed: " + err.Error()}
+	}
+	defer jail.release()
+	jail.prepare(cmd)
+
+	if err := cmd.Start(); err != nil {
+		return Result{ExitCode: -1, Stderr: err.Error()}
+	}
+	if err := jail.assign(cmd.Process); err != nil {
+		// Could not contain the tree; kill the direct child rather than risk
+		// leaking it, and report the failure.
+		_ = cmd.Process.Kill()
+		return Result{ExitCode: -1, Stderr: "process containment failed: " + err.Error()}
+	}
+
+	// Tear the tree down when the context ends (timeout, shutdown, or an
+	// explicit cancel). The watcher goroutine exits when the command completes.
+	waitDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			jail.terminate()
+		case <-waitDone:
+		}
+	}()
+
+	err = cmd.Wait()
+	close(waitDone)
 	outStr, errStr, outTrunc, errTrunc := applyOutputLimits(stdout, stderr)
 	res := Result{
 		Stdout:           outStr,

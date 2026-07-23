@@ -243,6 +243,20 @@ async def submit_result(
     if cmd is None:
         raise HTTPException(status_code=404, detail="Command not found")
 
+    # Idempotent, at-least-once result delivery (issue #113). The agent persists
+    # each completed result in a durable outbox and retries until it is
+    # acknowledged, so the same result can arrive more than once across server
+    # outages and agent restarts. Once a result has been recorded the command is
+    # in a delivered-terminal state (succeeded/failed); a duplicate delivery must
+    # be acknowledged without overwriting the stored result or appending a second
+    # completion event. Execution stays exactly-once (agent-side replay
+    # reservation); only delivery is at-least-once. This is the operator-visible
+    # boundary between execution completion and result-delivery completion:
+    # dispatched/running means "sent, result not yet delivered"; succeeded/failed
+    # means "result delivered and recorded".
+    if cmd.status in (CommandStatus.succeeded, CommandStatus.failed):
+        return  # already delivered; acknowledge idempotently (204)
+
     cmd.exit_code = body.exit_code
     cmd.stdout = body.stdout
     cmd.stderr = body.stderr

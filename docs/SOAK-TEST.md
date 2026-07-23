@@ -29,8 +29,12 @@ A compressed demonstration of the harness output is in
 
 Prerequisites: a running NodeLink server (the pilot topology — TLS proxy,
 PostgreSQL, `ENVIRONMENT=production`, an anchor publish backend configured per
-`docs/AUDIT-ANCHORING.md`), an operator account, and — for resource sampling —
-the ability to read the server process (same host, or sample separately).
+`docs/AUDIT-ANCHORING.md`), an operator account **with the arbitrary-script
+execution grant** (issue #111 — the harness dispatches `shell`/`powershell`, so
+without `can_execute_scripts` every dispatch is refused `403`; grant it with
+`PATCH /auth/operators/{id}/script-permission` as an admin), and — for resource
+sampling — the ability to read the server process (same host, or sample
+separately).
 
 ```bash
 python deploy/soak/soak.py \

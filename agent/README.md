@@ -171,7 +171,21 @@ when retiring or rolling back a key.
 
 Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
 (`cmd.exe` / `/bin/sh`), and `collect_inventory`. Commands run with a 5-minute
-timeout.
+timeout. Dispatch of the arbitrary-script kinds (`powershell`/`shell`) requires
+an explicit per-operator server-side permission; the agent only ever executes
+commands the server signed, so this gate is enforced before a command is ever
+queued (see server docs, issue #111).
+
+Each command runs inside a process-tree container so a timeout, cancellation, or
+service stop terminates the whole tree, not just the direct child: a Windows Job
+Object with kill-on-close, and a POSIX process group elsewhere. A completed
+result is written to a durable on-disk outbox (`result_outbox.json`, mode 0600,
+beside `identity.json`, written atomically) **before** it is uploaded, then
+retried on every check-in and across restarts until the server acknowledges it.
+Execution stays exactly-once (the replay reservation is persisted before the
+process starts); only delivery is at-least-once, and the server treats duplicate
+deliveries idempotently, so a server outage or a crash after execution never
+loses a result or re-runs a command.
 
 Commands from one heartbeat are executed sequentially and stdout/stderr are
 captured in memory up to 256 KiB per stream (384 KiB combined), then uploaded

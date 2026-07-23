@@ -48,7 +48,7 @@ async def app_client():
         await conn.run_sync(Base.metadata.create_all)
     async with AsyncSessionLocal() as db:
         db.add(Operator(email="soak@nodelink.test", password_hash=hash_password("pw"),
-                        role=OperatorRole.admin))
+                        role=OperatorRole.admin, can_execute_scripts=True))  # script grant (#111)
         await db.commit()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:

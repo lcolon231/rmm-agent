@@ -159,11 +159,16 @@ func newTestSession(t *testing.T) (*Agent, *session, ed25519.PrivateKey, *result
 			return executor.Result{ExitCode: 0, Stdout: "ok"}
 		},
 	}
+	outbox, err := LoadOutbox(filepath.Join(t.TempDir(), outboxFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := &session{
 		api:     client.New(srv.URL, "test-token"),
 		pub:     pub,
 		agentID: "agent-1",
 		seen:    seen,
+		outbox:  outbox,
 	}
 	return a, s, priv, cap
 }
@@ -419,7 +424,11 @@ func TestCheckInQuarantineSuspendsExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &session{api: client.New(srv.URL, "tok"), agentID: "agent-1", seen: seen}
+	outbox, err := LoadOutbox(filepath.Join(t.TempDir(), outboxFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &session{api: client.New(srv.URL, "tok"), agentID: "agent-1", seen: seen, outbox: outbox}
 
 	for i := 0; i < 2; i++ { // two beats: the transition must be logged once
 		if err := a.checkIn(context.Background(), context.Background(), s); err != nil {
