@@ -101,6 +101,28 @@ class Settings(BaseSettings):
     anchor_s3_object_lock_mode: str = "COMPLIANCE"  # GOVERNANCE | COMPLIANCE
     anchor_s3_retain_days: int = 3650
 
+    # --- Storage growth / retention (issue #114) ---
+    # Telemetry (heartbeats) is high-volume, non-compliance data. Rows older
+    # than this are pruned. 0 disables pruning (unbounded — not recommended).
+    telemetry_retention_days: int = 30
+    # Captured command stdout/stderr can be the largest single data class. Past
+    # this age the *text* is cleared from terminal commands while the row and
+    # its accountability metadata (exit code, truncation totals) — and the audit
+    # events — are kept. 0 disables clearing. Audit events, anchors, and anchor
+    # receipts are NEVER pruned, so chain/anchor verification is unaffected.
+    command_output_retention_days: int = 90
+    # How often the retention sweep runs.
+    retention_sweep_interval_seconds: int = 86_400  # daily
+    # Filesystem path whose free space is reported/alerted in /storage/status
+    # (server host disk backing logs, backups, and — for local DBs — data).
+    retention_disk_path: str = "/"
+
+    # Observability thresholds: a breach sets an alert flag in /storage/status
+    # and logs a warning from the retention sweeper. They do not delete data.
+    heartbeat_backlog_alert: int = 5_000_000    # total heartbeat rows
+    command_backlog_alert: int = 1_000_000      # total command rows
+    disk_free_alert_bytes: int = 1_073_741_824  # 1 GiB free remaining
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,0 +1,18 @@
+# NodeLink RMM — declared release build targets (issue #116).
+#
+# This file is the single machine-readable source of truth for which
+# os/architecture targets NodeLink builds and ships. `tools/check_release_targets.py`
+# (run in CI) fails the build if agent/build.sh or the release workflow drift
+# from this list, so a new architecture cannot be shipped without an explicit,
+# reviewed change here — and to the support matrix it mirrors,
+# docs/WINDOWS-SUPPORT-MATRIX.md.
+#
+# Format:  <goos>/<goarch>  <class>
+#   class = supported : a first-class, released, supported target
+#           dev        : a development/portability build, not a supported product
+#
+# Lines starting with '#' and blank lines are ignored.
+
+windows/amd64  supported
+linux/amd64    dev
+darwin/arm64   dev

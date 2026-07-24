@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_role
-from app.core import anchor, anchor_publish, audit
+from app.core import anchor, anchor_publish, audit, retention
 from app.core.command_envelope import (
     ACTIVE_COMMAND_ENVELOPE_VERSION,
     COMMAND_ENVELOPE_V3,
@@ -928,6 +928,18 @@ async def audit_publication_status(db: AsyncSession = Depends(get_db)):
         "lag_alert": status.lag_alert,
         "last_error": status.last_error,
     }
+
+
+@router.get("/storage/status")
+async def storage_status(db: AsyncSession = Depends(get_db)):
+    """Observable storage growth for every persistent data class (issue #114).
+
+    Reports per-class counts, oldest-age, backlog, host disk headroom, and
+    unpublished-anchor lag, each with a threshold-breach flag; `alert` is true
+    when any class has breached. Audit data and anchors are reported for capacity
+    planning but are never pruned, so this endpoint has no effect on chain or
+    external-anchor verification."""
+    return await retention.storage_status(db, settings)
 
 
 @router.get("/audit/anchors/{anchor_id}/receipt")

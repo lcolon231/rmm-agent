@@ -116,7 +116,15 @@ link to reproducible evidence in the release or pilot record.
 - [x] Payload and script-size limits exist at API and agent boundaries
       (64 KiB dispatch payload cap; server refuses over-cap results, and the
       agent's script arrives inside the signed, capped payload).
-- [ ] Disk and log growth are bounded and observable.
+- [x] Disk and log growth are bounded and observable (issue #114: telemetry and
+      aged command output are pruned on a schedule — audit-safe, so audit events
+      and anchors are never touched and chain/anchor verification is unaffected;
+      agent logs size-rotate and server-log rotation is a documented deployment
+      step; `GET /storage/status` reports per-class counts, oldest-age, backlog,
+      host disk headroom, and unpublished-anchor lag with threshold-breach alert
+      flags, and the sweeper logs a warning on breach. Retention policy, sizing,
+      and full-disk behavior are in [`RETENTION.md`](RETENTION.md); covered by
+      `server/tests/test_retention.py`).
 
 ### Audit evidence
 
@@ -171,7 +179,13 @@ link to reproducible evidence in the release or pilot record.
 - [x] Windows CI builds the agent and installer and tests install, service start,
       stop, restart, refuse-double-install, and uninstall (CLI lifecycle script
       driving the SCM) plus a silent installer install/uninstall smoke test.
-- [ ] Supported Windows versions and architectures are explicitly listed.
+- [x] Supported Windows versions and architectures are explicitly listed (issue
+      #116: [`WINDOWS-SUPPORT-MATRIX.md`](WINDOWS-SUPPORT-MATRIX.md) lists
+      supported client/server versions, editions, architectures, exclusions, and
+      per-class agent/installer/service/DPAPI/TLS/upgrade expectations, and marks
+      CI-tested vs manually qualified targets. The machine-readable list
+      `agent/supported-targets.txt` is CI-enforced by
+      `tools/check_release_targets.py` so shipped targets cannot drift from it).
 - [ ] Agent and installer are Authenticode-signed and timestamped; signatures
       are verified before publication (deferred: requires a paid code-signing
       certificate; the workflow has a documented slot for it).

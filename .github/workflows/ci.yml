@@ -16,6 +16,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-targets:
+    name: release target matrix (issue #116)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check release targets match the declared support matrix
+        run: python3 tools/check_release_targets.py
+
   agent:
     name: agent (Go)
     runs-on: ubuntu-latest

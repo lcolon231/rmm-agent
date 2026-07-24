@@ -7,7 +7,10 @@ signature before running it, and reporting results.
 
 Windows is the primary supported endpoint platform. Linux and macOS builds are
 development artifacts for portability testing, not a supported cross-platform
-RMM product. The agent is not ready for production or regulated endpoints; see
+RMM product. The supported Windows versions, editions, and architectures are
+defined in [`docs/WINDOWS-SUPPORT-MATRIX.md`](../docs/WINDOWS-SUPPORT-MATRIX.md)
+(machine-readable list: [`supported-targets.txt`](supported-targets.txt),
+CI-enforced). The agent is not ready for production or regulated endpoints; see
 [`docs/DEPLOYMENT-READINESS.md`](../docs/DEPLOYMENT-READINESS.md).
 
 ## Why Go / stdlib-only
