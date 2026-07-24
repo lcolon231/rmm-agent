@@ -102,6 +102,13 @@ dispatched but never started. Windows commands start suspended inside
 kill-on-close Job Objects; native tests verify cancellation and parent exit
 terminate descendants.
 
+Storage growth is bounded and observable (issue #114): telemetry and aged
+command output are pruned on a schedule while audit events, anchors, and anchor
+receipts are never touched, so retention cannot break chain or external-anchor
+verification. `GET /storage/status` exposes per-class counts, backlog, host disk
+headroom, and unpublished-anchor lag with threshold-breach alert flags. Sizing,
+retention, and full-disk behavior are documented in `docs/RETENTION.md`.
+
 ### Strengthen audit ordering and external verification
 
 Introduce a database-backed monotonic sequence with serialized append behavior

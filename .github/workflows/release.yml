@@ -121,6 +121,11 @@ jobs:
             - Build provenance — verify with
               `gh attestation verify <file> --repo ${{ github.repository }}`.
 
+            Supported platforms: windows/amd64 (x64) is the supported product
+            target; linux/amd64 and darwin/arm64 are development builds only.
+            See docs/WINDOWS-SUPPORT-MATRIX.md for supported Windows versions,
+            editions, and any release-specific platform exceptions.
+
             On Windows, SmartScreen may still warn on first run until signing
             is added.
 
