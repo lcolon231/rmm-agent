@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 
 import {
   commandKindDefinitions,
+  commandKindDefinitionsForPermission,
   ttlOptions,
   validateDispatchInput,
   type CommandKind,
@@ -18,6 +19,7 @@ import {
 type DispatchFormProps = {
   endpointId: string;
   hostname: string;
+  canExecuteScripts: boolean;
 };
 
 type Step =
@@ -25,9 +27,15 @@ type Step =
   | { name: "confirm"; input: DispatchInput }
   | { name: "dispatched"; commandId: string };
 
-export function CommandDispatchForm({ endpointId, hostname }: DispatchFormProps) {
+export function CommandDispatchForm({
+  endpointId,
+  hostname,
+  canExecuteScripts,
+}: DispatchFormProps) {
   const router = useRouter();
-  const [kind, setKind] = useState<CommandKind>("powershell");
+  const [kind, setKind] = useState<CommandKind>(
+    canExecuteScripts ? "powershell" : "collect_inventory",
+  );
   const [script, setScript] = useState("");
   const [ttlSeconds, setTtlSeconds] = useState(300);
   const [step, setStep] = useState<Step>({ name: "compose" });
@@ -35,6 +43,8 @@ export function CommandDispatchForm({ endpointId, hostname }: DispatchFormProps)
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const definition = commandKindDefinitions.find((d) => d.kind === kind)!;
+  const availableDefinitions =
+    commandKindDefinitionsForPermission(canExecuteScripts);
 
   function handleReview() {
     setError("");
@@ -135,7 +145,7 @@ export function CommandDispatchForm({ endpointId, hostname }: DispatchFormProps)
           onChange={(event) => setKind(event.target.value as CommandKind)}
           value={kind}
         >
-          {commandKindDefinitions.map((d) => (
+          {availableDefinitions.map((d) => (
             <option key={d.kind} value={d.kind}>{d.label}</option>
           ))}
         </select>

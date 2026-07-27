@@ -54,8 +54,15 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         command_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(commands)")
         }
+        operator_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(operators)")
+        }
     assert {"alembic_version", "agents", "commands", "audit_events"} <= tables
     assert "agent_completed_at" in command_columns
+    assert {
+        "script_execution_scope",
+        "script_execution_scope_id",
+    } <= operator_columns
 
 
 def test_upgrade_from_baseline_preserves_rows_and_expires_legacy_queue(tmp_path: Path):
@@ -231,6 +238,44 @@ def test_result_pending_status_is_supported_after_upgrade(tmp_path: Path):
         ).fetchone()
     assert status_value == "result_pending"
     assert completed is not None
+
+
+def test_script_permission_is_default_deny_after_upgrade(tmp_path: Path):
+    db_path = tmp_path / "script-permission.db"
+    command.upgrade(migration_config(sqlite_url(db_path)), "head")
+
+    now = "2026-07-27T12:00:00+00:00"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """INSERT INTO operators
+               (id, email, password_hash, role, disabled, token_generation, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "operator-script",
+                "script@nodelink.test",
+                "hash",
+                "operator",
+                0,
+                0,
+                now,
+            ),
+        )
+        initial = connection.execute(
+            """SELECT script_execution_scope, script_execution_scope_id
+               FROM operators WHERE id = 'operator-script'"""
+        ).fetchone()
+        connection.execute(
+            """UPDATE operators
+               SET script_execution_scope = 'site',
+                   script_execution_scope_id = 'site-1'
+               WHERE id = 'operator-script'"""
+        )
+        granted = connection.execute(
+            """SELECT script_execution_scope, script_execution_scope_id
+               FROM operators WHERE id = 'operator-script'"""
+        ).fetchone()
+    assert initial == (None, None)
+    assert granted == ("site", "site-1")
 
 
 def test_unversioned_database_fails_startup_revision_check(tmp_path: Path):

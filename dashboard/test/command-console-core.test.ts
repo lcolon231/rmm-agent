@@ -7,6 +7,7 @@ import {
   MAX_SCRIPT_BYTES,
   buildDispatchRequestBody,
   commandPageCount,
+  commandKindDefinitionsForPermission,
   describeCommandStatus,
   describeStreamCapture,
   formatByteCount,
@@ -88,6 +89,17 @@ test("inventory dispatches carry an empty payload", () => {
     payload: {},
     ttl_seconds: 900,
   });
+});
+
+test("script command choices require explicit endpoint permission", () => {
+  assert.deepEqual(
+    commandKindDefinitionsForPermission(false).map((item) => item.kind),
+    ["collect_inventory"],
+  );
+  assert.deepEqual(
+    commandKindDefinitionsForPermission(true).map((item) => item.kind),
+    ["powershell", "shell", "collect_inventory"],
+  );
 });
 
 test("classifies statuses into terminal and active work", () => {

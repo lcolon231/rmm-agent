@@ -18,12 +18,18 @@ and fill it with immutable identifiers. Do not use `latest` or a mutable branch.
 | Database | Alembic head(s) | Alembic head(s) and matching backup manifest |
 | Protocol | Command-envelope versions | Command-envelope versions |
 
-At this revision, the server requires Alembic `0009` and agents use
+At this revision, the server requires Alembic `0010` and agents use
 `command-v3` (with `command-v2` only for a staged mixed-version rollout). The
 existing public `v0.1.0` and `v0.1.1` tags predate Alembic and are **not** a
 supported server/database rollback target for a database created by current
 `main`. The first production-intended release must establish N by retaining its
 filled compatibility record, artifacts, checksums, and a verified backup.
+
+Revision `0010` changes only the server database and dashboard capability
+display; the agent protocol is unchanged. Its nullable operator scope columns
+make arbitrary script dispatch default-deny. A rollback that removes those
+columns must use the exact-revision restore procedure below, not an in-place
+downgrade.
 
 ## Non-reversible migration policy
 

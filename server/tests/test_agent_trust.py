@@ -39,6 +39,7 @@ from app.models.models import (  # noqa: E402
     Heartbeat,
     Operator,
     OperatorRole,
+    ScriptExecutionScope,
 )
 
 
@@ -54,7 +55,18 @@ async def client():
             ("trust-op@nodelink.test", "op-pass", OperatorRole.operator),
             ("trust-viewer@nodelink.test", "viewer-pass", OperatorRole.readonly),
         ):
-            db.add(Operator(email=email, password_hash=hash_password(password), role=role))
+            db.add(
+                Operator(
+                    email=email,
+                    password_hash=hash_password(password),
+                    role=role,
+                    script_execution_scope=(
+                        ScriptExecutionScope.global_
+                        if role != OperatorRole.readonly
+                        else None
+                    ),
+                )
+            )
         await db.commit()
 
     transport = httpx.ASGITransport(app=app)

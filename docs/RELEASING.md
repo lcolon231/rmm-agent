@@ -123,14 +123,20 @@ it is added.
 
 ## Current schema and agent compatibility
 
-Current server releases require Alembic revision `0009`; non-debug startup
-requires `alembic upgrade head`. Roll out the database revision and server first,
-then upgrade agents. Revision 0009 adds the `result_pending` enum value and
+Current server releases require Alembic revision `0010`; non-debug startup
+requires `alembic upgrade head`. Roll out the database revision, server, and
+dashboard together. Revision 0009 adds the `result_pending` enum value and
 `agent_completed_at`; durable dispatch-lease recovery is active only after both
 server and agent are upgraded. Command dispatch returns `409` until an agent advertises
 `command-v3`; old queued commands are expired by the migration. A new agent
 refuses commands from an old server because they lack an envelope version, and
 a new server rejects enrollment when no supported version overlaps.
+
+Revision `0010` adds nullable operator arbitrary-script permission columns.
+Null is intentionally default deny for all existing and new operators,
+including admins. No agent or signed-envelope change is required. After
+migration, admins must explicitly grant the narrowest necessary global, site,
+or agent scope; see `SCRIPT-AUTHORIZATION.md`.
 
 There is no in-place schema or protocol downgrade. Prefer a forward fix. A
 restore to an older database and matching old components is an explicit destructive

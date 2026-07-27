@@ -23,6 +23,7 @@ from app.models.models import (
     CommandKind,
     CommandStatus,
     OperatorRole,
+    ScriptExecutionScope,
 )
 from app.core.command_envelope import format_command_time, validate_command_payload
 
@@ -51,8 +52,34 @@ class OperatorOut(BaseModel):
     id: str
     email: str
     role: OperatorRole
+    script_execution_scope: ScriptExecutionScope | None
+    script_execution_scope_id: str | None
     disabled: bool
     created_at: datetime
+
+
+class ScriptExecutionPermissionChange(BaseModel):
+    scope: ScriptExecutionScope
+    scope_id: Annotated[
+        str | None, StringConstraints(min_length=1, max_length=36)
+    ] = None
+    reason: Annotated[
+        str, StringConstraints(min_length=3, max_length=500, strip_whitespace=True)
+    ]
+
+    @model_validator(mode="after")
+    def scope_and_id_must_match(self):
+        if self.scope == ScriptExecutionScope.global_ and self.scope_id is not None:
+            raise ValueError("global script permission must not include scope_id")
+        if self.scope != ScriptExecutionScope.global_ and self.scope_id is None:
+            raise ValueError("site and agent script permissions require scope_id")
+        return self
+
+
+class ScriptExecutionPermissionRevoke(BaseModel):
+    reason: Annotated[
+        str, StringConstraints(min_length=3, max_length=500, strip_whitespace=True)
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -439,6 +466,7 @@ class EndpointDetailOut(BaseModel):
     client_name: str
     site_id: str
     site_name: str
+    script_execution_allowed: bool
     current_telemetry: EndpointTelemetrySampleOut | None
     telemetry: list[EndpointTelemetrySampleOut] = Field(default_factory=list)
     telemetry_freshness: Literal["current", "stale", "unavailable"]

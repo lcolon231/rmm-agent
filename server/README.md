@@ -93,8 +93,13 @@ operators can verify activation and overlap without exposing private material.
 
 Management routes require operator JWT authentication. Global roles are
 `readonly`, `operator`, and `admin`. Login failures are throttled per process,
-and a token-generation counter supports logout-everywhere. There is no browser
-authentication UI, MFA, federation, tenant-scoped role, or full operator
+and a token-generation counter supports logout-everywhere. `operator` and
+`admin` may dispatch the typed `collect_inventory` operation, but arbitrary
+`powershell`/`shell` execution is default-deny and needs a separate admin-granted
+global, site, or agent scope. Admin has no implicit bypass. Grant/revoke reasons
+and each allowed/denied decision are audited without scripts; see
+[`SCRIPT-AUTHORIZATION.md`](../docs/SCRIPT-AUTHORIZATION.md). There is no browser
+authentication UI, MFA, federation, tenant-scoped role, or general operator
 administration API yet.
 
 ### Audit records
@@ -120,6 +125,9 @@ Operator/authentication:
 | POST | `/api/v1/auth/login` | Public |
 | GET | `/api/v1/auth/me` | Readonly |
 | POST | `/api/v1/auth/operators` | Admin |
+| GET | `/api/v1/auth/operators` | Admin |
+| PUT | `/api/v1/auth/operators/{id}/script-permission` | Admin |
+| POST | `/api/v1/auth/operators/{id}/script-permission/revoke` | Admin |
 | POST | `/api/v1/auth/revoke-tokens` | Readonly |
 | POST | `/api/v1/auth/operators/{id}/revoke-tokens` | Admin |
 | POST/GET | `/api/v1/clients` | Operator / Readonly |

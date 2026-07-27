@@ -28,6 +28,7 @@ export type EndpointDetailData = {
   client_name: string;
   site_id: string;
   site_name: string;
+  script_execution_allowed: boolean;
   current_telemetry: EndpointTelemetrySample | null;
   telemetry: EndpointTelemetrySample[];
   telemetry_freshness: "current" | "stale" | "unavailable";

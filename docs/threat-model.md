@@ -31,9 +31,12 @@ authentication and role-based authorization:
 - **AuthZ.** Three roles (`readonly` < `operator` < `admin`). The management
   router requires `readonly` at minimum (nothing is anonymous); mutating routes
   require `operator`; operator management requires `admin`. Insufficient role
-  returns 403.
+  returns 403. Arbitrary PowerShell/shell execution is additionally
+  default-deny, including for admins, and requires an explicit global, site, or
+  agent scope matching the target. Typed inventory is authorized separately.
 - **Accountability.** The acting operator's email is recorded as the `actor` on
-  each `command.dispatched` audit event.
+  each `command.dispatched` audit event. Allowed and denied authorization
+  decisions are also audited before signing/queueing without payload values.
 - **Bootstrap.** The first admin is created out-of-band via
   `scripts/create_admin.py` (the create-operator endpoint is admin-only, so it
   can't mint the first admin itself).
@@ -151,6 +154,14 @@ installed as a Windows service (Gate 2), which by default runs as `LocalSystem` 
 high privilege — so anyone who can dispatch a verified command has effective
 admin on the endpoint, which is why boundary (1) matters so much. Running under a
 least-privilege service account is still future work.
+
+The server reduces this exposure by separating typed operations from arbitrary
+scripts. Roles alone cannot dispatch `powershell` or `shell`; an admin must
+grant the operator one matching global, site, or agent scope with a reason.
+Scope changes and every allowed/denied authorization decision are audited, and
+denial occurs before command construction, signing, or queueing. This is not a
+replacement for approval workflows, expiring grants, or a least-privilege agent
+service identity.
 
 Each Windows command is created suspended, assigned to its own kill-on-close
 Job Object, then resumed. Timeout, SCM stop, agent termination, and ordinary

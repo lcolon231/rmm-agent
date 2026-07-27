@@ -27,7 +27,11 @@ import pytest_asyncio  # noqa: E402
 from app.main import app  # noqa: E402
 from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
-from app.models.models import Operator, OperatorRole  # noqa: E402
+from app.models.models import (  # noqa: E402
+    Operator,
+    OperatorRole,
+    ScriptExecutionScope,
+)
 
 
 @pytest_asyncio.fixture
@@ -42,6 +46,7 @@ async def client():
                 email="admin@nodelink.test",
                 password_hash=hash_password("correct-horse"),
                 role=OperatorRole.operator,
+                script_execution_scope=ScriptExecutionScope.global_,
             )
         )
         db.add(
@@ -188,9 +193,10 @@ async def test_endpoint_detail_returns_bounded_telemetry_and_audits(client):
     assert audit_event.detail == {
         "history_hours": 1,
         "history_limit": 10,
-        "history_count": 10,
-        "history_truncated": True,
-    }
+            "history_count": 10,
+            "history_truncated": True,
+            "script_execution_allowed": False,
+        }
 
 
 @pytest.mark.asyncio

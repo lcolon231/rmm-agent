@@ -173,6 +173,24 @@ async def _provision(client: httpx.AsyncClient, cfg: SoakConfig, state: SoakStat
     r.raise_for_status()
     client.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
 
+    # The workload deliberately exercises arbitrary shell execution. Role alone
+    # is insufficient, so the dedicated synthetic admin explicitly grants its
+    # own scope over the synthetic soak agents.
+    me = await client.get(f"{cfg.api_prefix}/auth/me")
+    me.raise_for_status()
+    permission = await client.put(
+        (
+            f"{cfg.api_prefix}/auth/operators/"
+            f"{me.json()['id']}/script-permission"
+        ),
+        json={
+            "scope": "global",
+            "scope_id": None,
+            "reason": "Synthetic soak workload requires shell execution",
+        },
+    )
+    permission.raise_for_status()
+
     cl = (await client.post(f"{cfg.api_prefix}/clients", json={"name": "Soak Client"})).json()
     st = (await client.post(f"{cfg.api_prefix}/sites",
                             json={"client_id": cl["id"], "name": "Soak Site"})).json()

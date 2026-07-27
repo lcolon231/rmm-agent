@@ -12,7 +12,10 @@ export const dynamic = "force-dynamic";
 function dispatchErrorMessage(error: NodelinkApiError): { message: string; status: number } {
   if (error.status === 401 || error.status === 403) {
     return {
-      message: "Your operator session is not allowed to dispatch commands.",
+      message:
+        error.code === "script_execution_not_authorized"
+          ? "PowerShell and shell execution require an explicit administrator-granted scope for this endpoint."
+          : "Your operator session is not allowed to dispatch commands.",
       status: 403,
     };
   }
