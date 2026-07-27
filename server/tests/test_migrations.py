@@ -51,7 +51,11 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
+        command_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(commands)")
+        }
     assert {"alembic_version", "agents", "commands", "audit_events"} <= tables
+    assert "agent_completed_at" in command_columns
 
 
 def test_upgrade_from_baseline_preserves_rows_and_expires_legacy_queue(tmp_path: Path):
@@ -168,6 +172,65 @@ def test_downgrade_policy_is_forward_only(tmp_path: Path):
     command.upgrade(config, "head")
     with pytest.raises(RuntimeError, match="forward-only"):
         command.downgrade(config, "0001")
+
+
+def test_result_pending_status_is_supported_after_upgrade(tmp_path: Path):
+    db_path = tmp_path / "result-pending.db"
+    config = migration_config(sqlite_url(db_path))
+    command.upgrade(config, "head")
+
+    now = "2026-07-26T12:00:00+00:00"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO clients (id, name, created_at) VALUES (?, ?, ?)",
+            ("client-r", "Client", now),
+        )
+        connection.execute(
+            "INSERT INTO sites (id, client_id, name, created_at) VALUES (?, ?, ?, ?)",
+            ("site-r", "client-r", "HQ", now),
+        )
+        connection.execute(
+            """INSERT INTO agents
+               (id, site_id, token_hash, hostname, os, os_version,
+                agent_version, status, enrolled_at, command_envelope_versions,
+                trust_state)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "agent-r",
+                "site-r",
+                "hash-r",
+                "PC",
+                "windows",
+                "11",
+                "0.3",
+                "online",
+                now,
+                '["command-v3"]',
+                "active",
+            ),
+        )
+        connection.execute(
+            """INSERT INTO commands
+               (id, agent_id, kind, payload, signature, envelope_version,
+                status, created_at, agent_completed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "command-r",
+                "agent-r",
+                "shell",
+                "{}",
+                "sig",
+                "command-v3",
+                "result_pending",
+                now,
+                now,
+            ),
+        )
+        status_value, completed = connection.execute(
+            "SELECT status, agent_completed_at FROM commands WHERE id = 'command-r'"
+        ).fetchone()
+    assert status_value == "result_pending"
+    assert completed is not None
 
 
 def test_unversioned_database_fails_startup_revision_check(tmp_path: Path):

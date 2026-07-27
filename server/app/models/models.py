@@ -87,6 +87,7 @@ class CommandStatus(str, enum.Enum):
     queued = "queued"
     dispatched = "dispatched"
     running = "running"
+    result_pending = "result_pending"
     succeeded = "succeeded"
     failed = "failed"
     expired = "expired"
@@ -276,6 +277,11 @@ class Command(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Agent-local completion time reported from the durable result outbox.
+    # completed_at remains the server acknowledgement/persistence time.
+    agent_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

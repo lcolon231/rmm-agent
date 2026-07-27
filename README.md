@@ -36,8 +36,11 @@ The code in this repository currently provides:
 - Basic CPU, memory, system-disk, uptime, and logged-in-user telemetry.
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation
-  recorded in command and audit data). Results are uploaded only after
-  execution finishes.
+  recorded in command and audit data). Completed results are DPAPI-protected
+  in a durable agent outbox before upload and retried idempotently across
+  outages, lost acknowledgements, and restarts. Windows commands run in
+  kill-on-close Job Objects so timeout, service stop, agent exit, and normal
+  shell completion terminate the complete process tree.
 - Fail-closed production startup validation (`ENVIRONMENT=production` rejects
   debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
   URLs) with explicit opt-in proxy trust for client IPs.

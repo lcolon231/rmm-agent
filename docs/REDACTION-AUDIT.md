@@ -79,6 +79,12 @@ message.
 - The runner logs command **IDs**, kinds, and agent IDs — never payloads,
   output, or tokens. The bearer token lives only in the `Authorization` header
   and is never formatted into a log or error.
+- Bounded results waiting for upload live in `seen_commands.json`, not logs or
+  diagnostics. On Windows the complete command journal/outbox is
+  DPAPI-encrypted under the service identity and protected by a
+  SYSTEM+Administrators-only DACL; other development platforms declare
+  protection `none` and restrict the file to mode 0600. Heartbeats advertise
+  only pending command IDs and completion timestamps, never captured output.
 - Server error bodies are the one place untrusted text enters an agent error
   string. `client.go` now passes that text through `redact.Text` (same pattern
   set as the server scrubber) before constructing a `StatusError`.

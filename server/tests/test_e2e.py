@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import os
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
@@ -166,6 +167,194 @@ async def test_command_dispatch_pickup_and_signature(client):
     assert r.status_code == 204
     cmds = (await client.get(f"/agents/{agent_id}/commands")).json()["items"]
     assert cmds[0]["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_result_delivery_is_idempotent_and_conflicts_fail_closed(client):
+    from sqlalchemy import func, select
+    from app.models.models import AuditEvent, Command
+
+    agent_id, token, _ = await _enroll(client)
+    auth = {"Authorization": f"Bearer {token}"}
+    dispatched = (
+        await client.post(
+            f"/agents/{agent_id}/commands",
+            json={"kind": "shell", "payload": {"script": "echo durable"}},
+        )
+    ).json()
+    await client.post(
+        "/heartbeat",
+        json={"supported_command_envelope_versions": [COMMAND_ENVELOPE_V2]},
+        headers=auth,
+    )
+    result = {
+        "exit_code": 0,
+        "stdout": "durable",
+        "stderr": "",
+        "agent_completed_at": "2026-07-26T16:30:00Z",
+    }
+
+    assert (
+        await client.post(
+            f"/commands/{dispatched['id']}/result", json=result, headers=auth
+        )
+    ).status_code == 204
+    # Simulate a lost HTTP acknowledgement: the exact retry succeeds without
+    # changing receipt time or appending a second completion event.
+    async with AsyncSessionLocal() as db:
+        first_received_at = (
+            await db.execute(select(Command).where(Command.id == dispatched["id"]))
+        ).scalar_one().completed_at
+    assert (
+        await client.post(
+            f"/commands/{dispatched['id']}/result", json=result, headers=auth
+        )
+    ).status_code == 204
+    async with AsyncSessionLocal() as db:
+        command = (
+            await db.execute(select(Command).where(Command.id == dispatched["id"]))
+        ).scalar_one()
+        completion_events = (
+            await db.execute(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(
+                    AuditEvent.action == "command.completed",
+                    AuditEvent.agent_id == agent_id,
+                )
+            )
+        ).scalar_one()
+    assert command.completed_at == first_received_at
+    assert completion_events == 1
+
+    conflict = await client.post(
+        f"/commands/{dispatched['id']}/result",
+        json={**result, "stdout": "different"},
+        headers=auth,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "command_result_conflict"
+
+
+@pytest.mark.asyncio
+async def test_pending_result_state_is_operator_visible_before_delivery(client):
+    from sqlalchemy import func, select
+    from app.models.models import AuditEvent, Command
+
+    agent_id, token, _ = await _enroll(client)
+    auth = {"Authorization": f"Bearer {token}"}
+    command = (
+        await client.post(
+            f"/agents/{agent_id}/commands",
+            json={"kind": "shell", "payload": {"script": "echo pending"}},
+        )
+    ).json()
+    await client.post(
+        "/heartbeat",
+        json={"supported_command_envelope_versions": [COMMAND_ENVELOPE_V2]},
+        headers=auth,
+    )
+    pending_body = {
+        "supported_command_envelope_versions": [COMMAND_ENVELOPE_V2],
+        "pending_results": [
+            {
+                "command_id": command["id"],
+                "agent_completed_at": "2026-07-26T16:31:00Z",
+            }
+        ],
+    }
+    assert (await client.post("/heartbeat", json=pending_body, headers=auth)).status_code == 200
+
+    history = (await client.get(f"/agents/{agent_id}/commands")).json()["items"]
+    assert history[0]["status"] == "result_pending"
+    assert history[0]["agent_completed_at"] == "2026-07-26T16:31:00"
+
+    # Repeated notices are idempotent and do not duplicate audit evidence.
+    assert (await client.post("/heartbeat", json=pending_body, headers=auth)).status_code == 200
+    async with AsyncSessionLocal() as db:
+        notice_events = (
+            await db.execute(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(
+                    AuditEvent.action == "command.result_pending",
+                    AuditEvent.agent_id == agent_id,
+                )
+            )
+        ).scalar_one()
+        stored = (
+            await db.execute(select(Command).where(Command.id == command["id"]))
+        ).scalar_one()
+    assert notice_events == 1
+    assert stored.status.value == "result_pending"
+
+    delivered = await client.post(
+        f"/commands/{command['id']}/result",
+        json={
+            "exit_code": 0,
+            "stdout": "pending",
+            "agent_completed_at": "2026-07-26T16:31:00Z",
+        },
+        headers=auth,
+    )
+    assert delivered.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_dispatched_command_is_redelivered_after_lease(client):
+    from sqlalchemy import select
+    from app.models.models import Command
+
+    agent_id, token, _ = await _enroll(client)
+    auth = {"Authorization": f"Bearer {token}"}
+    command = (
+        await client.post(
+            f"/agents/{agent_id}/commands",
+            json={"kind": "shell", "payload": {"script": "echo lease"}},
+        )
+    ).json()
+    first = (
+        await client.post(
+            "/heartbeat",
+            json={"supported_command_envelope_versions": [COMMAND_ENVELOPE_V2]},
+            headers=auth,
+        )
+    ).json()
+    assert [item["id"] for item in first["pending_commands"]] == [command["id"]]
+
+    async with AsyncSessionLocal() as db:
+        row = (
+            await db.execute(select(Command).where(Command.id == command["id"]))
+        ).scalar_one()
+        row.dispatched_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        await db.commit()
+
+    redelivered = (
+        await client.post(
+            "/heartbeat",
+            json={"supported_command_envelope_versions": [COMMAND_ENVELOPE_V2]},
+            headers=auth,
+        )
+    ).json()
+    assert [item["id"] for item in redelivered["pending_commands"]] == [command["id"]]
+
+
+@pytest.mark.asyncio
+async def test_result_before_dispatch_is_rejected(client):
+    agent_id, token, _ = await _enroll(client)
+    command = (
+        await client.post(
+            f"/agents/{agent_id}/commands",
+            json={"kind": "shell", "payload": {"script": "echo too-early"}},
+        )
+    ).json()
+    response = await client.post(
+        f"/commands/{command['id']}/result",
+        json={"exit_code": 0},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "command_not_accepting_results"
 
 
 @pytest.mark.asyncio

@@ -31,6 +31,7 @@ function historyItem(status: CommandHistoryItem["status"]): CommandHistoryItem {
     created_at: "2026-07-21T05:00:00Z",
     issued_at: "2026-07-21T05:00:00Z",
     dispatched_at: null,
+    agent_completed_at: null,
     completed_at: null,
     expires_at: "2026-07-21T05:05:00Z",
   };
@@ -93,6 +94,7 @@ test("classifies statuses into terminal and active work", () => {
   assert.equal(describeCommandStatus("queued").terminal, false);
   assert.equal(describeCommandStatus("dispatched").terminal, false);
   assert.equal(describeCommandStatus("running").terminal, false);
+  assert.equal(describeCommandStatus("result_pending").terminal, false);
   assert.equal(describeCommandStatus("succeeded").terminal, true);
   assert.equal(describeCommandStatus("failed").tone, "failure");
   assert.equal(describeCommandStatus("expired").tone, "expired");

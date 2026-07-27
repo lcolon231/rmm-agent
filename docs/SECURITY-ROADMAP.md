@@ -93,6 +93,15 @@ structured result, and avoid unbounded memory growth. Define explicit per-agent
 command concurrency and queue admission; default to one until a safe policy is
 designed. Test timeout, cancellation, truncation, retry, and shutdown races.
 
+Implemented for the polling executor. The agent now saves an atomically
+protected command journal and bounded result outbox before upload, retries exact
+results across outages/restarts/lost acknowledgements, and never re-executes an
+`executing` crash state. The server exposes `result_pending`, accepts identical
+delivery idempotently, rejects conflicts, and lease-redelivers work that was
+dispatched but never started. Windows commands start suspended inside
+kill-on-close Job Objects; native tests verify cancellation and parent exit
+terminate descendants.
+
 ### Strengthen audit ordering and external verification
 
 Introduce a database-backed monotonic sequence with serialized append behavior

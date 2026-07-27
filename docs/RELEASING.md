@@ -123,9 +123,11 @@ it is added.
 
 ## Current schema and agent compatibility
 
-Current server releases require Alembic revision `0008`; non-debug startup
+Current server releases require Alembic revision `0009`; non-debug startup
 requires `alembic upgrade head`. Roll out the database revision and server first,
-then upgrade agents. Command dispatch returns `409` until an agent advertises
+then upgrade agents. Revision 0009 adds the `result_pending` enum value and
+`agent_completed_at`; durable dispatch-lease recovery is active only after both
+server and agent are upgraded. Command dispatch returns `409` until an agent advertises
 `command-v3`; old queued commands are expired by the migration. A new agent
 refuses commands from an old server because they lack an envelope version, and
 a new server rejects enrollment when no supported version overlaps.

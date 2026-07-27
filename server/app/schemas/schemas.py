@@ -167,6 +167,35 @@ class HeartbeatIn(CommandEnvelopeCapabilities):
     uptime_seconds: int = 0
     logged_in_user: str | None = None
     inventory: dict | None = None  # optional full snapshot piggybacked on a beat
+    pending_results: list["PendingResultNotice"] = Field(
+        default_factory=list, max_length=256
+    )
+
+    @field_validator("pending_results")
+    @classmethod
+    def pending_result_ids_must_be_unique(
+        cls, value: list["PendingResultNotice"]
+    ) -> list["PendingResultNotice"]:
+        ids = [notice.command_id for notice in value]
+        if len(ids) != len(set(ids)):
+            raise ValueError("pending result command IDs must be unique")
+        return value
+
+
+class PendingResultNotice(BaseModel):
+    command_id: Annotated[
+        str, StringConstraints(min_length=1, max_length=64)
+    ]
+    agent_completed_at: datetime | None = None
+
+    @field_validator("agent_completed_at")
+    @classmethod
+    def completion_time_must_include_timezone(
+        cls, value: datetime | None
+    ) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("agent_completed_at must include a timezone")
+        return value
 
 
 class HeartbeatAck(BaseModel):
@@ -256,6 +285,7 @@ class CommandHistoryItemOut(BaseModel):
     created_at: datetime
     issued_at: datetime | None
     dispatched_at: datetime | None
+    agent_completed_at: datetime | None
     completed_at: datetime | None
     expires_at: datetime | None
 
@@ -308,10 +338,20 @@ class CommandResult(BaseModel):
     exit_code: int
     stdout: str = ""
     stderr: str = ""
+    agent_completed_at: datetime | None = None
     stdout_truncated: bool | None = None
     stderr_truncated: bool | None = None
     stdout_total_bytes: int | None = Field(default=None, ge=0)
     stderr_total_bytes: int | None = Field(default=None, ge=0)
+
+    @field_validator("agent_completed_at")
+    @classmethod
+    def result_completion_time_must_include_timezone(
+        cls, value: datetime | None
+    ) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("agent_completed_at must include a timezone")
+        return value
 
     @field_validator("stdout", "stderr")
     @classmethod
@@ -435,4 +475,5 @@ class AnchorVerifyOut(BaseModel):
     reason: str | None = None
 
 
+HeartbeatIn.model_rebuild()
 HeartbeatAck.model_rebuild()

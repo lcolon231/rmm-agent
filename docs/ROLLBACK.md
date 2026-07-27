@@ -18,7 +18,7 @@ and fill it with immutable identifiers. Do not use `latest` or a mutable branch.
 | Database | Alembic head(s) | Alembic head(s) and matching backup manifest |
 | Protocol | Command-envelope versions | Command-envelope versions |
 
-At this revision, the server requires Alembic `0008` and agents use
+At this revision, the server requires Alembic `0009` and agents use
 `command-v3` (with `command-v2` only for a staged mixed-version rollout). The
 existing public `v0.1.0` and `v0.1.1` tags predate Alembic and are **not** a
 supported server/database rollback target for a database created by current

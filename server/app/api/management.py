@@ -574,7 +574,14 @@ async def revoke_agent(
     result = await db.execute(
         select(Command).where(
             Command.agent_id == agent.id,
-            Command.status.in_([CommandStatus.queued, CommandStatus.dispatched]),
+            Command.status.in_(
+                [
+                    CommandStatus.queued,
+                    CommandStatus.dispatched,
+                    CommandStatus.running,
+                    CommandStatus.result_pending,
+                ]
+            ),
         )
     )
     expired_ids = []
@@ -651,6 +658,7 @@ async def dispatch_command(
                         CommandStatus.queued,
                         CommandStatus.dispatched,
                         CommandStatus.running,
+                        CommandStatus.result_pending,
                     ]
                 ),
             )
@@ -789,6 +797,7 @@ async def list_commands(
                         CommandStatus.queued,
                         CommandStatus.dispatched,
                         CommandStatus.running,
+                        CommandStatus.result_pending,
                     ]
                 ),
             )

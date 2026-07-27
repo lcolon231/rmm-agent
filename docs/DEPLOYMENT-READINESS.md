@@ -111,8 +111,13 @@ link to reproducible evidence in the release or pilot record.
 - [x] Per-agent concurrency and queue/admission limits are configured and tested
       (per-agent outstanding-command cap admits/refuses at the dispatch
       boundary; per-heartbeat FIFO batch cap; agent executes one at a time).
-- [ ] Timeout, cancellation, service stop, server outage, and result retry do not
-      orphan processes or duplicate execution.
+- [x] Timeout, cancellation, service stop, server outage, and result retry do not
+      orphan processes or duplicate execution (durable DPAPI-protected command
+      journal/outbox with `reserved` → `executing` → `result_pending` →
+      `acknowledged` transitions; exact-result idempotency and conflict
+      rejection; dispatch-lease recovery; Windows suspended-process Job Object
+      tests prove direct and descendant termination on cancellation and parent
+      exit; outage, lost-acknowledgement, restart, and crash-state tests).
 - [x] Payload and script-size limits exist at API and agent boundaries
       (64 KiB dispatch payload cap; server refuses over-cap results, and the
       agent's script arrives inside the signed, capped payload).
@@ -237,6 +242,14 @@ an old agent. There is no dual-issue or downgrade mode. In-place database
 downgrade is unsupported; use a forward fix, or restore a pre-migration backup
 with the correspondingly old server and agent only after an explicit data-loss
 decision.
+
+Revision `0009` adds the `result_pending` command status on PostgreSQL and the
+nullable `agent_completed_at` column. New agents are compatible with an older
+server because pending-result heartbeat data and completion timestamps are
+additive, but durable dispatch recovery requires the server and agent from this
+revision together. Rolling the server back while new agents are active requires
+pausing dispatch; retained acknowledged results prevent re-execution if a
+command row is restored to a pre-result state.
 
 ## Rollback procedure
 

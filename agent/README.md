@@ -123,8 +123,10 @@ rmm-agent.exe uninstall                      # remove it (safe to run even if no
   size-rotated file at `%ProgramData%\NodeLink\logs\rmm-agent.log`
   (10 MB per file, 5 rotations kept). In the foreground it still logs to stdout.
 - On service stop the agent stops accepting new commands, lets an in-flight
-  command finish (up to a grace period) or force-cancels it so no child process
-  is orphaned, then exits.
+  command finish (up to a grace period) or force-cancels it, persists the
+  bounded outcome, and exits. Windows commands are created suspended inside a
+  kill-on-close Job Object, so the direct process and every descendant are
+  terminated on timeout, cancellation, agent exit, or normal parent exit.
 
 ## What it collects
 
@@ -158,11 +160,19 @@ execution. This is a fail-closed rollout boundary; it does not silently fall
 back to the old format.
 
 Checks run after signature verification in the order signature → time window →
-command-ID replay → nonce replay → execute. The agent persists both replay keys
-to `seen_commands.json` (mode 0600, beside `identity.json`, written atomically)
-before starting a process. A replayed command ID is neither executed nor
-re-reported, so it cannot clobber the original result. Expired entries are
-pruned on load. For v3 the agent replaces its trusted public-key bundle on every
+command-ID replay → nonce replay → execute. `seen_commands.json` is now a
+protected command journal and result outbox, saved atomically beside
+`identity.json` (DPAPI plus a SYSTEM+Administrators DACL on Windows; protection
+`none` plus mode 0600 on development platforms). It records each transition
+before its side effect: `reserved` before process start, `executing` before the
+point of no safe retry, `result_pending` before upload, and `acknowledged` only
+after the server accepts the result. A crash in `reserved` may be safely
+re-delivered; a crash in `executing` produces an explicit unknown-outcome
+failure without rerunning the command. Pending results survive outages and
+restarts, and a replayed acknowledged command causes the exact retained result
+to be re-reported idempotently without execution. Acknowledged entries are
+pruned after signed expiry; pending results are never pruned before delivery.
+For v3 the agent replaces its trusted public-key bundle on every
 heartbeat, accepts only active/overlap key IDs supplied by the server, and
 refuses unknown or retired keys. Operators rotate the server-side registry with
 `scripts/rotate_command_key.py` (staged activation/overlap/retire, compromise,
@@ -174,8 +184,11 @@ Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
 timeout.
 
 Commands from one heartbeat are executed sequentially and stdout/stderr are
-captured in memory up to 256 KiB per stream (384 KiB combined), then uploaded
-after completion. Bytes past a cap are counted but never buffered; when the
+captured in memory up to 256 KiB per stream (384 KiB combined), then protected
+in the durable outbox before upload. Every heartbeat advertises result-pending
+command IDs without copying output into telemetry, and delivery is retried
+until the server acknowledges the exact result. Bytes past a cap are counted
+but never buffered; when the
 combined cap binds, stderr is kept whole and stdout trimmed. Truncation is
 UTF-8-safe and reported to the server as structured metadata alongside the
 original byte totals. Output streaming, queue/admission limits, and a

@@ -79,7 +79,7 @@ validation:
 cd server
 python scripts/verify_restore.py \
   --database-url 'postgresql+asyncpg://rmm:...@127.0.0.1:5432/nodelink_restore' \
-  --expected-schema-revision 0008 \
+  --expected-schema-revision 0009 \
   --min-operators 1 --min-agents 1 --min-audit-events 1 \
   --evidence-output ../incident/restore-verification.json
 ```

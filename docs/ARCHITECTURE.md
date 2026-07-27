@@ -41,9 +41,11 @@ and response polling:
 
 1. An unenrolled agent calls `POST /api/v1/enroll`.
 2. The enrolled agent calls `POST /api/v1/heartbeat` on its configured cadence.
-3. The heartbeat response carries queued commands.
-4. The agent executes accepted commands sequentially and posts the buffered
-   result to `POST /api/v1/commands/{id}/result`.
+3. The heartbeat advertises durable pending-result notices and the response
+   carries queued or lease-expired dispatched commands.
+4. The agent executes accepted commands sequentially, protects the bounded
+   result in its local journal, and retries
+   `POST /api/v1/commands/{id}/result` until idempotently acknowledged.
 
 There is no WebSocket, server-initiated endpoint connection, interactive
 session, or streamed result channel. A future interactive transport may add
@@ -266,9 +268,17 @@ is stored with protection `none` and mode `0600`. A legacy plaintext
 replace; if protection or migration fails, the agent refuses to run rather than
 falling back to plaintext, and a scheme mismatch (e.g. a blob enrolled under a
 different account) fails closed with a delete-and-re-enroll instruction.
-`seen_commands.json` stores
-executed command IDs and accepted signed nonces with expiry values for replay
-prevention; both entries are reserved atomically before execution.
+`seen_commands.json` is a versioned local command journal and result outbox.
+Because bounded output can contain sensitive endpoint data, Windows protects
+the complete file with DPAPI under the service identity and the same
+SYSTEM+Administrators-only DACL as identity; development platforms declare
+protection `none` and use mode `0600`. Each command advances durably through
+`reserved`, `executing`, `result_pending`, and `acknowledged`. ID and nonce are
+atomically reserved before process start. Startup safely releases `reserved`
+work for lease-based re-delivery, but converts `executing` to an
+unknown-outcome failure without replay. Exact results remain retained through
+signed expiry so lost HTTP acknowledgements and server rollback can be repaired
+without duplicate execution.
 
 Command concurrency and admission are explicit and configurable. The agent's
 contract is one command at a time per runtime: a heartbeat's batch is executed
@@ -276,9 +286,27 @@ strictly in delivery order and the next beat is not issued until the batch
 drains. The server enforces two bounds: admission control refuses dispatch
 (HTTP 429, `agent_command_queue_full`) once an agent has
 `max_outstanding_commands_per_agent` non-terminal commands, and each heartbeat
-hands out at most `max_commands_per_heartbeat` queued commands oldest-first, so
-a backlog drains over several beats instead of flooding one. Terminal commands
-(succeeded/failed/expired) free admission slots.
+hands out at most `max_commands_per_heartbeat` commands oldest-first, so a
+backlog drains over several beats instead of flooding one. A dispatched command
+is eligible for re-delivery after `command_redelivery_seconds`; a new agent
+either executes a released pre-start reservation or re-reports the retained
+result, never re-executes accepted work. `result_pending` counts as outstanding;
+terminal commands (succeeded/failed/expired) free admission slots.
+
+Result delivery is at least once and server application is idempotent by
+`(agent_id, command_id)`. The first valid result locks and completes the row,
+sets `agent_completed_at` from the durable agent record and `completed_at` from
+server receipt time, and appends one `command.completed` event. An exact retry
+returns 204 without mutation or another audit event; a conflicting retry
+returns 409. Pending-result heartbeat notices move dispatched work to
+`result_pending`, giving operators truthful visibility during partial outages
+without putting captured output in heartbeat or audit data.
+
+On Windows, commands start suspended, are assigned to a Job Object configured
+with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and only then resume. Timeout,
+context cancellation, SCM stop, agent crash, and normal shell exit therefore
+terminate the direct process and descendants. Unix development builds use a
+dedicated process group with the same no-deferred-work behavior.
 
 Command output capture is bounded: stdout and stderr are each captured up to
 256 KiB, with a 384 KiB combined cap. Bytes beyond a cap are counted but never
@@ -448,7 +476,8 @@ moved merely to match an aspirational tree.
   inside the database trust boundary and the publisher warns.
 - Roles are global; clients/sites are not authorization tenants.
 - The login limiter is process-local and weakens with multiple workers.
-- `CommandStatus.running` exists but is never assigned.
+- `CommandStatus.running` remains reserved for a future live start signal;
+  `result_pending` is assigned from durable agent outbox notices today.
 - `websockets` and `python-multipart` are declared dependencies without
   corresponding implemented product behavior.
 - Release binaries are checksummed and carry an SBOM and signed build
