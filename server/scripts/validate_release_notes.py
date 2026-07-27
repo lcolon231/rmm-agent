@@ -597,6 +597,16 @@ def render_markdown(evidence: dict[str, Any]) -> str:
             f"| Server | `{evidence['server']['tag']}` / "
             f"`{evidence['server']['commit']}` | source commit |",
             "",
+            "## Supported platforms",
+            "",
+            "- Supported product target: `windows/amd64` (x64).",
+            "- Development-only builds: `linux/amd64`, `darwin/arm64`.",
+            "- Support policy: [Windows support matrix]"
+            f"(https://github.com/{source['repository']}/blob/"
+            f"{source['commit']}/docs/WINDOWS-SUPPORT-MATRIX.md).",
+            "- Release-specific platform exceptions are listed under "
+            "Known limitations.",
+            "",
             "## Schema and protocol compatibility",
             "",
             f"- Required Alembic revision: `{evidence['database']['alembic_revision']}`",

@@ -5,6 +5,10 @@ non-technical person can install the agent on an endpoint: run the setup,
 enter the server URL and enrollment token, watch the progress page, and get a
 clear "Setup Completed" screen. No terminal required.
 
+The installer targets **x64 Windows** (`ArchitecturesAllowed=x64compatible`).
+Supported Windows versions, editions, and the Server Core CLI path are defined
+in [`docs/WINDOWS-SUPPORT-MATRIX.md`](../docs/WINDOWS-SUPPORT-MATRIX.md).
+
 The installer deliberately contains **no service logic of its own** — it shells
 out to the agent's built-in CLI verbs (`rmm-agent.exe install|start|uninstall`),
 which own service registration, SCM auto-recovery, and idempotent removal. The

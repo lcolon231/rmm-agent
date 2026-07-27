@@ -200,6 +200,7 @@ def test_finalize_verifies_artifacts_and_renders_complete_evidence(tmp_path: Pat
     assert evidence == json.loads(GOLDEN_EVIDENCE.read_text(encoding="utf-8"))
     for heading in (
         "## Immutable release identity",
+        "## Supported platforms",
         "## Schema and protocol compatibility",
         "## Known limitations",
         "## Upgrade",
@@ -208,6 +209,9 @@ def test_finalize_verifies_artifacts_and_renders_complete_evidence(tmp_path: Pat
         "## Release evidence",
     ):
         assert heading in markdown
+    assert (
+        f"/blob/{SOURCE_SHA}/docs/WINDOWS-SUPPORT-MATRIX.md" in markdown
+    )
     assert "placeholder" not in markdown.lower()
 
 

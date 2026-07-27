@@ -4,6 +4,13 @@ Releases are automated by `.github/workflows/release.yml`, which fires on a
 version tag. The server is run from source (uvicorn), so only the **agent** is
 released as a binary.
 
+Supported platforms are defined by the
+[Windows support matrix](WINDOWS-SUPPORT-MATRIX.md) and the machine-readable
+[`agent/supported-targets.txt`](../agent/supported-targets.txt). CI
+(`tools/check_release_targets.py`) fails if the shipped build targets drift from
+that list. **Every release must identify the support matrix and call out any
+release-specific platform exceptions in its notes.**
+
 The current release process publishes SHA-256 checksums, an SPDX SBOM, and
 signed SLSA build-provenance attestations for every artifact, and Windows
 service/installer lifecycle tests run in CI on every push. It does **not**

@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.core.database import Base, engine
 from app.core.prodcheck import ensure_safe_production_config
 from app.core.schema_revision import ensure_schema_current
-from app.core.tasks import anchor_publisher, offline_sweeper
+from app.core.tasks import anchor_publisher, offline_sweeper, retention_sweeper
 
 
 @asynccontextmanager
@@ -36,11 +36,12 @@ async def lifespan(app: FastAPI):
     stop = asyncio.Event()
     sweeper = asyncio.create_task(offline_sweeper(stop))
     publisher = asyncio.create_task(anchor_publisher(stop))
+    pruner = asyncio.create_task(retention_sweeper(stop))
     try:
         yield
     finally:
         stop.set()
-        await asyncio.gather(sweeper, publisher)
+        await asyncio.gather(sweeper, publisher, pruner)
 
 
 app = FastAPI(
