@@ -33,7 +33,7 @@
       "url": "https://github.com/lcolon231/rmm-agent/blob/4607ecbe42c3800610f5c17929a0f9bf43d71626/docs/BACKUP-RESTORE.md"
     },
     "checksums": {
-      "sha256": "10bcadb4657ade5441c5e76ff0df83a38d6ca11871dea004523aa542a276521a",
+      "sha256": "8d0b905067f022b3bc3dcddd888a9a202b12026aebfcd04516c3361c24cbbdef",
       "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.0.0-release-notes-rehearsal/SHA256SUMS.txt"
     },
     "ci": {
@@ -41,7 +41,7 @@
       "url": "https://github.com/lcolon231/rmm-agent/actions/runs/117000001"
     },
     "installer_checksum": {
-      "sha256": "6b93a5d073352b3d18d8d6a0b9b3dc14d055810fe9f920dab52730ebbabf2230",
+      "sha256": "6479aab8f711b49b1d7fecbba22b160e468983e81e5438e93b2e19858a5d4600",
       "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.0.0-release-notes-rehearsal/NodeLinkAgentSetup-0.0.0-release-notes-rehearsal.exe.sha256"
     },
     "provenance": [

@@ -64,11 +64,13 @@ def _create_artifacts(directory: Path, manifest: dict) -> None:
         f"{_digest(directory / name)}  {name}" for name in checksummed
     ]
     (directory / "SHA256SUMS.txt").write_text(
-        "\n".join(checksum_lines) + "\n", encoding="utf-8"
+        "\n".join(checksum_lines) + "\n", encoding="utf-8", newline="\n"
     )
     installer = manifest["installer"]["filename"]
     (directory / f"{installer}.sha256").write_text(
-        f"{_digest(directory / installer)}  {installer}\n", encoding="utf-8"
+        f"{_digest(directory / installer)}  {installer}\n",
+        encoding="utf-8",
+        newline="\n",
     )
 
 
