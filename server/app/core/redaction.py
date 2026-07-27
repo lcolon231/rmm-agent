@@ -3,27 +3,23 @@
 
 Two related problems, one module:
 
-* **Audit events (issue #115).** `audit.record` runs every event's ``detail``
-  through :func:`redact_detail` before the value is hashed and persisted, so no
-  event producer — present or future — can commit a secret into the
-  tamper-evident chain. Redaction is deterministic (same input -> same output),
-  so chain and anchor verification stay reproducible over the *stored*
-  (redacted) representation, which is the only representation that is ever
-  hashed.
+* **Audit events (issue #115).** `audit.record` runs every action and ``detail``
+  through :func:`sanitize_audit_detail` before sequence allocation, hashing, or
+  persistence. Exact action/field schemas reject producer drift and malformed
+  input; credential shapes are redacted and arbitrary prose is digest-only.
+  The policy is deterministic, so chain and anchor verification stay
+  reproducible over the stored safe representation.
 
 * **Logs / diagnostics / errors (issue #112).** :func:`scrub_text` removes
   credential-shaped substrings from free text before it reaches a log line or
   an API error body.
 
 A design constraint is specific to this codebase: audit detail legitimately
-carries high-entropy *public* values — Merkle roots and event hashes (64 hex
-chars), replay nonces (URL-safe base64, the same shape as our bearer tokens),
-and envelope digests. Redacting those by *shape* would both destroy
-accountability and break anchor verification. So the audit path redacts by
-**key name** (a value is secret because of where it sits — ``password``,
-``agent_token``, ...) plus only the two value shapes that never legitimately
-appear in audit detail: PEM private-key blocks and JWTs. Hex and
-URL-safe-base64 blobs are deliberately preserved.
+carries high-entropy *public* values—Merkle roots and event hashes (64 hex
+chars), replay nonces (URL-safe base64, the same shape as bearer tokens), and
+envelope digests. Exact per-action schemas distinguish those reviewed fields
+from unclassified input; public evidence is preserved while unknown fields are
+rejected.
 
 :func:`scrub_text` has no verification obligation, so it is allowed to
 over-redact and casts a wider net (bearer headers, ``key=value`` secrets, PEM,
@@ -31,8 +27,11 @@ JWTs).
 """
 from __future__ import annotations
 
+import hashlib
+import math
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 REDACTED = "[redacted]"
@@ -41,6 +40,177 @@ _TOO_DEEP = "[redacted:too-deep]"
 # Recursion guard. Mirrors the 16-level envelope nesting limit's intent: bound
 # the work and fail closed (redact) rather than recurse without limit.
 _MAX_DEPTH = 64
+
+# Audit producers are intentionally much more constrained than the generic
+# recursive redactor. No production event currently needs nested objects, and
+# accepting arbitrary object graphs would create an easy place for a future
+# producer to hide an unclassified credential.
+_MAX_AUDIT_STRING_BYTES = 4096
+_MAX_AUDIT_LIST_ITEMS = 1000
+
+
+class AuditDetailError(ValueError):
+    """An audit action or detail failed the fail-closed producer policy."""
+
+
+@dataclass(frozen=True)
+class AuditDetailSchema:
+    """Exact top-level input contract for one audit action.
+
+    ``digest_fields`` are accepted as strings but never stored verbatim. Their
+    UTF-8 SHA-256 and byte count are stored instead, retaining correlation and
+    accountability without committing operator/agent-controlled prose to the
+    immutable audit chain.
+    """
+
+    fields: frozenset[str]
+    digest_fields: frozenset[str] = frozenset()
+
+    @property
+    def stored_fields(self) -> frozenset[str]:
+        stored = set(self.fields - self.digest_fields)
+        for field in self.digest_fields:
+            stored.update((f"{field}_sha256", f"{field}_bytes"))
+        return frozenset(stored)
+
+
+def _schema(
+    *fields: str,
+    digest_fields: tuple[str, ...] = (),
+) -> AuditDetailSchema:
+    schema = AuditDetailSchema(frozenset(fields), frozenset(digest_fields))
+    if not schema.digest_fields <= schema.fields:
+        raise ValueError("digest fields must be part of the audit schema")
+    return schema
+
+
+# Every production audit producer is represented here. ``sanitize_audit_detail``
+# rejects unknown actions and any field drift, so adding or changing a producer
+# requires an explicit, reviewable policy update.
+AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
+    "agent.enrolled": _schema(
+        "hostname",
+        "os",
+        "site_id",
+        "command_envelope_version",
+        "supported_command_envelope_versions",
+        digest_fields=("hostname", "os"),
+    ),
+    "agent.command_envelope_capabilities_changed": _schema(
+        "previous",
+        "current",
+    ),
+    "agent.offline": _schema("last_seen_at"),
+    "agent.quarantined": _schema(
+        "previous_trust_state",
+        "trust_state",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    "agent.restored": _schema(
+        "previous_trust_state",
+        "trust_state",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    "agent.revoked": _schema(
+        "previous_trust_state",
+        "trust_state",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    "agent.commands_expired_on_revoke": _schema("command_ids"),
+    "audit.anchored": _schema("anchor_id", "merkle_root", "event_count"),
+    "client_navigation.list_viewed": _schema("client_count", "truncated"),
+    "client_navigation.client_viewed": _schema("client_id"),
+    "client_navigation.site_viewed": _schema("site_id", "client_id"),
+    "command.authorization_allowed": _schema(
+        "operator_id",
+        "operator_role",
+        "kind",
+        "site_id",
+        "policy",
+        "reason",
+        "permission_scope",
+        "permission_scope_id",
+    ),
+    "command.authorization_denied": _schema(
+        "operator_id",
+        "operator_role",
+        "kind",
+        "site_id",
+        "policy",
+        "reason",
+        "permission_scope",
+        "permission_scope_id",
+    ),
+    "command.completed": _schema(
+        "command_id",
+        "kind",
+        "exit_code",
+        "status",
+        "agent_completed_at",
+        "stdout_truncated",
+        "stderr_truncated",
+        "stdout_total_bytes",
+        "stderr_total_bytes",
+    ),
+    "command.dispatched": _schema(
+        "command_id",
+        "kind",
+        "payload_keys",
+        "envelope_version",
+        "schema_version",
+        "issued_at",
+        "expires_at",
+        "nonce",
+        "signing_key_id",
+        "envelope_sha256",
+    ),
+    "command.result_pending": _schema(
+        "command_id",
+        "kind",
+        "agent_completed_at",
+    ),
+    "command_detail.viewed": _schema("command_id", "status"),
+    "endpoint_detail.viewed": _schema(
+        "history_hours",
+        "history_limit",
+        "history_count",
+        "history_truncated",
+        "script_execution_allowed",
+    ),
+    "endpoint_list.viewed": _schema(
+        "client_id",
+        "site_id",
+        "status",
+        "search",
+        "sort",
+        "direction",
+        "page",
+        "page_size",
+        "result_count",
+    ),
+    "operator.script_permission_changed": _schema(
+        "operator_id",
+        "operator_role",
+        "previous_scope",
+        "previous_scope_id",
+        "new_scope",
+        "new_scope_id",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    "operator.script_permission_revoked": _schema(
+        "operator_id",
+        "operator_role",
+        "previous_scope",
+        "previous_scope_id",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    "operator.tokens_revoked": _schema("operator_id", "by"),
+}
 
 # Substrings that make a mapping key sensitive (matched case-insensitively).
 # Curated to avoid colliding with legitimate accountable keys that this
@@ -75,6 +245,16 @@ _PEM_PRIVATE_KEY = re.compile(
 # dots) do not match, so this is safe on the audit path.
 _JWT = re.compile(r"\b[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b")
 
+# Sentinel tests and accidentally labelled credentials often reach the boundary
+# as a bare string rather than a full JWT/PEM. This narrow marker check is safe
+# for audit detail because free-form producer text is digest-only; readable
+# strings are identifiers, enum-like codes, timestamps, and public evidence.
+_CREDENTIAL_VALUE_MARKER = re.compile(
+    r"(?i)(?:password|passphrase|secret|bearer|credential|"
+    r"private[-_ ]?key|api[-_ ]?key|access[-_ ]?token|"
+    r"agent[-_ ]?token|enrollment[-_ ]?token|session[-_ ]?key)"
+)
+
 
 def is_sensitive_key(key: Any) -> bool:
     """True if *key* names a credential-bearing field."""
@@ -83,11 +263,12 @@ def is_sensitive_key(key: Any) -> bool:
 
 
 def _redact_scalar_str(value: str) -> str:
-    """Redact a string value on the audit path: only shapes that never
-    legitimately appear in audit detail (PEM private keys, JWTs)."""
+    """Redact a credential-shaped or explicitly credential-labelled value."""
     if _PEM_PRIVATE_KEY.search(value):
         return REDACTED
     if _JWT.fullmatch(value):
+        return REDACTED
+    if _CREDENTIAL_VALUE_MARKER.search(value):
         return REDACTED
     return value
 
@@ -132,6 +313,90 @@ def redact_detail(detail: Any) -> dict:
     if isinstance(detail, Mapping):
         return _redact_mapping(detail, 0)
     return {"_value": _redact_value(detail, 0)}
+
+
+def _normalize_audit_scalar(value: Any, field: str) -> Any:
+    """Validate one producer value and return its deterministic safe form."""
+    if value is None or isinstance(value, bool) or isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise AuditDetailError(f"audit detail field {field!r} is not finite")
+        return value
+    if isinstance(value, str):
+        if len(value.encode("utf-8")) > _MAX_AUDIT_STRING_BYTES:
+            raise AuditDetailError(f"audit detail field {field!r} is too large")
+        return _redact_scalar_str(value)
+    if isinstance(value, (bytes, bytearray)):
+        raise AuditDetailError(f"audit detail field {field!r} may not contain bytes")
+    if isinstance(value, Mapping):
+        raise AuditDetailError(
+            f"audit detail field {field!r} may not contain a nested object"
+        )
+    if isinstance(value, Sequence):
+        if len(value) > _MAX_AUDIT_LIST_ITEMS:
+            raise AuditDetailError(f"audit detail field {field!r} has too many items")
+        normalized = []
+        for item in value:
+            if isinstance(item, (Mapping, Sequence)) and not isinstance(item, str):
+                raise AuditDetailError(
+                    f"audit detail field {field!r} may contain only scalar items"
+                )
+            normalized.append(_normalize_audit_scalar(item, field))
+        return normalized
+    raise AuditDetailError(
+        f"audit detail field {field!r} has unsupported type "
+        f"{type(value).__name__}"
+    )
+
+
+def sanitize_audit_detail(action: str, detail: Any) -> dict:
+    """Enforce one action's schema, then return the only form that may be hashed.
+
+    The boundary is intentionally fail closed. Unknown actions, field drift,
+    malformed structures, and non-canonical JSON values are rejected before a
+    sequence number is allocated or an ``AuditEvent`` is added to the session.
+    """
+    if not isinstance(action, str):
+        raise AuditDetailError("audit action must be a string")
+    schema = AUDIT_DETAIL_SCHEMAS.get(action)
+    if schema is None:
+        raise AuditDetailError(f"unregistered audit action {action!r}")
+    if not isinstance(detail, Mapping):
+        raise AuditDetailError("audit detail must be a mapping")
+    if any(not isinstance(key, str) for key in detail):
+        raise AuditDetailError("audit detail keys must be strings")
+
+    actual = frozenset(detail)
+    missing = sorted(schema.fields - actual)
+    unexpected = sorted(actual - schema.fields)
+    if missing or unexpected:
+        parts = []
+        if missing:
+            parts.append(f"missing fields: {missing}")
+        if unexpected:
+            parts.append(f"unexpected fields: {unexpected}")
+        raise AuditDetailError(
+            f"audit detail does not match schema for {action!r}: "
+            + "; ".join(parts)
+        )
+
+    output: dict[str, Any] = {}
+    for field in sorted(schema.fields):
+        value = detail[field]
+        if field in schema.digest_fields:
+            if not isinstance(value, str):
+                raise AuditDetailError(
+                    f"audit digest-only field {field!r} must be a string"
+                )
+            encoded = value.encode("utf-8")
+            if len(encoded) > _MAX_AUDIT_STRING_BYTES:
+                raise AuditDetailError(f"audit detail field {field!r} is too large")
+            output[f"{field}_sha256"] = hashlib.sha256(encoded).hexdigest()
+            output[f"{field}_bytes"] = len(encoded)
+        else:
+            output[field] = _normalize_audit_scalar(value, field)
+    return output
 
 
 # --- Free-text scrubbing for logs / diagnostics / API errors (issue #112) ---

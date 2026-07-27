@@ -32,22 +32,25 @@ hashes, envelope SHA-256 digests, actor emails, actions, timestamps, counts.
 
 ### Server — audit detail (`app/core/redaction.py`, issue #115)
 
-`audit.record` runs every event's `detail` through `redact_detail` before it is
-hashed and persisted. Redaction is deterministic and structure-preserving:
+`audit.record` runs every event's `detail` through
+`sanitize_audit_detail(action, detail)` before it allocates a sequence number,
+hashes content, or adds a row. The policy is deterministic and fail closed:
 
-- **Key-based:** any value whose key contains a sensitive part
-  (`password`, `passphrase`, `secret`, `token`, `authorization`, `bearer`,
-  `credential`, `private_key`, `api_key`, `session_key`, `cookie`) is replaced
-  with `[redacted]`, at any nesting depth and inside arrays.
-- **Value-shape, narrow:** PEM private-key blocks and JWTs are redacted
-  regardless of key (a private key or operator token that leaks in under an
-  innocuous name is still caught).
-- **Deliberately preserved:** hex and URL-safe-base64 blobs. Nonces share the
-  bearer-token shape and Merkle roots/hashes are 64-hex; redacting by shape
-  would erase accountability and break anchor verification.
-- **Fail-closed structure:** `bytes` are never persisted, recursion is bounded
-  (over-deep subtrees become `[redacted:too-deep]`), and a malformed
-  (non-mapping) detail is wrapped under `_value` rather than trusted.
+- **Action and field schemas:** every production action is registered with its
+  exact top-level input fields. Unknown actions and missing or extra fields are
+  rejected. The complete producer inventory and stored fields are in
+  [`AUDIT-EVENTS.md`](AUDIT-EVENTS.md).
+- **Strict structure:** non-string keys, nested producer objects/arrays,
+  unsupported values, bytes, non-finite numbers, and oversized strings/lists
+  are rejected before append.
+- **Value redaction:** PEM private keys, JWTs, and credential-labelled sentinel
+  values become `[redacted]` in otherwise readable scalar fields.
+- **Digest-only prose:** operator/agent-controlled `reason`, `hostname`, and
+  `os` values are replaced by their UTF-8 SHA-256 and byte count. Arbitrary
+  prose therefore never becomes permanent audit history.
+- **Accountability preserved:** server-generated decision codes, actors,
+  actions, target IDs, counts, timestamps, key IDs, replay nonces, Merkle roots,
+  and envelope digests remain readable.
 
 Because redaction happens before hashing, the stored (redacted) representation
 is the only one ever hashed. Clean-room chain and anchor verification therefore
@@ -109,7 +112,7 @@ forensics; they are non-credential-bearing by the logging discipline above.
 
 | Surface | Test | What it proves |
 |---|---|---|
-| Audit detail | `server/tests/test_redaction.py` | key/value redaction across nesting, arrays, casing; PEM/JWT shapes; malformed/deep input; **accountable fields and nonces/roots preserved**; every producer shape cannot persist a sentinel; chain still verifies |
+| Audit detail | `server/tests/test_redaction.py` | exact schemas for every source-discovered producer; unknown/missing/extra fields, nesting, arrays, non-string keys, bytes, non-finite and oversized input fail closed; PEM/JWT/sentinel values cannot persist; digest-only prose and accountable nonces/roots are verified; chain and anchor remain intact |
 | Server free text | `server/tests/test_redaction.py::test_scrub_*` | bearer/kv/PEM/JWT scrubbed, ordinary text preserved |
 | Agent | `agent/internal/redact/redact_test.go` | bearer, `key=value`, PEM, JWT scrubbed; command IDs/nonces/status preserved |
 | Chain integrity | `server/tests/test_audit_sequence.py`, `test_anchoring.py`, `test_anchor_publish.py` | redaction did not break sequence, hash, or anchor verification |
@@ -119,12 +122,11 @@ appears where it must not.
 
 ## Residual limitations
 
-- **Audit path is key-scoped, not universal shape-scoped.** A secret placed as a
-  bare string under an *innocuous* key (and not shaped like a PEM/JWT) is
-  preserved. This is a deliberate trade: shape-based redaction of high-entropy
-  blobs would destroy nonces/roots and break verification. Producers are
-  expected to key credential-bearing values with a recognizable name; the
-  boundary is the backstop, not a licence to pass secrets under bland keys.
+- **Public high-entropy fields stay public.** Registered nonce, hash, and root
+  fields are retained because independent verification depends on them. The
+  exact action/field allowlist prevents a producer from relabelling an
+  unclassified credential as a new innocuous field; changing the contract
+  requires a reviewed schema, test sample, and documentation update.
 - **Free-text scrubbing is best-effort.** `scrub_text` / `redact.Text` catch
   known shapes; a novel secret format in a log line is not guaranteed caught.
   The primary control remains *not logging secrets in the first place*.

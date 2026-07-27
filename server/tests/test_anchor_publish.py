@@ -57,7 +57,11 @@ async def db(tmp_path, monkeypatch):
 
 async def _seed_events(session, n=4):
     for i in range(n):
-        await audit.record(session, action=f"anchor.pub.seed{i}")
+        await audit.record(
+            session,
+            action="agent.offline",
+            detail={"last_seen_at": f"2026-01-01T00:00:{i:02d}+00:00"},
+        )
     await session.commit()
 
 

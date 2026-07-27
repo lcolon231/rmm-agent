@@ -154,13 +154,14 @@ link to reproducible evidence in the release or pilot record.
       recomputes the Merkle root from read-only event hashes and the downloaded
       artifact; it does not import NodeLink).
 - [x] Sensitive fields and secrets are redacted without removing accountability
-      (every `audit.record` runs `detail` through the deterministic
-      `app/core/redaction.py` boundary before hashing; secrets are removed by
-      key name plus PEM/JWT value shapes while accountable public values —
-      Merkle roots, event hashes, nonces, envelope digests, actor/action/target
-      IDs — are preserved, so chain and anchor verification stay reproducible;
-      tested against every existing producer and clean-room anchor
-      verification — see [`REDACTION-AUDIT.md`](REDACTION-AUDIT.md)).
+      (every `audit.record` runs through an exact per-action field schema before
+      sequence allocation or hashing; unknown actions, producer drift,
+      malformed/nested and non-canonical values fail closed; credential shapes
+      are redacted and arbitrary prose becomes digest+byte count, while Merkle
+      roots, hashes, nonces, decisions, counts, and target IDs remain readable;
+      source-discovered producer coverage plus chain/anchor verification are
+      tested — see [`AUDIT-EVENTS.md`](AUDIT-EVENTS.md) and
+      [`REDACTION-AUDIT.md`](REDACTION-AUDIT.md)).
 
 ### Database and recovery
 

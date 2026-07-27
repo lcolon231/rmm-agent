@@ -69,7 +69,11 @@ async def client():
 async def _seed_events(n: int) -> None:
     async with AsyncSessionLocal() as db:
         for i in range(n):
-            await audit.record(db, action="test.event", detail={"i": i})
+            await audit.record(
+                db,
+                action="agent.offline",
+                detail={"last_seen_at": f"2026-01-01T00:00:{i:02d}+00:00"},
+            )
         await db.commit()
 
 

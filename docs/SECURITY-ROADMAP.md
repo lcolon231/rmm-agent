@@ -123,15 +123,16 @@ independently recomputes the root from read-only event hashes and the external
 artifact. Publication is opt-in and loud when unconfigured; the operator
 chooses and operates the destination. See `docs/AUDIT-ANCHORING.md`.
 
-Audit detail passes through one deterministic redaction boundary
-(`app/core/redaction.py`) before hashing: `audit.record` redacts credential
-values by key name plus PEM/JWT value shapes, while high-entropy public values
-(Merkle roots, event hashes, nonces, envelope digests) and accountability
-fields are preserved so chain and anchor verification stay reproducible over
-the stored form. Every existing producer, nested/array/casing variants, and
-malformed detail are tested, and clean-room verification still passes. General
-logs, diagnostics, command results, and uninstall paths are covered by a
-separate redaction audit (`docs/REDACTION-AUDIT.md`).
+Audit detail passes through one deterministic, fail-closed policy
+(`app/core/redaction.py`) before sequence allocation or hashing. Every action
+has an exact field schema; unknown actions, producer drift, malformed/nested
+objects, non-canonical values, and resource-bound violations are rejected.
+Credential shapes are redacted and arbitrary operator/agent prose becomes only
+a digest plus byte count. Registered public evidence (Merkle roots, event
+hashes, nonces, envelope digests, IDs, decisions, and counts) remains readable,
+so chain and anchor verification stays reproducible. Source-discovered producer
+coverage and clean-room verification are tested. See
+`docs/AUDIT-EVENTS.md` and `docs/REDACTION-AUDIT.md`.
 
 ### Make data and releases recoverable
 

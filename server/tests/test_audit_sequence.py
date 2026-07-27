@@ -55,7 +55,13 @@ async def db():
 async def _append(db: AsyncSession, n: int) -> list[AuditEvent]:
     events = []
     for i in range(n):
-        events.append(await audit.record(db, action=f"test.event{i}"))
+        events.append(
+            await audit.record(
+                db,
+                action="agent.offline",
+                detail={"last_seen_at": f"2026-01-01T00:00:{i:02d}+00:00"},
+            )
+        )
     await db.commit()
     return events
 
@@ -181,7 +187,11 @@ def test_migration_backfills_legacy_events_in_ts_id_order(tmp_path: Path):
                 ok, broken = await audit.verify_chain(session)
                 assert ok, f"legacy backfilled chain broken at {broken}"
                 # New appends continue the numbering under the current schema.
-                ev = await audit.record(session, action="post.migration")
+                ev = await audit.record(
+                    session,
+                    action="agent.offline",
+                    detail={"last_seen_at": "2026-01-01T00:01:00+00:00"},
+                )
                 await session.commit()
                 assert ev.seq == 5
                 assert ev.hash_schema == audit.HASH_SCHEMA_SEQUENCED
@@ -228,7 +238,13 @@ def test_concurrent_appends_serialize_on_postgresql():
 
             async def one_append(i: int) -> None:
                 async with maker() as session:
-                    await audit.record(session, action=f"concurrent.{i}")
+                    await audit.record(
+                        session,
+                        action="agent.offline",
+                        detail={
+                            "last_seen_at": f"2026-01-01T00:00:{i:02d}+00:00"
+                        },
+                    )
                     await session.commit()
 
             await asyncio.gather(*(one_append(i) for i in range(25)))

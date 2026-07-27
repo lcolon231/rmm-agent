@@ -18,8 +18,10 @@ Run just this file:  pytest tests/test_redaction.py -q
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
+from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_redaction.db")
 os.environ.setdefault("DEBUG", "false")
@@ -29,12 +31,15 @@ os.environ.setdefault("COMMAND_SIGNING_KEY_PATH", "command_signing_key.pem")
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 
-from app.core import audit  # noqa: E402
+from app.core import anchor, audit  # noqa: E402
 from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.redaction import (  # noqa: E402
+    AUDIT_DETAIL_SCHEMAS,
+    AuditDetailError,
     REDACTED,
     is_sensitive_key,
     redact_detail,
+    sanitize_audit_detail,
     scrub_text,
 )
 from app.models.models import AuditEvent  # noqa: E402
@@ -108,10 +113,9 @@ def test_nested_and_array_redaction():
     assert out["outer"]["list"][0]["token"] == REDACTED
     assert out["items"][1]["api_key"] == REDACTED
     assert out["outer"]["list"][1]["nonce"] == "n0nce-value"
-    # A bare sentinel string under a non-sensitive key/list is NOT secret-shaped
-    # (no PEM/JWT), so it is preserved — key context is what marks it secret.
-    # This is the documented limitation of the audit path (see REDACTION-AUDIT).
-    assert out["items"][0] == SENTINEL
+    # Credential-labelled sentinel values are redacted even when a caller files
+    # them under an innocuous key.
+    assert out["items"][0] == REDACTED
 
 
 def test_pem_private_key_redacted_regardless_of_key():
@@ -142,9 +146,16 @@ def test_bytes_never_persisted():
 
 
 def test_malformed_detail_is_wrapped_not_trusted():
+    # The generic recursive helper remains total for diagnostic callers.
     assert redact_detail("just a string") == {"_value": "just a string"}
     assert redact_detail([1, 2, 3]) == {"_value": [1, 2, 3]}
     assert redact_detail(None) == {"_value": None}
+
+    # The audit boundary is stricter: malformed producer input is rejected
+    # before hashing/persistence.
+    for malformed in ("just a string", [1, 2, 3], None):
+        with pytest.raises(AuditDetailError, match="must be a mapping"):
+            sanitize_audit_detail("agent.offline", malformed)
 
 
 def test_deep_structure_is_bounded():
@@ -224,52 +235,269 @@ async def db():
     await engine.dispose()
 
 
-# Detail shapes mirroring every existing producer, each seeded with a secret
-# under a sensitive key to prove the boundary catches producers uniformly.
-PRODUCER_DETAILS = [
-    {"last_seen_at": "2026-07-23T00:00:00Z", "password": SENTINEL},
-    {"client_count": 3, "truncated": False, "token": SENTINEL},
-    {"client_id": "c1", "api_key": SENTINEL},
-    {"command_id": "cmd1", "kind": "powershell", "payload_keys": ["script"],
-     "nonce": "Zx9_ab-CD012345", "envelope_sha256": "b" * 64,
-     "signing_key_id": "k1", "authorization": SENTINEL},
-    {"command_id": "cmd1", "exit_code": 0, "status": "succeeded",
-     "stdout_total_bytes": 10, "operator_password": SENTINEL},
-    {"anchor_id": 1, "merkle_root": "c" * 64, "backup_passphrase": SENTINEL},
-    {"operator_id": "o1", "by": "admin", "session_key": SENTINEL},
-    {"hostname": "h1", "agent_token": SENTINEL},
-]
+ID1 = "11111111-1111-4111-8111-111111111111"
+ID2 = "22222222-2222-4222-8222-222222222222"
+ID3 = "33333333-3333-4333-8333-333333333333"
+
+# Exact input shape for every production action. Free-form agent/operator text
+# deliberately contains the sentinel and must become digest+byte-count fields.
+PRODUCER_DETAILS = {
+    "agent.enrolled": {
+        "hostname": SENTINEL,
+        "os": "windows",
+        "site_id": ID1,
+        "command_envelope_version": "command-v3",
+        "supported_command_envelope_versions": ["command-v3"],
+    },
+    "agent.command_envelope_capabilities_changed": {
+        "previous": ["command-v2"],
+        "current": ["command-v3"],
+    },
+    "agent.offline": {"last_seen_at": "2026-07-23T00:00:00+00:00"},
+    "agent.quarantined": {
+        "previous_trust_state": "active",
+        "trust_state": "quarantined",
+        "reason": SENTINEL,
+    },
+    "agent.restored": {
+        "previous_trust_state": "quarantined",
+        "trust_state": "active",
+        "reason": SENTINEL,
+    },
+    "agent.revoked": {
+        "previous_trust_state": "active",
+        "trust_state": "revoked",
+        "reason": SENTINEL,
+    },
+    "agent.commands_expired_on_revoke": {"command_ids": [ID3]},
+    "audit.anchored": {
+        "anchor_id": ID1,
+        "merkle_root": "c" * 64,
+        "event_count": 21,
+    },
+    "client_navigation.list_viewed": {
+        "client_count": 3,
+        "truncated": False,
+    },
+    "client_navigation.client_viewed": {"client_id": ID1},
+    "client_navigation.site_viewed": {"site_id": ID1, "client_id": ID2},
+    "command.authorization_allowed": {
+        "operator_id": ID1,
+        "operator_role": "operator",
+        "kind": "powershell",
+        "site_id": ID2,
+        "policy": "script_permission",
+        "reason": "script_permission_scope_allowed",
+        "permission_scope": "site",
+        "permission_scope_id": ID2,
+    },
+    "command.authorization_denied": {
+        "operator_id": ID1,
+        "operator_role": "operator",
+        "kind": "powershell",
+        "site_id": ID2,
+        "policy": "script_permission",
+        "reason": "script_permission_missing",
+        "permission_scope": None,
+        "permission_scope_id": None,
+    },
+    "command.completed": {
+        "command_id": ID3,
+        "kind": "powershell",
+        "exit_code": 0,
+        "status": "succeeded",
+        "agent_completed_at": "2026-07-23T00:00:00+00:00",
+        "stdout_truncated": False,
+        "stderr_truncated": False,
+        "stdout_total_bytes": 12,
+        "stderr_total_bytes": 0,
+    },
+    "command.dispatched": {
+        "command_id": ID3,
+        "kind": "powershell",
+        "payload_keys": ["script"],
+        "envelope_version": "command-v3",
+        "schema_version": 3,
+        "issued_at": "2026-07-23T00:00:00Z",
+        "expires_at": "2026-07-23T00:05:00Z",
+        "nonce": "Zx9_ab-CD012345",
+        "signing_key_id": "key-1",
+        "envelope_sha256": "b" * 64,
+    },
+    "command.result_pending": {
+        "command_id": ID3,
+        "kind": "powershell",
+        "agent_completed_at": "2026-07-23T00:00:00+00:00",
+    },
+    "command_detail.viewed": {"command_id": ID3, "status": "succeeded"},
+    "endpoint_detail.viewed": {
+        "history_hours": 24,
+        "history_limit": 144,
+        "history_count": 12,
+        "history_truncated": False,
+        "script_execution_allowed": True,
+    },
+    "endpoint_list.viewed": {
+        "client_id": None,
+        "site_id": None,
+        "status": None,
+        "search": False,
+        "sort": "last_seen",
+        "direction": "desc",
+        "page": 1,
+        "page_size": 25,
+        "result_count": 3,
+    },
+    "operator.script_permission_changed": {
+        "operator_id": ID1,
+        "operator_role": "operator",
+        "previous_scope": None,
+        "previous_scope_id": None,
+        "new_scope": "site",
+        "new_scope_id": ID2,
+        "reason": SENTINEL,
+    },
+    "operator.script_permission_revoked": {
+        "operator_id": ID1,
+        "operator_role": "operator",
+        "previous_scope": "site",
+        "previous_scope_id": ID2,
+        "reason": SENTINEL,
+    },
+    "operator.tokens_revoked": {"operator_id": ID1, "by": "admin"},
+}
+
+
+def _source_audit_actions() -> tuple[set[str], int]:
+    """Discover literal production producers and the one typed trust helper."""
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    actions: set[str] = set()
+    dynamic_record_calls = 0
+    for path in app_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "record"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "audit"
+            ):
+                action_kw = next(
+                    (kw.value for kw in node.keywords if kw.arg == "action"),
+                    None,
+                )
+                if isinstance(action_kw, ast.Constant) and isinstance(
+                    action_kw.value, str
+                ):
+                    actions.add(action_kw.value)
+                else:
+                    dynamic_record_calls += 1
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "_apply_trust_change"
+            ):
+                actions.update(
+                    arg.value
+                    for arg in node.args
+                    if isinstance(arg, ast.Constant)
+                    and isinstance(arg.value, str)
+                    and arg.value.startswith("agent.")
+                )
+    return actions, dynamic_record_calls
+
+
+def test_every_production_action_has_exact_schema_and_documentation():
+    source_actions, dynamic_calls = _source_audit_actions()
+    assert dynamic_calls == 1  # _apply_trust_change(action=...)
+    assert source_actions == set(AUDIT_DETAIL_SCHEMAS)
+    assert set(PRODUCER_DETAILS) == set(AUDIT_DETAIL_SCHEMAS)
+
+    docs = (
+        Path(__file__).resolve().parents[2] / "docs" / "AUDIT-EVENTS.md"
+    ).read_text(encoding="utf-8")
+    for action, schema in AUDIT_DETAIL_SCHEMAS.items():
+        assert f"`{action}`" in docs
+        for field in schema.stored_fields:
+            assert f"`{field}`" in docs
 
 
 @pytest.mark.asyncio
-async def test_producers_cannot_persist_secrets_and_chain_verifies(db):
-    for i, detail in enumerate(PRODUCER_DETAILS):
-        await audit.record(db, action=f"test.producer{i}", detail=detail)
+async def test_producers_cannot_persist_secrets_and_chain_anchor_verify(db):
+    for action, detail in PRODUCER_DETAILS.items():
+        # Every registered producer rejects field drift, including a deeply
+        # nested sentinel smuggled under an innocuous top-level key.
+        malformed = {
+            **detail,
+            "unclassified": {"nested": [{"credential": SENTINEL}]},
+        }
+        with pytest.raises(AuditDetailError, match="unexpected fields"):
+            await audit.record(db, action=action, detail=malformed)
+        await audit.record(db, action=action, detail=detail)
     await db.commit()
 
-    rows = (await db.execute(select(AuditEvent))).scalars().all()
+    rows = (
+        await db.execute(select(AuditEvent).order_by(AuditEvent.seq))
+    ).scalars().all()
     assert len(rows) == len(PRODUCER_DETAILS)
+    assert [event.seq for event in rows] == list(
+        range(1, len(PRODUCER_DETAILS) + 1)
+    )
     for ev in rows:
         stored = json.dumps(ev.detail)
         assert SENTINEL not in stored, f"secret leaked in {ev.action}: {stored}"
+        assert set(ev.detail) == AUDIT_DETAIL_SCHEMAS[ev.action].stored_fields
 
-    # Redaction happened before hashing, so the chain over the redacted form
-    # still verifies deterministically.
     ok, broken = await audit.verify_chain(db)
     assert ok, f"chain broke at {broken}"
 
-
-@pytest.mark.asyncio
-async def test_accountable_fields_survive_the_boundary(db):
-    detail = {
-        "command_id": "cmd-42", "nonce": "Zx9_ab-CD012345",
-        "merkle_root": "d" * 64, "signing_key_id": "key-1",
-        "agent_token": SENTINEL,
-    }
-    ev = await audit.record(db, action="test.keep", detail=detail)
+    audit_anchor = await anchor.create_anchor(db)
+    assert audit_anchor is not None
     await db.commit()
-    assert ev.detail["command_id"] == "cmd-42"
-    assert ev.detail["nonce"] == "Zx9_ab-CD012345"
-    assert ev.detail["merkle_root"] == "d" * 64
-    assert ev.detail["signing_key_id"] == "key-1"
-    assert ev.detail["agent_token"] == REDACTED
+    intact, reason = await anchor.verify_anchor(db, audit_anchor)
+    assert intact, reason
+
+
+def test_accountable_fields_survive_and_free_text_is_digest_only():
+    dispatched = sanitize_audit_detail(
+        "command.dispatched",
+        PRODUCER_DETAILS["command.dispatched"],
+    )
+    assert dispatched["command_id"] == ID3
+    assert dispatched["nonce"] == "Zx9_ab-CD012345"
+    assert dispatched["envelope_sha256"] == "b" * 64
+    assert dispatched["signing_key_id"] == "key-1"
+
+    enrolled = sanitize_audit_detail(
+        "agent.enrolled",
+        PRODUCER_DETAILS["agent.enrolled"],
+    )
+    assert "hostname" not in enrolled
+    assert enrolled["hostname_bytes"] == len(SENTINEL.encode("utf-8"))
+    assert len(enrolled["hostname_sha256"]) == 64
+    assert SENTINEL not in json.dumps(enrolled)
+
+
+@pytest.mark.parametrize(
+    ("detail", "message"),
+    [
+        ({"last_seen_at": "now", "extra": 1}, "unexpected fields"),
+        ({}, "missing fields"),
+        ({1: "now"}, "keys must be strings"),
+        ({"last_seen_at": {"nested": "value"}}, "nested object"),
+        ({"last_seen_at": [SENTINEL, {"nested": "value"}]}, "scalar items"),
+        ({"last_seen_at": b"raw"}, "may not contain bytes"),
+        ({"last_seen_at": float("nan")}, "not finite"),
+    ],
+)
+def test_audit_policy_rejects_malformed_detail(detail, message):
+    with pytest.raises(AuditDetailError, match=message):
+        sanitize_audit_detail("agent.offline", detail)
+
+
+def test_audit_policy_rejects_unknown_action_and_oversized_value():
+    with pytest.raises(AuditDetailError, match="unregistered audit action"):
+        sanitize_audit_detail("future.unreviewed", {})
+    with pytest.raises(AuditDetailError, match="too large"):
+        sanitize_audit_detail("agent.offline", {"last_seen_at": "x" * 4097})

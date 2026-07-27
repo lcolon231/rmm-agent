@@ -200,21 +200,19 @@ confirms detection.
 The audit chain is durable and externally published, so a secret written into
 an event's `detail` would be *permanently* preserved and hard to expunge.
 `audit.record` therefore runs every event's `detail` through one central,
-deterministic boundary (`app/core/redaction.py`) **before** the value is hashed
-and stored. A value is redacted when its key names a credential
-(`password`, `agent_token`, `enrollment_token`, `*passphrase`, `authorization`,
-…) or when its string shape is unmistakably a secret that never legitimately
-appears in audit detail (a PEM private-key block or a JWT).
+deterministic boundary (`app/core/redaction.py`) **before** a sequence is
+allocated or the value is hashed and stored. Each action has an exact field
+schema. Unknown actions, field drift, malformed/nested objects, non-canonical
+numbers, and oversized values fail closed. PEM/JWT/credential-labelled values
+are redacted, while arbitrary operator/agent prose is stored only as SHA-256
+plus byte count.
 
-Redaction is deliberately *not* shape-based for high-entropy blobs: this log
-legitimately records Merkle roots and event hashes (64-hex) and replay nonces
-(URL-safe base64, the same shape as bearer tokens). Redacting those would both
-erase accountability and break anchor verification, so they are preserved.
-Because redaction is deterministic and happens before hashing, the stored
-(redacted) form is the only representation ever hashed, and clean-room chain and
-anchor verification remain reproducible. Accountability fields — actor, action,
-target IDs, decision, reason, counts, digests — are untouched. The reviewed
-producer inventory and residual limitations are in
+Registered public evidence—Merkle roots, event hashes, replay nonces, target
+IDs, policy decisions, timestamps, and counts—remains readable because
+accountability and independent verification depend on it. The stored safe form
+is the only representation ever hashed, so chain and anchor verification remain
+reproducible. The reviewed producer inventory and exact stored fields are in
+[`AUDIT-EVENTS.md`](AUDIT-EVENTS.md); the cross-surface credential review is in
 [`REDACTION-AUDIT.md`](REDACTION-AUDIT.md).
 
 ### External verifiability: Merkle anchoring
