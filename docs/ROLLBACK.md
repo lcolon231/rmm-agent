@@ -7,23 +7,27 @@ compatibility planner records the decision but never changes a deployment.
 
 ## Release compatibility record
 
-Before every production-intended tag, copy this table into the release notes
-and fill it with immutable identifiers. Do not use `latest` or a mutable branch.
+Before every tag, copy
+[`release-notes/TEMPLATE.json`](../release-notes/TEMPLATE.json) to the exact
+`release-notes/<tag>.json` path and fill it with immutable identifiers. Do not
+use `latest`, a mutable branch, an abbreviated commit, or an unversioned
+evidence URL.
 
-| Component | Release being deployed | Last known good rollback target N |
-|---|---|---|
-| Server | Git tag and commit | Git tag and commit |
-| Agent | Version plus all artifact SHA-256 digests | Version plus all artifact SHA-256 digests |
-| Windows installer | Filename plus SHA-256 digest | Filename plus SHA-256 digest |
-| Database | Alembic head(s) | Alembic head(s) and matching backup manifest |
-| Protocol | Command-envelope versions | Command-envelope versions |
+The manifest records both the release being deployed and last-known-good target
+N: server tag, workflow-bound source commit, agent version and per-platform
+SHA-256 digests, installer filename/digest, Alembic revisions, command-envelope
+versions, backup manifest/digest, and rollback verification evidence. The
+workflow-generated `release-evidence-<version>.json` is the finalized
+compatibility record; retain it with `RELEASE-NOTES.md` and the release
+artifacts.
 
 At this revision, the server requires Alembic `0010` and agents use
 `command-v3` (with `command-v2` only for a staged mixed-version rollout). The
 existing public `v0.1.0` and `v0.1.1` tags predate Alembic and are **not** a
 supported server/database rollback target for a database created by current
-`main`. The first production-intended release must establish N by retaining its
-filled compatibility record, artifacts, checksums, and a verified backup.
+`main`. The first production-intended release must establish N before a later
+tag can name it as a safe target, by retaining its finalized compatibility
+record, artifacts, checksums, and a verified backup.
 
 Revision `0010` changes only the server database and dashboard capability
 display; the agent protocol is unchanged. Its nullable operator scope columns

@@ -1,0 +1,118 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "v0.0.0-release-notes-rehearsal",
+    "title": "NodeLink release-note gate rehearsal",
+    "intended_use": "Validation rehearsal only; these synthetic artifacts are not deployable."
+  },
+  "server": {
+    "tag": "v0.0.0-release-notes-rehearsal",
+    "deployment": "Run from the source commit identified by the release workflow."
+  },
+  "agent": {
+    "version": "0.0.0-release-notes-rehearsal",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "0.0.0-release-notes-rehearsal",
+    "filename": "NodeLinkAgentSetup-0.0.0-release-notes-rehearsal.exe"
+  },
+  "database": {
+    "alembic_revision": "0010",
+    "compatible_from": [
+      "0009",
+      "0010"
+    ],
+    "migration_policy": "Migrations are forward-only; restore an exact-revision verified backup when a schema rollback is required."
+  },
+  "protocols": {
+    "command_envelopes": [
+      "command-v3"
+    ],
+    "mixed_version_behavior": "Dispatch remains unavailable until the agent advertises command-v3; there is no downgrade mode."
+  },
+  "known_limitations": [
+    "Windows executables are not Authenticode-signed and may trigger SmartScreen warnings.",
+    "Production backup scheduling and a timed operator rollback drill remain deployment evidence.",
+    "This rehearsal uses synthetic artifact payloads and must never be deployed."
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "Verify an encrypted backup and retain its immutable manifest before changing the database or server.",
+      "Confirm the server, dashboard, agent, Alembic revision, and command-envelope versions match this record."
+    ],
+    "steps": [
+      "Pause command dispatch and external agent rollout automation.",
+      "Apply Alembic revision 0010, then deploy the server and dashboard from the recorded source commit.",
+      "Deploy the checksum-verified agent and installer to owned canary endpoints before expanding."
+    ],
+    "verification": [
+      "Confirm the server revision guard passes and a known operator can authenticate.",
+      "Confirm canary agents advertise command-v3 and complete one benign command exactly once.",
+      "Verify the audit chain, external anchor publication, backup evidence, and release artifact attestations."
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "Prefer a forward fix when the current schema can remain in place.",
+      "Redeploy the last-known-good components only when their required schema exactly matches the live database.",
+      "Otherwise preserve the failed state, approve the data-loss window, and restore the exact-revision verified backup."
+    ],
+    "target": {
+      "server": {
+        "tag": "v0.0.0-rollback-rehearsal",
+        "commit": "4607ecbe42c3800610f5c17929a0f9bf43d71626"
+      },
+      "agent": {
+        "version": "0.0.0-rollback-rehearsal",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "d48b7308afdfbfd7158245f0bd6728325776494ba8620aeb272e2fcec8f4b108",
+          "rmm-agent-linux-amd64": "1573b1c20d4dd0847a80bb25c9977a6f3565c472c6fe85fb3180b11c4284a023",
+          "rmm-agent-darwin-arm64": "69c29d586bef432068fc5ecf0dcb798acbb72326bfca89e368777ac1b43c9b0a"
+        }
+      },
+      "installer": {
+        "filename": "NodeLinkAgentSetup-0.0.0-rollback-rehearsal.exe",
+        "sha256": "5d818c5fb38a7953e2b24c8a6a7d6ab150332be5d1371f6ea2e01cc1affbfc75"
+      },
+      "database": {
+        "alembic_revision": "0010",
+        "backup_manifest": {
+          "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.0.0-rollback-rehearsal/nodelink-backup-rehearsal.manifest.json",
+          "sha256": "10bcadb4657ade5441c5e76ff0df83a38d6ca11871dea004523aa542a276521a"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "command-v3"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "The gate adds no runtime trust boundary; it prevents releases with incomplete compatibility, recovery, or security evidence.",
+    "fixed_vulnerabilities": [
+      "No runtime vulnerability is claimed fixed by this release-note validation rehearsal."
+    ],
+    "new_risks": [
+      "Authenticode signing remains absent, so checksum and provenance verification are still mandatory."
+    ],
+    "operator_actions": [
+      "Review every manifest field and independently verify checksums, provenance, backup, and rollback evidence before deployment."
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "https://github.com/lcolon231/rmm-agent/blob/4607ecbe42c3800610f5c17929a0f9bf43d71626/docs/BACKUP-RESTORE.md",
+      "sha256": "0a8d5027d03413b5ab4913682acdef2bd31f443e781a881849ae8ad7e36d64c3"
+    },
+    "rollback_rehearsal": {
+      "url": "https://github.com/lcolon231/rmm-agent/blob/4607ecbe42c3800610f5c17929a0f9bf43d71626/deploy/backup/rehearsal/issue-26-ci.md",
+      "sha256": "80f330234601403a261d6fe710902a4496cf9753e7d1e6ef86d311cc640ec80c"
+    }
+  }
+}

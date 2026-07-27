@@ -203,8 +203,16 @@ link to reproducible evidence in the release or pilot record.
 - [x] An SBOM and provenance attestation are published and independently
       verified (SPDX SBOM; signed SLSA build provenance via
       `actions/attest-build-provenance`, verifiable with `gh attestation verify`).
-- [ ] Release notes state known limitations, schema/agent compatibility, upgrade,
-      rollback, and security impact.
+- [x] Every tag requires a complete `release-notes/<tag>.json`; preflight rejects
+      missing, placeholder, mutable, or malformed identifiers before builds.
+      Finalization binds the source commit and verified agent/installer digests,
+      publishes the validated body plus JSON evidence, and links checksums,
+      SBOM, provenance, CI, backup verification, and rollback evidence
+      (`server/scripts/validate_release_notes.py`,
+      `server/tests/test_release_notes.py`, and
+      the retained synthetic
+      [`release body`](../release-notes/examples/v0.0.0-release-notes-rehearsal.md)
+      and [`JSON evidence`](../release-notes/examples/v0.0.0-release-notes-rehearsal.evidence.json)).
 
 ### Pilot operations
 
@@ -275,12 +283,14 @@ protocol is unchanged. See `docs/SCRIPT-AUTHORIZATION.md`.
 
 ## Rollback procedure
 
-Every release needs the release-specific compatibility record in
-`docs/ROLLBACK.md`. The planner fails closed unless it identifies the target
-server, agent, installer, and schema and confirms external agent rollout is
-paused. Migrations are forward-only; a schema restore requires a matching tested
-backup and explicit acceptance of post-backup data loss. The runbook preserves
-failed-state and audit evidence and defines post-rollback verification.
+Every release needs an exact-tag source manifest under `release-notes/`; the
+workflow turns it into a finalized compatibility record only after binding the
+tag commit and verified artifact digests. `docs/ROLLBACK.md` consumes that
+record. The planner fails closed unless it identifies the target server, agent,
+installer, and schema and confirms external agent rollout is paused. Migrations
+are forward-only; a schema restore requires a matching tested backup and
+explicit acceptance of post-backup data loss. The runbook preserves failed-state
+and audit evidence and defines post-rollback verification.
 
 The automated PostgreSQL rehearsal is complete and reproducible in CI. The
 incident-response checkbox under Pilot operations remains open until operators
