@@ -75,6 +75,39 @@ async def _publish_once() -> None:
         )
 
 
+async def _retention_once() -> None:
+    """Prune expired telemetry and command output, then log a warning if any
+    storage class has breached its observability threshold (issue #114)."""
+    from app.core import retention
+
+    async with AsyncSessionLocal() as db:
+        result = await retention.prune_expired(db, settings)
+        await db.commit()
+        status = await retention.storage_status(db, settings)
+    if result.heartbeats_deleted or result.command_outputs_cleared:
+        print(
+            f"[retention] pruned {result.heartbeats_deleted} heartbeat(s), "
+            f"cleared output on {result.command_outputs_cleared} command(s)"
+        )
+    if status["alert"]:
+        print(f"[retention] WARNING storage threshold breached: {status}")
+
+
+async def retention_sweeper(stop: asyncio.Event) -> None:
+    """Bound storage growth on a schedule. Audit-safe: only telemetry and aged
+    command output are pruned; audit events and anchors are never touched."""
+    interval = settings.retention_sweep_interval_seconds
+    while not stop.is_set():
+        try:
+            await _retention_once()
+        except Exception as exc:  # keep the loop alive on transient DB errors
+            print(f"[retention] error: {exc}")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+
+
 async def anchor_publisher(stop: asyncio.Event) -> None:
     """Create and externally publish audit anchors on a schedule.
 
