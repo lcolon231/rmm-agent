@@ -43,8 +43,6 @@ import type { NavigationData } from "@/lib/client-navigation";
 import type { EndpointListData } from "@/lib/endpoint-list";
 import {
   attentionItems,
-  clients as fixtureClients,
-  endpoints,
   signedActions,
   type Endpoint,
   type EndpointStatus,
@@ -314,7 +312,11 @@ function EndpointDrawer({ endpoint, onClose }: { endpoint: Endpoint | null; onCl
 }
 
 type DashboardShellProps = {
+  endpointError: boolean;
   endpointList: EndpointListData | null;
+  endpointSearch: string;
+  endpointSort: "last_seen" | "hostname" | "status";
+  endpointStatus?: "online" | "offline" | "pending";
   navigation: NavigationData | null;
   navigationError: boolean;
   operator: DashboardOperator;
@@ -324,7 +326,11 @@ type DashboardShellProps = {
 };
 
 export function DashboardShell({
+  endpointError,
   endpointList,
+  endpointSearch,
+  endpointSort,
+  endpointStatus,
   navigation,
   navigationError,
   operator,
@@ -333,8 +339,7 @@ export function DashboardShell({
   selectionError,
 }: DashboardShellProps) {
   const router = useRouter();
-  const [scope, setScope] = useState("All clients");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(endpointSearch);
   const [issueFilter, setIssueFilter] = useState<Endpoint["issue"] | "all">("all");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedEndpoint, setSelectedEndpoint] = useState<Endpoint | null>(null);
@@ -356,22 +361,14 @@ export function DashboardShell({
     disk: endpoint.disk_percent,
     work: "none",
     issue: null,
-  })) ?? endpoints, [endpointList]);
+  })) ?? [], [endpointList]);
 
   const visibleEndpoints = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
     return serverEndpoints.filter((endpoint) => {
-      const matchesScope = scope === "All clients" || endpoint.client === scope;
       const matchesIssue = issueFilter === "all" || endpoint.issue === issueFilter;
-      const matchesQuery =
-        normalizedQuery.length === 0 ||
-        [endpoint.name, endpoint.client, endpoint.site, endpoint.user, endpoint.os]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedQuery);
-      return matchesScope && matchesIssue && matchesQuery;
+      return matchesIssue;
     });
-  }, [issueFilter, query, scope, serverEndpoints]);
+  }, [issueFilter, serverEndpoints]);
 
   const exportCsv = () => {
     const rows = [
@@ -399,6 +396,7 @@ export function DashboardShell({
 
   const refresh = () => {
     setRefreshTime(new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date()));
+    router.refresh();
   };
 
   const signOut = async () => {
@@ -412,13 +410,15 @@ export function DashboardShell({
   };
 
   const updateEndpointQuery = (changes: Record<string, string | undefined>) => {
+    if ("search" in changes) setQuery(changes.search ?? "");
     const params = new URLSearchParams(window.location.search);
     for (const [key, value] of Object.entries(changes)) {
       if (value) params.set(key, value);
       else params.delete(key);
     }
     if (!("page" in changes)) params.delete("page");
-    router.push(`/?${params.toString()}`);
+    const nextQuery = params.toString();
+    router.push(nextQuery ? `/?${nextQuery}` : "/");
   };
 
   const operatorInitials = operator.email
@@ -448,9 +448,9 @@ export function DashboardShell({
         </button>
         <label className="scope-select">
           <Building2 size={17} />
-          <select value={scope} onChange={(event) => setScope(event.target.value)} aria-label="Client scope">
-            <option>All clients</option>
-            {fixtureClients.map((client) => <option key={client.name}>{client.name}</option>)}
+          <select value={selectedClientId ?? ""} onChange={(event) => updateEndpointQuery({ client: event.target.value || undefined, site: undefined })} aria-label="Client scope">
+            <option value="">All clients</option>
+            {navigation?.items.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
           </select>
           <ChevronDown size={15} />
         </label>
@@ -524,15 +524,15 @@ export function DashboardShell({
                 <h2>Fleet status</h2>
               </div>
               <button className="export-button" onClick={exportCsv}><Download size={16} /><span>Export CSV</span></button>
-              <select aria-label="Endpoint status" defaultValue={new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("status") ?? ""} onChange={(event) => updateEndpointQuery({ status: event.target.value || undefined })}>
+              <select aria-label="Endpoint status" value={endpointStatus ?? ""} onChange={(event) => updateEndpointQuery({ status: event.target.value || undefined })}>
                 <option value="">All statuses</option><option value="online">Online</option><option value="offline">Offline</option><option value="pending">Pending</option>
               </select>
-              <select aria-label="Endpoint sort order" defaultValue={new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("sort") ?? "last_seen"} onChange={(event) => updateEndpointQuery({ sort: event.target.value })}>
+              <select aria-label="Endpoint sort order" value={endpointSort} onChange={(event) => updateEndpointQuery({ sort: event.target.value })}>
                 <option value="last_seen">Last seen</option><option value="hostname">Hostname</option><option value="status">Status</option>
               </select>
             </header>
             <div className="fleet-summary">
-              <div className="total-stat"><small>Total endpoints</small><strong>{endpointList?.total ?? 156}</strong></div>
+              <div className="total-stat"><small>Total endpoints</small><strong>{endpointList?.total ?? "—"}</strong></div>
               <div className="summary-stat online"><CheckCircle2 size={19} /><span><small>Online</small><strong>132 <em>84.6%</em></strong></span></div>
               <div className="summary-stat warning"><AlertTriangle size={19} /><span><small>Warnings</small><strong>12 <em>7.7%</em></strong></span></div>
               <div className="summary-stat critical"><CircleAlert size={19} /><span><small>Critical</small><strong>7 <em>4.5%</em></strong></span></div>
@@ -572,12 +572,14 @@ export function DashboardShell({
                   ))}
                 </tbody>
               </table>
-              {visibleEndpoints.length === 0 ? (
-                <div className="empty-state"><Search size={24} /><strong>No endpoints found</strong><span>Try another search or clear the active issue filter.</span></div>
+              {endpointError ? (
+                <div className="empty-state" role="alert"><CircleAlert size={24} /><strong>Endpoint inventory is unavailable</strong><span>Try refreshing the dashboard. No preview endpoints are shown here.</span><button onClick={() => router.refresh()}>Try again</button></div>
+              ) : visibleEndpoints.length === 0 ? (
+                <div className="empty-state"><Search size={24} /><strong>No endpoints found</strong><span>Try another server-side search or filter.</span></div>
               ) : null}
             </div>
             <footer className="table-footer">
-              <span>Showing {visibleEndpoints.length} of {endpointList?.total ?? 156} endpoints</span>
+              <span>{endpointError ? "Endpoint inventory unavailable" : `Showing ${visibleEndpoints.length} of ${endpointList?.total ?? 0} endpoints`}</span>
               <div className="pagination"><button disabled={(endpointList?.page ?? 1) <= 1} onClick={() => updateEndpointQuery({ page: String((endpointList?.page ?? 1) - 1) })}><ChevronLeft size={15} /></button><button className="active">{endpointList?.page ?? 1}</button><button disabled={!endpointList || endpointList.page * endpointList.page_size >= endpointList.total} onClick={() => updateEndpointQuery({ page: String((endpointList?.page ?? 1) + 1) })}><ChevronRight size={15} /></button></div>
               <button className="page-size">25 / page <ChevronDown size={14} /></button>
             </footer>

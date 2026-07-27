@@ -43,12 +43,18 @@ export default async function Home({ searchParams }: HomePageProps) {
   let navigation: NavigationData | null = null;
   let endpointList: EndpointListData | null = null;
   let navigationError = false;
+  let endpointError = false;
 
   try {
     navigation = await getClientNavigation(session.sessionToken);
-    endpointList = await getEndpointList(session.sessionToken, { clientId: selectedClientId, direction: endpointDirection, page: endpointPage, search: endpointSearch, siteId: selectedSiteId, sort: endpointSort, status: endpointStatus });
   } catch {
     navigationError = true;
+  }
+
+  try {
+    endpointList = await getEndpointList(session.sessionToken, { clientId: selectedClientId, direction: endpointDirection, page: endpointPage, search: endpointSearch, siteId: selectedSiteId, sort: endpointSort, status: endpointStatus });
+  } catch {
+    endpointError = true;
   }
 
   const selectedSite = navigation?.items
@@ -63,7 +69,11 @@ export default async function Home({ searchParams }: HomePageProps) {
     <DashboardShell
       navigation={navigation}
       navigationError={navigationError}
+      endpointError={endpointError}
       endpointList={endpointList}
+      endpointSearch={endpointSearch ?? ""}
+      endpointSort={endpointSort}
+      endpointStatus={endpointStatus}
       operator={session.operator}
       selectedClientId={selectedClientId}
       selectedSiteId={selectedSiteId}
