@@ -58,14 +58,19 @@ class Settings(BaseSettings):
 
     # --- Command concurrency and admission ---
     # Admission control: the maximum number of *outstanding* commands (queued,
-    # dispatched, or running — anything not in a terminal state) an agent may
-    # have at once. Dispatching past this is refused, so an operator or a bug
+    # dispatched, running, or result-pending — anything not in a terminal
+    # state) an agent may have at once. Dispatching past this is refused, so an
+    # operator or a bug
     # cannot pile unbounded work on one endpoint.
     max_outstanding_commands_per_agent: int = 100
     # Delivery pacing: the most commands handed to an agent in a single
     # heartbeat. The agent executes one at a time (its concurrency contract),
     # so a large backlog drains over several beats instead of arriving at once.
     max_commands_per_heartbeat: int = 10
+    # A dispatched command is eligible for safe re-delivery after this lease.
+    # New agents durably reserve before execution, so re-delivery repairs a
+    # lost heartbeat response or stop-before-start without duplicate execution.
+    command_redelivery_seconds: int = 120
 
     @property
     def offline_threshold_seconds(self) -> int:

@@ -114,6 +114,7 @@ func TestRunRetriesWhenServerUnreachable(t *testing.T) {
 type resultCapture struct {
 	mu       sync.Mutex
 	results  map[string]client.CommandResult
+	posts    map[string]int
 	executed map[string]bool
 }
 
@@ -123,7 +124,11 @@ type resultCapture struct {
 // refusal/execution behavior.
 func newTestSession(t *testing.T) (*Agent, *session, ed25519.PrivateKey, *resultCapture) {
 	t.Helper()
-	cap := &resultCapture{results: map[string]client.CommandResult{}, executed: map[string]bool{}}
+	cap := &resultCapture{
+		results:  map[string]client.CommandResult{},
+		posts:    map[string]int{},
+		executed: map[string]bool{},
+	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Path is /api/v1/commands/{id}/result.
@@ -136,6 +141,7 @@ func newTestSession(t *testing.T) (*Agent, *session, ed25519.PrivateKey, *result
 		_ = json.NewDecoder(r.Body).Decode(&res)
 		cap.mu.Lock()
 		cap.results[id] = res
+		cap.posts[id]++
 		cap.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -240,8 +246,8 @@ func TestProcessCommandExpiredIsRefused(t *testing.T) {
 	if res.ExitCode != -1 || !strings.Contains(res.Stderr, "invalid signed time window") {
 		t.Fatalf("unexpected refusal result: %+v", res)
 	}
-	if s.seen.Has(cmd.ID) {
-		t.Fatal("refused command must not be recorded as executed")
+	if !s.seen.Has(cmd.ID) {
+		t.Fatal("refusal result should be retained for idempotent delivery")
 	}
 }
 
@@ -283,8 +289,8 @@ func TestProcessCommandStrippedExpiryIsRefused(t *testing.T) {
 	if cap.executed["echo run"] {
 		t.Fatal("command with stripped expiry must not execute")
 	}
-	if s.seen.Has(cmd.ID) {
-		t.Fatal("refused command must not be recorded in the replay store")
+	if !s.seen.Has(cmd.ID) {
+		t.Fatal("refusal result should be retained in the durable outbox")
 	}
 	if res, ok := cap.results[cmd.ID]; !ok || res.ExitCode != -1 {
 		t.Fatalf("expected a refusal result, got %+v (reported=%v)", res, ok)
@@ -338,8 +344,69 @@ func TestProcessCommandReplayIsRefused(t *testing.T) {
 	if cap.executed["echo once"] {
 		t.Fatal("replayed command must not execute a second time")
 	}
-	if _, ok := cap.results[cmd.ID]; ok {
-		t.Fatal("replayed command must not report a result (would clobber the original)")
+	if res, ok := cap.results[cmd.ID]; !ok || res.Stdout != "ok" {
+		t.Fatalf("replayed command should re-report the exact retained result, got %+v", res)
+	}
+	if cap.posts[cmd.ID] != 2 {
+		t.Fatalf("expected original plus idempotent retry, got %d posts", cap.posts[cmd.ID])
+	}
+}
+
+func TestPendingResultRetriesAfterOutageAndRestart(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		attempts int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		current := attempts
+		mu.Unlock()
+		if current == 1 {
+			http.Error(w, "temporary outage", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	path := filepath.Join(t.TempDir(), seenFileName)
+	store, err := LoadSeenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := client.CommandResult{
+		ExitCode:         0,
+		Stdout:           "completed once",
+		AgentCompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if err := store.StoreResult("cmd-outbox", time.Now().Add(time.Hour), result); err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{log: log.New(&bytes.Buffer{}, "", 0)}
+	s := &session{api: client.New(srv.URL, "token"), seen: store}
+	if err := a.flushPendingResults(context.Background(), s); err == nil {
+		t.Fatal("first upload should fail")
+	}
+	if len(store.PendingResults()) != 1 {
+		t.Fatal("failed upload must remain pending")
+	}
+
+	reloaded, err := LoadSeenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := &session{api: client.New(srv.URL, "token"), seen: reloaded}
+	if err := a.flushPendingResults(context.Background(), restarted); err != nil {
+		t.Fatalf("retry after restart: %v", err)
+	}
+	if len(reloaded.PendingResults()) != 0 {
+		t.Fatal("acknowledged retry should leave the upload queue")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if attempts != 2 {
+		t.Fatalf("result delivery attempts = %d, want 2", attempts)
 	}
 }
 

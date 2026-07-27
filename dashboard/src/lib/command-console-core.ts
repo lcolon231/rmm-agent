@@ -6,6 +6,7 @@ export type CommandStatus =
   | "queued"
   | "dispatched"
   | "running"
+  | "result_pending"
   | "succeeded"
   | "failed"
   | "expired";
@@ -24,6 +25,7 @@ export type CommandHistoryItem = {
   created_at: string;
   issued_at: string | null;
   dispatched_at: string | null;
+  agent_completed_at: string | null;
   completed_at: string | null;
   expires_at: string | null;
 };
@@ -140,6 +142,8 @@ export function describeCommandStatus(status: CommandStatus): CommandStatusPrese
       return { label: "Dispatched", tone: "active", terminal: false };
     case "running":
       return { label: "Running", tone: "active", terminal: false };
+    case "result_pending":
+      return { label: "Result pending", tone: "active", terminal: false };
     case "succeeded":
       return { label: "Succeeded", tone: "success", terminal: true };
     case "failed":

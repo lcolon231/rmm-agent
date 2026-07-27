@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// dpapiProtector encrypts the identity with Windows DPAPI in user scope, so the
+// dpapiProtector encrypts sensitive agent-local state with Windows DPAPI in user scope, so the
 // blob is only decryptable by the account that wrote it — the service identity
 // (LocalSystem for the installed service). Enrolling interactively under a
 // different account and then starting the service yields a clear unprotect
@@ -20,7 +20,7 @@ type dpapiProtector struct{}
 
 // dpapiDescription is stored inside the blob by DPAPI and shown by forensic
 // tooling; it carries no secret material.
-var dpapiDescription = windows.StringToUTF16Ptr("NodeLink agent identity")
+var dpapiDescription = windows.StringToUTF16Ptr("NodeLink agent protected local state")
 
 func (dpapiProtector) Scheme() string { return "dpapi" }
 

@@ -111,11 +111,15 @@ defends against this on two fronts:
 - **Signed time window.** `command-v3` binds canonical `issued_at` and
   `expires_at` into the signature. The agent rejects malformed, expired,
   overlong, or implausibly future-dated windows.
-- **Replay store.** The agent persists command IDs and signed nonces
-  (`seen_commands.json`, mode 0600, beside `identity.json`, written atomically)
-  and reserves both before execution. Entries whose expiry has lapsed are
-  pruned; a duplicate command ID is silently ignored while a duplicate nonce is
-  reported as a refusal.
+- **Replay journal and result outbox.** The agent atomically persists command
+  IDs, signed nonces, lifecycle state, and bounded pending results in
+  `seen_commands.json`. Windows protects the file with DPAPI and a restricted
+  DACL; other platforms use mode 0600. `reserved` is recorded before process
+  start and may be safely released after a crash; `executing` is never replayed
+  and recovers as an explicit unknown outcome; results are persisted before
+  upload and retained until an idempotent server acknowledgement. A duplicate
+  command ID re-reports the exact retained result without execution, while a
+  duplicate nonce is reported as a refusal.
 
 Refusal order in the agent is signature → time window → command-ID replay →
 nonce replay → execute.
@@ -147,6 +151,13 @@ installed as a Windows service (Gate 2), which by default runs as `LocalSystem` 
 high privilege — so anyone who can dispatch a verified command has effective
 admin on the endpoint, which is why boundary (1) matters so much. Running under a
 least-privilege service account is still future work.
+
+Each Windows command is created suspended, assigned to its own kill-on-close
+Job Object, then resumed. Timeout, SCM stop, agent termination, and ordinary
+shell exit kill the entire descendant tree, preventing a script from escaping
+limits by starting deferred background work. The bounded result is durably
+recorded before network reporting; server conflict checks prevent a retry from
+rewriting the original outcome.
 
 - Agent identity is a long-lived bearer token issued at enrollment. The server
   stores only its SHA-256 hash. On the endpoint the token lives in

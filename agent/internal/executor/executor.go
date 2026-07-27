@@ -4,6 +4,8 @@ package executor
 
 import (
 	"context"
+	"io"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -46,17 +48,47 @@ func RunContext(parent context.Context, kind string, script string) Result {
 	ctx, cancel := context.WithTimeout(parent, defaultTimeout)
 	defer cancel()
 
-	cmd := buildCommand(ctx, kind, script)
+	cmd := buildCommand(kind, script)
 	if cmd == nil {
 		return Result{ExitCode: -1, Stderr: "unsupported command kind: " + kind}
 	}
 
 	stdout := &limitWriter{max: MaxStreamBytes}
 	stderr := &limitWriter{max: MaxStreamBytes}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	if err != nil {
+		return Result{ExitCode: -1, Stderr: "create stdout capture pipe: " + err.Error()}
+	}
+	defer stdoutRead.Close()
+	defer stdoutWrite.Close()
+	stderrRead, stderrWrite, err := os.Pipe()
+	if err != nil {
+		return Result{ExitCode: -1, Stderr: "create stderr capture pipe: " + err.Error()}
+	}
+	defer stderrRead.Close()
+	defer stderrWrite.Close()
+	cmd.Stdout = stdoutWrite
+	cmd.Stderr = stderrWrite
 
-	err := cmd.Run()
+	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(stdout, stdoutRead)
+		close(stdoutDone)
+	}()
+	go func() {
+		_, _ = io.Copy(stderr, stderrRead)
+		close(stderrDone)
+	}()
+
+	err = runCommand(ctx, cmd)
+	// The parent copies are no longer needed. Platform runners terminate the
+	// command's process tree before returning, so these closes produce EOF for
+	// both capture goroutines even when a script attempted deferred work.
+	_ = stdoutWrite.Close()
+	_ = stderrWrite.Close()
+	<-stdoutDone
+	<-stderrDone
 	outStr, errStr, outTrunc, errTrunc := applyOutputLimits(stdout, stderr)
 	res := Result{
 		Stdout:           outStr,
@@ -71,6 +103,11 @@ func RunContext(parent context.Context, kind string, script string) Result {
 		// Appended after capping: the marker must survive truncation so the
 		// operator always sees why the run ended.
 		res.Stderr += "\n[command timed out]"
+		return res
+	}
+	if ctx.Err() == context.Canceled {
+		res.ExitCode = -1
+		res.Stderr += "\n[command cancelled]"
 		return res
 	}
 	if err != nil {

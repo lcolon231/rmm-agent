@@ -63,6 +63,16 @@ hashes, not plaintext tokens.
 The enrolled agent posts telemetry to `/api/v1/heartbeat`; the response carries
 queued commands. This is polling, not WebSocket or streaming transport.
 
+Completed outcomes use at-least-once delivery over a command-ID idempotency
+boundary. The agent heartbeat advertises protected outbox entries so the server
+can expose `result_pending` separately from terminal `succeeded`/`failed`.
+Exact duplicate result submissions return success without changing receipt
+timestamps or duplicating audit events; conflicting duplicates fail with 409.
+Commands whose dispatch lease expires are re-delivered to repair a lost
+heartbeat response or stop-before-start, while the agent's durable reservation
+prevents duplicate execution. `agent_completed_at` records endpoint completion
+separately from the server's `completed_at` acknowledgement time.
+
 ### Signed commands
 
 The server signs the negotiated `command-v3` canonical JSON containing
@@ -100,8 +110,8 @@ Agent-facing:
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/v1/enroll` | Enroll using a site token |
-| POST | `/api/v1/heartbeat` | Store telemetry and poll commands |
-| POST | `/api/v1/commands/{id}/result` | Submit buffered command result |
+| POST | `/api/v1/heartbeat` | Store telemetry, advertise pending results, and poll commands |
+| POST | `/api/v1/commands/{id}/result` | Idempotently acknowledge a durable command result |
 
 Operator/authentication:
 

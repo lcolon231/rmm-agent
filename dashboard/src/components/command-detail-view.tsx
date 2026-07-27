@@ -104,7 +104,8 @@ export function CommandDetailView({
         <section className="command-lifecycle" aria-label="Command lifecycle">
           <article><span>Created</span><strong>{formatEndpointDateTime(command.created_at)}</strong></article>
           <article><span>Dispatched to agent</span><strong>{formatEndpointDateTime(command.dispatched_at)}</strong></article>
-          <article><span>Completed</span><strong>{formatEndpointDateTime(command.completed_at)}</strong></article>
+          <article><span>Finished on agent</span><strong>{formatEndpointDateTime(command.agent_completed_at)}</strong></article>
+          <article><span>Result acknowledged</span><strong>{formatEndpointDateTime(command.completed_at)}</strong></article>
           <article><span>Expires</span><strong>{formatEndpointDateTime(command.expires_at)}</strong></article>
         </section>
 
@@ -134,10 +135,18 @@ export function CommandDetailView({
           ) : (
             <div className="detail-empty">
               <TerminalSquare size={24} />
-              <strong>{command.status === "expired" ? "No result: the command expired" : "No result yet"}</strong>
+              <strong>
+                {command.status === "expired"
+                  ? "No result: the command expired"
+                  : command.status === "result_pending"
+                    ? "Execution finished; result delivery is pending"
+                    : "No result yet"}
+              </strong>
               <span>
                 {command.status === "expired"
                   ? "The signed validity window closed before the agent completed this command."
+                  : command.status === "result_pending"
+                    ? "The endpoint durably retained the result and will retry until the server acknowledges it."
                   : "The agent has not reported a result. This page refreshes automatically."}
               </span>
             </div>

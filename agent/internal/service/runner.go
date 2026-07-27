@@ -175,6 +175,9 @@ func (a *Agent) loop(ctx, execCtx context.Context) error {
 		err := a.checkIn(ctx, execCtx, sess)
 		var wait time.Duration
 		if err != nil {
+			if isFatal(err) {
+				return err
+			}
 			wait = b.Next()
 			if client.IsUnauthorized(err) {
 				// A definitive credential rejection usually means the agent was
@@ -230,7 +233,21 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, fatal(fmt.Errorf("load replay store: %w", err))
 	}
-	seen.Prune(time.Now().UTC())
+	released, unknown, err := seen.RecoverInterrupted()
+	if err != nil {
+		return nil, fatal(fmt.Errorf("recover command journal: %w", err))
+	}
+	if released > 0 {
+		a.log.Printf("recovered %d command reservation(s) that never started; awaiting safe server redelivery", released)
+	}
+	if unknown > 0 {
+		a.log.Printf("recovered %d interrupted command(s) with unknown outcome; queued failure results without replay", unknown)
+	}
+	if seen.Prune(time.Now().UTC()) {
+		if err := seen.Save(); err != nil {
+			return nil, fatal(fmt.Errorf("persist pruned command journal: %w", err))
+		}
+	}
 	api, err := client.NewWithTLSSPKIPins(
 		identity.ServerURL,
 		identity.AgentToken,
@@ -304,8 +321,15 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if s.seen.Prune(time.Now().UTC()) {
+		if err := s.seen.Save(); err != nil {
+			return fatal(fmt.Errorf("persist pruned command journal: %w", err))
+		}
+	}
 	sample := telemetry.CollectContext(ctx)
-	ack, err := s.api.Heartbeat(ctx, sample, nil)
+	ack, err := s.api.HeartbeatWithPendingResults(
+		ctx, sample, nil, pendingResultNotices(s.seen, 256),
+	)
 	if err != nil {
 		return err
 	}
@@ -323,6 +347,13 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 		a.log.Printf("server restored this agent from quarantine; resuming normal operation")
 		s.quarantined = false
 	}
+	// Results are persisted before upload. Flush anything recovered from a
+	// prior outage/restart before adding more work to the outbox.
+	var firstReportErr error
+	if err := a.flushPendingResults(ctx, s); err != nil {
+		a.log.Printf("failed to flush pending command results: %v", err)
+		firstReportErr = err
+	}
 	if len(ack.CommandPublicKeys) > 0 {
 		updated := map[string]ed25519.PublicKey{}
 		for keyID, pemKey := range ack.CommandPublicKeys {
@@ -339,7 +370,7 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 		}
 	}
 	if len(ack.PendingCommands) == 0 {
-		return nil
+		return firstReportErr
 	}
 	// Concurrency contract: exactly one command runs at a time per agent
 	// runtime. Commands in a heartbeat batch are executed strictly in the order
@@ -349,7 +380,14 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	// arrive at once; this loop is what keeps them serialized.
 	a.log.Printf("received %d command(s)", len(ack.PendingCommands))
 	for i, cmd := range ack.PendingCommands {
-		a.processCommand(execCtx, s, cmd)
+		if err := a.processCommand(execCtx, s, cmd); err != nil {
+			if isFatal(err) {
+				return err
+			}
+			if firstReportErr == nil {
+				firstReportErr = err
+			}
+		}
 		// On shutdown, finish the current command but do not start new ones.
 		if ctx.Err() != nil {
 			if remaining := len(ack.PendingCommands) - i - 1; remaining > 0 {
@@ -358,20 +396,34 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 			break
 		}
 	}
-	return nil
+	// A force-cancelled execution uses execCtx, which is already cancelled.
+	// Give its durably stored result one bounded independent upload attempt
+	// during shutdown; a failure remains in the outbox for the next start.
+	reportCtx := ctx
+	cancelReport := func() {}
+	if ctx.Err() != nil {
+		reportCtx, cancelReport = context.WithTimeout(context.Background(), 5*time.Second)
+	}
+	defer cancelReport()
+	if err := a.flushPendingResults(reportCtx, s); err != nil {
+		a.log.Printf("pending command results remain queued: %v", err)
+		if firstReportErr == nil {
+			firstReportErr = err
+		}
+	}
+	return firstReportErr
 }
 
 // processCommand runs the accept/refuse gate for one command in strict order:
 // signature/shape -> signed time window -> nonce replay -> ID replay -> execute. A command that fails any gate is
 // refused and never executed.
-func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Command) {
+func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Command) error {
 	if cmd.AgentID != s.agentID {
 		a.log.Printf("REFUSING command %s: agent identity mismatch", cmd.ID)
-		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
+		return a.queueResult(ctx, s, cmd.ID, time.Time{}, client.CommandResult{
 			ExitCode: -1,
 			Stderr:   "agent refused command: agent identity mismatch",
 		})
-		return
 	}
 
 	var verifyErr error
@@ -379,8 +431,7 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		pub, ok := s.pubKeys[cmd.SigningKeyID]
 		if !ok {
 			a.log.Printf("REFUSING command %s: unknown or retired signing key %q", cmd.ID, cmd.SigningKeyID)
-			_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{ExitCode: -1, Stderr: "agent refused command: unknown signing key"})
-			return
+			return a.queueResult(ctx, s, cmd.ID, time.Time{}, client.CommandResult{ExitCode: -1, Stderr: "agent refused command: unknown signing key"})
 		}
 		verifyErr = verify.VerifyWithKeyID(pub, cmd.EnvelopeVersion, cmd.SchemaVersion, cmd.ID, s.agentID, cmd.Kind, cmd.Payload, cmd.IssuedAt, cmd.ExpiresAt, cmd.Nonce, cmd.SigningKeyID, cmd.Signature)
 	} else {
@@ -388,11 +439,10 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 	}
 	if err := verifyErr; err != nil {
 		a.log.Printf("REFUSING command %s: signature invalid: %v", cmd.ID, err)
-		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
+		return a.queueResult(ctx, s, cmd.ID, time.Time{}, client.CommandResult{
 			ExitCode: -1,
 			Stderr:   "agent refused command: signature verification failed",
 		})
-		return
 	}
 
 	// Time window: all values are signed and required. Malformed, stale, overly
@@ -400,58 +450,141 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 	expiry, err := verify.ValidateCommandWindow(cmd.IssuedAt, cmd.ExpiresAt, time.Now().UTC())
 	if err != nil {
 		a.log.Printf("REFUSING command %s: invalid time window: %v", cmd.ID, err)
-		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
+		return a.queueResult(ctx, s, cmd.ID, time.Time{}, client.CommandResult{
 			ExitCode: -1,
 			Stderr:   "agent refused command: invalid signed time window",
 		})
-		return
 	}
 
-	// Replay: an id we have already executed must not run again. We do not report
-	// a result here, to avoid clobbering the original execution's result.
+	// Replay: an id already accepted must never execute again. If the server
+	// lost an acknowledged terminal row (for example after rollback), requeue
+	// the exact retained result rather than clobbering it or rerunning work.
 	if s.seen.Has(cmd.ID) {
 		a.log.Printf("REFUSING command %s: already executed", cmd.ID)
-		return
+		requeued, err := s.seen.RequeueAcknowledged(cmd.ID)
+		if err != nil {
+			return fatal(fmt.Errorf("requeue retained result for %s: %w", cmd.ID, err))
+		}
+		if requeued {
+			a.log.Printf("server re-delivered acknowledged command %s; requeueing retained result without execution", cmd.ID)
+		}
+		return a.flushPendingResults(ctx, s)
 	}
 
 	if s.seen.HasNonce(cmd.Nonce) {
 		a.log.Printf("REFUSING command %s: nonce already used", cmd.ID)
-		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
+		return a.queueResult(ctx, s, cmd.ID, expiry, client.CommandResult{
 			ExitCode: -1,
 			Stderr:   "agent refused command: repeated nonce",
 		})
-		return
 	}
 
 	// Reserve both replay keys durably before starting the process. If the agent
 	// cannot persist this reservation, fail closed rather than execute a command
 	// that could be replayed after a restart.
-	s.seen.Add(cmd.ID, expiry)
-	s.seen.AddNonce(cmd.Nonce, expiry)
-	if err := s.seen.Save(); err != nil {
+	if err := s.seen.ReserveCommand(cmd.ID, cmd.Nonce, expiry); err != nil {
 		a.log.Printf("failed to persist replay store after %s: %v", cmd.ID, err)
-		_ = s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
+		if queueErr := a.queueResult(ctx, s, cmd.ID, expiry, client.CommandResult{
 			ExitCode: -1,
 			Stderr:   "agent refused command: replay state could not be persisted",
-		})
-		return
+		}); queueErr != nil {
+			return fatal(fmt.Errorf("persist refusal result for %s: %w", cmd.ID, queueErr))
+		}
+		return nil
+	}
+	if err := s.seen.MarkExecuting(cmd.ID); err != nil {
+		a.log.Printf("REFUSING command %s: executing transition could not be persisted: %v", cmd.ID, err)
+		if queueErr := a.queueResult(ctx, s, cmd.ID, expiry, client.CommandResult{
+			ExitCode: -1,
+			Stderr:   "agent refused command: execution state could not be persisted",
+		}); queueErr != nil {
+			return fatal(fmt.Errorf("persist execution-state refusal for %s: %w", cmd.ID, queueErr))
+		}
+		return nil
 	}
 
 	script := extractScript(cmd.Payload)
 	a.log.Printf("executing command %s (kind=%s)", cmd.ID, cmd.Kind)
 	res := a.run(ctx, cmd.Kind, script)
 
-	if err := s.api.ReportResult(ctx, cmd.ID, client.CommandResult{
+	result := client.CommandResult{
 		ExitCode:         res.ExitCode,
 		Stdout:           res.Stdout,
 		Stderr:           res.Stderr,
+		AgentCompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		StdoutTruncated:  res.StdoutTruncated,
 		StderrTruncated:  res.StderrTruncated,
 		StdoutTotalBytes: res.StdoutTotalBytes,
 		StderrTotalBytes: res.StderrTotalBytes,
-	}); err != nil {
-		a.log.Printf("failed to report result for %s: %v", cmd.ID, err)
 	}
+	if err := s.seen.StoreResult(cmd.ID, expiry, result); err != nil {
+		// The on-disk state remains "executing", so restart recovery will emit
+		// an unknown-outcome failure without ever replaying the command.
+		return fatal(fmt.Errorf("persist completed result for %s: %w", cmd.ID, err))
+	}
+	if err := a.flushPendingResults(ctx, s); err != nil {
+		a.log.Printf("failed to report result for %s; retained for retry: %v", cmd.ID, err)
+		return err
+	}
+	return nil
+}
+
+func pendingResultNotices(store *SeenStore, limit int) []client.PendingResultNotice {
+	pending := store.PendingResults()
+	if len(pending) > limit {
+		pending = pending[:limit]
+	}
+	notices := make([]client.PendingResultNotice, 0, len(pending))
+	for _, item := range pending {
+		notices = append(notices, client.PendingResultNotice{
+			CommandID:        item.CommandID,
+			AgentCompletedAt: item.Result.AgentCompletedAt,
+		})
+	}
+	return notices
+}
+
+// queueResult persists before reporting, including refusal outcomes. A network
+// failure is returned for backoff but never removes the durable outbox entry.
+func (a *Agent) queueResult(
+	ctx context.Context,
+	s *session,
+	commandID string,
+	expiry time.Time,
+	result client.CommandResult,
+) error {
+	if err := s.seen.StoreResult(commandID, expiry, result); err != nil {
+		if errors.Is(err, errResultAlreadyStored) {
+			return a.flushPendingResults(ctx, s)
+		}
+		return fatal(fmt.Errorf("persist result for %s: %w", commandID, err))
+	}
+	return a.flushPendingResults(ctx, s)
+}
+
+// flushPendingResults implements at-least-once delivery over the server's
+// command-ID idempotency boundary. An acknowledgement is persisted only after
+// HTTP success; a lost acknowledgement therefore causes an exact safe retry.
+func (a *Agent) flushPendingResults(ctx context.Context, s *session) error {
+	var firstErr error
+	for _, pending := range s.seen.PendingResults() {
+		if err := ctx.Err(); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			break
+		}
+		if err := s.api.ReportResult(ctx, pending.CommandID, pending.Result); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if err := s.seen.Acknowledge(pending.CommandID); err != nil {
+			return fatal(fmt.Errorf("persist result acknowledgement for %s: %w", pending.CommandID, err))
+		}
+	}
+	return firstErr
 }
 
 // extractScript pulls the "script" field from a command payload, if present.

@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_agent
@@ -180,8 +180,55 @@ async def heartbeat(
             },
         )
 
+    # The agent persists every completed/refused outcome before upload and
+    # advertises that outbox here. This transition is deliberately separate
+    # from terminal acknowledgement so operators can see "finished locally,
+    # result delivery pending" during partial outages.
+    if body.pending_results:
+        notices = {notice.command_id: notice for notice in body.pending_results}
+        pending_rows = await db.execute(
+            select(Command)
+            .where(
+                Command.agent_id == agent.id,
+                Command.id.in_(notices),
+                Command.status.in_(
+                    [
+                        CommandStatus.dispatched,
+                        CommandStatus.running,
+                        CommandStatus.result_pending,
+                    ]
+                ),
+            )
+            .with_for_update()
+        )
+        for cmd in pending_rows.scalars().all():
+            notice = notices[cmd.id]
+            first_notice = cmd.status != CommandStatus.result_pending
+            cmd.status = CommandStatus.result_pending
+            if notice.agent_completed_at is not None:
+                cmd.agent_completed_at = ensure_utc(notice.agent_completed_at)
+            if first_notice:
+                await audit.record(
+                    db,
+                    action="command.result_pending",
+                    actor=f"agent:{agent.id}",
+                    agent_id=agent.id,
+                    detail={
+                        "command_id": cmd.id,
+                        "kind": cmd.kind.value,
+                        "agent_completed_at": (
+                            notice.agent_completed_at.isoformat()
+                            if notice.agent_completed_at is not None
+                            else None
+                        ),
+                    },
+                )
+
     # Expire stale commands, then hand out at most one batch of deliverable
-    # work. Oldest-first (FIFO) so nothing starves, and bounded by
+    # work. A dispatched command whose lease elapsed is safely re-delivered:
+    # the agent's durable reservation prevents duplicate execution and repairs
+    # lost heartbeat responses or stop-before-start. Oldest-first (FIFO) so
+    # nothing starves, and bounded by
     # max_commands_per_heartbeat so a backlog drains over several beats rather
     # than flooding one — the agent executes them one at a time.
     pending: list[Command] = []
@@ -190,11 +237,20 @@ async def heartbeat(
     )
     if selected_version is not None:
         batch = max(1, settings.max_commands_per_heartbeat)
+        redelivery_before = now - timedelta(
+            seconds=max(1, settings.command_redelivery_seconds)
+        )
         result = await db.execute(
             select(Command)
             .where(
                 Command.agent_id == agent.id,
-                Command.status == CommandStatus.queued,
+                or_(
+                    Command.status == CommandStatus.queued,
+                    and_(
+                        Command.status == CommandStatus.dispatched,
+                        Command.dispatched_at <= redelivery_before,
+                    ),
+                ),
                 Command.envelope_version == selected_version,
             )
             .order_by(Command.created_at.asc(), Command.id.asc())
@@ -235,13 +291,58 @@ async def submit_result(
             detail={"code": "agent_quarantined"},
         )
     result = await db.execute(
-        select(Command).where(
-            Command.id == command_id, Command.agent_id == agent.id
-        )
+        select(Command)
+        .where(Command.id == command_id, Command.agent_id == agent.id)
+        .with_for_update()
     )
     cmd = result.scalar_one_or_none()
     if cmd is None:
         raise HTTPException(status_code=404, detail="Command not found")
+
+    agent_completed_at = (
+        ensure_utc(body.agent_completed_at)
+        if body.agent_completed_at is not None
+        else None
+    )
+    terminal = cmd.status in (CommandStatus.succeeded, CommandStatus.failed)
+    same_result = (
+        cmd.exit_code == body.exit_code
+        and cmd.stdout == body.stdout
+        and cmd.stderr == body.stderr
+        and cmd.stdout_truncated == body.stdout_truncated
+        and cmd.stderr_truncated == body.stderr_truncated
+        and cmd.stdout_total_bytes == body.stdout_total_bytes
+        and cmd.stderr_total_bytes == body.stderr_total_bytes
+        and (
+            ensure_utc(cmd.agent_completed_at)
+            if cmd.agent_completed_at is not None
+            else None
+        )
+        == agent_completed_at
+    )
+    if terminal:
+        if same_result:
+            # Lost HTTP acknowledgements are expected under at-least-once
+            # delivery. Return success without changing timestamps or emitting
+            # a duplicate audit event.
+            return None
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "command_result_conflict"},
+        )
+
+    if cmd.status not in (
+        CommandStatus.dispatched,
+        CommandStatus.running,
+        CommandStatus.result_pending,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "command_not_accepting_results",
+                "status": cmd.status.value,
+            },
+        )
 
     cmd.exit_code = body.exit_code
     cmd.stdout = body.stdout
@@ -250,6 +351,7 @@ async def submit_result(
     cmd.stderr_truncated = body.stderr_truncated
     cmd.stdout_total_bytes = body.stdout_total_bytes
     cmd.stderr_total_bytes = body.stderr_total_bytes
+    cmd.agent_completed_at = agent_completed_at
     cmd.status = (
         CommandStatus.succeeded if body.exit_code == 0 else CommandStatus.failed
     )
@@ -265,6 +367,11 @@ async def submit_result(
             "kind": cmd.kind.value,
             "exit_code": body.exit_code,
             "status": cmd.status.value,
+            "agent_completed_at": (
+                agent_completed_at.isoformat()
+                if agent_completed_at is not None
+                else None
+            ),
             # Truncation is part of the accountability record: "what we stored"
             # vs "what actually happened" must be distinguishable later.
             "stdout_truncated": body.stdout_truncated,

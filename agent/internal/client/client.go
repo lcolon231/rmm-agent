@@ -225,9 +225,28 @@ type HeartbeatAck struct {
 	TrustState string `json:"trust_state"`
 }
 
+// PendingResultNotice tells the server that execution has finished locally but
+// the durable result has not yet been acknowledged. This makes the delivery
+// gap operator-visible without copying command output into heartbeat data.
+type PendingResultNotice struct {
+	CommandID        string `json:"command_id"`
+	AgentCompletedAt string `json:"agent_completed_at,omitempty"`
+}
+
 // Heartbeat posts telemetry and returns any queued commands. inventory may be
 // nil for ordinary beats.
 func (c *Client) Heartbeat(ctx context.Context, s telemetry.Sample, inventory map[string]any) (*HeartbeatAck, error) {
+	return c.HeartbeatWithPendingResults(ctx, s, inventory, nil)
+}
+
+// HeartbeatWithPendingResults is Heartbeat plus a bounded list of durable
+// outbox entries waiting for idempotent result acknowledgement.
+func (c *Client) HeartbeatWithPendingResults(
+	ctx context.Context,
+	s telemetry.Sample,
+	inventory map[string]any,
+	pendingResults []PendingResultNotice,
+) (*HeartbeatAck, error) {
 	body := map[string]any{
 		"cpu_percent":                         s.CPUPercent,
 		"mem_percent":                         s.MemPercent,
@@ -235,6 +254,7 @@ func (c *Client) Heartbeat(ctx context.Context, s telemetry.Sample, inventory ma
 		"uptime_seconds":                      s.UptimeSeconds,
 		"logged_in_user":                      s.LoggedInUser,
 		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
+		"pending_results":                     pendingResults,
 	}
 	if inventory != nil {
 		body["inventory"] = inventory
@@ -252,6 +272,7 @@ type CommandResult struct {
 	ExitCode         int    `json:"exit_code"`
 	Stdout           string `json:"stdout"`
 	Stderr           string `json:"stderr"`
+	AgentCompletedAt string `json:"agent_completed_at,omitempty"`
 	StdoutTruncated  bool   `json:"stdout_truncated,omitempty"`
 	StderrTruncated  bool   `json:"stderr_truncated,omitempty"`
 	StdoutTotalBytes int64  `json:"stdout_total_bytes,omitempty"`
