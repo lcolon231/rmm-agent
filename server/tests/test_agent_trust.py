@@ -420,7 +420,9 @@ async def test_trust_transitions_are_audited(client):
         ).scalar_one()
     assert ev.actor == "trust-admin@nodelink.test"
     assert ev.agent_id == agent_id
-    assert ev.detail["reason"] == "stolen: r3"
+    assert "reason" not in ev.detail
+    assert ev.detail["reason_bytes"] == len("stolen: r3".encode("utf-8"))
+    assert len(ev.detail["reason_sha256"]) == 64
     assert ev.detail["previous_trust_state"] == "active"
 
     # The chain still verifies with the new events on it.

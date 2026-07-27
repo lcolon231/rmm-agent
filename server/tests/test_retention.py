@@ -135,8 +135,16 @@ async def test_prune_clears_old_output_keeps_metadata_and_recent(db):
 
 @pytest.mark.asyncio
 async def test_prune_never_touches_audit_and_chain_verifies(db):
-    await audit.record(db, action="test.one", detail={"a": 1})
-    await audit.record(db, action="test.two", detail={"b": 2})
+    await audit.record(
+        db,
+        action="agent.offline",
+        detail={"last_seen_at": "2026-01-01T00:00:01+00:00"},
+    )
+    await audit.record(
+        db,
+        action="agent.offline",
+        detail={"last_seen_at": "2026-01-01T00:00:02+00:00"},
+    )
     await db.commit()
     before = (await db.execute(select(func.count()).select_from(AuditEvent))).scalar_one()
 
@@ -174,7 +182,11 @@ async def test_storage_status_counts_and_alert_flags(db, monkeypatch):
     for _ in range(3):
         db.add(_heartbeat(agent_id, age_days=1))
     db.add(_command(agent_id, age_days=1))
-    await audit.record(db, action="test.audit")
+    await audit.record(
+        db,
+        action="agent.offline",
+        detail={"last_seen_at": "2026-01-01T00:00:00+00:00"},
+    )
     await db.commit()
 
     # No breach with default thresholds.

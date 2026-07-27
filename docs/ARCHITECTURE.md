@@ -395,6 +395,14 @@ previous registry atomically and never reactivates an unknown key.
 their own SHA-256 hash. `/audit/verify` detects changes or deletion relative to
 the stored chain.
 
+Before append, `sanitize_audit_detail` enforces the exact registered field
+schema for the action. Unknown actions, missing/extra fields, malformed nested
+structures, non-canonical values, and resource-bound violations fail before a
+sequence number is allocated. Credential shapes are redacted; arbitrary
+operator/agent prose is retained only as SHA-256 plus byte count. The stored
+safe representation is the only representation included in `event_hash`.
+[`AUDIT-EVENTS.md`](AUDIT-EVENTS.md) is the complete producer contract.
+
 Ordering is explicit: every event carries a strictly monotonic `seq`
 (1, 2, 3, … with no gaps) assigned inside a serialized append — a
 transaction-scoped PostgreSQL advisory lock serializes concurrent writers, and
