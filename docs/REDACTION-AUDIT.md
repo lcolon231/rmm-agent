@@ -74,6 +74,12 @@ audit-event detail (`command.completed` records IDs, exit code, status,
 truncation flags, and byte totals — not the output), a log line, or an error
 message.
 
+Script authorization audit events follow the same no-payload boundary.
+`command.authorization_allowed` and `command.authorization_denied` retain the
+operator, role, command kind, target IDs, scope, policy, and decision reason,
+but never the command payload or script. Permission grant/revoke events retain
+scope changes and the admin-supplied reason, not command content.
+
 ### Agent — logs and errors (`agent/internal/redact`, issue #112)
 
 - The runner logs command **IDs**, kinds, and agent IDs — never payloads,

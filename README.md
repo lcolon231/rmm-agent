@@ -41,6 +41,10 @@ The code in this repository currently provides:
   outages, lost acknowledgements, and restarts. Windows commands run in
   kill-on-close Job Objects so timeout, service stop, agent exit, and normal
   shell completion terminate the complete process tree.
+- Default-deny arbitrary-script authorization: PowerShell and shell require an
+  explicit admin-granted global, site, or agent scope even for admins, while
+  typed inventory remains role-authorized. Grant changes and every allow/deny
+  decision are audited without recording script contents.
 - Fail-closed production startup validation (`ENVIRONMENT=production` rejects
   debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
   URLs) with explicit opt-in proxy trust for client IPs.

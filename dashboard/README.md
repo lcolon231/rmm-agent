@@ -84,12 +84,14 @@ table. Successful reads create a redacted `endpoint_detail.viewed` audit event.
 ## Command console
 
 `/endpoints/{id}/commands` lists an endpoint's signed command history (newest
-first, paginated) with a queue admission meter, and `operator`/`admin` roles can
-dispatch `powershell`, `shell`, and `collect_inventory` commands through a
-compose-then-confirm flow; `readonly` operators get history and results with an
-explicit read-only notice. Dispatch is validated in the browser and again in a
+first, paginated) with a queue admission meter. `operator`/`admin` roles can
+dispatch the typed `collect_inventory` operation; `powershell` and `shell`
+appear only when the endpoint-detail API reports that the operator's explicit
+global, site, or agent script scope matches this endpoint. Admin has no implicit
+bypass. `readonly` operators get history and results with an explicit read-only
+notice. Dispatch is validated in the browser and again in a
 same-origin route handler before being forwarded to the NodeLink API, which
-independently enforces role, trust state, queue admission, and envelope
+independently enforces role, script scope, trust state, queue admission, and envelope
 negotiation. `/endpoints/{id}/commands/{commandId}` shows one command's full
 record: lifecycle timestamps, signed payload, envelope evidence (version,
 schema, nonce, signing key, signature), exit code, and bounded stdout/stderr
@@ -104,7 +106,7 @@ Reading a command record creates a `command_detail.viewed` audit event.
 - The only dashboard mutation is command dispatch, which is forwarded
   same-origin with the operator's HTTP-only session cookie; no browser token or
   persisted dashboard state exists. Aggregate overview and audit panels remain
-  fixture-backed. No schema migration is required for these APIs.
+  fixture-backed. Script permission administration remains API-only.
 - The API client makes no automatic retry, and dispatch is not retried —
   a failed dispatch is reported and the operator decides whether to resend.
 - Rollback is deployment-level: remove or disable the dashboard service without

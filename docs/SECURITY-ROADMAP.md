@@ -163,7 +163,12 @@ inventory. Command dispatch is same-origin-checked, role-gated
 (`operator`/`admin`), blocked for untrusted endpoints, bounded by server-side
 queue admission, and audited; command history and detail reads are paginated
 and bounded, and reading captured output is audited as
-`command_detail.viewed`. Tenant-scoped authorization, mutation-specific CSRF
+`command_detail.viewed`. Arbitrary `powershell` and `shell` dispatch is also
+default-deny for every role and requires an explicit admin-granted global,
+site, or agent scope. Typed inventory remains role-authorized independently;
+every allow/deny decision is audited without the payload before signing or
+queueing (`docs/SCRIPT-AUTHORIZATION.md`). Tenant-scoped authorization,
+mutation-specific CSRF
 tokens beyond the same-origin check, and the remaining administrative audit
 coverage are still required before this milestone closes.
 

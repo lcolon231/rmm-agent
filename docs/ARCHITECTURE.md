@@ -71,7 +71,9 @@ accept an action. It currently contains:
 
 - Operator email/password authentication with bcrypt password hashes.
 - HS256 JWTs with a per-operator generation counter for logout-everywhere.
-- Global `readonly`, `operator`, and `admin` roles.
+- Global `readonly`, `operator`, and `admin` roles. Arbitrary script execution
+  is a separate default-deny permission with one admin-granted `global`, `site`,
+  or `agent` scope; admin does not bypass it.
 - Enrollment-token and agent-token issuance; only token hashes are stored on
   the server.
 - A single deployment-wide Ed25519 command-signing keypair.
@@ -101,10 +103,11 @@ enrollment, heartbeat telemetry, polling command pickup, three command kinds,
 buffered result submission, command history, and offline status transitions.
 
 The current command kinds are `powershell`, `shell`, and `collect_inventory`.
-`collect_inventory` is only another script execution path; no built-in complete
-inventory collector exists. Prefer typed endpoint operations as new behavior is
-added. Arbitrary scripts remain powerful escape hatches and should receive
-stronger policy and approval controls.
+`collect_inventory` is a typed operation authorized by the operator role.
+`powershell` and `shell` are arbitrary-script escape hatches and require a
+separate scope matching the target. Authorization is evaluated and audited
+before an envelope is created, signed, or queued. See
+[`SCRIPT-AUTHORIZATION.md`](SCRIPT-AUTHORIZATION.md).
 
 ### 3.3 Product plane
 
@@ -136,7 +139,9 @@ The dashboard also has a per-endpoint command console at
 compose-then-confirm flow available only to `operator`/`admin` roles and only
 for endpoints in the `active` trust state; `readonly` operators see history and
 results with an explicit read-only notice, and the server enforces the same
-rules regardless of what the UI shows. Dispatch input is validated in the
+rules regardless of what the UI shows. Operators without a matching explicit
+script scope see only typed inventory dispatch; the endpoint-detail API returns
+the target-specific `script_execution_allowed` capability. Dispatch input is validated in the
 browser and again in a same-origin Next.js route handler (supported kinds only,
 script required for `powershell`/`shell` and refused for `collect_inventory`,
 56 KiB script bound under the 60 KiB signed-payload cap, 1s-24h TTL) before
@@ -189,6 +194,10 @@ their signatures do not cover the v2 contract. Migrations are forward-only; an
 existing debug-created database may be stamped `0001` only after backup and
 manual schema verification.
 
+Revision `0010` adds nullable operator script scope and scope-ID columns. Null
+means default deny; migration does not grandfather any existing operator or
+admin.
+
 ### 4.1 Current data model
 
 ```text
@@ -217,6 +226,9 @@ All application routes except `/healthz` are under `/api/v1`.
 |---|---|---|---|
 | POST | `/auth/login` | Exchange credentials for JWT | Public, throttled in-process |
 | POST | `/auth/operators` | Create operator | Admin |
+| GET | `/auth/operators` | List operators and script scopes | Admin |
+| PUT | `/auth/operators/{id}/script-permission` | Grant/replace one script scope | Admin |
+| POST | `/auth/operators/{id}/script-permission/revoke` | Revoke script scope | Admin |
 | GET | `/auth/me` | Current operator | Readonly+ |
 | POST | `/auth/revoke-tokens` | Revoke caller sessions | Readonly+ |
 | POST | `/auth/operators/{id}/revoke-tokens` | Revoke operator sessions | Admin |
@@ -240,8 +252,8 @@ All application routes except `/healthz` are under `/api/v1`.
 | GET | `/audit/anchors/{id}/receipt` | External publication receipt + tamper check | Readonly |
 | GET | `/audit/publication-status` | External anchor publication lag/health | Readonly |
 
-There are no APIs yet for listing/revoking enrollment tokens, operator
-listing/editing, audit-event listing, monitoring policies or alerts, scheduling,
+There are no APIs yet for listing/revoking enrollment tokens, general operator
+editing, audit-event listing, monitoring policies or alerts, scheduling,
 patching, or evidence export. Telemetry history is available only as a bounded
 read-only endpoint-detail query, not as a general analytics API.
 

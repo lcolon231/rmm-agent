@@ -30,7 +30,11 @@ from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.security import canonical_command_bytes, hash_password  # noqa: E402
 from app.core.command_envelope import COMMAND_ENVELOPE_V2, COMMAND_ENVELOPE_V3  # noqa: E402
 from app.core import audit  # noqa: E402
-from app.models.models import Operator, OperatorRole  # noqa: E402
+from app.models.models import (  # noqa: E402
+    Operator,
+    OperatorRole,
+    ScriptExecutionScope,
+)
 
 
 @pytest_asyncio.fixture
@@ -47,6 +51,7 @@ async def client():
                 email="e2e@nodelink.test",
                 password_hash=hash_password("e2e-password"),
                 role=OperatorRole.operator,
+                script_execution_scope=ScriptExecutionScope.global_,
             )
         )
         await db.commit()

@@ -77,6 +77,14 @@ export const commandKindDefinitions: CommandKindDefinition[] = [
   },
 ];
 
+export function commandKindDefinitionsForPermission(
+  canExecuteScripts: boolean,
+): CommandKindDefinition[] {
+  return canExecuteScripts
+    ? commandKindDefinitions
+    : commandKindDefinitions.filter((item) => !item.requiresScript);
+}
+
 // The signed payload is capped at 60 KiB canonical JSON server-side; leave
 // headroom for the JSON wrapping around the script text.
 export const MAX_SCRIPT_BYTES = 56 * 1024;

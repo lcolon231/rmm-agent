@@ -71,8 +71,11 @@ link to reproducible evidence in the release or pilot record.
       atomic registry writes with an append-only rotation journal;
       `docs/KEY-ROTATION.md`; full staged + compromise + rollback rehearsal in
       `tests/test_key_rotation.py`).
-- [ ] Typed operations are used where available; arbitrary script permission is
-      explicit.
+- [x] Typed operations are authorized independently; arbitrary PowerShell and
+      shell execution is default-deny for every role and requires an explicit
+      admin-granted global, site, or agent scope. Allowed and denied decisions
+      are audited before signing/queueing without recording scripts
+      (`docs/SCRIPT-AUTHORIZATION.md`).
 
 ### Agent identity and endpoint storage
 
@@ -250,6 +253,11 @@ additive, but durable dispatch recovery requires the server and agent from this
 revision together. Rolling the server back while new agents are active requires
 pausing dispatch; retained acknowledged results prevent re-execution if a
 command row is restored to a pre-result state.
+
+Revision `0010` adds nullable arbitrary-script permission scope fields to
+operators. Null is default deny, including for existing admins. The server and
+dashboard must be deployed together to expose the grant accurately; the agent
+protocol is unchanged. See `docs/SCRIPT-AUTHORIZATION.md`.
 
 ## Rollback procedure
 

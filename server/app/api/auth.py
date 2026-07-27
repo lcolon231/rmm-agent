@@ -21,11 +21,19 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.models.models import Operator, OperatorRole
+from app.models.models import (
+    Agent,
+    Operator,
+    OperatorRole,
+    ScriptExecutionScope,
+    Site,
+)
 from app.schemas.schemas import (
     LoginRequest,
     OperatorCreate,
     OperatorOut,
+    ScriptExecutionPermissionChange,
+    ScriptExecutionPermissionRevoke,
     TokenResponse,
 )
 
@@ -110,6 +118,125 @@ async def whoami(
 ):
     """Return the calling operator — handy for the dashboard to know its role."""
     return operator
+
+
+@router.get("/auth/operators", response_model=list[OperatorOut])
+async def list_operators(
+    _admin: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """List operator identities and their current script permission. Admin-only."""
+    result = await db.execute(select(Operator).order_by(Operator.email, Operator.id))
+    return list(result.scalars().all())
+
+
+async def _validate_script_permission_scope(
+    db: AsyncSession,
+    body: ScriptExecutionPermissionChange,
+) -> None:
+    if body.scope == ScriptExecutionScope.global_:
+        return
+    target = (
+        await db.get(Site, body.scope_id)
+        if body.scope == ScriptExecutionScope.site
+        else await db.get(Agent, body.scope_id)
+    )
+    if target is None:
+        kind = "Site" if body.scope == ScriptExecutionScope.site else "Agent"
+        raise HTTPException(status_code=404, detail=f"{kind} not found")
+
+
+@router.put(
+    "/auth/operators/{operator_id}/script-permission",
+    response_model=OperatorOut,
+)
+async def set_script_execution_permission(
+    operator_id: str,
+    body: ScriptExecutionPermissionChange,
+    admin: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Explicitly grant one global, site, or agent arbitrary-script scope."""
+    target = await db.get(Operator, operator_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Operator not found")
+    if target.role == OperatorRole.readonly:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "script_permission_role_ineligible"},
+        )
+    await _validate_script_permission_scope(db, body)
+
+    previous_scope = target.script_execution_scope
+    previous_scope_id = target.script_execution_scope_id
+    target.script_execution_scope = body.scope
+    target.script_execution_scope_id = body.scope_id
+    await audit.record(
+        db,
+        action="operator.script_permission_changed",
+        actor=admin.email,
+        agent_id=(
+            body.scope_id
+            if body.scope == ScriptExecutionScope.agent
+            else None
+        ),
+        detail={
+            "operator_id": target.id,
+            "operator_role": target.role.value,
+            "previous_scope": (
+                previous_scope.value if previous_scope is not None else None
+            ),
+            "previous_scope_id": previous_scope_id,
+            "new_scope": body.scope.value,
+            "new_scope_id": body.scope_id,
+            "reason": body.reason,
+        },
+    )
+    return target
+
+
+@router.post(
+    "/auth/operators/{operator_id}/script-permission/revoke",
+    response_model=OperatorOut,
+)
+async def revoke_script_execution_permission(
+    operator_id: str,
+    body: ScriptExecutionPermissionRevoke,
+    admin: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return an operator to the default-deny arbitrary-script state."""
+    target = await db.get(Operator, operator_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Operator not found")
+    if target.script_execution_scope is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "script_permission_not_granted"},
+        )
+
+    previous_scope = target.script_execution_scope
+    previous_scope_id = target.script_execution_scope_id
+    target.script_execution_scope = None
+    target.script_execution_scope_id = None
+    await audit.record(
+        db,
+        action="operator.script_permission_revoked",
+        actor=admin.email,
+        agent_id=(
+            previous_scope_id
+            if previous_scope == ScriptExecutionScope.agent
+            else None
+        ),
+        detail={
+            "operator_id": target.id,
+            "operator_role": target.role.value,
+            "previous_scope": previous_scope.value,
+            "previous_scope_id": previous_scope_id,
+            "reason": body.reason,
+        },
+    )
+    return target
 
 
 @router.post("/auth/revoke-tokens", status_code=status.HTTP_204_NO_CONTENT)

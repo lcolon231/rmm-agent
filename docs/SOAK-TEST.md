@@ -50,6 +50,12 @@ The harness exits **non-zero** if any CRITICAL finding is recorded (the audit
 chain broke, or the workload could not run), so it can gate a pipeline. It
 writes three files into `--evidence-dir`:
 
+The supplied account must be an admin dedicated to the synthetic soak
+environment. After login, the harness explicitly grants that account a global
+arbitrary-script scope with an audited reason because the workload exercises
+shell commands; it does not rely on the admin role as an implicit bypass. Do
+not point the harness at non-synthetic endpoints.
+
 - `soak-evidence.jsonl` — one JSON object per sample (raw evidence).
 - `soak-summary.json` — machine-readable summary and findings.
 - `soak-report.md` — the human report (workload, resources, integrity,

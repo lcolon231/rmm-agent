@@ -35,7 +35,13 @@ from app.schemas.schemas import (  # noqa: E402
     MAX_RESULT_COMBINED_BYTES,
     MAX_RESULT_STREAM_BYTES,
 )
-from app.models.models import AuditEvent, Command, Operator, OperatorRole  # noqa: E402
+from app.models.models import (  # noqa: E402
+    AuditEvent,
+    Command,
+    Operator,
+    OperatorRole,
+    ScriptExecutionScope,
+)
 
 
 @pytest_asyncio.fixture
@@ -50,6 +56,7 @@ async def client():
                 email="limits@nodelink.test",
                 password_hash=hash_password("limits-pass"),
                 role=OperatorRole.operator,
+                script_execution_scope=ScriptExecutionScope.global_,
             )
         )
         await db.commit()

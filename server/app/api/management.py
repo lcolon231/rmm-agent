@@ -5,8 +5,9 @@ agents, and dispatch commands.
 Authorization model:
   - The whole router requires a valid operator token (readonly or higher). This
     is set as a router-level dependency, so no route is reachable anonymously.
-  - Mutating routes (provisioning, dispatch) additionally require `operator` or
-    higher, declared per-route with Depends(require_role(...)).
+  - Mutating provisioning routes require `operator` or higher.
+  - Command dispatch applies an explicit policy in the handler so both role
+    denials and the separate arbitrary-script permission are auditable.
 """
 from __future__ import annotations
 
@@ -33,6 +34,10 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
 from app.core.keyring import active_signing_key, load_keyring
+from app.core.script_authorization import (
+    authorize_command,
+    decision_audit_detail,
+)
 from app.models.models import (
     Agent,
     AgentTrustState,
@@ -40,6 +45,7 @@ from app.models.models import (
     AuditAnchor,
     Client,
     Command,
+    CommandKind,
     CommandStatus,
     EnrollmentToken,
     Heartbeat,
@@ -400,6 +406,9 @@ async def get_endpoint_detail(
     descending_heartbeats = list(heartbeat_result.scalars().all())
     history_truncated = len(descending_heartbeats) > history_limit
     history = list(reversed(descending_heartbeats[:history_limit]))
+    script_execution_allowed = authorize_command(
+        operator, agent, CommandKind.powershell
+    ).allowed
 
     def telemetry_sample(heartbeat: Heartbeat) -> EndpointTelemetrySampleOut:
         return EndpointTelemetrySampleOut(
@@ -434,6 +443,7 @@ async def get_endpoint_detail(
             "history_limit": history_limit,
             "history_count": len(history),
             "history_truncated": history_truncated,
+            "script_execution_allowed": script_execution_allowed,
         },
     )
     return EndpointDetailOut(
@@ -451,6 +461,7 @@ async def get_endpoint_detail(
         client_name=client.name,
         site_id=site.id,
         site_name=site.name,
+        script_execution_allowed=script_execution_allowed,
         current_telemetry=telemetry_sample(latest_heartbeat) if latest_heartbeat else None,
         telemetry=[telemetry_sample(heartbeat) for heartbeat in history],
         telemetry_freshness=telemetry_freshness,
@@ -623,7 +634,7 @@ async def list_signing_keys(db: AsyncSession = Depends(get_db)):
 async def dispatch_command(
     agent_id: str,
     body: CommandCreate,
-    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
     """Queue a command for an agent, signed so the agent can verify authenticity.
@@ -634,6 +645,35 @@ async def dispatch_command(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    decision = authorize_command(operator, agent, body.kind)
+    decision_detail = decision_audit_detail(
+        decision,
+        operator=operator,
+        agent=agent,
+        kind=body.kind,
+    )
+    if not decision.allowed:
+        # HTTPException would normally roll the request transaction back. This
+        # denial audit is the only mutation so commit it explicitly before the
+        # fail-closed response; no command has been signed or queued.
+        await audit.record(
+            db,
+            action="command.authorization_denied",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail=decision_detail,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": (
+                    "script_execution_not_authorized"
+                    if body.kind in (CommandKind.powershell, CommandKind.shell)
+                    else "command_role_not_authorized"
+                )
+            },
+        )
     # Trust gate before capability negotiation: no new work may even be queued
     # for an agent the server no longer fully trusts.
     if agent.trust_state != AgentTrustState.active:
@@ -686,6 +726,13 @@ async def dispatch_command(
             },
         )
 
+    await audit.record(
+        db,
+        action="command.authorization_allowed",
+        actor=operator.email,
+        agent_id=agent.id,
+        detail=decision_detail,
+    )
     now = _now()
     key_id = active_signing_key().key_id if envelope_version == COMMAND_ENVELOPE_V3 else None
     cmd = Command(

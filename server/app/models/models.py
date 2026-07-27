@@ -55,6 +55,14 @@ class OperatorRole(str, enum.Enum):
     admin = "admin"
 
 
+class ScriptExecutionScope(str, enum.Enum):
+    """The single explicit arbitrary-script boundary granted to an operator."""
+
+    global_ = "global"
+    site = "site"
+    agent = "agent"
+
+
 class AgentStatus(str, enum.Enum):
     pending = "pending"      # enrolled, no heartbeat yet
     online = "online"
@@ -114,6 +122,15 @@ class Operator(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[OperatorRole] = mapped_column(
         Enum(OperatorRole), default=OperatorRole.readonly, nullable=False
+    )
+    # Arbitrary PowerShell/shell execution is independently default-denied,
+    # including for admins. A non-NULL scope is an explicit permission grant;
+    # scope_id is required for site/agent scopes and NULL for global.
+    script_execution_scope: Mapped[ScriptExecutionScope | None] = mapped_column(
+        Enum(ScriptExecutionScope), nullable=True
+    )
+    script_execution_scope_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True
     )
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # Monotonic token version. Every JWT carries the generation it was minted

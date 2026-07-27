@@ -73,6 +73,7 @@ export function CommandConsoleView({
   operator: DashboardOperator;
 }) {
   const canDispatch = operator.role === "operator" || operator.role === "admin";
+  const canExecuteScripts = endpoint.script_execution_allowed;
   const trusted = endpoint.trust_state === "active";
   const queueFull = history.outstanding >= history.outstanding_limit;
   const pageCount = commandPageCount(history.total, history.page_size);
@@ -127,7 +128,18 @@ export function CommandConsoleView({
                 will be refused until pending commands finish or expire.
               </p>
             ) : null}
-            <CommandDispatchForm endpointId={endpoint.id} hostname={endpoint.hostname} />
+            {!canExecuteScripts ? (
+              <p className="dispatch-queue-warning" role="status">
+                Arbitrary PowerShell and shell execution is default-denied for this endpoint.
+                An administrator must grant your operator an explicit matching scope. Typed
+                inventory collection remains available.
+              </p>
+            ) : null}
+            <CommandDispatchForm
+              canExecuteScripts={canExecuteScripts}
+              endpointId={endpoint.id}
+              hostname={endpoint.hostname}
+            />
           </section>
         ) : null}
 
