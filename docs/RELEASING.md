@@ -18,11 +18,25 @@ drill is still required. Do not describe a tagged artifact as production-ready. 
 
 1. Make sure `main` is green (the CI workflow runs the Go and Python suites on
    every push/PR).
-2. Fill the release and last-known-good compatibility record in
-   [`ROLLBACK.md`](ROLLBACK.md): immutable server commit/tag, agent and installer
-   versions/digests, Alembic head, backup manifest, and protocol versions.
-   Confirm the rollback backup has passed `verify_restore.py`.
-3. Tag and push:
+2. Copy [`release-notes/TEMPLATE.json`](../release-notes/TEMPLATE.json) to
+   `release-notes/<tag>.json` and fill every release-specific field. The record
+   names the server tag, agent and installer versions, Alembic and protocol
+   compatibility, known limitations, upgrade and rollback procedures, security
+   impact, immutable last-known-good component digests, verified backup, and
+   retained rollback evidence.
+3. Run the same preflight used by the release workflow:
+
+   ```bash
+   python3 server/scripts/validate_release_notes.py \
+     --manifest release-notes/v0.1.2.json \
+     --tag v0.1.2 \
+     --phase preflight
+   ```
+
+   Placeholder text, missing fields, mutable identifiers, abbreviated commits,
+   and invalid digests fail validation. Confirm the named rollback backup has
+   passed `verify_restore.py`.
+4. Commit the completed manifest, make sure `main` is green, then tag and push:
 
    ```bash
    git checkout main && git pull
@@ -30,7 +44,8 @@ drill is still required. Do not describe a tagged artifact as production-ready. 
    git push origin v0.1.0
    ```
 
-4. The workflow runs the Go tests, cross-builds with the version stamped in
+5. The workflow revalidates the manifest before tests or builds, cross-builds
+   with the version stamped in
    (`-ldflags "-X main.version=<tag without v>"`), and publishes a GitHub
    Release with:
    - `rmm-agent-windows-amd64.exe`
@@ -43,6 +58,9 @@ drill is still required. Do not describe a tagged artifact as production-ready. 
      Authenticode signing slots in at the same place (below). Linux/macOS have
      no installer — those platforms use the foreground/systemd path described
      in `agent/README.md`.
+   - `RELEASE-NOTES.md` and `release-evidence-<version>.json` — the validated
+     release body and machine-readable record bound to the tag commit and final
+     artifact digests.
 
 `rmm-agent.exe -version`-style identification: the version is compiled in and
 printed in the startup log line (`NodeLink RMM agent <version> starting`).
@@ -115,11 +133,17 @@ Each release publishes and (where possible) verifies:
   final installer. *Not done — requires a paid certificate (see below). This is
   the remaining release-authenticity gap.*
 - **Compatibility, migration, backup, upgrade, and rollback notes** — see the
-  sections below and `docs/BACKUP-RESTORE.md`.
+  tag-specific source manifest under `release-notes/`, its rendered release
+  assets, and `docs/BACKUP-RESTORE.md`.
 
-Because the SBOM, provenance, and checksum steps run inline, a failure in any of
-them fails the release job. The signing step will fail closed the same way once
-it is added.
+The workflow validates the operator-authored manifest before building. Agent
+and installer jobs upload temporary workflow artifacts but do not create or
+modify a GitHub Release. A final job downloads both outputs, verifies their
+checksum files, binds their SHA-256 digests and the checked-out tag commit into
+the evidence, and renders the release body. The single publication step cannot
+run unless all
+of those checks pass. The signing step will fail closed in the same pre-publish
+path once it is added.
 
 ## Current schema and agent compatibility
 
@@ -145,13 +169,15 @@ rollback.
 
 ## Rollback
 
-The operator runbook is [`ROLLBACK.md`](ROLLBACK.md). It requires a
-release-specific record naming the compatible server, agent, installer, and
-schema; fails closed until external agent rollout is paused; treats migrations
-as forward-only; preserves the failed-state backup and audit evidence; and
-defines post-rollback checks. `scripts/plan_release_rollback.py` records the
-forward-fix/redeploy/restore decision, and the PostgreSQL CI suite rehearses the
-restore path through `verify_restore.py`.
+The operator runbook is [`ROLLBACK.md`](ROLLBACK.md). The tag-specific source
+manifest and finalized release evidence name the compatible server, agent,
+installer, schema, protocols, backup, and immutable last-known-good target.
+The runbook fails closed until external agent rollout is paused, treats
+migrations as forward-only, preserves the failed-state backup and audit
+evidence, and defines post-rollback checks.
+`scripts/plan_release_rollback.py` records the forward-fix/redeploy/restore
+decision, and the PostgreSQL CI suite rehearses the restore path through
+`verify_restore.py`.
 
 This is reproducible automated evidence, not a claim that a production
 deployment or operator response has been drilled. Perform and retain a timed

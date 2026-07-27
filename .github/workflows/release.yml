@@ -1,19 +1,10 @@
 name: Release
 
-# Cut a versioned agent release. Triggered by pushing a tag like v0.1.0.
-# Builds the agent for all targets with the version stamped in, publishes the
-# binaries + SHA-256 checksums to a GitHub Release, and builds the graphical
-# Windows installer (installer/NodeLinkAgent.iss) on a Windows runner. The
-# server runs from source (uvicorn), so only the agent is released as a binary.
-#
-# Each release also publishes an SPDX SBOM (Go + Python dependencies) and a
-# signed SLSA build-provenance attestation tying every artifact's digest to
-# this workflow and source ref, plus SHA-256 checksums.
-#
-# Code signing (Authenticode) is NOT wired up — these binaries are UNSIGNED,
-# because it requires a paid code-signing certificate. See docs/RELEASING.md
-# for where the signing step slots in once a certificate exists. Provenance +
-# SBOM + checksums are the supply-chain evidence available without one.
+# Cut a versioned agent release. A tag is publishable only when its
+# version-controlled release-notes/<tag>.json manifest passes preflight and the
+# finalized evidence matches every built artifact. The server runs from source,
+# so the server tag and commit are recorded while only agent/installer binaries
+# are attached to the GitHub Release.
 
 on:
   push:
@@ -25,8 +16,21 @@ permissions:
   attestations: write   # store the attestations
 
 jobs:
+  release-notes-preflight:
+    name: validate release-specific notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require a complete manifest for this tag
+        run: |
+          python3 server/scripts/validate_release_notes.py \
+            --manifest "release-notes/${GITHUB_REF_NAME}.json" \
+            --tag "$GITHUB_REF_NAME" \
+            --phase preflight
+
   test:
     name: test before release
+    needs: release-notes-preflight
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -41,7 +45,7 @@ jobs:
       - run: go test ./...
 
   build:
-    name: build and publish
+    name: build agent release artifacts
     needs: test
     runs-on: ubuntu-latest
     defaults:
@@ -58,9 +62,6 @@ jobs:
         id: version
         run: |
           version="${GITHUB_REF_NAME#v}"
-          # Constrain to a safe charset so the value can't smuggle shell/expression
-          # metacharacters into the steps that interpolate it (a git tag may
-          # legally contain quotes, ';', '$', backticks, etc.).
           if ! [[ "$version" =~ ^[0-9A-Za-z.+-]+$ ]]; then
             echo "::error::Refusing unsafe release tag: ${GITHUB_REF_NAME}"
             exit 1
@@ -72,8 +73,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: ./build.sh "$VERSION"
 
-      # SPDX SBOM over the whole repo, so it captures both the Go module
-      # (agent go.mod) and the Python server dependencies (requirements.txt).
+      # SPDX SBOM over the whole repo captures the Go agent and Python server.
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
         with:
@@ -81,16 +81,17 @@ jobs:
           format: spdx-json
           output-file: agent/bin/nodelink-${{ steps.version.outputs.version }}.spdx.json
 
-      # Checksums cover every published artifact, including the SBOM. Generated
-      # last so a future signing step (which rewrites the binaries) would land
-      # before this line and keep the checksums honest.
+      # A future signing step must remain before checksums and attestations.
       - name: Checksums
         working-directory: agent/bin
-        run: sha256sum * > SHA256SUMS.txt
+        run: |
+          sha256sum \
+            rmm-agent-windows-amd64.exe \
+            rmm-agent-linux-amd64 \
+            rmm-agent-darwin-arm64 \
+            "nodelink-${{ steps.version.outputs.version }}.spdx.json" \
+            > SHA256SUMS.txt
 
-      # Signed, keyless SLSA provenance binding each binary's digest to this
-      # workflow + source ref. Verify with:
-      #   gh attestation verify <file> --repo lcolon231/rmm-agent
       - name: Attest build provenance (agent binaries)
         uses: actions/attest-build-provenance@v1
         with:
@@ -99,30 +100,24 @@ jobs:
             agent/bin/rmm-agent-linux-amd64
             agent/bin/rmm-agent-darwin-arm64
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Stage agent release artifacts
+        run: |
+          mkdir -p ../release-output
+          cp \
+            bin/rmm-agent-windows-amd64.exe \
+            bin/rmm-agent-linux-amd64 \
+            bin/rmm-agent-darwin-arm64 \
+            "bin/nodelink-${{ steps.version.outputs.version }}.spdx.json" \
+            bin/SHA256SUMS.txt \
+            ../release-output/
+
+      - name: Retain agent artifacts for final validation
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            agent/bin/rmm-agent-windows-amd64.exe
-            agent/bin/rmm-agent-linux-amd64
-            agent/bin/rmm-agent-darwin-arm64
-            agent/bin/nodelink-${{ steps.version.outputs.version }}.spdx.json
-            agent/bin/SHA256SUMS.txt
-          generate_release_notes: true
-          body: |
-            NodeLink RMM agent ${{ steps.version.outputs.version }}.
-
-            **These binaries are unsigned** (Authenticode signing needs a paid
-            certificate — see docs/RELEASING.md). Supply-chain evidence that
-            does not require one is published instead:
-
-            - `SHA256SUMS.txt` — verify downloads with `sha256sum -c`.
-            - `nodelink-<version>.spdx.json` — SPDX SBOM (Go + Python deps).
-            - Build provenance — verify with
-              `gh attestation verify <file> --repo ${{ github.repository }}`.
-
-            On Windows, SmartScreen may still warn on first run until signing
-            is added.
+          name: release-agent-${{ github.ref_name }}
+          path: release-output/*
+          if-no-files-found: error
+          retention-days: 7
 
   installer:
     name: build windows installer
@@ -140,8 +135,6 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          # Constrain to a safe charset before it reaches the PowerShell steps
-          # below; a git tag may legally contain quotes/';'/'$'/backticks.
           if ! [[ "$version" =~ ^[0-9A-Za-z.+-]+$ ]]; then
             echo "::error::Refusing unsafe release tag: ${GITHUB_REF_NAME}"
             exit 1
@@ -157,9 +150,7 @@ jobs:
           $env:GOARCH = 'amd64'
           go build -ldflags "-s -w -X main.version=$env:VERSION" -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
 
-      # Pinned to the 6.x line: Inno Setup 7 is out upstream, and an unpinned
-      # install would eventually land in "Inno Setup 7\" and break the ISCC
-      # path below (the .iss targets IS6; bump both together when upgrading).
+      # Pinned to the 6.x line to match installer/NodeLinkAgent.iss.
       - name: Install Inno Setup
         run: choco install innosetup --version=6.7.1 -y
 
@@ -175,17 +166,85 @@ jobs:
         shell: pwsh
         run: |
           $f = "NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe"
-          (Get-FileHash $f -Algorithm SHA256).Hash.ToLower() + "  " + $f | Out-File -Encoding ascii "$f.sha256"
+          (Get-FileHash $f -Algorithm SHA256).Hash.ToLower() + "  " + $f |
+            Out-File -Encoding ascii "$f.sha256"
 
-      # Provenance for the installer, tying its digest to this workflow/ref.
       - name: Attest build provenance (installer)
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: installer/Output/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe
 
-      - name: Attach installer to the release
+      - name: Stage installer release artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-output | Out-Null
+          $files = @(
+            "installer/Output/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe"
+            "installer/Output/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe.sha256"
+          )
+          Copy-Item -LiteralPath $files -Destination release-output
+
+      - name: Retain installer artifacts for final validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-installer-${{ github.ref_name }}
+          path: release-output/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: finalize evidence and publish
+    needs: [build, installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all built release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*-${{ github.ref_name }}
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Derive version from tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ "$version" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+            echo "::error::Refusing unsafe release tag: ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Finalize release notes and immutable evidence
+        run: |
+          source_sha="$(git rev-parse HEAD)"
+          python3 server/scripts/validate_release_notes.py \
+            --manifest "release-notes/${GITHUB_REF_NAME}.json" \
+            --tag "$GITHUB_REF_NAME" \
+            --phase finalize \
+            --artifact-dir release-artifacts \
+            --source-sha "$source_sha" \
+            --repository "$GITHUB_REPOSITORY" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --output-notes release-artifacts/RELEASE-NOTES.md \
+            --output-evidence \
+              "release-artifacts/release-evidence-${{ steps.version.outputs.version }}.json"
+
+      # This is the only GitHub Release publication step. It cannot run until
+      # both platform builds and final release-evidence validation succeed.
+      - name: Publish validated GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release-artifacts/RELEASE-NOTES.md
+          generate_release_notes: false
           files: |
-            installer/Output/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe
-            installer/Output/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe.sha256
+            release-artifacts/rmm-agent-windows-amd64.exe
+            release-artifacts/rmm-agent-linux-amd64
+            release-artifacts/rmm-agent-darwin-arm64
+            release-artifacts/nodelink-${{ steps.version.outputs.version }}.spdx.json
+            release-artifacts/SHA256SUMS.txt
+            release-artifacts/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe
+            release-artifacts/NodeLinkAgentSetup-${{ steps.version.outputs.version }}.exe.sha256
+            release-artifacts/RELEASE-NOTES.md
+            release-artifacts/release-evidence-${{ steps.version.outputs.version }}.json

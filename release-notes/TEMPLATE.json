@@ -1,0 +1,108 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "<required: vX.Y.Z>",
+    "title": "NodeLink <required: version> release",
+    "intended_use": "<required: deployment scope and readiness statement>"
+  },
+  "server": {
+    "tag": "<required: same immutable release tag>",
+    "deployment": "source"
+  },
+  "agent": {
+    "version": "<required: tag without v>",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "<required: tag without v>",
+    "filename": "NodeLinkAgentSetup-<required: version>.exe"
+  },
+  "database": {
+    "alembic_revision": "<required: exact revision>",
+    "compatible_from": [
+      "<required: exact supported prior revision>"
+    ],
+    "migration_policy": "<required: upgrade and downgrade policy>"
+  },
+  "protocols": {
+    "command_envelopes": [
+      "<required: versioned protocol identifier>"
+    ],
+    "mixed_version_behavior": "<required: compatibility and failure behavior>"
+  },
+  "known_limitations": [
+    "<required: at least one explicit limitation or a reasoned none statement>"
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "<required: backup and compatibility prerequisites>"
+    ],
+    "steps": [
+      "<required: ordered deployment step>"
+    ],
+    "verification": [
+      "<required: post-upgrade verification>"
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "<required: forward-fix/redeploy/restore decision step>"
+    ],
+    "target": {
+      "server": {
+        "tag": "<required: immutable rollback tag>",
+        "commit": "<required: full 40-character commit>"
+      },
+      "agent": {
+        "version": "<required: immutable rollback version>",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "<required: SHA-256>",
+          "rmm-agent-linux-amd64": "<required: SHA-256>",
+          "rmm-agent-darwin-arm64": "<required: SHA-256>"
+        }
+      },
+      "installer": {
+        "filename": "<required: immutable installer filename>",
+        "sha256": "<required: SHA-256>"
+      },
+      "database": {
+        "alembic_revision": "<required: rollback revision>",
+        "backup_manifest": {
+          "url": "<required: immutable https or versioned s3 URL>",
+          "sha256": "<required: SHA-256>"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "<required: rollback protocol identifier>"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "<required: security impact summary>",
+    "fixed_vulnerabilities": [
+      "<required: fixed issue or an explicit none statement>"
+    ],
+    "new_risks": [
+      "<required: new/retained risk or an explicit none statement>"
+    ],
+    "operator_actions": [
+      "<required: security action or an explicit none statement>"
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "<required: immutable evidence URL>",
+      "sha256": "<required: SHA-256>"
+    },
+    "rollback_rehearsal": {
+      "url": "<required: immutable evidence URL>",
+      "sha256": "<required: SHA-256>"
+    }
+  }
+}
