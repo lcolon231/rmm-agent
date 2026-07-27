@@ -43,6 +43,7 @@ REPO_ROOT = SERVER_ROOT.parent
 BACKUP_SH = REPO_ROOT / "deploy" / "backup" / "nodelink-backup.sh"
 RESTORE_SH = REPO_ROOT / "deploy" / "backup" / "nodelink-restore.sh"
 ROLLBACK_PLANNER = SERVER_ROOT / "scripts" / "plan_release_rollback.py"
+ROLLBACK_N_PLUS_1_LAST_SEEN = "2099-01-01T00:00:00+00:00"
 
 _TOOLS = all(shutil.which(t) for t in ("pg_dump", "pg_restore", "psql", "openssl"))
 
@@ -98,7 +99,11 @@ async def _seed(asyncpg_url: str) -> None:
                            payload={"script": "echo hi"}, envelope_version="command-v3",
                            status=CommandStatus.succeeded, stdout="hi"))
             for i in range(5):
-                await audit_mod.record(db, action=f"backup.seed{i}")
+                await audit_mod.record(
+                    db,
+                    action="agent.offline",
+                    detail={"last_seen_at": f"2026-07-27T00:00:0{i}+00:00"},
+                )
             await db.flush()
             created = await anchor_mod.create_anchor(db)
             assert created is not None
@@ -115,7 +120,11 @@ async def _simulate_bad_release(asyncpg_url: str) -> None:
     maker = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with maker() as db:
-            await audit_mod.record(db, action="rollback.bad_release_n_plus_1")
+            await audit_mod.record(
+                db,
+                action="agent.offline",
+                detail={"last_seen_at": ROLLBACK_N_PLUS_1_LAST_SEEN},
+            )
             await db.commit()
         async with engine.begin() as connection:
             await connection.execute(
@@ -305,7 +314,8 @@ def test_release_rollback_rehearsal(prepared_db, tmp_path: Path):
     assert _psql(
         restored_url,
         "SELECT count(*) FROM audit_events "
-        "WHERE action = 'rollback.bad_release_n_plus_1'",
+        "WHERE action = 'agent.offline' "
+        f"AND detail->>'last_seen_at' = '{ROLLBACK_N_PLUS_1_LAST_SEEN}'",
     ) == "0"
 
 
