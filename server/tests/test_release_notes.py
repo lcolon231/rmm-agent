@@ -14,6 +14,7 @@ import pytest
 from scripts.validate_release_notes import (
     EVIDENCE_FORMAT,
     ReleaseNoteError,
+    _source_manifest_sha256,
     finalize_release,
     load_manifest,
     validate_manifest,
@@ -72,6 +73,16 @@ def _create_artifacts(directory: Path, manifest: dict) -> None:
         encoding="utf-8",
         newline="\n",
     )
+
+
+def test_source_manifest_digest_is_line_ending_stable(tmp_path: Path):
+    lf = tmp_path / "lf.json"
+    crlf = tmp_path / "crlf.json"
+    lf.write_bytes(b'{\n  "release": "test"\n}\n')
+    crlf.write_bytes(b'{\r\n  "release": "test"\r\n}\r\n')
+
+    assert _source_manifest_sha256(lf) == _source_manifest_sha256(crlf)
+    assert _digest(lf) != _digest(crlf)
 
 
 def test_rehearsal_manifest_passes_preflight():

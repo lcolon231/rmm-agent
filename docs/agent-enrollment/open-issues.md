@@ -11,7 +11,7 @@ following issues are pertinent to the v0.1.2 release decision:
 | Issue | Release relationship | Disposition |
 |---|---|---|
 | [#127](https://github.com/lcolon231/rmm-agent/issues/127) | Immutable release manifest, PostgreSQL upgrade, verified backup, canary enrollment, and rollback evidence | **Tag blocker**; do not publish v0.1.2 until complete |
-| [#128](https://github.com/lcolon231/rmm-agent/issues/128) | Next.js 16.2.12 transitive PostCSS/Sharp advisories | Resolved by exact Next-scoped patched dependencies, zero production audit, and production smoke evidence; close after the hardening PR merges |
+| [#128](https://github.com/lcolon231/rmm-agent/issues/128) | Next.js 16.2.12 transitive PostCSS/Sharp advisories | Resolved and closed after the hardening PR merged |
 | [#24](https://github.com/lcolon231/rmm-agent/issues/24) | Windows agent and installer remain unsigned | Existing pilot-exit blocker; must be explicit in release notes |
 | [#125](https://github.com/lcolon231/rmm-agent/issues/125) | Agent credentials remain long-lived bearer credentials | Known security limitation; implement loss-safe expiry/renewal |
 | [#126](https://github.com/lcolon231/rmm-agent/issues/126) | Empty deployments still need a client/site bootstrap path | Known onboarding limitation; existing client/site API bootstrap remains required |

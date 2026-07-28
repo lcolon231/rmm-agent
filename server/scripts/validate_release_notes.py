@@ -51,6 +51,18 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _source_manifest_sha256(path: Path) -> str:
+    """Hash the committed JSON representation consistently on every OS.
+
+    GitHub serves the LF-normalized blob. Windows checkouts may contain CRLF,
+    so hashing checkout bytes would bind otherwise identical release evidence
+    to the runner platform. JSON cannot contain raw newlines inside strings;
+    universal-newline decoding is therefore unambiguous here.
+    """
+    canonical = path.read_text(encoding="utf-8").encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def _mapping(value: Any, field: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ReleaseNoteError(f"{field} must be an object")
@@ -460,7 +472,7 @@ def finalize_release(
         )
 
     tag = normalized["release"]["tag"]
-    manifest_digest = _sha256(manifest_path)
+    manifest_digest = _source_manifest_sha256(manifest_path)
     manifest_url = (
         f"https://github.com/{repository}/blob/{source_sha}/"
         f"release-notes/{quote(tag, safe='')}.json"
@@ -741,7 +753,7 @@ def main(argv: list[str] | None = None) -> int:
                     {
                         "status": "valid",
                         "tag": normalized["release"]["tag"],
-                        "manifest_sha256": _sha256(args.manifest),
+                        "manifest_sha256": _source_manifest_sha256(args.manifest),
                     },
                     sort_keys=True,
                 )

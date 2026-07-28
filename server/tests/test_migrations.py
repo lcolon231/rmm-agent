@@ -18,6 +18,7 @@ from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.schema_revision import SchemaRevisionMismatch, ensure_schema_current
+from scripts import adopt_v011_schema
 
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
@@ -258,6 +259,95 @@ def test_forward_repair_restores_schema_skipped_by_incorrect_stamp(tmp_path: Pat
     assert agent_state[1] == "active"
     assert command_state == ("legacy-unversioned", "expired")
     assert audit_state == (1, 1)
+
+
+def test_exact_unversioned_v011_schema_is_adopted_and_upgraded(tmp_path: Path):
+    db_path = tmp_path / "v011.db"
+    url = sqlite_url(db_path)
+    config = migration_config(url)
+    command.upgrade(config, "0001")
+
+    now = "2026-07-27T12:00:00+00:00"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("DROP TABLE alembic_version")
+        connection.execute(
+            "INSERT INTO clients (id, name, created_at) VALUES (?, ?, ?)",
+            ("client-v011", "v0.1.1 client", now),
+        )
+        connection.execute(
+            "INSERT INTO sites (id, client_id, name, created_at) VALUES (?, ?, ?, ?)",
+            ("site-v011", "client-v011", "Legacy site", now),
+        )
+        connection.execute(
+            """INSERT INTO agents
+               (id, site_id, token_hash, hostname, os, os_version,
+                agent_version, status, enrolled_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "agent-v011",
+                "site-v011",
+                "legacy-hash",
+                "LEGACY-PC",
+                "windows",
+                "11",
+                "0.1.1",
+                "online",
+                now,
+            ),
+        )
+        connection.commit()
+
+    assert (
+        adopt_v011_schema.run(
+            url,
+            stamp=True,
+            allow_test_dialect=True,
+        )
+        == 0
+    )
+    command.upgrade(config, "head")
+    asyncio.run(_assert_current(url))
+
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT hostname, agent_version, trust_state "
+            "FROM agents WHERE id = 'agent-v011'"
+        ).fetchone()
+        revision = connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()
+    assert row == ("LEGACY-PC", "0.1.1", "active")
+    assert revision == ("0012",)
+
+
+def test_v011_adoption_rejects_schema_drift_without_stamping(tmp_path: Path):
+    db_path = tmp_path / "drifted-v011.db"
+    url = sqlite_url(db_path)
+    config = migration_config(url)
+    command.upgrade(config, "0001")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("DROP TABLE alembic_version")
+        connection.execute(
+            "ALTER TABLE agents ADD COLUMN unreviewed_secret TEXT"
+        )
+        connection.commit()
+
+    assert (
+        adopt_v011_schema.run(
+            url,
+            stamp=True,
+            allow_test_dialect=True,
+        )
+        == 1
+    )
+    with sqlite3.connect(db_path) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert "alembic_version" not in tables
 
 
 def test_upgrade_from_baseline_preserves_rows_and_expires_legacy_queue(tmp_path: Path):
