@@ -1,0 +1,131 @@
+{
+  "format": "nodelink-release-drill-evidence-index-v1",
+  "release": "v0.1.2",
+  "candidate_commit": "940cd0c477590b9c2cb04a116e98d54321f5af4d",
+  "bundle": {
+    "tag": "v0.1.2-evidence",
+    "url": "https://github.com/lcolon231/rmm-agent/releases/tag/v0.1.2-evidence",
+    "target_commit": "940cd0c477590b9c2cb04a116e98d54321f5af4d",
+    "asset_count": 17
+  },
+  "verification": {
+    "verified_at_utc": "2026-07-28T23:29:00.8042150Z",
+    "method": "Downloaded every asset from the GitHub prerelease into a fresh directory and compared its SHA-256 digest with the GitHub release-asset digest.",
+    "all_assets_verified": true,
+    "plaintext_secret_scan_required_before_upload": true
+  },
+  "assets": [
+    {
+      "name": "nodelink-backup-20260728T050127Z.dump.enc",
+      "role": "encrypted public-v0.1.1 recovery-point backup at adopted revision 0001",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T050127Z.dump.enc",
+      "sha256": "8e41c1632d646740cebec3b491585e005ce1f26ba95c168b59cb418b2527ed0e"
+    },
+    {
+      "name": "nodelink-backup-20260728T050127Z.manifest.json",
+      "role": "public-v0.1.1 recovery-point backup manifest",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T050127Z.manifest.json",
+      "sha256": "c5e6696430f0685f3715605321b718512276bcbd760a14b5db4bbcb4e21c6c82"
+    },
+    {
+      "name": "nodelink-backup-20260728T050127Z.manifest.json.sha256",
+      "role": "recovery-point manifest checksum sidecar",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T050127Z.manifest.json.sha256",
+      "sha256": "8cccddc0d9e2cc911e83bd989e250cbd92380dee326cbb636f334f1684636be0"
+    },
+    {
+      "name": "v011-schema-check.json",
+      "role": "guarded public-v0.1.1 schema fingerprint dry run",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/v011-schema-check.json",
+      "sha256": "3c56aed0a7b96796ab01c15405b79d6cadde5e49e280eb488c6ded103e3ee685"
+    },
+    {
+      "name": "v011-schema-adoption.json",
+      "role": "guarded adoption and stamp at Alembic 0001",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/v011-schema-adoption.json",
+      "sha256": "6c513c03ef07018c617a45ce4e781e53467562a18c54cb0e7d238da9633e81d9"
+    },
+    {
+      "name": "restore-verification-0012.json",
+      "role": "forward-migrated recovery-point verification at Alembic 0012",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/restore-verification-0012.json",
+      "sha256": "ac4649b5c58bbc6e579164ea2710b126d848009e203db3f28b7c82394346a66a"
+    },
+    {
+      "name": "phase3-https-verification.json",
+      "role": "production configuration, HTTPS, health, readiness, metrics, and dashboard smoke",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/phase3-https-verification.json",
+      "sha256": "968bf7f4a85cb80ed6728c49ed2c66138640a36f44f78c83e90089f1ed2676ac"
+    },
+    {
+      "name": "phase4-windows-canary-evidence.json",
+      "role": "Windows enrollment, heartbeat, reuse rejection, audit, and revocation evidence",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/phase4-windows-canary-evidence.json",
+      "sha256": "42390c47be9d5d5fd7c03db8b0240598fe1fb1169e172477ea521c7742dc90cb"
+    },
+    {
+      "name": "nodelink-backup-20260728T063709Z.dump.enc",
+      "role": "encrypted known-good 0012 rollback-rehearsal backup",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T063709Z.dump.enc",
+      "sha256": "561a2ed344e048cf1242cfc3f95a8adcf6400b8a487e8b68bcdf8409618c6227"
+    },
+    {
+      "name": "nodelink-backup-20260728T063709Z.manifest.json",
+      "role": "known-good 0012 rollback-rehearsal backup manifest",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T063709Z.manifest.json",
+      "sha256": "e9e90837722a4b3fe4cd7de7dbcd350426fbb8915b58b90c3423e8a85484b419"
+    },
+    {
+      "name": "nodelink-backup-20260728T064016Z.dump.enc",
+      "role": "encrypted preserved failed-state rollback-rehearsal backup",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T064016Z.dump.enc",
+      "sha256": "f9dfbe2bd002a8a7af4f576eb4f2f41872dfd7559db2bb9115c7987d0ac147a2"
+    },
+    {
+      "name": "nodelink-backup-20260728T064016Z.manifest.json",
+      "role": "preserved failed-state rollback-rehearsal backup manifest",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T064016Z.manifest.json",
+      "sha256": "9d2f6d52452969f904b9bef95f0bd63a714843e0a4ee24ed6e15a3d9664906ae"
+    },
+    {
+      "name": "production-v011-rollback-blocked.json",
+      "role": "fail-closed production decision against v0.1.1 component rollback on schema 0012",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/production-v011-rollback-blocked.json",
+      "sha256": "d4e85c7a965d50ec534a7fc520cc61b045f2a9161e74b388ef0a88940ce47cfa"
+    },
+    {
+      "name": "isolated-rollback-plan.json",
+      "role": "matching-0012 isolated restore and redeploy decision",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/isolated-rollback-plan.json",
+      "sha256": "48c462321fa81cb256cf9d91359f5dd5ca846850d23606471b74dddc09958c8a"
+    },
+    {
+      "name": "restore-verification.json",
+      "role": "timed isolated rollback restored-state verification",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/restore-verification.json",
+      "sha256": "b66dedf1b609408245d563a39e4653a48dab958a7e98eabe29bccb904cd5f8b7"
+    },
+    {
+      "name": "phase5-timed-rollback-evidence.json",
+      "role": "timed rollback decision, RTO, RPO, data-loss boundary, and reconciliation evidence",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/phase5-timed-rollback-evidence.json",
+      "sha256": "078e9c0b655e5fb62a72aa6141d8660792dda4df3988551942e30b196a7f25f6"
+    },
+    {
+      "name": "phase6-final-gate-evidence.json",
+      "role": "final backend, PostgreSQL, Go, Windows, installer, dashboard, HTTPS, and artifact gate evidence",
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/phase6-final-gate-evidence.json",
+      "sha256": "275454384a4731b8b7e6695128dbc324a34ed68cd0ac2a2ddc8b557559cf886e"
+    }
+  ],
+  "review": {
+    "independent_second_operator_required_by_runbook": true,
+    "waived": true,
+    "waived_by": "repository owner lcolon231",
+    "waived_at_utc": "2026-07-28T23:44:09.6815035Z",
+    "reason": "No independent second operator is available.",
+    "residual_risk": "The same operator controls evidence assembly, release approval, merge, and tagging, reducing separation of duties.",
+    "sole_operator_decision": "pass",
+    "tag_authorized": true
+  }
+}
