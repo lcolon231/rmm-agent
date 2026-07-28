@@ -1,0 +1,144 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "v0.1.2",
+    "title": "NodeLink v0.1.2 secure enrollment pilot",
+    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after independent review of the release evidence; this release is not approved for multi-tenant or high-availability claims."
+  },
+  "server": {
+    "tag": "v0.1.2",
+    "deployment": "Deploy source from the exact commit bound to v0.1.2 by the release workflow."
+  },
+  "agent": {
+    "version": "0.1.2",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "0.1.2",
+    "filename": "NodeLinkAgentSetup-0.1.2.exe"
+  },
+  "database": {
+    "alembic_revision": "0012",
+    "compatible_from": [
+      "0001",
+      "0010",
+      "0011",
+      "0012"
+    ],
+    "migration_policy": "Migrations are forward-only. Public v0.1.1 databases must pass guarded schema adoption at 0001 before upgrading; never edit the revision or perform an in-place downgrade."
+  },
+  "protocols": {
+    "command_envelopes": [
+      "command-v3"
+    ],
+    "mixed_version_behavior": "Agents advertise command-v3 and command-v2 during a staged rollout, but new deployments require command-v3; missing, unknown, and legacy-unversioned capabilities fail closed."
+  },
+  "known_limitations": [
+    "#24: Windows agent and installer artifacts are not Authenticode signed, so SmartScreen or antivirus warnings remain possible.",
+    "#66: Roles are global and clients or sites are not authorization tenants; do not market or operate this release as multi-tenant.",
+    "#84: Enrollment rate limits, counters, and metrics are process-local; no multi-worker or high-availability protection claim is made.",
+    "#125: Per-agent bearer credentials are long-lived and do not yet have automatic expiry, proof-of-possession, or loss-safe renewal.",
+    "#126: Empty deployments must bootstrap the first client and site through the existing administrative API before using enrollment.",
+    "#76: The local release drill verified the internal audit chain but had no external immutable audit-anchor receipt to cross-check.",
+    "Caddy private-PKI testing had no reachable CRL or OCSP service; Windows Schannel curl required best-effort revocation while certificate-chain and hostname verification remained enabled.",
+    "The production dependency audit is clean, but nine high-severity findings remain in the dashboard development-only lint dependency graph and require reassessment by v0.1.3.",
+    "Public v0.1.1 predates explicit envelope negotiation; command-v1 below names its legacy signed-command compatibility format only for a full-stack recovery and never permits mixed-version operation."
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "Pause enrollment, command dispatch, server promotion, and external agent rollout automation.",
+      "Verify the encrypted 0001 recovery-point backup, current 0012 backup, manifests, and retained restore evidence against their immutable SHA-256 digests.",
+      "Confirm Python 3.12, PostgreSQL, command signing keys, production secrets, trusted-proxy settings, HTTPS public URL, and server-only dashboard API URL are configured.",
+      "Verify every release artifact checksum and GitHub build-provenance attestation before execution."
+    ],
+    "steps": [
+      "For an unversioned public v0.1.1 database, run the guarded adoption dry run, review its exact fingerprint, stamp only through adopt_v011_schema.py, and confirm revision 0001.",
+      "Run Alembic upgrade to 0012 and confirm the startup revision guard passes before serving traffic.",
+      "Deploy the server and dashboard together from the workflow-bound v0.1.2 source commit.",
+      "Deploy the checksum-verified Windows agent or installer to one owned canary endpoint before expanding the rollout.",
+      "Keep public v0.1.1 and the failed-state backup unavailable to automatic rollout channels."
+    ],
+    "verification": [
+      "Confirm Alembic current reports 0012 and health, readiness, metrics, login, and production configuration checks pass over verified HTTPS.",
+      "Confirm a single-use restricted Windows canary token permits exactly one enrollment and that a second redemption is generically rejected.",
+      "Confirm heartbeat, audit sequence, expected metric deltas, token revocation, agent revocation, and post-revocation authentication rejection.",
+      "Confirm the audit chain, restore evidence, encrypted-backup manifests, artifact checksums, SBOM, and provenance attestations.",
+      "Confirm NodeLinkAgent service and installer install, start, stop, restart, and uninstall behavior on Windows, with DPAPI-protected identity and restricted ACLs."
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "Prefer a forward fix while the live database remains at 0012; public v0.1.1 is not a component-only or in-place server/database rollback target for that schema.",
+      "Redeploy v0.1.2 components only when their required 0012 schema and retained artifact digests exactly match the live deployment.",
+      "Before any schema restore, pause rollout and writers, preserve an encrypted failed-state backup, and name the decision maker and exact accepted data-loss window.",
+      "Restore the verified 0001 recovery-point backup only after explicit data-loss approval, validate it in isolation, and deploy the exact v0.1.1 server, agent, and installer together.",
+      "If the matching backup, artifact, audit, or startup verification fails, keep promotion blocked and continue with a reviewed forward fix."
+    ],
+    "target": {
+      "server": {
+        "tag": "v0.1.1",
+        "commit": "7cc39f221acc2f717eaa62fe1404865e1a6bb046"
+      },
+      "agent": {
+        "version": "0.1.1",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "8ad7d7d20ca5a0630826b4c0ed60d968c55d68b5fd173dc31884a8d21f7f377d",
+          "rmm-agent-linux-amd64": "87914f9bb1ee2370e616f19cfb2768db7fdc1588dd86ebd7e6b68639ff96f72d",
+          "rmm-agent-darwin-arm64": "b5e116d90d74227443071fb9fddd81efcfda6190d848b4b7b1d98c8d3da2b4ec"
+        }
+      },
+      "installer": {
+        "filename": "NodeLinkAgentSetup-0.1.1.exe",
+        "sha256": "fb9f4277e88395042a9e04a2d552d8d9cd274fb26e29004caf4b096810aead5f"
+      },
+      "database": {
+        "alembic_revision": "0001",
+        "backup_manifest": {
+          "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T050127Z.manifest.json",
+          "sha256": "c5e6696430f0685f3715605321b718512276bcbd760a14b5db4bbcb4e21c6c82"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "command-v1"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "v0.1.2 adds constrained, audited agent enrollment and revocation while preserving fail-closed command verification, production configuration checks, recovery evidence, and explicit pilot-only operating limits.",
+    "fixed_vulnerabilities": [
+      "#128: Next.js was updated to 16.2.12 and exact Next-scoped PostCSS and Sharp overrides remove the directly applicable production dependency advisories.",
+      "Enrollment tokens now use high entropy, hash-only storage, mandatory expiry, single-use defaults, transactional redemption, restricted metadata, generic rejection, and audited revocation.",
+      "Windows agent identity is DPAPI protected with a restricted ACL, and revoked agent credentials fail authentication without exposing an oracle."
+    ],
+    "new_risks": [
+      "#24 remains open because Windows artifacts are unsigned and require checksum and provenance verification.",
+      "#66 remains open because authorization roles are global rather than tenant scoped.",
+      "#84 remains open because enrollment limiting and counters are process local.",
+      "#125 remains open because agent bearer credentials are long-lived and lack automatic renewal.",
+      "The tested private-PKI deployment has no online revocation endpoint, and the local drill had no external audit-anchor receipt."
+    ],
+    "operator_actions": [
+      "Independently review the complete v0.1.2 evidence index and verify every retained digest before approving the tag.",
+      "Use the release only for an owned, knowing Windows x64 pilot and document acceptance of unsigned artifacts and the non-multi-tenant authorization model.",
+      "Keep enrollment tokens single-use, restricted, short-lived, and transferred only through an approved secret channel.",
+      "Monitor audit-chain verification, backups, enrollment failures, revocations, and process-local counter resets throughout the pilot.",
+      "Use a forward fix by default; do not restore the 0001 recovery point without preserving failed state and explicitly accepting all post-backup data loss."
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/restore-verification-0012.json",
+      "sha256": "ac4649b5c58bbc6e579164ea2710b126d848009e203db3f28b7c82394346a66a"
+    },
+    "rollback_rehearsal": {
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/phase5-timed-rollback-evidence.json",
+      "sha256": "078e9c0b655e5fb62a72aa6141d8660792dda4df3988551942e30b196a7f25f6"
+    }
+  }
+}
