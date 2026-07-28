@@ -179,6 +179,7 @@ Dashboard:
 ```bash
 cd dashboard
 npm ci
+npm audit --omit=dev
 npm run dev
 ```
 
@@ -204,6 +205,7 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run smoke:production
 
 # Agent
 go test ./...
