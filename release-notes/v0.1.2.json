@@ -3,7 +3,7 @@
   "release": {
     "tag": "v0.1.2",
     "title": "NodeLink v0.1.2 secure enrollment pilot",
-    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after independent review of the release evidence; this release is not approved for multi-tenant or high-availability claims."
+    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after the sole repository owner reviewed and accepted the release evidence; this release is not approved for multi-tenant or high-availability claims."
   },
   "server": {
     "tag": "v0.1.2",
@@ -44,6 +44,7 @@
     "#125: Per-agent bearer credentials are long-lived and do not yet have automatic expiry, proof-of-possession, or loss-safe renewal.",
     "#126: Empty deployments must bootstrap the first client and site through the existing administrative API before using enrollment.",
     "#76: The local release drill verified the internal audit chain but had no external immutable audit-anchor receipt to cross-check.",
+    "Release governance deviation: the sole repository owner explicitly waived the runbook's independent second-operator review on 2026-07-28 because no second operator was available, accepting the increased risk of single-person evidence and release approval.",
     "Caddy private-PKI testing had no reachable CRL or OCSP service; Windows Schannel curl required best-effort revocation while certificate-chain and hostname verification remained enabled.",
     "The production dependency audit is clean, but nine high-severity findings remain in the dashboard development-only lint dependency graph and require reassessment by v0.1.3.",
     "Public v0.1.1 predates explicit envelope negotiation; command-v1 below names its legacy signed-command compatibility format only for a full-stack recovery and never permits mixed-version operation."
@@ -124,7 +125,7 @@
       "The tested private-PKI deployment has no online revocation endpoint, and the local drill had no external audit-anchor receipt."
     ],
     "operator_actions": [
-      "Independently review the complete v0.1.2 evidence index and verify every retained digest before approving the tag.",
+      "Because independent second-operator review was explicitly waived, the sole release operator must personally verify the complete v0.1.2 evidence index, retained digests, preflight result, and green release checks before tagging.",
       "Use the release only for an owned, knowing Windows x64 pilot and document acceptance of unsigned artifacts and the non-multi-tenant authorization model.",
       "Keep enrollment tokens single-use, restricted, short-lived, and transferred only through an approved secret channel.",
       "Monitor audit-chain verification, backups, enrollment failures, revocations, and process-local counter resets throughout the pilot.",

@@ -119,8 +119,13 @@
     }
   ],
   "review": {
-    "independent_second_operator_required": true,
-    "approved": false,
-    "tag_authorized": false
+    "independent_second_operator_required_by_runbook": true,
+    "waived": true,
+    "waived_by": "repository owner lcolon231",
+    "waived_at_utc": "2026-07-28T23:44:09.6815035Z",
+    "reason": "No independent second operator is available.",
+    "residual_risk": "The same operator controls evidence assembly, release approval, merge, and tagging, reducing separation of duties.",
+    "sole_operator_decision": "pass",
+    "tag_authorized": true
   }
 }
