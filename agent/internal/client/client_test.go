@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"math/big"
 	"net"
@@ -227,6 +228,36 @@ func TestTLSSPKIPinConfigurationIsStrict(t *testing.T) {
 	validPin := "sha256/" + base64.StdEncoding.EncodeToString(digest[:])
 	if _, err := NewWithTLSSPKIPins("http://rmm.example", "", []string{validPin}); err == nil {
 		t.Fatal("pinning accepted a non-HTTPS server URL")
+	}
+}
+
+func TestEnrollKeepsTokenInRequestBody(t *testing.T) {
+	const token = "temporary-enrollment-secret"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" || r.URL.String() != "/api/v1/enroll" {
+			t.Fatalf("enrollment secret must not be sent in URL: %s", r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["enrollment_token"] != token {
+			t.Fatal("token missing from enrollment body")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"agent_id":"agent-1",
+			"agent_token":"agent-secret",
+			"heartbeat_interval_seconds":60,
+			"command_public_key":"pem",
+			"command_public_keys":{},
+			"command_signing_key_id":"default",
+			"command_envelope_version":"command-v3"
+		}`))
+	}))
+	defer server.Close()
+	if _, err := New(server.URL, "").Enroll(context.Background(), token, telemetry.HostInfo{Hostname: "test"}, "1.0.0"); err != nil {
+		t.Fatal(err)
 	}
 }
 

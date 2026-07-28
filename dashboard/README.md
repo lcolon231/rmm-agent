@@ -11,6 +11,13 @@ totals).
 Aggregate overview and audit panels remain fixture-backed. It must not be used
 to manage production or regulated endpoints.
 
+The `/enrollment` control surface is live: authorized operators can create,
+list, filter, and revoke temporary enrollment tokens, view/revoke agent
+identities, and review enrollment audit events. Plaintext token values appear
+only in the in-memory creation view and are never stored in browser storage or
+placed in URLs. Browser mutations use same-origin Route Handlers; FastAPI
+independently enforces every role.
+
 ## Local development
 
 1. Use Node.js `24.15.0` (see `.nvmrc`).

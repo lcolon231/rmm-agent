@@ -96,7 +96,12 @@ async def record(
     *,
     action: str,
     actor: str = "system",
+    actor_user_id: str | None = None,
     agent_id: str | None = None,
+    enrollment_token_id: str | None = None,
+    organization_id: str | None = None,
+    source_ip: str | None = None,
+    user_agent: str | None = None,
     detail: dict | None = None,
 ) -> AuditEvent:
     """Append a new audit event to the chain. Caller is responsible for the
@@ -121,8 +126,13 @@ async def record(
         ts=ts,
         ts_iso=ts_iso,
         actor=actor,
+        actor_user_id=actor_user_id,
         action=action,
         agent_id=agent_id,
+        enrollment_token_id=enrollment_token_id,
+        organization_id=organization_id,
+        source_ip=source_ip,
+        user_agent=user_agent,
         detail=detail,
         prev_hash=prev,
     )

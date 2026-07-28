@@ -37,6 +37,25 @@ GOOS=windows GOARCH=amd64 go build -o rmm-agent.exe ./cmd/agent
 
 ## Configure & run
 
+Preferred enrollment keeps the temporary token out of arguments and static
+configuration:
+
+```bash
+# Populate AGENT_ENROLLMENT_TOKEN through a secret manager.
+./rmm-agent enroll \
+  --server "https://rmm.nodelink.example" \
+  --token-env "AGENT_ENROLLMENT_TOKEN" \
+  --non-interactive
+./rmm-agent run -config config.json
+```
+
+`--token-file` requires mode `0600` on non-Windows platforms, `--token-stdin`
+reads one line, and omitting those options opens a hidden interactive prompt.
+The CLI never accepts a plaintext token argument. See
+[`docs/agent-enrollment/agent-installation.md`](../docs/agent-enrollment/agent-installation.md).
+
+The legacy configuration path remains supported:
+
 ```bash
 cp config.example.json config.json
 # set server_url and paste a one-time enrollment_token from the server
@@ -49,7 +68,8 @@ cp config.example.json config.json
   with a declared `none` scheme elsewhere).
 - On later runs it loads `identity.json` and skips enrollment; a pre-envelope
   plaintext identity is migrated in place on first load. The
-  `enrollment_token` in the config is only used once.
+  `enrollment_token` in a legacy config is used once and atomically removed
+  after successful enrollment.
 - `-once` runs a single check-in and exits (useful for testing / cron-style use).
 - `run` is the default subcommand, so `./rmm-agent -config config.json` and
   `./rmm-agent run -config config.json` are equivalent.

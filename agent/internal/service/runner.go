@@ -84,6 +84,41 @@ func NewAgent(configPath, version string, logger *log.Logger) *Agent {
 	}
 }
 
+// EnrollIdentity performs one explicit enrollment and persists the resulting
+// identity. It deliberately does not retry: if the server consumed a
+// single-use token but the response was lost, the operator must inspect the
+// inventory and issue a replacement rather than risk ambiguous identity.
+func EnrollIdentity(
+	ctx context.Context,
+	serverURL, token, agentName, configPath, version string,
+) (*config.Identity, error) {
+	idPath := config.IdentityPath(configPath)
+	if _, err := os.Stat(idPath); err == nil {
+		return nil, fmt.Errorf("identity already exists at %s; revoke or remove it before re-enrolling", idPath)
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("inspect identity %s: %w", idPath, err)
+	}
+	host := telemetry.BasicHostInfo()
+	resp, err := client.New(serverURL, "").EnrollWithName(ctx, token, agentName, host, version)
+	if err != nil {
+		return nil, err
+	}
+	id := &config.Identity{
+		AgentID:             resp.AgentID,
+		AgentToken:          resp.AgentToken,
+		CommandPublicKey:    resp.CommandPublicKey,
+		CommandPublicKeys:   resp.CommandPublicKeys,
+		CommandSigningKeyID: resp.CommandSigningKeyID,
+		HeartbeatSeconds:    resp.HeartbeatSeconds,
+		ServerURL:           serverURL,
+		CredentialExpiresAt: resp.CredentialExpiresAt,
+	}
+	if err := id.Save(idPath); err != nil {
+		return nil, fmt.Errorf("persist enrolled identity: %w", err)
+	}
+	return id, nil
+}
+
 // session holds the resolved per-run state after enrollment.
 type session struct {
 	api          *client.Client
@@ -209,6 +244,11 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.EnrollmentToken != "" {
+		if err := config.ClearEnrollmentToken(a.configPath, cfg); err != nil {
+			return nil, fatal(fmt.Errorf("remove consumed enrollment token from config: %w", err))
+		}
+	}
 	pub, err := verify.PublicKeyFromPEM(identity.CommandPublicKey)
 	if err != nil {
 		return nil, fatal(fmt.Errorf("command public key: %w", err))
@@ -302,9 +342,13 @@ func (a *Agent) ensureEnrolled(ctx context.Context, cfg *config.Config, idPath s
 		CommandSigningKeyID: resp.CommandSigningKeyID,
 		HeartbeatSeconds:    resp.HeartbeatSeconds,
 		ServerURL:           cfg.ServerURL,
+		CredentialExpiresAt: resp.CredentialExpiresAt,
 	}
 	if err := id.Save(idPath); err != nil {
 		return nil, fatal(err)
+	}
+	if err := config.ClearEnrollmentToken(a.configPath, cfg); err != nil {
+		return nil, fatal(fmt.Errorf("remove consumed enrollment token from config: %w", err))
 	}
 	a.log.Printf("enrolled as agent %s; identity saved to %s", id.AgentID, idPath)
 	return id, nil

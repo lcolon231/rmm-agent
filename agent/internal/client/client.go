@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strings"
 	"time"
 
@@ -161,16 +162,26 @@ type EnrollResponse struct {
 	CommandPublicKeys      map[string]string `json:"command_public_keys"`
 	CommandSigningKeyID    string            `json:"command_signing_key_id"`
 	CommandEnvelopeVersion string            `json:"command_envelope_version"`
+	CredentialExpiresAt    string            `json:"credential_expires_at"`
 }
 
 // Enroll claims an identity using a one-time enrollment token.
 func (c *Client) Enroll(ctx context.Context, token string, host telemetry.HostInfo, agentVersion string) (*EnrollResponse, error) {
+	return c.EnrollWithName(ctx, token, "", host, agentVersion)
+}
+
+// EnrollWithName claims an identity and optionally supplies an administrator-
+// recognizable agent name. The token is serialized only into the HTTPS request
+// body and is never placed in a URL or log by this package.
+func (c *Client) EnrollWithName(ctx context.Context, token, agentName string, host telemetry.HostInfo, agentVersion string) (*EnrollResponse, error) {
 	body := map[string]any{
 		"enrollment_token":                    token,
+		"agent_name":                          agentName,
 		"hostname":                            host.Hostname,
 		"os":                                  host.OS,
 		"os_version":                          host.OSVersion,
 		"agent_version":                       agentVersion,
+		"architecture":                        runtime.GOARCH,
 		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
 	}
 	var out EnrollResponse

@@ -28,6 +28,12 @@ separate artifact.
    before deleting files, and cleans up the runtime files the agent created
    (`config.json`, `identity.json`, `seen_commands.json`).
 
+After successful service-context enrollment, the agent atomically rewrites
+`config.json` without the consumed plaintext token. Scripted deployments should
+prefer the agent's explicit `enroll --token-env|--token-file|--token-stdin`
+inputs, while ensuring enrollment runs under the same account that will later
+decrypt the DPAPI-protected identity (LocalSystem for this service).
+
 ## Building it
 
 Prerequisites:

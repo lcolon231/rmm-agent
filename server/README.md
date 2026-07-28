@@ -3,30 +3,48 @@
 FastAPI backend for agent enrollment, heartbeat polling, signed command
 dispatch, operator authentication, and tamper-evident audit records.
 
-This is an early-stage scaffold. It is not production-ready: backup/restore,
-production TLS enforcement, agent revocation, bounded command
-results, tenant isolation, and several other Milestone 0 controls are not yet
-implemented. See [deployment readiness](../docs/DEPLOYMENT-READINESS.md).
+This is an early-stage system and is not production-ready. Backup/restore
+tooling, production configuration enforcement, agent revocation, bounded
+command results, and enrollment management are implemented; tenant isolation,
+Authenticode signing, release-specific production evidence, and later-milestone
+controls remain incomplete. See
+[deployment readiness](../docs/DEPLOYMENT-READINESS.md).
 
 ## Requirements
 
-- Python 3.12 recommended
+- CPython 3.12 (the locked native dependencies and CI target this version;
+  Python 3.14 is not supported)
 - PostgreSQL 14+ for the intended deployment database
 - SQLite with `aiosqlite` for local tests/development
 
 ## Setup
 
-```bash
+Windows PowerShell:
+
+```powershell
 cd server
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# Unix: source .venv/bin/activate
-pip install -r requirements.txt
+py -3.12 -m venv .venv
+& .\.venv\Scripts\Activate.ps1
+python --version  # must report Python 3.12.x
+python -m pip install -r requirements.txt
 
 python scripts/gen_command_keys.py
-copy .env.example .env  # use cp on Unix; replace every placeholder
+Copy-Item .env.example .env  # replace every placeholder
 python scripts/create_admin.py admin@example.com --role admin
-uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload
+```
+
+Unix:
+
+```bash
+cd server
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python scripts/gen_command_keys.py
+cp .env.example .env
+python scripts/create_admin.py admin@example.com --role admin
+python -m uvicorn app.main:app --reload
 ```
 
 Interactive API documentation is at `/docs`; health is at `/healthz`.
@@ -39,14 +57,15 @@ the database is unversioned, behind, or ahead.
 For a fresh database, run from `server/`:
 
 ```bash
-alembic upgrade head
+python -m alembic upgrade head
 uvicorn app.main:app
 ```
 
 Alembic reads `DATABASE_URL` (or the higher-priority
 `ALEMBIC_DATABASE_URL`). Existing databases created by the old debug
 `create_all` path need a backup and schema review against revision `0001`
-before `alembic stamp 0001 && alembic upgrade head`. Stamping does not validate
+before `python -m alembic stamp 0001` followed by
+`python -m alembic upgrade head`. Stamping does not validate
 the schema. Migrations are forward-only: recover with a tested backup or a
 forward fix, not `alembic downgrade`. See
 [deployment readiness](../docs/DEPLOYMENT-READINESS.md#database-and-recovery).
@@ -55,10 +74,12 @@ forward fix, not `alembic downgrade`. See
 
 ### Enrollment and heartbeat polling
 
-An operator creates a client, site, and limited-use enrollment token. The agent
-uses that token once and receives an agent ID, plaintext agent bearer token,
-heartbeat interval, and the current Ed25519 public key. The server stores token
-hashes, not plaintext tokens.
+An authorized operator creates a required-expiry, limited-use enrollment token
+assigned to a client/site and optional endpoint restrictions. The plaintext is
+returned only by the creation response; list/detail APIs expose a masked
+prefix. Redemption is transactionally use-limited and creates a unique agent
+credential, whose verifier is stored as a hash. Both `/api/v1/agents/enroll`
+and the legacy `/api/v1/enroll` use the same validation service.
 
 The enrolled agent posts telemetry to `/api/v1/heartbeat`; the response carries
 queued commands. This is polling, not WebSocket or streaming transport.
@@ -98,15 +119,17 @@ and a token-generation counter supports logout-everywhere. `operator` and
 `powershell`/`shell` execution is default-deny and needs a separate admin-granted
 global, site, or agent scope. Admin has no implicit bypass. Grant/revoke reasons
 and each allowed/denied decision are audited without scripts; see
-[`SCRIPT-AUTHORIZATION.md`](../docs/SCRIPT-AUTHORIZATION.md). There is no browser
-authentication UI, MFA, federation, tenant-scoped role, or general operator
-administration API yet.
+[`SCRIPT-AUTHORIZATION.md`](../docs/SCRIPT-AUTHORIZATION.md). The Next.js
+dashboard provides browser authentication and enrollment management; MFA,
+federation, tenant-scoped roles, and general operator administration remain
+incomplete.
 
 ### Audit records
 
-Meaningful actions append hash-chained `AuditEvent` rows. The server can verify
-the local chain and create/verify Merkle anchors over a prefix. It does not
-assign monotonic audit sequence numbers or publish anchors outside the database.
+Meaningful actions append redacted, schema-validated, monotonically sequenced,
+hash-chained `AuditEvent` rows. The server can verify the local chain,
+create/verify Merkle anchors over a prefix, and optionally publish anchors to
+configured immutable storage with retained receipts.
 
 ## API surface
 
@@ -115,6 +138,8 @@ Agent-facing:
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/v1/enroll` | Enroll using a site token |
+| POST | `/api/v1/agents/enroll` | Resource-oriented enrollment alias |
+| POST | `/api/v1/agents/credentials/renew` | Rotate current agent credential |
 | POST | `/api/v1/heartbeat` | Store telemetry, advertise pending results, and poll commands |
 | POST | `/api/v1/commands/{id}/result` | Idempotently acknowledge a durable command result |
 
@@ -133,11 +158,18 @@ Operator/authentication:
 | POST/GET | `/api/v1/clients` | Operator / Readonly |
 | POST | `/api/v1/sites` | Operator |
 | POST | `/api/v1/enrollment-tokens` | Operator |
+| GET | `/api/v1/enrollment-tokens`, `/api/v1/enrollment-tokens/{id}` | Readonly |
+| POST | `/api/v1/enrollment-tokens/{id}/revoke` | Operator |
+| GET | `/api/v1/enrollment-dashboard`, `/api/v1/audit/events` | Readonly |
 | GET | `/api/v1/agents`, `/api/v1/agents/{id}` | Readonly |
 | POST/GET | `/api/v1/agents/{id}/commands` | Operator / Readonly |
 | GET | `/api/v1/audit/verify` | Readonly |
 | POST/GET | `/api/v1/audit/anchors` | Operator / Readonly |
 | GET | `/api/v1/audit/anchors/{id}/verify` | Readonly |
+
+Liveness is `/healthz`, database readiness is `/readyz`, and `/metrics`
+contains process-local enrollment operation counters without IDs or secrets.
+See [`docs/agent-enrollment/api-reference.md`](../docs/agent-enrollment/api-reference.md).
 
 ## Tests
 

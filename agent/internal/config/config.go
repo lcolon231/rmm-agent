@@ -35,6 +35,39 @@ type Identity struct {
 	CommandSigningKeyID string            `json:"command_signing_key_id,omitempty"`
 	HeartbeatSeconds    int               `json:"heartbeat_seconds"`
 	ServerURL           string            `json:"server_url"`
+	CredentialExpiresAt string            `json:"credential_expires_at,omitempty"`
+}
+
+// SaveInstallConfig writes a token-free install configuration atomically.
+// Explicit `enroll` uses this after reading the token from an environment
+// variable, protected file, stdin, or a no-echo prompt.
+func SaveInstallConfig(path, serverURL string) error {
+	return saveConfig(path, &Config{ServerURL: serverURL})
+}
+
+// ClearEnrollmentToken removes a bootstrap token from a legacy config after
+// enrollment. The replacement is atomic, so a crash never leaves a partial
+// JSON file and a consumed plaintext secret does not persist indefinitely.
+func ClearEnrollmentToken(path string, c *Config) error {
+	c.EnrollmentToken = ""
+	return saveConfig(path, c)
+}
+
+func saveConfig(path string, c *Config) error {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // Load reads the install-time config from path.

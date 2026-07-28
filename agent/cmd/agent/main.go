@@ -9,15 +9,20 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"log"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 
+	"github.com/lcolon231/rmm/agent/internal/config"
 	"github.com/lcolon231/rmm/agent/internal/service"
 )
 
@@ -46,6 +51,8 @@ func main() {
 	switch sub {
 	case "run":
 		runForeground(args)
+	case "enroll":
+		runEnroll(args)
 	case "install", "uninstall", "start", "stop":
 		runControl(sub, args)
 	case "help", "-h", "--help":
@@ -55,6 +62,110 @@ func main() {
 		usage(os.Stderr)
 		os.Exit(2)
 	}
+}
+
+func runEnroll(args []string) {
+	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
+	serverURL := fs.String("server", "", "management server URL (HTTPS; loopback HTTP allowed for development)")
+	configPath := fs.String("config", "config.json", "path for token-free config and protected identity")
+	agentName := fs.String("name", "", "optional agent display name")
+	tokenEnv := fs.String("token-env", "AGENT_ENROLLMENT_TOKEN", "environment variable containing the temporary token")
+	tokenFile := fs.String("token-file", "", "restricted file containing the temporary token")
+	tokenStdin := fs.Bool("token-stdin", false, "read one token line from standard input")
+	nonInteractive := fs.Bool("non-interactive", false, "fail instead of prompting when no token source is available")
+	_ = fs.Parse(args)
+
+	if err := validateServerURL(*serverURL); err != nil {
+		fmt.Fprintf(os.Stderr, "enroll: %v\n", err)
+		os.Exit(2)
+	}
+	token, err := enrollmentToken(*tokenEnv, *tokenFile, *tokenStdin, *nonInteractive)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "enroll: %v\n", err)
+		os.Exit(2)
+	}
+	if err := config.SaveInstallConfig(*configPath, strings.TrimRight(*serverURL, "/")); err != nil {
+		fmt.Fprintf(os.Stderr, "enroll: save token-free config: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	identity, err := service.EnrollIdentity(
+		ctx,
+		strings.TrimRight(*serverURL, "/"),
+		token,
+		*agentName,
+		*configPath,
+		version,
+	)
+	token = "" // best-effort lifetime reduction; Go does not guarantee memory wiping.
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "enroll: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("enrolled agent %s; protected identity saved to %s\n", identity.AgentID, config.IdentityPath(*configPath))
+}
+
+func enrollmentToken(envName, filePath string, fromStdin, nonInteractive bool) (string, error) {
+	if envName != "" {
+		if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+			return value, nil
+		}
+	}
+	if filePath != "" {
+		info, err := os.Stat(filePath)
+		if err != nil {
+			return "", fmt.Errorf("inspect token file: %w", err)
+		}
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+			return "", fmt.Errorf("token file permissions are too broad; require mode 0600")
+		}
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf("read token file: %w", err)
+		}
+		if value := strings.TrimSpace(string(data)); value != "" {
+			return value, nil
+		}
+		return "", fmt.Errorf("token file is empty")
+	}
+	if fromStdin {
+		value, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && strings.TrimSpace(value) == "" {
+			return "", fmt.Errorf("read token from stdin: %w", err)
+		}
+		return strings.TrimSpace(value), nil
+	}
+	if nonInteractive {
+		return "", fmt.Errorf("no token available; set %s, --token-file, or --token-stdin", envName)
+	}
+	fmt.Fprint(os.Stderr, "Enrollment token (input hidden): ")
+	value, err := readSecret()
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("enrollment token is required")
+	}
+	return strings.TrimSpace(value), nil
+}
+
+func validateServerURL(value string) error {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("--server must be an origin URL without credentials, query, or fragment")
+	}
+	if parsed.Scheme == "https" {
+		return nil
+	}
+	host := parsed.Hostname()
+	ip := net.ParseIP(host)
+	if parsed.Scheme == "http" && (host == "localhost" || (ip != nil && ip.IsLoopback())) {
+		return nil
+	}
+	return fmt.Errorf("--server must use HTTPS (HTTP is allowed only for loopback development)")
 }
 
 // runForeground runs the check-in loop in the foreground, logging to stdout.
@@ -115,12 +226,14 @@ func usage(w *os.File) {
 
 Usage:
   rmm-agent [run] [-config FILE] [-once]   Run in the foreground (default)
+  rmm-agent enroll --server URL [--token-env NAME | --token-file FILE | --token-stdin]
   rmm-agent install   [-config FILE]       Install as a Windows service (auto-start)
   rmm-agent uninstall                      Remove the Windows service (idempotent)
   rmm-agent start                          Start the installed Windows service
   rmm-agent stop                           Stop the running Windows service
 
-The service subcommands are Windows-only. On Linux/macOS the agent runs in the
-foreground and is typically supervised by systemd/launchd.
+Enrollment tokens are never accepted as command-line values. Use an environment
+variable populated by a secret manager, a mode-0600 secret file, standard input,
+or the hidden interactive prompt. Service subcommands are Windows-only.
 `, version)
 }

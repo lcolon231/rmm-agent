@@ -252,9 +252,10 @@ All application routes except `/healthz` are under `/api/v1`.
 | GET | `/audit/anchors/{id}/receipt` | External publication receipt + tamper check | Readonly |
 | GET | `/audit/publication-status` | External anchor publication lag/health | Readonly |
 
-There are no APIs yet for listing/revoking enrollment tokens, general operator
-editing, audit-event listing, monitoring policies or alerts, scheduling,
-patching, or evidence export. Telemetry history is available only as a bounded
+Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, and
+a filtered enrollment audit-event list are implemented. Operator
+listing/editing, monitoring policies or alerts, scheduling, patching, and
+evidence export remain absent. Telemetry history is available only as a bounded
 read-only endpoint-detail query, not as a general analytics API.
 
 ## 5. Agent
@@ -494,8 +495,10 @@ moved merely to match an aspirational tree.
 - Audit anchors are published to external immutable storage when a backend is
   configured (`docs/AUDIT-ANCHORING.md`); with none configured they remain
   inside the database trust boundary and the publisher warns.
-- Roles are global; clients/sites are not authorization tenants.
-- The login limiter is process-local and weakens with multiple workers.
+- Roles are global; clients/sites bind token and agent assignments but are not
+  authorization tenants.
+- Login and enrollment limiters plus enrollment counters are process-local and
+  weaken or multiply with multiple workers.
 - `CommandStatus.running` remains reserved for a future live start signal;
   `result_pending` is assigned from durable agent outbox notices today.
 - `websockets` and `python-multipart` are declared dependencies without

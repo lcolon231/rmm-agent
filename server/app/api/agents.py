@@ -8,25 +8,29 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_agent
-from app.core import audit
+from app.core import audit, metrics
+from app.core.clientip import client_ip
 from app.core.command_envelope import (
     SUPPORTED_COMMAND_ENVELOPE_VERSIONS,
     select_command_envelope_version,
 )
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.enrollment import EnrollmentRejected, redeem_enrollment_token
 from app.core.security import (
     generate_token,
     hash_token,
+    credential_fingerprint,
     public_key_pem,
     public_key_bundle_pem,
 )
 from app.core.keyring import active_signing_key
+from app.core.ratelimit import enrollment_limiter
 from app.core.timeutil import ensure_utc
 from app.models.models import (
     Agent,
@@ -34,9 +38,10 @@ from app.models.models import (
     AgentTrustState,
     Command,
     CommandStatus,
-    EnrollmentToken,
+    Site,
 )
 from app.schemas.schemas import (
+    AgentCredentialRenewResponse,
     CommandOut,
     CommandResult,
     EnrollRequest,
@@ -53,16 +58,59 @@ def _now() -> datetime:
 
 
 @router.post("/enroll", response_model=EnrollResponse)
-async def enroll(body: EnrollRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/agents/enroll", response_model=EnrollResponse)
+async def enroll(
+    body: EnrollRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     """Claim an agent identity using a site enrollment token.
 
     The plaintext agent token is returned exactly once here; the agent must
     persist it. Server keeps only the hash.
     """
+    source_ip = client_ip(request)
+    retry_after = enrollment_limiter.retry_after(source_ip)
+    if retry_after is not None:
+        metrics.increment("enrollment_failure_total")
+        await audit.record(
+            db,
+            action="agent.enrollment_failed",
+            actor="installer",
+            source_ip=source_ip,
+            user_agent=request.headers.get("user-agent", "")[:500] or None,
+            detail={
+                "reason": "rate_limited",
+                "hostname": body.hostname,
+                "agent_name": body.agent_name or "",
+            },
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": "enrollment_rate_limited"},
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
+    enrollment_limiter.record_failure(source_ip)
+
     selected_version = select_command_envelope_version(
         body.supported_command_envelope_versions
     )
     if selected_version is None:
+        metrics.increment("enrollment_failure_total")
+        await audit.record(
+            db,
+            action="agent.enrollment_failed",
+            actor="installer",
+            source_ip=source_ip,
+            user_agent=request.headers.get("user-agent", "")[:500] or None,
+            detail={
+                "reason": "no_common_command_envelope_version",
+                "hostname": body.hostname,
+                "agent_name": body.agent_name or "",
+            },
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
@@ -71,55 +119,102 @@ async def enroll(body: EnrollRequest, db: AsyncSession = Depends(get_db)):
             },
         )
 
-    result = await db.execute(
-        select(EnrollmentToken).where(
-            EnrollmentToken.token_hash == hash_token(body.enrollment_token)
+    try:
+        enrollment = await redeem_enrollment_token(
+            db,
+            body=body,
+            source_ip=source_ip,
         )
-    )
-    etoken = result.scalar_one_or_none()
-    if etoken is None or not etoken.is_usable:
+    except EnrollmentRejected as exc:
+        metrics.increment("enrollment_failure_total")
+        await audit.record(
+            db,
+            action="agent.enrollment_failed",
+            actor="installer",
+            source_ip=source_ip,
+            user_agent=request.headers.get("user-agent", "")[:500] or None,
+            detail={
+                "reason": exc.reason,
+                "hostname": body.hostname,
+                "agent_name": body.agent_name or "",
+            },
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Enrollment token is invalid, expired, or exhausted",
+            detail={"code": "enrollment_rejected", "message": "Enrollment failed"},
         )
-
-    agent_token = generate_token()
-    agent = Agent(
-        site_id=etoken.site_id,
-        token_hash=hash_token(agent_token),
-        hostname=body.hostname,
-        os=body.os,
-        os_version=body.os_version,
-        agent_version=body.agent_version,
-        command_envelope_versions=body.supported_command_envelope_versions,
-        status=AgentStatus.pending,
-    )
-    db.add(agent)
-    etoken.uses += 1
-    await db.flush()
 
     await audit.record(
         db,
         action="agent.enrolled",
-        actor=f"installer:{etoken.id}",
-        agent_id=agent.id,
+        actor=f"installer:{enrollment.enrollment_token.id}",
+        agent_id=enrollment.agent.id,
+        enrollment_token_id=enrollment.enrollment_token.id,
+        organization_id=enrollment.organization_id,
+        source_ip=source_ip,
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
         detail={
             "hostname": body.hostname,
-            "os": body.os,
-            "site_id": etoken.site_id,
+            "agent_name": enrollment.agent.name,
+            "os": enrollment.agent.os,
+            "architecture": enrollment.agent.architecture,
+            "site_id": enrollment.enrollment_token.site_id,
+            "environment": enrollment.agent.environment,
             "command_envelope_version": selected_version,
             "supported_command_envelope_versions": body.supported_command_envelope_versions,
+            "public_key_supplied": body.public_key is not None,
         },
     )
+    enrollment_limiter.clear(source_ip)
+    metrics.increment("enrollment_success_total")
 
     return EnrollResponse(
-        agent_id=agent.id,
-        agent_token=agent_token,
+        agent_id=enrollment.agent.id,
+        agent_token=enrollment.agent_token,
         heartbeat_interval_seconds=settings.heartbeat_interval_seconds,
         command_public_key=public_key_pem(),
         command_public_keys=public_key_bundle_pem(),
         command_signing_key_id=active_signing_key().key_id,
         command_envelope_version=selected_version,
+        credential_expires_at=enrollment.agent.credential_expires_at,
+        api_base_url=settings.public_base_url,
+        configuration_metadata={
+            "organization_id": enrollment.organization_id,
+            "site": enrollment.site_name,
+            "environment": enrollment.agent.environment,
+            "labels": enrollment.agent.labels,
+        },
+    )
+
+
+@router.post(
+    "/agents/credentials/renew",
+    response_model=AgentCredentialRenewResponse,
+)
+async def renew_agent_credential(
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rotate the current per-agent bearer credential atomically."""
+    plaintext = generate_token()
+    agent.token_hash = hash_token(plaintext)
+    agent.credential_fingerprint = credential_fingerprint(plaintext)
+    agent.credential_issued_at = _now()
+    site = await db.get(Site, agent.site_id)
+    await audit.record(
+        db,
+        action="agent.credential_renewed",
+        actor=f"agent:{agent.id}",
+        agent_id=agent.id,
+        organization_id=site.client_id if site else None,
+        detail={"credential_fingerprint": agent.credential_fingerprint},
+    )
+    metrics.increment("agent_credential_renewed_total")
+    return AgentCredentialRenewResponse(
+        agent_id=agent.id,
+        agent_token=plaintext,
+        credential_expires_at=agent.credential_expires_at,
     )
 
 

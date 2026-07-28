@@ -85,6 +85,13 @@ class AgentTrustState(str, enum.Enum):
     revoked = "revoked"
 
 
+class EnrollmentTokenStatus(str, enum.Enum):
+    active = "active"
+    used = "used"
+    expired = "expired"
+    revoked = "revoked"
+
+
 class CommandKind(str, enum.Enum):
     powershell = "powershell"
     shell = "shell"
@@ -170,26 +177,64 @@ class EnrollmentToken(Base):
         ForeignKey("sites.id", ondelete="CASCADE"), nullable=False
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # Non-secret support identifier. This is deliberately only the first few
+    # characters of the random token and is safe to show in masked list views.
+    token_prefix: Mapped[str] = mapped_column(String(12), default="", nullable=False)
+    name: Mapped[str] = mapped_column(String(200), default="Enrollment token", nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
     label: Mapped[str | None] = mapped_column(String(200))
-    max_uses: Mapped[int] = mapped_column(Integer, default=1)
-    uses: Mapped[int] = mapped_column(Integer, default=0)
-    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    assigned_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    environment: Mapped[str | None] = mapped_column(String(100))
+    hostname_restriction: Mapped[str | None] = mapped_column(String(255))
+    agent_name_restriction: Mapped[str | None] = mapped_column(String(255))
+    labels: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    max_uses: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    uses: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
 
     site: Mapped["Site"] = relationship(back_populates="enrollment_tokens")
+    assigned_user: Mapped["Operator | None"] = relationship(
+        foreign_keys=[assigned_user_id]
+    )
+    created_by: Mapped["Operator | None"] = relationship(
+        foreign_keys=[created_by_id]
+    )
+    revoked_by: Mapped["Operator | None"] = relationship(
+        foreign_keys=[revoked_by_id]
+    )
+
+    @property
+    def status(self) -> EnrollmentTokenStatus:
+        if self.revoked or self.revoked_at is not None:
+            return EnrollmentTokenStatus.revoked
+        if self.expires_at is None:
+            # Legacy tokens without an expiry fail closed.
+            return EnrollmentTokenStatus.expired
+        exp = self.expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp <= datetime.now(timezone.utc):
+            return EnrollmentTokenStatus.expired
+        if self.uses >= self.max_uses:
+            return EnrollmentTokenStatus.used
+        return EnrollmentTokenStatus.active
 
     @property
     def is_usable(self) -> bool:
-        if self.revoked or self.uses >= self.max_uses:
-            return False
-        if self.expires_at is not None:
-            exp = self.expires_at
-            if exp.tzinfo is None:
-                exp = exp.replace(tzinfo=timezone.utc)
-            if exp < datetime.now(timezone.utc):
-                return False
-        return True
+        return self.status == EnrollmentTokenStatus.active
 
 
 class Agent(Base):
@@ -201,11 +246,25 @@ class Agent(Base):
     )
     # SHA-256 of the agent's long-lived bearer token.
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    credential_fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
+    credential_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    credential_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     hostname: Mapped[str] = mapped_column(String(255), default="")
     os: Mapped[str] = mapped_column(String(100), default="")
     os_version: Mapped[str] = mapped_column(String(100), default="")
     agent_version: Mapped[str] = mapped_column(String(50), default="")
+    architecture: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    environment: Mapped[str | None] = mapped_column(String(100))
+    labels: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    owner_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    enrolled_by_token_id: Mapped[str | None] = mapped_column(
+        ForeignKey("enrollment_tokens.id", ondelete="SET NULL"), index=True
+    )
+    ip_address: Mapped[str | None] = mapped_column(String(64))
     # Versions this agent most recently advertised. Empty means commands fail
     # closed until a compatible agent checks in.
     command_envelope_versions: Mapped[list[str]] = mapped_column(
@@ -225,11 +284,16 @@ class Agent(Base):
     trust_state_changed_by: Mapped[str | None] = mapped_column(String(320))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Latest inventory snapshot (hardware + installed software), stored as JSON.
     inventory: Mapped[dict | None] = mapped_column(JSON)
 
     site: Mapped["Site"] = relationship(back_populates="agents")
+    owner_user: Mapped["Operator | None"] = relationship(foreign_keys=[owner_user_id])
+    enrolled_by_token: Mapped["EnrollmentToken | None"] = relationship(
+        foreign_keys=[enrolled_by_token_id]
+    )
     heartbeats: Mapped[list["Heartbeat"]] = relationship(
         back_populates="agent", cascade="all, delete-orphan"
     )
@@ -331,8 +395,13 @@ class AuditEvent(Base):
     # timezone-aware datetimes.
     ts_iso: Mapped[str] = mapped_column(String(40), default="")
     actor: Mapped[str] = mapped_column(String(255), default="system")
+    actor_user_id: Mapped[str | None] = mapped_column(String(36), index=True)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     agent_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    enrollment_token_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    organization_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    source_ip: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
 
     prev_hash: Mapped[str] = mapped_column(String(64), default="")

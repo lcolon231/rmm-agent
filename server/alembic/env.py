@@ -29,7 +29,7 @@ def _database_url() -> str:
     return (
         os.getenv("ALEMBIC_DATABASE_URL")
         or os.getenv("DATABASE_URL")
-        or configured
+        or settings.database_url
     )
 
 

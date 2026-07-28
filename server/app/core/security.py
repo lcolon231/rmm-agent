@@ -77,6 +77,15 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def credential_fingerprint(token: str) -> str:
+    """Non-authenticating fingerprint safe to show to administrators.
+
+    This is deliberately domain-separated from the digest used as the database
+    credential verifier, so exposing a fingerprint never exposes that verifier.
+    """
+    return hashlib.sha256(f"nodelink-agent-fingerprint:{token}".encode("utf-8")).hexdigest()
+
+
 def verify_token(token: str, token_hash: str) -> bool:
     return secrets.compare_digest(hash_token(token), token_hash)
 
