@@ -15,13 +15,14 @@ import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_role
-from app.core import anchor, anchor_publish, audit, retention
+from app.core import anchor, anchor_publish, audit, metrics, retention
+from app.core.clientip import client_ip
 from app.core.command_envelope import (
     ACTIVE_COMMAND_ENVELOPE_VERSION,
     COMMAND_ENVELOPE_V3,
@@ -40,14 +41,17 @@ from app.core.script_authorization import (
 )
 from app.models.models import (
     Agent,
+    AgentStatus,
     AgentTrustState,
     AnchorPublication,
+    AuditEvent,
     AuditAnchor,
     Client,
     Command,
     CommandKind,
     CommandStatus,
     EnrollmentToken,
+    EnrollmentTokenStatus,
     Heartbeat,
     Operator,
     OperatorRole,
@@ -55,6 +59,8 @@ from app.models.models import (
 )
 from app.schemas.schemas import (
     AgentOut,
+    AuditEventListOut,
+    AuditEventOut,
     AnchorOut,
     AnchorVerifyOut,
     ClientCreate,
@@ -65,7 +71,10 @@ from app.schemas.schemas import (
     CommandHistoryOut,
     CommandOut,
     EnrollmentTokenCreate,
+    EnrollmentTokenListOut,
+    EnrollmentTokenMetadataOut,
     EnrollmentTokenOut,
+    EnrollmentDashboardOut,
     EndpointDetailOut,
     EndpointListItemOut,
     EndpointListOut,
@@ -245,34 +254,219 @@ async def get_site_navigation(
 # --------------------------------------------------------------------------- #
 # Enrollment tokens
 # --------------------------------------------------------------------------- #
+async def _enrollment_token_metadata(
+    db: AsyncSession, token: EnrollmentToken
+) -> EnrollmentTokenMetadataOut:
+    site = await db.get(Site, token.site_id)
+    if site is None:
+        raise HTTPException(status_code=500, detail="Enrollment token assignment is invalid")
+    organization = await db.get(Client, site.client_id)
+    if organization is None:
+        raise HTTPException(status_code=500, detail="Enrollment token assignment is invalid")
+    assigned = await db.get(Operator, token.assigned_user_id) if token.assigned_user_id else None
+    created_by = await db.get(Operator, token.created_by_id) if token.created_by_id else None
+    revoked_by = await db.get(Operator, token.revoked_by_id) if token.revoked_by_id else None
+    return EnrollmentTokenMetadataOut(
+        id=token.id,
+        site_id=site.id,
+        organization_id=organization.id,
+        organization_name=organization.name,
+        site_name=site.name,
+        masked_token=f"{token.token_prefix or 'nlenr'}••••••••",
+        name=token.name,
+        description=token.description,
+        label=token.label,
+        assigned_user_id=token.assigned_user_id,
+        assigned_user_email=assigned.email if assigned else None,
+        environment=token.environment,
+        hostname_restriction=token.hostname_restriction,
+        agent_name_restriction=token.agent_name_restriction,
+        labels=list(token.labels or []),
+        max_uses=token.max_uses,
+        use_count=token.uses,
+        expires_at=token.expires_at,
+        created_at=token.created_at,
+        created_by_id=token.created_by_id,
+        created_by_email=created_by.email if created_by else None,
+        last_used_at=token.last_used_at,
+        revoked_at=token.revoked_at,
+        revoked_by_id=token.revoked_by_id,
+        revoked_by_email=revoked_by.email if revoked_by else None,
+        status=token.status,
+        notes=token.notes,
+    )
+
+
+def _sortable_time(value: datetime | None) -> float:
+    if value is None:
+        return float("-inf")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
+
+
 @router.post("/enrollment-tokens", response_model=EnrollmentTokenOut)
 async def create_enrollment_token(
     body: EnrollmentTokenCreate,
-    _op: Operator = Depends(require_role(OperatorRole.operator)),
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
     db: AsyncSession = Depends(get_db),
 ):
-    if not await db.get(Site, body.site_id):
+    site = await db.get(Site, body.site_id)
+    if site is None:
         raise HTTPException(status_code=404, detail="Site not found")
+    if body.assigned_user_id and not await db.get(Operator, body.assigned_user_id):
+        raise HTTPException(status_code=404, detail="Assigned user not found")
 
-    plaintext = generate_token()
+    now = _now()
+    expires_at = body.expires_at or (
+        now + timedelta(hours=settings.enrollment_token_default_expiry_hours)
+    )
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= now:
+        raise HTTPException(status_code=422, detail="Token expiration must be in the future")
+    if expires_at > now + timedelta(days=settings.enrollment_token_max_expiry_days):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Token expiration cannot exceed {settings.enrollment_token_max_expiry_days} days",
+        )
+    if body.max_uses > settings.enrollment_token_max_uses:
+        raise HTTPException(status_code=422, detail="Maximum uses exceeds deployment policy")
+
+    plaintext = f"nlenr_{generate_token()}"
     etoken = EnrollmentToken(
         site_id=body.site_id,
         token_hash=hash_token(plaintext),
+        token_prefix=plaintext[:12],
+        name=body.name if body.name != "Enrollment token" or not body.label else body.label,
+        description=body.description,
         label=body.label,
+        assigned_user_id=body.assigned_user_id,
+        environment=body.environment,
+        hostname_restriction=body.hostname_restriction,
+        agent_name_restriction=body.agent_name_restriction,
+        labels=body.labels,
         max_uses=body.max_uses,
-        expires_at=body.expires_at,
+        expires_at=expires_at,
+        created_by_id=operator.id,
+        notes=body.notes,
     )
     db.add(etoken)
     await db.flush()
 
-    return EnrollmentTokenOut(
-        id=etoken.id,
-        site_id=etoken.site_id,
-        token=plaintext,
-        label=etoken.label,
-        max_uses=etoken.max_uses,
-        expires_at=etoken.expires_at,
+    await audit.record(
+        db,
+        action="enrollment_token.created",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        enrollment_token_id=etoken.id,
+        organization_id=site.client_id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "site_id": site.id,
+            "name": etoken.name,
+            "expires_at": expires_at.isoformat(),
+            "max_uses": etoken.max_uses,
+            "has_hostname_restriction": bool(etoken.hostname_restriction),
+            "has_agent_name_restriction": bool(etoken.agent_name_restriction),
+            "labels": etoken.labels,
+        },
     )
+    metrics.increment("enrollment_token_created_total")
+    metadata = await _enrollment_token_metadata(db, etoken)
+    return EnrollmentTokenOut(**metadata.model_dump(), token=plaintext)
+
+
+@router.get("/enrollment-tokens", response_model=EnrollmentTokenListOut)
+async def list_enrollment_tokens(
+    search: str | None = Query(default=None, max_length=100),
+    token_status: EnrollmentTokenStatus | None = Query(default=None, alias="status"),
+    organization_id: str | None = Query(default=None, max_length=36),
+    site_id: str | None = Query(default=None, max_length=36),
+    sort: str = Query(default="created_at", pattern="^(created_at|expires_at|name|status|use_count)$"),
+    direction: str = Query(default="desc", pattern="^(asc|desc)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(EnrollmentToken).join(Site).join(Client)
+    if organization_id:
+        stmt = stmt.where(Client.id == organization_id)
+    if site_id:
+        stmt = stmt.where(Site.id == site_id)
+    if search:
+        term = f"%{search.strip()}%"
+        stmt = stmt.where(
+            or_(
+                EnrollmentToken.name.ilike(term),
+                EnrollmentToken.description.ilike(term),
+                EnrollmentToken.label.ilike(term),
+            )
+        )
+    tokens = list((await db.execute(stmt)).scalars().all())
+    if token_status:
+        tokens = [token for token in tokens if token.status == token_status]
+    key = {
+        "created_at": lambda token: _sortable_time(token.created_at),
+        "expires_at": lambda token: _sortable_time(token.expires_at),
+        "name": lambda token: token.name.casefold(),
+        "status": lambda token: token.status.value,
+        "use_count": lambda token: token.uses,
+    }[sort]
+    tokens.sort(key=key, reverse=direction == "desc")
+    total = len(tokens)
+    page_tokens = tokens[(page - 1) * page_size : page * page_size]
+    return EnrollmentTokenListOut(
+        items=[await _enrollment_token_metadata(db, token) for token in page_tokens],
+        page=page,
+        page_size=page_size,
+        total=total,
+    )
+
+
+@router.get("/enrollment-tokens/{token_id}", response_model=EnrollmentTokenMetadataOut)
+async def get_enrollment_token(
+    token_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    token = await db.get(EnrollmentToken, token_id)
+    if token is None:
+        raise HTTPException(status_code=404, detail="Enrollment token not found")
+    return await _enrollment_token_metadata(db, token)
+
+
+@router.post("/enrollment-tokens/{token_id}/revoke", response_model=EnrollmentTokenMetadataOut)
+async def revoke_enrollment_token(
+    token_id: str,
+    body: TrustStateChange,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    token = await db.get(EnrollmentToken, token_id)
+    if token is None:
+        raise HTTPException(status_code=404, detail="Enrollment token not found")
+    if not token.revoked:
+        now = _now()
+        token.revoked = True
+        token.revoked_at = now
+        token.revoked_by_id = operator.id
+        site = await db.get(Site, token.site_id)
+        await audit.record(
+            db,
+            action="enrollment_token.revoked",
+            actor=operator.email,
+            actor_user_id=operator.id,
+            enrollment_token_id=token.id,
+            organization_id=site.client_id if site else None,
+            source_ip=client_ip(request),
+            user_agent=request.headers.get("user-agent", "")[:500] or None,
+            detail={"site_id": token.site_id, "reason": body.reason},
+        )
+        metrics.increment("enrollment_token_revoked_total")
+    return await _enrollment_token_metadata(db, token)
 
 
 # --------------------------------------------------------------------------- #
@@ -507,11 +701,14 @@ async def _apply_trust_change(
     agent.trust_state_reason = reason
     agent.trust_state_changed_at = _now()
     agent.trust_state_changed_by = operator.email
+    site = await db.get(Site, agent.site_id)
     await audit.record(
         db,
         action=action,
         actor=operator.email,
+        actor_user_id=operator.id,
         agent_id=agent.id,
+        organization_id=site.client_id if site else None,
         detail={
             "previous_trust_state": previous.value,
             "trust_state": new_state.value,
@@ -603,6 +800,8 @@ async def revoke_agent(
     agent = await _apply_trust_change(
         db, agent, AgentTrustState.revoked, body.reason, operator, "agent.revoked"
     )
+    agent.revoked_at = _now()
+    metrics.increment("agent_revoked_total")
     if expired_ids:
         await audit.record(
             db,
@@ -912,6 +1111,101 @@ async def get_command(
 # --------------------------------------------------------------------------- #
 # Audit
 # --------------------------------------------------------------------------- #
+@router.get("/enrollment-dashboard", response_model=EnrollmentDashboardOut)
+async def enrollment_dashboard(db: AsyncSession = Depends(get_db)):
+    agents = list((await db.execute(select(Agent))).scalars().all())
+    tokens = list((await db.execute(select(EnrollmentToken))).scalars().all())
+    recent_agents = list(
+        (
+            await db.execute(
+                select(Agent)
+                .order_by(Agent.enrolled_at.desc(), Agent.id.desc())
+                .limit(8)
+            )
+        ).scalars().all()
+    )
+    failure_cutoff = _now() - timedelta(hours=24)
+    recent_failures = (
+        await db.execute(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(
+                AuditEvent.action == "agent.enrollment_failed",
+                AuditEvent.ts >= failure_cutoff,
+            )
+        )
+    ).scalar_one()
+    return EnrollmentDashboardOut(
+        total_agents=len(agents),
+        active_agents=sum(
+            agent.trust_state == AgentTrustState.active
+            and agent.status != AgentStatus.offline
+            for agent in agents
+        ),
+        offline_agents=sum(agent.status == AgentStatus.offline for agent in agents),
+        revoked_agents=sum(
+            agent.trust_state == AgentTrustState.revoked for agent in agents
+        ),
+        active_enrollment_tokens=sum(
+            token.status == EnrollmentTokenStatus.active for token in tokens
+        ),
+        expired_tokens=sum(
+            token.status == EnrollmentTokenStatus.expired for token in tokens
+        ),
+        recently_enrolled_agents=recent_agents,
+        recent_enrollment_failures=recent_failures,
+    )
+
+
+@router.get("/audit/events", response_model=AuditEventListOut)
+async def list_audit_events(
+    event_type: str | None = Query(default=None, max_length=100),
+    actor: str | None = Query(default=None, max_length=255),
+    agent_id: str | None = Query(default=None, max_length=36),
+    organization_id: str | None = Query(default=None, max_length=36),
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    filters = []
+    if event_type:
+        filters.append(AuditEvent.action == event_type)
+    if actor:
+        filters.append(AuditEvent.actor.ilike(f"%{actor.strip()}%"))
+    if agent_id:
+        filters.append(AuditEvent.agent_id == agent_id)
+    if organization_id:
+        filters.append(AuditEvent.organization_id == organization_id)
+    if date_from:
+        filters.append(AuditEvent.ts >= date_from)
+    if date_to:
+        filters.append(AuditEvent.ts <= date_to)
+    total = (
+        await db.execute(
+            select(func.count()).select_from(AuditEvent).where(*filters)
+        )
+    ).scalar_one()
+    events = list(
+        (
+            await db.execute(
+                select(AuditEvent)
+                .where(*filters)
+                .order_by(AuditEvent.seq.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).scalars().all()
+    )
+    return AuditEventListOut(
+        items=[AuditEventOut.model_validate(event) for event in events],
+        page=page,
+        page_size=page_size,
+        total=total,
+    )
+
+
 @router.get("/audit/verify")
 async def verify_audit_chain(db: AsyncSession = Depends(get_db)):
     ok, broken_at = await audit.verify_chain(db)

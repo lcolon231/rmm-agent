@@ -244,11 +244,21 @@ ID3 = "33333333-3333-4333-8333-333333333333"
 PRODUCER_DETAILS = {
     "agent.enrolled": {
         "hostname": SENTINEL,
+        "agent_name": SENTINEL,
         "os": "windows",
+        "architecture": "amd64",
         "site_id": ID1,
+        "environment": "production",
         "command_envelope_version": "command-v3",
         "supported_command_envelope_versions": ["command-v3"],
+        "public_key_supplied": False,
     },
+    "agent.enrollment_failed": {
+        "reason": "invalid_token",
+        "hostname": SENTINEL,
+        "agent_name": SENTINEL,
+    },
+    "agent.credential_renewed": {"credential_fingerprint": "a" * 64},
     "agent.command_envelope_capabilities_changed": {
         "previous": ["command-v2"],
         "current": ["command-v3"],
@@ -281,6 +291,19 @@ PRODUCER_DETAILS = {
     },
     "client_navigation.client_viewed": {"client_id": ID1},
     "client_navigation.site_viewed": {"site_id": ID1, "client_id": ID2},
+    "enrollment_token.created": {
+        "site_id": ID1,
+        "name": SENTINEL,
+        "expires_at": "2026-07-29T00:00:00+00:00",
+        "max_uses": 1,
+        "has_hostname_restriction": True,
+        "has_agent_name_restriction": False,
+        "labels": ["canary"],
+    },
+    "enrollment_token.revoked": {
+        "site_id": ID1,
+        "reason": SENTINEL,
+    },
     "command.authorization_allowed": {
         "operator_id": ID1,
         "operator_role": "operator",

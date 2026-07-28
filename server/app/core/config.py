@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     # further attempts are rejected with 429.
     login_max_failures: int = 5
     login_window_seconds: int = 300
+    # Enrollment attempts (successful or failed) allowed per source IP in the
+    # process-local window. Multi-worker deployments require the shared limiter
+    # tracked in docs/agent-enrollment/open-issues.md.
+    enrollment_rate_limit_attempts: int = 10
+    enrollment_rate_limit_window_seconds: int = 60
+    enrollment_token_default_expiry_hours: int = 24
+    enrollment_token_max_expiry_days: int = 30
+    enrollment_token_max_uses: int = 100
 
     # Ed25519 private key (PEM) used to SIGN commands sent to agents.
     # Agents hold the matching public key and verify every command before executing.

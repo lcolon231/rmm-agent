@@ -22,6 +22,7 @@ from app.models.models import (
     AgentTrustState,
     CommandKind,
     CommandStatus,
+    EnrollmentTokenStatus,
     OperatorRole,
     ScriptExecutionScope,
 )
@@ -150,28 +151,96 @@ class CommandEnvelopeCapabilities(BaseModel):
 
 class EnrollmentTokenCreate(BaseModel):
     site_id: str
+    name: Annotated[
+        str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)
+    ] = "Enrollment token"
+    description: Annotated[
+        str, StringConstraints(max_length=2_000, strip_whitespace=True)
+    ] | None = None
+    assigned_user_id: str | None = None
+    environment: Annotated[
+        str, StringConstraints(max_length=100, strip_whitespace=True)
+    ] | None = None
+    hostname_restriction: Annotated[
+        str, StringConstraints(max_length=255, strip_whitespace=True)
+    ] | None = None
+    agent_name_restriction: Annotated[
+        str, StringConstraints(max_length=255, strip_whitespace=True)
+    ] | None = None
+    labels: list[
+        Annotated[str, StringConstraints(min_length=1, max_length=50, strip_whitespace=True)]
+    ] = Field(default_factory=list, max_length=20)
+    notes: Annotated[
+        str, StringConstraints(max_length=4_000, strip_whitespace=True)
+    ] | None = None
     label: str | None = None
-    max_uses: int = 1
+    max_uses: int = Field(default=1, ge=1, le=100)
     expires_at: datetime | None = None
 
+    @field_validator("labels")
+    @classmethod
+    def labels_must_be_unique(cls, value: list[str]) -> list[str]:
+        if len({item.casefold() for item in value}) != len(value):
+            raise ValueError("labels must be unique")
+        return value
 
-class EnrollmentTokenOut(BaseModel):
-    """Returned once at creation — includes the plaintext token."""
+
+class EnrollmentTokenMetadataOut(BaseModel):
+    """Safe token metadata used after the creation response."""
     id: str
     site_id: str
-    token: str  # plaintext, shown only here
+    organization_id: str
+    organization_name: str
+    site_name: str
+    masked_token: str
+    name: str
+    description: str | None
     label: str | None
+    assigned_user_id: str | None
+    assigned_user_email: str | None
+    environment: str | None
+    hostname_restriction: str | None
+    agent_name_restriction: str | None
+    labels: list[str]
     max_uses: int
+    use_count: int
     expires_at: datetime | None
+    created_at: datetime
+    created_by_id: str | None
+    created_by_email: str | None
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+    revoked_by_id: str | None
+    revoked_by_email: str | None
+    status: EnrollmentTokenStatus
+    notes: str | None
+
+
+class EnrollmentTokenOut(EnrollmentTokenMetadataOut):
+    """Creation-only response. No other response schema contains plaintext."""
+    token: str
+
+
+class EnrollmentTokenListOut(BaseModel):
+    items: list[EnrollmentTokenMetadataOut] = Field(default_factory=list)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total: int = Field(ge=0)
 
 
 class EnrollRequest(CommandEnvelopeCapabilities):
     """Sent by the agent installer to claim an identity."""
     enrollment_token: str
     hostname: str
-    os: str
+    agent_name: str | None = None
+    os: str = ""
+    operating_system: str | None = None
     os_version: str = ""
     agent_version: str = ""
+    architecture: str = ""
+    environment: str | None = None
+    site: str | None = None
+    public_key: str | None = Field(default=None, max_length=16_384)
 
 
 class EnrollResponse(BaseModel):
@@ -182,6 +251,15 @@ class EnrollResponse(BaseModel):
     command_envelope_version: EnvelopeVersion
     command_public_keys: dict[str, str] = Field(default_factory=dict)
     command_signing_key_id: str = "default"
+    credential_expires_at: datetime | None = None
+    api_base_url: str | None = None
+    configuration_metadata: dict = Field(default_factory=dict)
+
+
+class AgentCredentialRenewResponse(BaseModel):
+    agent_id: str
+    agent_token: str
+    credential_expires_at: datetime | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -403,10 +481,19 @@ class AgentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     site_id: str
+    name: str
     hostname: str
     os: str
     os_version: str
     agent_version: str
+    architecture: str
+    environment: str | None
+    labels: list[str]
+    owner_user_id: str | None
+    enrolled_by_token_id: str | None
+    credential_fingerprint: str | None
+    credential_issued_at: datetime | None
+    credential_expires_at: datetime | None
     command_envelope_versions: list[EnvelopeVersion]
     status: AgentStatus
     trust_state: AgentTrustState
@@ -415,6 +502,40 @@ class AgentOut(BaseModel):
     trust_state_changed_by: str | None
     last_seen_at: datetime | None
     enrolled_at: datetime
+    revoked_at: datetime | None
+
+
+class EnrollmentDashboardOut(BaseModel):
+    total_agents: int = Field(ge=0)
+    active_agents: int = Field(ge=0)
+    offline_agents: int = Field(ge=0)
+    revoked_agents: int = Field(ge=0)
+    active_enrollment_tokens: int = Field(ge=0)
+    expired_tokens: int = Field(ge=0)
+    recently_enrolled_agents: list[AgentOut] = Field(default_factory=list)
+    recent_enrollment_failures: int = Field(ge=0)
+
+
+class AuditEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    seq: int | None
+    ts: datetime
+    actor: str
+    actor_user_id: str | None
+    action: str
+    agent_id: str | None
+    enrollment_token_id: str | None
+    organization_id: str | None
+    source_ip: str | None
+    detail: dict
+
+
+class AuditEventListOut(BaseModel):
+    items: list[AuditEventOut] = Field(default_factory=list)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total: int = Field(ge=0)
 
 
 class EndpointListItemOut(BaseModel):

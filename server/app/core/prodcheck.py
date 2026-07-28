@@ -64,6 +64,15 @@ def production_config_problems(settings: Settings) -> list[str]:
             "permissive failure modes)"
         )
 
+    if settings.enrollment_token_default_expiry_hours <= 0:
+        problems.append("ENROLLMENT_TOKEN_DEFAULT_EXPIRY_HOURS must be positive")
+    if settings.enrollment_token_max_expiry_days <= 0:
+        problems.append("ENROLLMENT_TOKEN_MAX_EXPIRY_DAYS must be positive")
+    if not 1 <= settings.enrollment_token_max_uses <= 1000:
+        problems.append("ENROLLMENT_TOKEN_MAX_USES must be between 1 and 1000")
+    if settings.enrollment_rate_limit_attempts <= 0:
+        problems.append("ENROLLMENT_RATE_LIMIT_ATTEMPTS must be positive")
+
     secret = settings.secret_key.strip()
     if secret.lower() in _PLACEHOLDER_SECRETS:
         problems.append("SECRET_KEY is a known placeholder value; generate a real one")

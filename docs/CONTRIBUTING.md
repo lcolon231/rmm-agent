@@ -79,7 +79,7 @@ Server:
 
 ```bash
 cd server
-pip install -r requirements.txt pytest pytest-asyncio httpx aiosqlite
+python -m pip install -r requirements.txt pytest pytest-asyncio httpx aiosqlite
 python scripts/gen_command_keys.py
 pytest -q
 ```

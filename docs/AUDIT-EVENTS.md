@@ -28,7 +28,9 @@ and SHA-256/Merkle roots—remains readable.
 
 | Action | Producer | Stored detail fields |
 |---|---|---|
-| `agent.enrolled` | `api/agents.py` enrollment | `hostname_sha256`, `hostname_bytes`, `os_sha256`, `os_bytes`, `site_id`, `command_envelope_version`, `supported_command_envelope_versions` |
+| `agent.enrolled` | `api/agents.py` enrollment | `hostname_sha256`, `hostname_bytes`, `agent_name_sha256`, `agent_name_bytes`, `os_sha256`, `os_bytes`, `architecture`, `site_id`, `environment`, `command_envelope_version`, `supported_command_envelope_versions`, `public_key_supplied` |
+| `agent.enrollment_failed` | `api/agents.py` rejected enrollment | `reason`, `hostname_sha256`, `hostname_bytes`, `agent_name_sha256`, `agent_name_bytes` |
+| `agent.credential_renewed` | `api/agents.py` credential renewal | `credential_fingerprint` |
 | `agent.command_envelope_capabilities_changed` | `api/agents.py` heartbeat | `previous`, `current` |
 | `agent.offline` | `core/tasks.py` offline sweep | `last_seen_at` |
 | `agent.quarantined` | `api/management.py` trust transition | `previous_trust_state`, `trust_state`, `reason_sha256`, `reason_bytes` |
@@ -47,6 +49,8 @@ and SHA-256/Merkle roots—remains readable.
 | `command_detail.viewed` | `api/management.py` sensitive result view | `command_id`, `status` |
 | `endpoint_detail.viewed` | `api/management.py` endpoint detail | `history_hours`, `history_limit`, `history_count`, `history_truncated`, `script_execution_allowed` |
 | `endpoint_list.viewed` | `api/management.py` endpoint list | `client_id`, `site_id`, `status`, `search`, `sort`, `direction`, `page`, `page_size`, `result_count` |
+| `enrollment_token.created` | `api/management.py` token creation | `site_id`, `name_sha256`, `name_bytes`, `expires_at`, `max_uses`, `has_hostname_restriction`, `has_agent_name_restriction`, `labels` |
+| `enrollment_token.revoked` | `api/management.py` token revocation | `site_id`, `reason_sha256`, `reason_bytes` |
 | `operator.script_permission_changed` | `api/auth.py` permission grant/change | `operator_id`, `operator_role`, `previous_scope`, `previous_scope_id`, `new_scope`, `new_scope_id`, `reason_sha256`, `reason_bytes` |
 | `operator.script_permission_revoked` | `api/auth.py` permission revoke | `operator_id`, `operator_role`, `previous_scope`, `previous_scope_id`, `reason_sha256`, `reason_bytes` |
 | `operator.tokens_revoked` | `api/auth.py` token-generation bump | `operator_id`, `by` |

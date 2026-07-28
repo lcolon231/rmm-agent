@@ -2,6 +2,8 @@
 """Shared API dependencies."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +41,17 @@ async def get_current_agent(
     # A revoked agent's credentials fail authentication outright, with the same
     # response as an unknown token — no oracle for a stolen credential to learn
     # it was specifically revoked rather than never valid.
-    if agent is None or agent.trust_state == AgentTrustState.revoked:
+    credential_expired = False
+    if agent is not None and agent.credential_expires_at is not None:
+        expires_at = agent.credential_expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        credential_expired = expires_at <= datetime.now(timezone.utc)
+    if (
+        agent is None
+        or agent.trust_state == AgentTrustState.revoked
+        or credential_expired
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token"
         )

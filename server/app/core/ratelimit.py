@@ -66,3 +66,11 @@ login_limiter = LoginRateLimiter(
     max_failures=settings.login_max_failures,
     window_seconds=settings.login_window_seconds,
 )
+
+# Enrollment counts every attempt, not only failures. The existing limiter
+# primitive provides the sliding-window behavior; callers intentionally use
+# record_failure as a generic "record attempt" operation.
+enrollment_limiter = LoginRateLimiter(
+    max_failures=settings.enrollment_rate_limit_attempts,
+    window_seconds=settings.enrollment_rate_limit_window_seconds,
+)

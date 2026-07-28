@@ -23,17 +23,21 @@ acceptance evidence exists, not when code has merely been merged.
 
 ## Current baseline
 
-Implemented today: outbound heartbeat polling, enrollment, basic telemetry,
-buffered signed command execution, global operator RBAC, Windows service and
-installer, hash-chained audit events, local Merkle anchors, Linux CI for Go and
-Python, tagged binaries, installer, and checksums.
+Implemented today: outbound heartbeat polling, temporary limited-use enrollment
+tokens, protected per-agent identity, basic telemetry, durable buffered signed
+command execution, global operator RBAC, agent quarantine/revocation, Windows
+service and installer, hash-chained sequenced audit events, local Merkle anchors
+and optional external publication, Alembic migrations, backup/restore tooling,
+Windows/Linux CI, checksums, SBOM/provenance, and an authenticated Next.js
+dashboard with live endpoint, command, and enrollment-management workflows.
 
-Material baseline gaps: the command signature omits expiry and versioning;
-endpoint credentials are plaintext; agents cannot be revoked or quarantined;
-production TLS is procedural; result and execution resources are not explicitly
-bounded; audit ordering and external publication are incomplete; migrations,
-recovery automation, Windows CI, signed releases, provenance, and soak evidence
-are absent. There is no dashboard or general RMM feature set.
+Material baseline gaps: per-agent bearer credentials remain long-lived; roles
+are not tenant scoped; enrollment limiting and counters are process-local;
+Windows artifacts are not Authenticode signed; the production-like v0.1.2
+backup/canary/rollback evidence is not complete; the dashboard still lacks the
+general inventory, monitoring, notification, scheduling, patching, and
+remediation product set. The multi-day controlled-pilot soak remains operator
+evidence.
 
 ## Live execution program
 

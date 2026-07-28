@@ -5,8 +5,35 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestClearEnrollmentTokenRemovesPlaintext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{
+		ServerURL:        "https://rmm.example.test",
+		EnrollmentToken:  "temporary-bootstrap-secret",
+		HeartbeatSeconds: 60,
+	}
+	if err := ClearEnrollmentToken(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "temporary-bootstrap-secret") {
+		t.Fatal("plaintext enrollment token remained in config")
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.EnrollmentToken != "" || loaded.ServerURL != cfg.ServerURL {
+		t.Fatalf("unexpected scrubbed config: %#v", loaded)
+	}
+}
 
 func TestLoadTLSSPKIPins(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")

@@ -48,8 +48,9 @@ The code in this repository currently provides:
 - Fail-closed production startup validation (`ENVIRONMENT=production` rejects
   debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
   URLs) with explicit opt-in proxy trust for client IPs.
-- Operator password authentication, JWT sessions, three global roles, token
-  generation revocation, and in-process login throttling.
+- Operator password authentication, JWT sessions, three global roles, complete
+  enrollment-token lifecycle management, transactional limited-use redemption,
+  token/agent revocation, and in-process login/enrollment throttling.
 - Client and site records, agent listing, command dispatch/history APIs, and an
   offline-status sweeper.
 - Agent quarantine/restore (operator) and terminal revocation (admin) with
@@ -62,8 +63,9 @@ The code in this repository currently provides:
   anchors, plus a scheduled publisher that writes anchor roots to external
   immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
-- An Alembic baseline and forward migration, with exact revision enforcement
-  on non-debug startup and a disposable PostgreSQL migration test in CI.
+- Forward-only Alembic migrations through revision `0012`, with exact revision
+  enforcement on non-debug startup, legacy debug-schema repair, and a
+  disposable PostgreSQL migration test in CI.
 - Encrypted PostgreSQL backup/isolated restore plus a fail-closed release
   rollback planner; CI rehearses an incompatible bad release, exact-revision
   restore, explicit data loss, component selection, and audit verification
@@ -190,6 +192,9 @@ See [server/README.md](server/README.md) to run the backend,
 [agent/README.md](agent/README.md) to build and enroll an agent, and
 [installer/README.md](installer/README.md) for the Windows installer. See
 [dashboard/README.md](dashboard/README.md) to run the dashboard foundation.
+The complete enrollment runbooks, API reference, security model, decisions,
+known issues, and v0.1.2 candidate notes are under
+[`docs/agent-enrollment/`](docs/agent-enrollment/).
 
 Before any pilot, review the [threat model](docs/threat-model.md),
 [security roadmap](docs/SECURITY-ROADMAP.md), and

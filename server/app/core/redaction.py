@@ -90,12 +90,23 @@ def _schema(
 AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     "agent.enrolled": _schema(
         "hostname",
+        "agent_name",
         "os",
+        "architecture",
         "site_id",
+        "environment",
         "command_envelope_version",
         "supported_command_envelope_versions",
-        digest_fields=("hostname", "os"),
+        "public_key_supplied",
+        digest_fields=("hostname", "agent_name", "os"),
     ),
+    "agent.enrollment_failed": _schema(
+        "reason",
+        "hostname",
+        "agent_name",
+        digest_fields=("hostname", "agent_name"),
+    ),
+    "agent.credential_renewed": _schema("credential_fingerprint"),
     "agent.command_envelope_capabilities_changed": _schema(
         "previous",
         "current",
@@ -190,6 +201,21 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "page",
         "page_size",
         "result_count",
+    ),
+    "enrollment_token.created": _schema(
+        "site_id",
+        "name",
+        "expires_at",
+        "max_uses",
+        "has_hostname_restriction",
+        "has_agent_name_restriction",
+        "labels",
+        digest_fields=("name",),
+    ),
+    "enrollment_token.revoked": _schema(
+        "site_id",
+        "reason",
+        digest_fields=("reason",),
     ),
     "operator.script_permission_changed": _schema(
         "operator_id",

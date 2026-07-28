@@ -6,11 +6,14 @@ import asyncio
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -63,6 +66,198 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "script_execution_scope",
         "script_execution_scope_id",
     } <= operator_columns
+
+
+def test_cli_prefers_dotenv_database_over_alembic_sample_url(tmp_path: Path):
+    """The checked-in rmm:rmm URL is documentation, never a runtime default."""
+    db_path = tmp_path / "dotenv.db"
+    (tmp_path / ".env").write_text(
+        f"DATABASE_URL={sqlite_url(db_path)}\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.pop("ALEMBIC_DATABASE_URL", None)
+    environment.pop("DATABASE_URL", None)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        filter(None, (str(SERVER_ROOT), environment.get("PYTHONPATH")))
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            str(SERVER_ROOT / "alembic.ini"),
+            "upgrade",
+            "head",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stderr
+    with sqlite3.connect(db_path) as connection:
+        revision = connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()
+    expected_head = ScriptDirectory.from_config(
+        Config(str(SERVER_ROOT / "alembic.ini"))
+    ).get_current_head()
+    assert revision == (expected_head,)
+
+
+def test_forward_repair_restores_schema_skipped_by_incorrect_stamp(tmp_path: Path):
+    db_path = tmp_path / "stamped-debug.db"
+    config = migration_config(sqlite_url(db_path))
+    command.upgrade(config, "0001")
+
+    now = "2026-07-18T12:00:00+00:00"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO clients (id, name, created_at) VALUES (?, ?, ?)",
+            ("client-1", "Preserved client", now),
+        )
+        connection.execute(
+            "INSERT INTO sites (id, client_id, name, created_at) VALUES (?, ?, ?, ?)",
+            ("site-1", "client-1", "HQ", now),
+        )
+        connection.execute(
+            """INSERT INTO agents
+               (id, site_id, token_hash, hostname, os, os_version,
+                agent_version, status, enrolled_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "agent-1",
+                "site-1",
+                "hash",
+                "PC1",
+                "windows",
+                "11",
+                "0.1",
+                "pending",
+                now,
+            ),
+        )
+        connection.execute(
+            """INSERT INTO commands
+               (id, agent_id, kind, payload, signature, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "command-1",
+                "agent-1",
+                "shell",
+                "{}",
+                "legacy-sig",
+                "queued",
+                now,
+            ),
+        )
+        connection.execute(
+            """INSERT INTO audit_events
+               (id, ts, ts_iso, actor, action, detail, prev_hash, event_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "audit-1",
+                now,
+                now,
+                "system",
+                "legacy.event",
+                "{}",
+                "0" * 64,
+                "1" * 64,
+            ),
+        )
+        connection.commit()
+
+    # Reproduce the historical mistake: the revision marker moved to the
+    # enrollment revision while schema changes 0002-0011 never ran.
+    command.stamp(config, "0011")
+    command.upgrade(config, "head")
+    asyncio.run(_assert_current(sqlite_url(db_path)))
+
+    with sqlite3.connect(db_path) as connection:
+        agent_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(agents)")
+        }
+        command_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(commands)")
+        }
+        audit_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(audit_events)")
+        }
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        indexes = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            )
+        }
+        agent_state = connection.execute(
+            "SELECT command_envelope_versions, trust_state "
+            "FROM agents WHERE id = 'agent-1'"
+        ).fetchone()
+        command_state = connection.execute(
+            "SELECT envelope_version, status FROM commands WHERE id = 'command-1'"
+        ).fetchone()
+        audit_state = connection.execute(
+            "SELECT seq, hash_schema FROM audit_events WHERE id = 'audit-1'"
+        ).fetchone()
+
+    assert {
+        "command_envelope_versions",
+        "trust_state",
+        "trust_state_reason",
+        "trust_state_changed_at",
+        "trust_state_changed_by",
+        "credential_fingerprint",
+        "credential_issued_at",
+        "credential_expires_at",
+        "name",
+        "architecture",
+        "environment",
+        "labels",
+        "owner_user_id",
+        "enrolled_by_token_id",
+        "ip_address",
+        "revoked_at",
+    } <= agent_columns
+    assert {
+        "envelope_version",
+        "schema_version",
+        "issued_at",
+        "nonce",
+        "signing_key_id",
+        "stdout_truncated",
+        "stderr_truncated",
+        "stdout_total_bytes",
+        "stderr_total_bytes",
+        "agent_completed_at",
+    } <= command_columns
+    assert {
+        "seq",
+        "hash_schema",
+        "actor_user_id",
+        "enrollment_token_id",
+        "organization_id",
+        "source_ip",
+        "user_agent",
+    } <= audit_columns
+    assert "anchor_publications" in tables
+    assert {"ux_commands_agent_nonce", "ux_audit_events_seq"} <= indexes
+    assert json.loads(agent_state[0]) == []
+    assert agent_state[1] == "active"
+    assert command_state == ("legacy-unversioned", "expired")
+    assert audit_state == (1, 1)
 
 
 def test_upgrade_from_baseline_preserves_rows_and_expires_legacy_queue(tmp_path: Path):

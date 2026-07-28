@@ -53,8 +53,8 @@ const navItems = [
   { label: "Endpoints", icon: Monitor, count: null },
   { label: "Alerts", icon: AlertTriangle, count: 7 },
   { label: "Automation", icon: Bot, count: null },
-  { label: "Audit", icon: ShieldCheck, count: null },
-  { label: "Administration", icon: Settings, count: null },
+  { label: "Audit", icon: ShieldCheck, count: null, href: "/enrollment/audit" },
+  { label: "Administration", icon: Settings, count: null, href: "/enrollment" },
 ];
 
 const statusLabels: Record<EndpointStatus, string> = {
@@ -190,12 +190,18 @@ function Sidebar({
 
         <nav className="sidebar-section main-nav" aria-label="Primary navigation">
           <div className="sidebar-label">Navigation</div>
-          {navItems.map(({ label, icon: Icon, count, active }) => (
-            <button className={active ? "active" : ""} key={label}>
+          {navItems.map(({ label, icon: Icon, count, active, href }) => href ? (
+            <Link className={active ? "active" : ""} href={href} key={label} onClick={onClose}>
               <Icon size={19} />
               <span>{label}</span>
               {count ? <span className="nav-count">{count}</span> : null}
               {label === "Administration" ? <ChevronRight className="nav-chevron" size={15} /> : null}
+            </Link>
+          ) : (
+            <button className={active ? "active" : ""} key={label}>
+              <Icon size={19} />
+              <span>{label}</span>
+              {count ? <span className="nav-count">{count}</span> : null}
             </button>
           ))}
         </nav>

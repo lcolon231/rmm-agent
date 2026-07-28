@@ -154,9 +154,9 @@ path once it is added.
 
 ## Current schema and agent compatibility
 
-Current server releases require Alembic revision `0010`; non-debug startup
-requires `alembic upgrade head`. Roll out the database revision, server, and
-dashboard together. Revision 0009 adds the `result_pending` enum value and
+The v0.1.2 enrollment candidate requires Alembic revision `0012`; non-debug
+startup requires `alembic upgrade head`. Roll out the database revision,
+server, and dashboard together. Revision 0009 adds the `result_pending` enum value and
 `agent_completed_at`; durable dispatch-lease recovery is active only after both
 server and agent are upgraded. Command dispatch returns `409` until an agent advertises
 `command-v3`; old queued commands are expired by the migration. A new agent
@@ -168,6 +168,15 @@ Null is intentionally default deny for all existing and new operators,
 including admins. No agent or signed-envelope change is required. After
 migration, admins must explicitly grant the narrowest necessary global, site,
 or agent scope; see `SCRIPT-AUTHORIZATION.md`.
+
+Revision `0011` adds enrollment-token assignment/lifecycle metadata, agent
+credential and enrollment metadata, and audit query dimensions. Revision
+`0012` conditionally repairs legacy debug-created databases whose Alembic
+marker was stamped without the matching schema. New token creation requires
+expiry; legacy tokens with no expiry fail closed. Preserve `/api/v1/enroll`
+compatibility while deploying the `/api/v1/agents/enroll` alias, token
+management dashboard, and agent CLI together. See
+[`agent-enrollment/operations.md`](agent-enrollment/operations.md).
 
 There is no in-place schema or protocol downgrade. Prefer a forward fix. A
 restore to an older database and matching old components is an explicit destructive
