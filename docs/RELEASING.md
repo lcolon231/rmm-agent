@@ -178,6 +178,14 @@ compatibility while deploying the `/api/v1/agents/enroll` alias, token
 management dashboard, and agent CLI together. See
 [`agent-enrollment/operations.md`](agent-enrollment/operations.md).
 
+Public v0.1.1 has no Alembic marker. Its exact schema may be adopted as baseline
+`0001` only through `server/scripts/adopt_v011_schema.py`, which fails closed
+on schema drift, and then upgraded forward to `0012`. Directly stamping an
+unverified database is unsupported. This is an upgrade path only: a v0.1.1
+server remains incompatible with an `0012` database and is not an in-place
+rollback target. The retained-evidence procedure is
+[`V0.1.2-RELEASE-DRILL.md`](V0.1.2-RELEASE-DRILL.md).
+
 There is no in-place schema or protocol downgrade. Prefer a forward fix. A
 restore to an older database and matching old components is an explicit destructive
 recovery choice and discards post-backup data; it is not a normal release

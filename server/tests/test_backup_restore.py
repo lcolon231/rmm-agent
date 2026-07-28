@@ -37,6 +37,7 @@ from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
 from tests.test_migrations import migration_config  # noqa: E402
+from scripts import adopt_v011_schema  # noqa: E402
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = SERVER_ROOT.parent
@@ -45,11 +46,9 @@ RESTORE_SH = REPO_ROOT / "deploy" / "backup" / "nodelink-restore.sh"
 ROLLBACK_PLANNER = SERVER_ROOT / "scripts" / "plan_release_rollback.py"
 ROLLBACK_N_PLUS_1_LAST_SEEN = "2099-01-01T00:00:00+00:00"
 
-_TOOLS = all(shutil.which(t) for t in ("pg_dump", "pg_restore", "psql", "openssl"))
-
-pytestmark = pytest.mark.skipif(
-    not os.getenv("TEST_POSTGRES_URL") or not _TOOLS,
-    reason="needs TEST_POSTGRES_URL and postgres client tools",
+_POSTGRES_CONFIGURED = bool(os.getenv("TEST_POSTGRES_URL"))
+_BACKUP_TOOLS = all(
+    shutil.which(t) for t in ("pg_dump", "pg_restore", "psql", "openssl")
 )
 
 
@@ -70,6 +69,87 @@ def _psql(url: str, sql: str) -> str:
     return subprocess.run(
         ["psql", url, "-tAc", sql], check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+async def _execute_sql(asyncpg_url: str, statements: list[str]) -> None:
+    engine = create_async_engine(asyncpg_url)
+    try:
+        async with engine.begin() as connection:
+            for statement in statements:
+                await connection.execute(text(statement))
+    finally:
+        await engine.dispose()
+
+
+async def _scalar_sql(asyncpg_url: str, statement: str) -> str:
+    engine = create_async_engine(asyncpg_url)
+    try:
+        async with engine.connect() as connection:
+            return str((await connection.execute(text(statement))).scalar_one())
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(
+    not _POSTGRES_CONFIGURED,
+    reason="needs TEST_POSTGRES_URL",
+)
+def test_public_v011_postgresql_schema_adopts_and_upgrades_to_head():
+    """Prove the pre-Alembic public release has a guarded path to v0.1.2."""
+    src_async = os.environ["TEST_POSTGRES_URL"]
+    try:
+        command.upgrade(migration_config(src_async), "0001")
+        asyncio.run(
+            _execute_sql(
+                src_async,
+                [
+                    """
+                    INSERT INTO clients (id, name, created_at)
+                    VALUES ('client-v011', 'v0.1.1 client', NOW())
+                    """,
+                    """
+                    INSERT INTO sites (id, client_id, name, created_at)
+                    VALUES ('site-v011', 'client-v011', 'Legacy site', NOW())
+                    """,
+                    """
+                    INSERT INTO agents
+                      (id, site_id, token_hash, hostname, os, os_version,
+                       agent_version, status, enrolled_at)
+                    VALUES
+                      ('agent-v011', 'site-v011', 'legacy-hash', 'LEGACY-PC',
+                       'windows', '11', '0.1.1', 'online', NOW())
+                    """,
+                    "DROP TABLE alembic_version",
+                ],
+            )
+        )
+
+        assert adopt_v011_schema.run(src_async, stamp=True) == 0
+        command.upgrade(migration_config(src_async), "head")
+
+        assert (
+            asyncio.run(
+                _scalar_sql(src_async, "SELECT version_num FROM alembic_version")
+            )
+            == "0012"
+        )
+        preserved = asyncio.run(
+            _scalar_sql(
+                src_async,
+                """
+                SELECT hostname || '|' || agent_version || '|' || trust_state
+                FROM agents WHERE id = 'agent-v011'
+                """,
+            )
+        )
+        assert preserved == "LEGACY-PC|0.1.1|active"
+    finally:
+        asyncio.run(
+            _execute_sql(
+                src_async,
+                ["DROP SCHEMA public CASCADE", "CREATE SCHEMA public"],
+            )
+        )
 
 
 async def _seed(asyncpg_url: str) -> None:
@@ -152,6 +232,8 @@ async def _schema_guard_fails(asyncpg_url: str) -> None:
 def prepared_db(tmp_path: Path):
     """Migrated + seeded source DB; guarantees both DBs are cleaned up so the
     disposable-database assumption of test_migrations still holds."""
+    if not _POSTGRES_CONFIGURED or not _BACKUP_TOOLS:
+        pytest.skip("needs TEST_POSTGRES_URL and postgres client tools")
     src_async = os.environ["TEST_POSTGRES_URL"]
     admin = _admin_url()
     _psql(admin, "DROP DATABASE IF EXISTS nodelink_restore_test")

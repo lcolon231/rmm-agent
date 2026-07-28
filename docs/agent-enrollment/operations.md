@@ -36,13 +36,20 @@ service treats them as expired rather than preserving indefinite enrollment
 access. Revision `0012` repairs legacy debug-created SQLite schemas that were
 stamped without all enrollment columns. Replace old tokens intentionally.
 
+The public v0.1.1 server predates Alembic. Its reviewed schema corresponds to
+baseline `0001`, but an unversioned database must not be stamped on trust. Run
+`scripts/adopt_v011_schema.py` first in dry-run mode and then with `--stamp`;
+the command fails unless the full table/column/key/index fingerprint matches.
+After a successful stamp, upgrade normally to `0012`. See
+[`V0.1.2-RELEASE-DRILL.md`](../V0.1.2-RELEASE-DRILL.md).
+
 Migrations are forward-only. Never run downgrade in production.
 
 `alembic stamp` only writes a revision marker; it does not apply or validate
-schema changes. Never infer a stamp revision from table presence or from a
-successful later migration. Legacy debug-created databases require a
-column/index comparison against the proposed revision or the forward repair in
-revision `0012`.
+schema changes. Never run it directly against a legacy database, infer a
+revision from table presence, or infer correctness from a successful later
+migration. Legacy debug-created databases require the forward repair in
+revision `0012`; public-v0.1.1 adoption requires the exact guarded comparison.
 
 ## Deployment order
 
