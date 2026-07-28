@@ -1,6 +1,6 @@
 # Agent enrollment open issues
 
-Status values are `Open`, `Planned`, `Blocked`, or `Accepted risk`.
+Status values are `Open`, `Planned`, `Blocked`, `Accepted risk`, or `Resolved`.
 
 ## v0.1.2 issue map
 
@@ -11,7 +11,7 @@ following issues are pertinent to the v0.1.2 release decision:
 | Issue | Release relationship | Disposition |
 |---|---|---|
 | [#127](https://github.com/lcolon231/rmm-agent/issues/127) | Immutable release manifest, PostgreSQL upgrade, verified backup, canary enrollment, and rollback evidence | **Tag blocker**; do not publish v0.1.2 until complete |
-| [#128](https://github.com/lcolon231/rmm-agent/issues/128) | Next.js 16.2.12 removes direct framework advisories, but its resolved PostCSS/Sharp dependencies still fail the production audit | **Tag blocker**; resolve or approve a time-bounded, evidence-backed exception |
+| [#128](https://github.com/lcolon231/rmm-agent/issues/128) | Next.js 16.2.12 transitive PostCSS/Sharp advisories | Resolved by exact Next-scoped patched dependencies, zero production audit, and production smoke evidence; close after the hardening PR merges |
 | [#24](https://github.com/lcolon231/rmm-agent/issues/24) | Windows agent and installer remain unsigned | Existing pilot-exit blocker; must be explicit in release notes |
 | [#125](https://github.com/lcolon231/rmm-agent/issues/125) | Agent credentials remain long-lived bearer credentials | Known security limitation; implement loss-safe expiry/renewal |
 | [#126](https://github.com/lcolon231/rmm-agent/issues/126) | Empty deployments still need a client/site bootstrap path | Known onboarding limitation; existing client/site API bootstrap remains required |
@@ -55,4 +55,4 @@ results. Issue #127 owns creating it after the evidence exists.
 | ENR-029 | CSRF token | Dashboard mutations use SameSite cookies and JSON same-origin handlers, but no synchronizer token. | Browser/platform changes or same-site subdomain compromise could increase risk. | Add Origin validation now; evaluate synchronizer tokens when more browser mutations are added. | Web security | Open | M2 |
 | ENR-030 | First-run client/site setup ([#126](https://github.com/lcolon231/rmm-agent/issues/126)) | Token creation requires an existing site, but the enrollment area does not create the first client/site. | Administrators may resort to direct database changes or over-privileged bootstrap scripts. | Add an audited, role-protected client/site creation path and link it from enrollment empty states. | Dashboard team | Open | Post-v0.1.2 |
 | ENR-031 | v0.1.2 operational evidence ([#127](https://github.com/lcolon231/rmm-agent/issues/127)) | Automated tests exist, but the production-like PostgreSQL upgrade, verified backup, canary, and rollback drill have not been retained. | A forward-only migration or credential rollout failure may not be recoverable within the expected RTO/RPO. | Complete the release evidence gate before tagging v0.1.2. | Release engineering | Blocked | v0.1.2 |
-| ENR-032 | Dashboard dependency advisories ([#128](https://github.com/lcolon231/rmm-agent/issues/128)) | Next.js is patched to 16.2.12, but `npm audit --omit=dev` still reports high-severity PostCSS/Sharp findings in the resolved production tree. | A vulnerable authenticated administration surface may be exposed, while unreviewed overrides could introduce incompatible runtime behavior. | Move to an upstream-supported fixed dependency set or document a reviewed, expiring non-reachability exception with compensating controls. | Dashboard security | Blocked | v0.1.2 |
+| ENR-032 | Dashboard dependency advisories ([#128](https://github.com/lcolon231/rmm-agent/issues/128)) | Next.js 16.2.12 declares vulnerable PostCSS/Sharp versions; exact Next-scoped overrides resolve PostCSS 8.5.23 and Sharp 0.35.3. | Production audit exposure is removed; compatibility risk is bounded by exact pins and the clean install/build/smoke suite. | Keep the exact pins until a stable Next.js release includes patched dependencies; reassess the dev-only lint toolchain by v0.1.3. | Dashboard security | Resolved | v0.1.2 |

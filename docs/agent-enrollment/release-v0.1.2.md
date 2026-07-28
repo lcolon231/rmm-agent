@@ -25,7 +25,8 @@ create or tag `release-notes/v0.1.2.json` with placeholder evidence.
 - Structured secret-redacting logs, enrollment rate limiting, readiness,
   liveness, and Prometheus-format enrollment/agent counters.
 - Next.js and its matching lint configuration updated from 16.2.10 to 16.2.12
-  to remove the direct patched framework advisories.
+  to remove the direct patched framework advisories. Exact, Next-scoped
+  overrides resolve its vulnerable PostCSS and Sharp transitive dependencies.
 - Forward-only enrollment migrations `0011` and `0012`, including repair of
   legacy debug-created SQLite schemas that were incorrectly stamped.
 - Administrator, installer, API, security, operations, analysis, decision, and
@@ -63,7 +64,7 @@ revoked as required.
 | Issue | Impact |
 |---|---|
 | [#127](https://github.com/lcolon231/rmm-agent/issues/127) | Tag is blocked until immutable release/backup/canary/rollback evidence exists. |
-| [#128](https://github.com/lcolon231/rmm-agent/issues/128) | The patched Next.js version still resolves PostCSS/Sharp versions reported by the production dependency audit; resolve or formally time-bound the exception before tagging. |
+| [#128](https://github.com/lcolon231/rmm-agent/issues/128) | Resolved in the release-hardening patch: the clean production audit is zero and the compiled enrollment surface passes the placeholder-only production smoke harness. |
 | [#24](https://github.com/lcolon231/rmm-agent/issues/24) | Windows agent and installer are not Authenticode signed. |
 | [#125](https://github.com/lcolon231/rmm-agent/issues/125) | Per-agent bearer credentials do not expire or rotate automatically. |
 | [#126](https://github.com/lcolon231/rmm-agent/issues/126) | An empty deployment must bootstrap its first client/site outside the enrollment area. |
@@ -78,6 +79,8 @@ Additional residual risks and decisions are recorded in
 - Server enrollment, authorization, audit, migration, redaction, rate-limit,
   revocation, and renewal-foundation tests.
 - Dashboard lint, TypeScript type checking, unit tests, and production build.
+- Clean dashboard install, zero-vulnerability production audit, and compiled
+  authentication/enrollment route smoke test.
 - Full Go tests, `go vet`, and agent build.
 - Manual Windows flow: administrator login, token creation, hidden-input
   enrollment, protected identity persistence, heartbeat display, credential
@@ -85,6 +88,38 @@ Additional residual risks and decisions are recorded in
 
 The final release gate must rerun these checks from the rebased commit and add
 the PostgreSQL/production-like evidence in #127.
+
+### Dashboard dependency evidence
+
+Next.js `16.2.12` is the latest stable release available during this review,
+but its package metadata pins PostCSS `8.4.31` and permits Sharp `^0.34.5`.
+Those resolutions were affected by:
+
+- PostCSS
+  [`GHSA-qx2v-qp2m-jg93`](https://github.com/advisories/GHSA-qx2v-qp2m-jg93),
+  [`GHSA-6g55-p6wh-862q`](https://github.com/advisories/GHSA-6g55-p6wh-862q),
+  and
+  [`GHSA-r28c-9q8g-f849`](https://github.com/advisories/GHSA-r28c-9q8g-f849);
+- Sharp
+  [`GHSA-f88m-g3jw-g9cj`](https://github.com/advisories/GHSA-f88m-g3jw-g9cj).
+
+The dashboard lockfile uses exact Next-scoped overrides:
+
+- `next > postcss = 8.5.23`;
+- `next > sharp = 0.35.3`.
+
+After `npm ci`, `npm audit --omit=dev` reports zero vulnerabilities,
+`npm ls postcss sharp --all` reports both overrides as valid, and lint,
+typecheck, 31 unit tests, the production build, and
+`npm run smoke:production` pass.
+
+The unrestricted audit still reports nine high-severity findings confined to
+the ESLint/minimatch/brace-expansion development graph. Those packages are not
+installed by the production-only dependency set and do not process runtime
+requests. The residual exposure is limited to developer/CI availability when
+linting repository-controlled source and configuration. Dashboard security
+must reassess this toolchain no later than v0.1.3 or when matching stable
+Next.js/ESLint releases provide a non-breaking fix.
 
 ## Completed page descriptions
 

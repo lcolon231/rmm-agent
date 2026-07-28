@@ -50,11 +50,23 @@ in browser storage or a public environment variable.
 
 ```bash
 npm run validate:env
+npm audit --omit=dev
 npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run smoke:production
 ```
+
+The production smoke command requires a completed `.next` build. It starts the
+compiled dashboard against a local placeholder-only management API, validates
+authentication and every enrollment page, exercises token/agent mutations,
+and verifies that the one-time token is not rendered again.
+
+Next.js `16.2.12` still declares vulnerable PostCSS and Sharp transitive
+versions. `package.json` narrowly overrides only Next's copies to audited exact
+versions. Do not remove or broaden those pins until a stable Next.js release
+ships patched dependencies and passes this complete check set.
 
 The API-client boundary lives in `src/lib/nodelink-api.ts`. Browser code never
 receives an API bearer token: the login route stores the JWT in an HTTP-only,

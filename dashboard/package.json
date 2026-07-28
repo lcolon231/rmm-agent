@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "smoke:production": "node scripts/production-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/runtime-config.test.ts test/dashboard-auth-core.test.ts test/endpoint-detail-core.test.ts test/command-console-core.test.ts test/enrollment-core.test.ts",
     "validate:env": "node --experimental-strip-types scripts/validate-environment.ts"
@@ -30,5 +31,11 @@
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.23",
+      "sharp": "0.35.3"
+    }
   }
 }
