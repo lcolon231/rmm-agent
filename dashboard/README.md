@@ -6,7 +6,7 @@ operator sign-in boundary, live client/site navigation, endpoint inventory,
 endpoint telemetry detail, and a per-endpoint command console with role-gated
 compose-and-confirm dispatch, paginated command history, and per-command
 records (envelope evidence, exit code, bounded stdout/stderr with truncation
-totals).
+totals), and administrator-only operator identity management.
 
 Aggregate overview and audit panels remain fixture-backed. It must not be used
 to manage production or regulated endpoints.
@@ -17,6 +17,15 @@ identities, and review enrollment audit events. Plaintext token values appear
 only in the in-memory creation view and are never stored in browser storage or
 placed in URLs. Browser mutations use same-origin Route Handlers; FastAPI
 independently enforces every role.
+
+The live `/operators` surface is restricted to the API `admin` role. It lists
+the complete operator register, creates product-role Administrators (`admin`)
+and Technicians (`operator`) through one shared form, presents explicit
+default-deny script permission for every role, and provides audited
+compose-then-confirm global/site/agent grant and revoke controls plus confirmed
+sign-out-everywhere. Browser requests go only to same-origin `/api/operators`
+Route Handlers; the bearer token remains in the HTTP-only cookie and is
+forwarded to `/api/v1/auth/*` only by server code.
 
 ## Local development
 
@@ -120,12 +129,41 @@ Commands cannot be cancelled after dispatch — unpicked work dies at its signed
 expiry — and in-flight pages re-fetch bounded server data on an interval.
 Reading a command record creates a `command_detail.viewed` audit event.
 
+## Operator administration
+
+`/operators` reads `GET /auth/operators` without pagination and renders every
+`created_at` timestamp explicitly in UTC. `/operators/new/administrator` and
+`/operators/new/technician` are separate entry points backed by the same form;
+the displayed product roles map only to `admin` and `operator` in the request.
+Creation returns no password and the form drops its one-time password value
+after the request. A 409 duplicate email, expired session (401), forbidden role
+(403), missing operator/scope target (404), and script-permission conflicts
+(409) receive distinct redacted messages.
+
+Script permission is separate from role, including `admin`. `readonly`
+operators cannot receive a grant and the UI explains that restriction before
+submission. Grant and revoke both require a 3–500 character reason, identify it
+as audit-recorded, and require a review step before the same-origin mutation.
+Session revocation has its own confirmation and leaves the identity enabled.
+
+Known limitations are deliberately omitted from the controls:
+
+- no operator disable or delete endpoint;
+- no operator password change or reset endpoint;
+- no server-enforced password complexity or forced initial-password rotation;
+- no pagination on the operator list.
+
+Administrator-chosen initial passwords without forced rotation are a weakness.
+A future change should add a server-backed one-time activation or forced-change
+flow, including authorization, an audit event, tests, and documentation, rather
+than adding a dashboard-only password-policy claim.
+
 ## Foundation boundary
 
-- The only dashboard mutation is command dispatch, which is forwarded
-  same-origin with the operator's HTTP-only session cookie; no browser token or
-  persisted dashboard state exists. Aggregate overview and audit panels remain
-  fixture-backed. Script permission administration remains API-only.
+- Dashboard mutations (command dispatch, enrollment control, and operator
+  administration) are forwarded same-origin with the operator's HTTP-only
+  session cookie; no browser token or persisted dashboard state exists.
+  Aggregate overview and audit panels remain fixture-backed.
 - The API client makes no automatic retry, and dispatch is not retried —
   a failed dispatch is reported and the operator decides whether to resend.
 - Rollback is deployment-level: remove or disable the dashboard service without

@@ -32,6 +32,7 @@ import {
   Shield,
   ShieldCheck,
   TerminalSquare,
+  Users,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -41,6 +42,7 @@ import { useMemo, useState } from "react";
 import type { DashboardOperator } from "@/lib/dashboard-auth-core";
 import type { NavigationData } from "@/lib/client-navigation";
 import type { EndpointListData } from "@/lib/endpoint-list";
+import { operatorRoleLabel } from "@/lib/operator-management-core";
 import {
   attentionItems,
   signedActions,
@@ -49,12 +51,13 @@ import {
 } from "@/data/dashboard";
 
 const navItems = [
-  { label: "Overview", icon: Activity, active: true },
+  { label: "Overview", icon: Activity, href: "/" },
   { label: "Endpoints", icon: Monitor, count: null },
   { label: "Alerts", icon: AlertTriangle, count: 7 },
   { label: "Automation", icon: Bot, count: null },
   { label: "Audit", icon: ShieldCheck, count: null, href: "/enrollment/audit" },
   { label: "Administration", icon: Settings, count: null, href: "/enrollment" },
+  { label: "Operators", icon: Users, count: null, href: "/operators", adminOnly: true },
 ];
 
 const statusLabels: Record<EndpointStatus, string> = {
@@ -111,6 +114,7 @@ function WorkIcon({ work }: { work: Endpoint["work"] }) {
 }
 
 type SidebarProps = {
+  activePath: string;
   navigation: NavigationData | null;
   navigationError: boolean;
   onClose: () => void;
@@ -122,6 +126,7 @@ type SidebarProps = {
 };
 
 function Sidebar({
+  activePath,
   navigation,
   navigationError,
   onClose,
@@ -190,15 +195,21 @@ function Sidebar({
 
         <nav className="sidebar-section main-nav" aria-label="Primary navigation">
           <div className="sidebar-label">Navigation</div>
-          {navItems.map(({ label, icon: Icon, count, active, href }) => href ? (
-            <Link className={active ? "active" : ""} href={href} key={label} onClick={onClose}>
+          {navItems.filter((item) => !item.adminOnly || operator.role === "admin").map(({ label, icon: Icon, count, href }) => href ? (
+            <Link
+              aria-current={activePath === href ? "page" : undefined}
+              className={activePath === href ? "active" : ""}
+              href={href}
+              key={label}
+              onClick={onClose}
+            >
               <Icon size={19} />
               <span>{label}</span>
               {count ? <span className="nav-count">{count}</span> : null}
               {label === "Administration" ? <ChevronRight className="nav-chevron" size={15} /> : null}
             </Link>
           ) : (
-            <button className={active ? "active" : ""} key={label}>
+            <button key={label}>
               <Icon size={19} />
               <span>{label}</span>
               {count ? <span className="nav-count">{count}</span> : null}
@@ -314,6 +325,80 @@ function EndpointDrawer({ endpoint, onClose }: { endpoint: Endpoint | null; onCl
         ) : null}
       </aside>
     </>
+  );
+}
+
+export function DashboardSectionShell({
+  activePath,
+  children,
+  navigation,
+  navigationError,
+  operator,
+  sectionLabel,
+  sectionTitle,
+}: {
+  activePath: string;
+  children: React.ReactNode;
+  navigation: NavigationData | null;
+  navigationError: boolean;
+  operator: DashboardOperator;
+  sectionLabel: string;
+  sectionTitle: string;
+}) {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
+
+  async function signOut() {
+    setSignOutError("");
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      window.location.assign("/login");
+    } catch {
+      setSignOutError("Sign-out could not be confirmed. Try again.");
+    }
+  }
+
+  const operatorInitials = operator.email
+    .split("@")[0]
+    .split(/[._-]/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <div className="app-shell">
+      <Sidebar
+        activePath={activePath}
+        navigation={navigation}
+        navigationError={navigationError}
+        onClose={() => setSidebarOpen(false)}
+        open={sidebarOpen}
+        operator={operator}
+        selectionError={false}
+      />
+      <header className="topbar section-topbar">
+        <button className="mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">
+          <Menu size={21} />
+        </button>
+        <div className="section-context">
+          <span>{sectionLabel}</span>
+          <strong>{sectionTitle}</strong>
+        </div>
+        <div className="topbar-spacer" />
+        <div className="profile-block">
+          <div><strong>{operator.email}</strong><span>{operatorRoleLabel(operator.role)}</span></div>
+          <span className="avatar">{operatorInitials}</span>
+          <button className="sign-out" onClick={signOut}>Sign out</button>
+        </div>
+      </header>
+      <main className="workspace section-workspace">
+        <div className="content-column">
+          {signOutError ? <p className="sign-out-error" role="alert">{signOutError}</p> : null}
+          {children}
+        </div>
+      </main>
+    </div>
   );
 }
 
@@ -438,6 +523,7 @@ export function DashboardShell({
   return (
     <div className="app-shell">
       <Sidebar
+        activePath="/"
         navigation={navigation}
         navigationError={navigationError}
         onClose={() => setSidebarOpen(false)}
@@ -475,7 +561,7 @@ export function DashboardShell({
         <div className="audit-verified preview-status"><FlaskConical size={19} /><span>Preview data</span><i /></div>
         <button className="notification-button" aria-label="Notifications"><Bell size={19} /><span>5</span></button>
         <div className="profile-block">
-          <div><strong>{operator.email}</strong><span>{operator.role}</span></div>
+          <div><strong>{operator.email}</strong><span>{operatorRoleLabel(operator.role)}</span></div>
           <span className="avatar">{operatorInitials}</span>
           <button className="sign-out" onClick={signOut}>Sign out</button>
         </div>

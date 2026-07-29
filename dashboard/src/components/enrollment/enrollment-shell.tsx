@@ -4,6 +4,7 @@ import { Activity, ArrowLeft, KeyRound, ListChecks, Monitor, ShieldCheck } from 
 import Link from "next/link";
 
 import type { DashboardOperator } from "@/lib/dashboard-auth-core";
+import { operatorRoleLabel } from "@/lib/operator-management-core";
 
 export function EnrollmentShell({
   children,
@@ -35,7 +36,7 @@ export function EnrollmentShell({
         <header className="enrollment-topbar">
           <div><span>Secure provisioning</span><strong>Agent enrollment</strong></div>
           <div className="enrollment-operator">
-            <span>{operator.role === "admin" ? "Super Administrator" : operator.role === "operator" ? "Administrator" : "Viewer"}</span>
+            <span>{operatorRoleLabel(operator.role)}</span>
             <strong>{operator.email}</strong>
           </div>
         </header>
