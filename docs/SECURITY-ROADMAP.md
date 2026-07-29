@@ -180,6 +180,12 @@ mutation-specific CSRF
 tokens beyond the same-origin check, and the remaining administrative audit
 coverage are still required before this milestone closes.
 
+Administrator-only operator management now uses same-origin dashboard handlers
+for list/create, script-permission grant/revoke, and session revocation. Script
+permission changes and token-generation revocation use the server's existing
+audit events. Operator creation itself still has no audit event, so operator
+administration is not yet fully audited and this milestone item remains open.
+
 - Use server-mediated dashboard sessions with secure cookie, CSRF, expiration,
   logout, revocation, and role-change behavior. Do not persist operator bearer
   tokens in browser local storage.
@@ -188,7 +194,8 @@ coverage are still required before this milestone closes.
 - Redact secrets in UI, logs, command history, webhooks, and notification
   templates.
 - Audit token, operator, command, alert, script, schedule, and notification
-  administration.
+  administration. Operator script-permission and session-revocation events are
+  covered; operator creation remains an explicit audit gap.
 - Validate and bound inventory, telemetry, scripts, parameters, schedules, and
   webhook destinations.
 - Add SSRF controls for webhooks and delivery backoff with signed webhook

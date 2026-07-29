@@ -122,6 +122,22 @@ APIs with redacted audit evidence. Endpoint list rows expose only the latest
 heartbeat. Endpoint detail adds a bounded chronological heartbeat history but
 never returns raw inventory snapshots, token hashes, or agent credentials.
 
+Administrator-only operator management is available at `/operators`. The page
+lists the unpaginated `OperatorOut` register, creates administrators
+(`admin`) and technicians (`operator`) through one shared role-locked form,
+shows every role's script state as explicit default deny or one global/site/agent
+grant, and supports compose-then-confirm permission grant/revoke plus confirmed
+session revocation. Browser code calls only same-origin dashboard handlers:
+`GET/POST /api/operators`,
+`PUT /api/operators/{id}/script-permission`,
+`POST /api/operators/{id}/script-permission/revoke`, and
+`POST /api/operators/{id}/revoke-tokens`. Those handlers revalidate the
+HTTP-only dashboard session, require `admin`, allowlist response fields, and
+forward the bearer token server-side to the corresponding `/api/v1/auth/*`
+routes. The FastAPI role check remains the authorization boundary. Permission
+reasons use the API's 3-to-500-character bound and are recorded by the server's
+existing audit events; the dashboard never logs or returns an initial password.
+
 Endpoint telemetry detail accepts a 1-to-168-hour history window and a 10-to-500
 sample limit. The latest heartbeat is fetched independently of that window and
 is classified as current, stale, or unavailable; stale means older than three
@@ -253,10 +269,13 @@ All application routes except `/healthz` are under `/api/v1`.
 | GET | `/audit/publication-status` | External anchor publication lag/health | Readonly |
 
 Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, and
-a filtered enrollment audit-event list are implemented. Operator
-listing/editing, monitoring policies or alerts, scheduling, patching, and
-evidence export remain absent. Telemetry history is available only as a bounded
-read-only endpoint-detail query, not as a general analytics API.
+a filtered enrollment audit-event list are implemented. Operator listing,
+creation, script-permission administration, and session revocation are
+implemented in the dashboard; disabling/deleting identities and password
+lifecycle operations remain absent. Monitoring policies or alerts, scheduling,
+patching, and evidence export also remain absent. Telemetry history is
+available only as a bounded read-only endpoint-detail query, not as a general
+analytics API.
 
 ## 5. Agent
 
@@ -476,6 +495,12 @@ moved merely to match an aspirational tree.
   fixture-backed; beyond the endpoint telemetry and command console views,
   live audit UI, complete inventory, monitoring alerts, scheduling, patching,
   remediation, remote shell, and remote desktop are not implemented.
+- Operator administration has no disable/delete endpoint, password
+  change/reset or forced-rotation flow, server-enforced password complexity, or
+  pagination. The dashboard omits those controls rather than simulating them.
+  Administrator-chosen initial passwords without forced rotation remain a
+  security weakness; a future server change should add a one-time activation or
+  forced-change flow with authorization, audit events, tests, and documentation.
 - TLS termination itself remains an operator-run topology, but production
   mode (ENVIRONMENT=production) now fails startup on debug mode, placeholder
   or short secrets, missing signing keys, and a missing/non-HTTPS/loopback

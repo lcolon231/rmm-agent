@@ -113,6 +113,18 @@ test("redacts unsuccessful API responses behind a typed error", async () => {
   );
 });
 
+test("accepts no-content API responses without parsing a body", async () => {
+  const result = await requestNodelinkApi<void>(
+    "/api/v1/auth/operators/operator-1/revoke-tokens",
+    { method: "POST", sessionToken: "session-token" },
+    {
+      fetchImpl: async () => new Response(null, { status: 204 }),
+      runtimeConfig: getRuntimeConfig({ NODE_ENV: "test" }),
+    },
+  );
+  assert.equal(result, undefined);
+});
+
 test("reports a degraded health state without exposing upstream failure details", async () => {
   const health = await getNodelinkHealth({
     fetchImpl: async () => {
