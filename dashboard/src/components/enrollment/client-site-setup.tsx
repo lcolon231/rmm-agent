@@ -62,12 +62,13 @@ export function ClientSiteSetup({
         setClientError(body?.error ?? "The client could not be created.");
         return;
       }
+      const client = body.client;
       setClients((current) => [
         ...current,
-        { id: body.client!.id, name: body.client!.name, sites: [] },
+        { id: client.id, name: client.name, sites: [] },
       ]);
-      setCreatedClient(body.client);
-      setSelectedClientId(body.client.id);
+      setCreatedClient(client);
+      setSelectedClientId(client.id);
       setCreatedSite(null);
       form.reset();
     } catch {
@@ -101,23 +102,24 @@ export function ClientSiteSetup({
         setSiteError(body?.error ?? "The site could not be created.");
         return;
       }
+      const site = body.site;
       setClients((current) => current.map((client) => (
-        client.id === body.site!.client_id
+        client.id === site.client_id
           ? {
               ...client,
               sites: [
                 ...client.sites,
                 {
-                  id: body.site!.id,
-                  client_id: body.site!.client_id,
-                  name: body.site!.name,
+                  id: site.id,
+                  client_id: site.client_id,
+                  name: site.name,
                   endpoint_count: 0,
                 },
               ],
             }
           : client
       )));
-      setCreatedSite(body.site);
+      setCreatedSite(site);
       form.reset();
     } catch {
       setSiteError("Site creation is unavailable. Check the management service.");

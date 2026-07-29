@@ -7,7 +7,8 @@ Everything else in the app requires the token this endpoint issues.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
@@ -101,7 +102,11 @@ async def create_operator(
     The first admin can't be made this way (chicken-and-egg) — bootstrap it with
     scripts/create_admin.py.
     """
-    exists = await db.execute(select(Operator).where(Operator.email == body.email))
+    exists = await db.execute(
+        select(Operator.id).where(
+            func.lower(func.trim(Operator.email)) == body.email
+        )
+    )
     if exists.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="Email already registered")
 
@@ -111,7 +116,13 @@ async def create_operator(
         role=body.role,
     )
     db.add(operator)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        ) from exc
     await audit.record(
         db,
         action="operator.created",

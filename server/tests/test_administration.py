@@ -129,6 +129,19 @@ async def test_first_run_client_site_creation_is_validated_and_audited(
     )
     assert duplicate_site.status_code == 409
     assert duplicate_site.json()["detail"] == {"code": "site_name_exists"}
+    second_client = (
+        await client.post(
+            "/clients",
+            json={"name": "South Clinic"},
+            headers=headers,
+        )
+    ).json()
+    same_name_different_client = await client.post(
+        "/sites",
+        json={"client_id": second_client["id"], "name": "HEADQUARTERS"},
+        headers=headers,
+    )
+    assert same_name_different_client.status_code == 201
     assert (
         await client.post(
             "/sites",
@@ -159,11 +172,16 @@ async def test_first_run_client_site_creation_is_validated_and_audited(
                 await db.execute(
                     select(AuditEvent).where(
                         AuditEvent.action.in_(["client.created", "site.created"])
-                    )
+                    ).order_by(AuditEvent.seq)
                 )
             ).scalars()
         )
-    assert [event.action for event in events] == ["client.created", "site.created"]
+    assert [event.action for event in events] == [
+        "client.created",
+        "site.created",
+        "client.created",
+        "site.created",
+    ]
     assert events[0].organization_id == organization["id"]
     assert events[1].organization_id == organization["id"]
     serialized = repr([event.detail for event in events])
