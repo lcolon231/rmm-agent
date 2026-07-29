@@ -41,6 +41,8 @@ and SHA-256/Merkle roots—remains readable.
 | `client_navigation.list_viewed` | `api/management.py` navigation list | `client_count`, `truncated` |
 | `client_navigation.client_viewed` | `api/management.py` client view | `client_id` |
 | `client_navigation.site_viewed` | `api/management.py` site view | `site_id`, `client_id` |
+| `client.created` | `api/management.py` client creation | `client_id`, `name_sha256`, `name_bytes` |
+| `site.created` | `api/management.py` site creation | `site_id`, `client_id`, `name_sha256`, `name_bytes` |
 | `command.authorization_allowed` | `api/management.py` dispatch policy | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |
 | `command.authorization_denied` | `api/management.py` dispatch policy | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |
 | `command.completed` | `api/agents.py` result acceptance | `command_id`, `kind`, `exit_code`, `status`, `agent_completed_at`, `stdout_truncated`, `stderr_truncated`, `stdout_total_bytes`, `stderr_total_bytes` |
@@ -53,6 +55,9 @@ and SHA-256/Merkle roots—remains readable.
 | `enrollment_token.revoked` | `api/management.py` token revocation | `site_id`, `reason_sha256`, `reason_bytes` |
 | `operator.script_permission_changed` | `api/auth.py` permission grant/change | `operator_id`, `operator_role`, `previous_scope`, `previous_scope_id`, `new_scope`, `new_scope_id`, `reason_sha256`, `reason_bytes` |
 | `operator.script_permission_revoked` | `api/auth.py` permission revoke | `operator_id`, `operator_role`, `previous_scope`, `previous_scope_id`, `reason_sha256`, `reason_bytes` |
+| `operator.created` | `api/auth.py` operator creation | `operator_id`, `operator_role`, `email_sha256`, `email_bytes` |
+| `operator.role_changed` | `api/auth.py` global-role change | `operator_id`, `previous_role`, `new_role`, `script_permission_revoked`, `reason_sha256`, `reason_bytes` |
+| `operator.status_changed` | `api/auth.py` disable/re-enable | `operator_id`, `previous_disabled`, `new_disabled`, `reason_sha256`, `reason_bytes` |
 | `operator.tokens_revoked` | `api/auth.py` token-generation bump | `operator_id`, `by` |
 
 `server/tests/test_redaction.py` parses the production source and compares every

@@ -12,8 +12,10 @@ import type { EnrollmentTokenMetadata } from "@/lib/enrollment";
 type CreatedToken = EnrollmentTokenMetadata & { token: string };
 
 export function CreateTokenForm({
+  initialSiteId,
   sites,
 }: {
+  initialSiteId?: string;
   sites: Array<{ id: string; label: string }>;
 }) {
   const router = useRouter();
@@ -93,7 +95,7 @@ export function CreateTokenForm({
         <div className="enrollment-form-heading"><span>01</span><div><h2>Identity and assignment</h2><p>Name the credential and bind it to a specific organization site.</p></div></div>
         <div className="enrollment-form-grid">
           <label>Token name<input maxLength={200} name="name" placeholder="Tampa production rollout" required /></label>
-          <label>Organization / site<select name="site_id" required defaultValue=""><option disabled value="">Select a site</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.label}</option>)}</select></label>
+          <label>Organization / site<select name="site_id" required defaultValue={initialSiteId ?? ""}><option disabled value="">Select a site</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.label}</option>)}</select></label>
           <label className="span-2">Description<textarea maxLength={2000} name="description" placeholder="Purpose and intended installer" rows={2} /></label>
           <label>Assigned user ID<input name="assigned_user_id" placeholder="Optional operator UUID" /></label>
           <label>Environment<input maxLength={100} name="environment" placeholder="production" /></label>

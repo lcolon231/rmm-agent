@@ -4,11 +4,15 @@ import {
   describeOperatorActionError,
   operatorListFromUnknown,
   operatorRecordFromUnknown,
+  validateOperatorRoleChangeInput,
+  validateOperatorStatusChangeInput,
   validateOperatorCreateInput,
   validateScriptPermissionInput,
   validateScriptPermissionRevokeInput,
   type OperatorCreateInput,
   type OperatorRecord,
+  type OperatorRoleChangeInput,
+  type OperatorStatusChangeInput,
   type ScriptPermissionInput,
 } from "./operator-management-core.ts";
 import { isSameOrigin, requestOrigin } from "./dashboard-auth-core.ts";
@@ -229,6 +233,79 @@ export async function handleRevokeOperatorTokens(
     });
   } catch (error) {
     return actionError("revoke-tokens", error);
+  }
+}
+
+export async function handleChangeOperatorRole(
+  request: Request,
+  operatorId: string,
+  dependencies: SessionDependency & {
+    changeOperatorRole: (
+      sessionToken: string,
+      targetOperatorId: string,
+      input: OperatorRoleChangeInput,
+    ) => Promise<unknown>;
+  },
+): Promise<Response> {
+  if (!isSameOriginRequest(request)) {
+    return json({ error: "Operator role-change request was rejected." }, 403);
+  }
+  const admin = await requireAdmin(dependencies);
+  if (admin instanceof Response) return admin;
+  const input = validateOperatorRoleChangeInput(
+    await request.json().catch(() => null),
+  );
+  if (!input) {
+    return json(
+      { error: "Select a valid role and enter a 3-500 character audit reason." },
+      400,
+    );
+  }
+  try {
+    return operatorResponse(
+      await dependencies.changeOperatorRole(
+        admin.sessionToken,
+        operatorId,
+        input,
+      ),
+    );
+  } catch (error) {
+    return actionError("change-role", error);
+  }
+}
+
+export async function handleChangeOperatorStatus(
+  request: Request,
+  operatorId: string,
+  dependencies: SessionDependency & {
+    changeOperatorStatus: (
+      sessionToken: string,
+      targetOperatorId: string,
+      input: OperatorStatusChangeInput,
+    ) => Promise<unknown>;
+  },
+): Promise<Response> {
+  if (!isSameOriginRequest(request)) {
+    return json({ error: "Operator status-change request was rejected." }, 403);
+  }
+  const admin = await requireAdmin(dependencies);
+  if (admin instanceof Response) return admin;
+  const input = validateOperatorStatusChangeInput(
+    await request.json().catch(() => null),
+  );
+  if (!input) {
+    return json({ error: "Enter a 3-500 character audit reason." }, 400);
+  }
+  try {
+    return operatorResponse(
+      await dependencies.changeOperatorStatus(
+        admin.sessionToken,
+        operatorId,
+        input,
+      ),
+    );
+  } catch (error) {
+    return actionError("change-status", error);
   }
 }
 

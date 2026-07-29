@@ -23,6 +23,10 @@ import {
   ScriptPermissionAction,
   SignOutEverywhereAction,
 } from "@/components/operator-actions";
+import {
+  OperatorRoleAction,
+  OperatorStatusAction,
+} from "@/components/operator-account-actions";
 
 type OperatorListResponse = {
   error?: string;
@@ -189,6 +193,16 @@ export function OperatorManagementView({
                     <td><time dateTime={operator.created_at}>{formatOperatorCreatedAtUtc(operator.created_at)}</time></td>
                     <td>
                       <div className="operator-row-actions">
+                        <OperatorRoleAction
+                          isCurrentOperator={operator.id === currentOperatorId}
+                          onUpdated={updateOperator}
+                          operator={operator}
+                        />
+                        <OperatorStatusAction
+                          isCurrentOperator={operator.id === currentOperatorId}
+                          onUpdated={updateOperator}
+                          operator={operator}
+                        />
                         <ScriptPermissionAction mode="grant" onUpdated={updateOperator} operator={operator} />
                         {operator.script_execution_scope ? (
                           <ScriptPermissionAction mode="revoke" onUpdated={updateOperator} operator={operator} />
@@ -212,7 +226,7 @@ export function OperatorManagementView({
         <div>
           <strong>Current administration boundary</strong>
           <span>
-            Disabling, deleting, password reset/change, forced rotation, and pagination are not implemented by the server, so this page does not present those controls.
+            Deleting operators, password reset/change, forced rotation, and pagination are not implemented by the server, so this page does not present those controls.
           </span>
         </div>
       </aside>

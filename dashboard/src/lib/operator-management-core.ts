@@ -26,12 +26,24 @@ export type ScriptPermissionInput = {
   reason: string;
 };
 
+export type OperatorRoleChangeInput = {
+  role: OperatorRole;
+  reason: string;
+};
+
+export type OperatorStatusChangeInput = {
+  disabled: boolean;
+  reason: string;
+};
+
 export type OperatorAction =
   | "list"
   | "create"
   | "grant-script-permission"
   | "revoke-script-permission"
-  | "revoke-tokens";
+  | "revoke-tokens"
+  | "change-role"
+  | "change-status";
 
 export type OperatorActionError = {
   message: string;
@@ -147,6 +159,32 @@ export function validateScriptPermissionRevokeInput(
   return reason ? { reason } : null;
 }
 
+export function validateOperatorRoleChangeInput(
+  value: unknown,
+): OperatorRoleChangeInput | null {
+  if (!value || typeof value !== "object") return null;
+  const { role, reason: rawReason } = value as Record<string, unknown>;
+  const reason = validatePermissionReason(rawReason);
+  if (
+    typeof role !== "string"
+    || !operatorRoles.has(role as OperatorRole)
+    || !reason
+  ) {
+    return null;
+  }
+  return { role: role as OperatorRole, reason };
+}
+
+export function validateOperatorStatusChangeInput(
+  value: unknown,
+): OperatorStatusChangeInput | null {
+  if (!value || typeof value !== "object") return null;
+  const { disabled, reason: rawReason } = value as Record<string, unknown>;
+  const reason = validatePermissionReason(rawReason);
+  if (typeof disabled !== "boolean" || !reason) return null;
+  return { disabled, reason };
+}
+
 export function canGrantScriptPermission(role: OperatorRole): boolean {
   return role !== "readonly";
 }
@@ -233,12 +271,36 @@ export function describeOperatorActionError(
     if (code === "script_permission_not_granted") {
       return { message: "This operator has no script permission to revoke.", status: 409 };
     }
+    if (code === "last_active_admin_required") {
+      return {
+        message: "NodeLink must retain at least one active administrator. Promote or re-enable another administrator first.",
+        status: 409,
+      };
+    }
+    if (code === "operator_role_unchanged") {
+      return { message: "This operator already has the selected role.", status: 409 };
+    }
+    if (code === "operator_state_unchanged") {
+      return { message: "This operator is already in the requested account state.", status: 409 };
+    }
     return {
       message: "The operator changed before this action completed. Refresh and review the current state.",
       status: 409,
     };
   }
   if (upstreamStatus === 400 || upstreamStatus === 422) {
+    if (action === "change-role") {
+      return {
+        message: "Select a valid role and enter an audit reason between 3 and 500 characters.",
+        status: 400,
+      };
+    }
+    if (action === "change-status") {
+      return {
+        message: "Enter an audit reason between 3 and 500 characters.",
+        status: 400,
+      };
+    }
     return {
       message: action === "create"
         ? "Check the operator email, password, and role."

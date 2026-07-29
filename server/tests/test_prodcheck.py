@@ -21,7 +21,12 @@ import pytest  # noqa: E402
 from fastapi import Request  # noqa: E402
 
 from app.core.clientip import client_ip  # noqa: E402
-from app.core.config import Settings, settings  # noqa: E402
+from app.core.config import (  # noqa: E402
+    DatabaseConfigurationError,
+    Settings,
+    normalize_database_url,
+    settings,
+)
 from app.core.prodcheck import (  # noqa: E402
     ProductionConfigError,
     ensure_safe_production_config,
@@ -49,6 +54,48 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
 
 def problems(tmp_path: Path, **overrides) -> list[str]:
     return production_config_problems(make_settings(tmp_path, **overrides))
+
+
+@pytest.mark.parametrize(
+    ("configured", "normalized"),
+    [
+        (
+            "postgresql+asyncpg://user:secret@db.example.com/postgres",
+            "postgresql+asyncpg://user:secret@db.example.com/postgres",
+        ),
+        (
+            "postgresql://user:secret@db.example.com/postgres",
+            "postgresql+asyncpg://user:secret@db.example.com/postgres",
+        ),
+        (
+            "postgres://user:secret@db.example.com/postgres",
+            "postgresql+asyncpg://user:secret@db.example.com/postgres",
+        ),
+        (
+            "sqlite+aiosqlite:///./development.db",
+            "sqlite+aiosqlite:///./development.db",
+        ),
+    ],
+)
+def test_database_url_normalizes_supported_async_drivers(configured, normalized):
+    assert normalize_database_url(configured) == normalized
+
+
+@pytest.mark.parametrize("scheme", ["https", "http"])
+def test_database_url_rejects_supabase_api_url_without_echoing_it(scheme):
+    configured = f"{scheme}://project-ref.supabase.co/private-value"
+    with pytest.raises(DatabaseConfigurationError) as exc:
+        normalize_database_url(configured)
+    assert "Session pooler" in str(exc.value)
+    assert "project-ref" not in str(exc.value)
+    assert "private-value" not in str(exc.value)
+
+
+def test_database_url_rejects_unknown_driver_without_echoing_it():
+    configured = "mysql://user:private-value@db.example.com/nodelink"
+    with pytest.raises(DatabaseConfigurationError) as exc:
+        normalize_database_url(configured)
+    assert "private-value" not in str(exc.value)
 
 
 def test_safe_production_config_passes(tmp_path):

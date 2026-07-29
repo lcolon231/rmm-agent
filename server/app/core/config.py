@@ -5,6 +5,36 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class DatabaseConfigurationError(RuntimeError):
+    """Raised when DATABASE_URL cannot select a supported database driver."""
+
+
+def normalize_database_url(database_url: str) -> str:
+    """Return a SQLAlchemy async URL without exposing credentials in errors."""
+    value = database_url.strip()
+    if value.startswith("postgresql+asyncpg://"):
+        return value
+    if value.startswith("postgresql://"):
+        return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if value.startswith("postgres://"):
+        return value.replace("postgres://", "postgresql+asyncpg://", 1)
+    if value.startswith("sqlite+aiosqlite://"):
+        return value
+
+    if value.startswith(("http://", "https://")):
+        raise DatabaseConfigurationError(
+            "DATABASE_URL must be a PostgreSQL connection string, not a "
+            "Supabase project/API URL. In Supabase, open Connect, copy the "
+            "Session pooler connection string, and store it in Render as "
+            "DATABASE_URL."
+        )
+    raise DatabaseConfigurationError(
+        "DATABASE_URL must use postgresql+asyncpg://, postgresql://, or "
+        "postgres://. sqlite+aiosqlite:// is supported only for development "
+        "and tests."
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"

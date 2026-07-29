@@ -24,11 +24,13 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     JSON,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -164,6 +166,19 @@ class Site(Base):
     enrollment_tokens: Mapped[list["EnrollmentToken"]] = relationship(
         back_populates="site", cascade="all, delete-orphan"
     )
+
+
+Index(
+    "ux_clients_name_normalized",
+    func.lower(func.trim(Client.name)),
+    unique=True,
+)
+Index(
+    "ux_sites_client_name_normalized",
+    Site.client_id,
+    func.lower(func.trim(Site.name)),
+    unique=True,
+)
 
 
 class EnrollmentToken(Base):

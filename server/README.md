@@ -70,6 +70,24 @@ the schema. Migrations are forward-only: recover with a tested backup or a
 forward fix, not `alembic downgrade`. See
 [deployment readiness](../docs/DEPLOYMENT-READINESS.md#database-and-recovery).
 
+### Supabase database URL on Render
+
+For the Render Blueprint, set `DATABASE_URL` to the PostgreSQL **Session
+pooler** connection string shown by Supabase's **Connect** dialog. It has this
+shape:
+
+```text
+postgresql://postgres.<project-ref>:<password>@aws-<region>.pooler.supabase.com:5432/postgres
+```
+
+Do not use the Supabase project/API URL
+(`https://<project-ref>.supabase.co`); it is an HTTP endpoint, not a PostgreSQL
+connection string. NodeLink accepts Supabase's `postgres://` and
+`postgresql://` forms and selects the required `asyncpg` SQLAlchemy driver
+without logging the URL. Password characters that are reserved in URLs must
+remain percent-encoded. Keep this value only in Render's secret environment
+configuration.
+
 ## Current behavior
 
 ### Enrollment and heartbeat polling
@@ -121,8 +139,20 @@ global, site, or agent scope. Admin has no implicit bypass. Grant/revoke reasons
 and each allowed/denied decision are audited without scripts; see
 [`SCRIPT-AUTHORIZATION.md`](../docs/SCRIPT-AUTHORIZATION.md). The Next.js
 dashboard provides browser authentication and enrollment management; MFA,
-federation, tenant-scoped roles, and general operator administration remain
-incomplete.
+federation, and tenant-scoped roles remain incomplete.
+
+Administrators can create operators, change their global role, disable/re-enable
+their identity, grant/revoke script permission, and revoke sessions. Creation,
+role, status, permission, and revocation mutations are audited. Role and status
+changes invalidate sessions; a transition to `readonly` clears script
+permission, and the final active administrator cannot be demoted or disabled.
+Operator deletion, password reset/change, forced initial-password rotation, and
+list pagination are not implemented.
+
+Technicians and administrators can create the first client and site used by
+enrollment. Names are trimmed and normalized for uniqueness: clients are unique
+deployment-wide, while sites are unique within their client. Creation is
+audited without retaining plaintext names in audit detail.
 
 ### Audit records
 
@@ -151,6 +181,8 @@ Operator/authentication:
 | GET | `/api/v1/auth/me` | Readonly |
 | POST | `/api/v1/auth/operators` | Admin |
 | GET | `/api/v1/auth/operators` | Admin |
+| PUT | `/api/v1/auth/operators/{id}/role` | Admin |
+| PUT | `/api/v1/auth/operators/{id}/disabled` | Admin |
 | PUT | `/api/v1/auth/operators/{id}/script-permission` | Admin |
 | POST | `/api/v1/auth/operators/{id}/script-permission/revoke` | Admin |
 | POST | `/api/v1/auth/revoke-tokens` | Readonly |
@@ -178,10 +210,11 @@ pip install pytest pytest-asyncio httpx aiosqlite
 pytest -q
 ```
 
-The server suite covers authentication/roles, login throttling, operator-token
-revocation, enrollment, heartbeat, command lifecycle, Python command signing,
-shared command vectors, Alembic upgrades/revision checks, audit-chain tamper
-detection, and local Merkle anchors. CI also migrates a fresh PostgreSQL 16
-database.
+The server suite covers authentication/roles, operator creation and state
+transitions, last-active-admin safety, client/site first-run provisioning and
+duplicates, login throttling, operator-token revocation, enrollment, heartbeat,
+command lifecycle, Python command signing, shared command vectors, Alembic
+upgrades/revision checks, audit-chain tamper detection, and local Merkle
+anchors. CI also migrates a fresh PostgreSQL 16 database.
 Go-side verification and replay tests live under `agent/` and run on Linux and
 Windows; Windows service and installer lifecycle automation remains open.

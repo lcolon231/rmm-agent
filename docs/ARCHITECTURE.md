@@ -127,16 +127,32 @@ lists the unpaginated `OperatorOut` register, creates administrators
 (`admin`) and technicians (`operator`) through one shared role-locked form,
 shows every role's script state as explicit default deny or one global/site/agent
 grant, and supports compose-then-confirm permission grant/revoke plus confirmed
-session revocation. Browser code calls only same-origin dashboard handlers:
+session revocation, global-role changes, and disable/re-enable. Role and account
+state changes require a 3-to-500-character audit reason, invalidate existing
+sessions, and cannot remove or disable the final active administrator. Changing
+an operator to `readonly` atomically revokes any script grant. Browser code
+calls only same-origin dashboard handlers:
 `GET/POST /api/operators`,
 `PUT /api/operators/{id}/script-permission`,
 `POST /api/operators/{id}/script-permission/revoke`, and
-`POST /api/operators/{id}/revoke-tokens`. Those handlers revalidate the
+`POST /api/operators/{id}/revoke-tokens`,
+`PUT /api/operators/{id}/role`, and
+`PUT /api/operators/{id}/disabled`. Those handlers revalidate the
 HTTP-only dashboard session, require `admin`, allowlist response fields, and
 forward the bearer token server-side to the corresponding `/api/v1/auth/*`
 routes. The FastAPI role check remains the authorization boundary. Permission
 reasons use the API's 3-to-500-character bound and are recorded by the server's
-existing audit events; the dashboard never logs or returns an initial password.
+audit events. Operator creation is audited with a digest-only email and never
+records the submitted password; the dashboard never logs or returns it.
+
+First-run enrollment setup is available at `/enrollment/setup` for `operator`
+and `admin` roles. It creates a client and then a site through same-origin
+`POST /api/clients` and `POST /api/sites` handlers, with the bearer token
+forwarded only by server code. Client names are unique after trimming and
+case-folding; site names use the same rule within their client. Both creations
+are audited with digest-only names. Empty enrollment states direct authorized
+operators to this setup before token creation, then carry the new site ID only
+as a non-secret preselection parameter to the token form.
 
 Endpoint telemetry detail accepts a 1-to-168-hour history window and a 10-to-500
 sample limit. The latest heartbeat is fetched independently of that window and
@@ -214,6 +230,10 @@ Revision `0010` adds nullable operator script scope and scope-ID columns. Null
 means default deny; migration does not grandfather any existing operator or
 admin.
 
+Revision `0013` adds database-enforced normalized-name uniqueness for clients
+and for sites within a client. It preflights existing data and refuses to
+upgrade when case/whitespace-equivalent duplicates require an operator decision.
+
 ### 4.1 Current data model
 
 ```text
@@ -243,6 +263,8 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/auth/login` | Exchange credentials for JWT | Public, throttled in-process |
 | POST | `/auth/operators` | Create operator | Admin |
 | GET | `/auth/operators` | List operators and script scopes | Admin |
+| PUT | `/auth/operators/{id}/role` | Change global role and revoke sessions | Admin |
+| PUT | `/auth/operators/{id}/disabled` | Disable or re-enable identity and revoke sessions | Admin |
 | PUT | `/auth/operators/{id}/script-permission` | Grant/replace one script scope | Admin |
 | POST | `/auth/operators/{id}/script-permission/revoke` | Revoke script scope | Admin |
 | GET | `/auth/me` | Current operator | Readonly+ |
@@ -269,11 +291,12 @@ All application routes except `/healthz` are under `/api/v1`.
 | GET | `/audit/publication-status` | External anchor publication lag/health | Readonly |
 
 Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, and
-a filtered enrollment audit-event list are implemented. Operator listing,
-creation, script-permission administration, and session revocation are
-implemented in the dashboard; disabling/deleting identities and password
-lifecycle operations remain absent. Monitoring policies or alerts, scheduling,
-patching, and evidence export also remain absent. Telemetry history is
+a filtered enrollment audit-event list are implemented. Client/site first-run
+creation and operator listing, creation, global-role change, disable/re-enable,
+script-permission administration, and session revocation are implemented in the
+dashboard. Deleting identities and password lifecycle operations remain absent.
+Monitoring policies or alerts, scheduling, patching, and evidence export also
+remain absent. Telemetry history is
 available only as a bounded read-only endpoint-detail query, not as a general
 analytics API.
 
@@ -495,9 +518,9 @@ moved merely to match an aspirational tree.
   fixture-backed; beyond the endpoint telemetry and command console views,
   live audit UI, complete inventory, monitoring alerts, scheduling, patching,
   remediation, remote shell, and remote desktop are not implemented.
-- Operator administration has no disable/delete endpoint, password
-  change/reset or forced-rotation flow, server-enforced password complexity, or
-  pagination. The dashboard omits those controls rather than simulating them.
+- Operator administration has no delete endpoint, password change/reset or
+  forced-rotation flow, server-enforced password complexity, or pagination.
+  The dashboard omits those controls rather than simulating them.
   Administrator-chosen initial passwords without forced rotation remain a
   security weakness; a future server change should add a one-time activation or
   forced-change flow with authorization, audit events, tests, and documentation.

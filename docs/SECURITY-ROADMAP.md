@@ -175,16 +175,18 @@ and bounded, and reading captured output is audited as
 default-deny for every role and requires an explicit admin-granted global,
 site, or agent scope. Typed inventory remains role-authorized independently;
 every allow/deny decision is audited without the payload before signing or
-queueing (`docs/SCRIPT-AUTHORIZATION.md`). Tenant-scoped authorization,
-mutation-specific CSRF
-tokens beyond the same-origin check, and the remaining administrative audit
-coverage are still required before this milestone closes.
+  queueing (`docs/SCRIPT-AUTHORIZATION.md`). Tenant-scoped authorization and
+  mutation-specific CSRF tokens beyond the same-origin check are still required
+  before this milestone closes.
 
 Administrator-only operator management now uses same-origin dashboard handlers
-for list/create, script-permission grant/revoke, and session revocation. Script
-permission changes and token-generation revocation use the server's existing
-audit events. Operator creation itself still has no audit event, so operator
-administration is not yet fully audited and this milestone item remains open.
+for list/create, global-role change, disable/re-enable, script-permission
+grant/revoke, and session revocation. Every mutation is audited; user-controlled
+email and reason values are digest-only. Role and account changes revoke
+existing sessions, `readonly` transitions clear script permission, and the API
+prevents removal of the final active administrator. First-run client/site
+creation is also same-origin, role-authorized, normalized for duplicate-name
+handling, and audited with digest-only names.
 
 - Use server-mediated dashboard sessions with secure cookie, CSRF, expiration,
   logout, revocation, and role-change behavior. Do not persist operator bearer
@@ -194,8 +196,9 @@ administration is not yet fully audited and this milestone item remains open.
 - Redact secrets in UI, logs, command history, webhooks, and notification
   templates.
 - Audit token, operator, command, alert, script, schedule, and notification
-  administration. Operator script-permission and session-revocation events are
-  covered; operator creation remains an explicit audit gap.
+  administration. Operator creation, role/status changes, script permission,
+  and session revocation are covered; alert, script-library, schedule, and
+  notification administration remain future work.
 - Validate and bound inventory, telemetry, scripts, parameters, schedules, and
   webhook destinations.
 - Add SSRF controls for webhooks and delivery backoff with signed webhook

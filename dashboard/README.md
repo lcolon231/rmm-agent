@@ -18,14 +18,23 @@ only in the in-memory creation view and are never stored in browser storage or
 placed in URLs. Browser mutations use same-origin Route Handlers; FastAPI
 independently enforces every role.
 
+`/enrollment/setup` provides the first-run client/site workflow for Technician
+and Administrator roles. It creates the customer boundary first, then a site,
+and carries the new non-secret site ID into the token form as a preselection.
+Client and site names receive distinct duplicate/not-found/authorization
+messages; empty enrollment states link to setup instead of presenting an
+unusable token form.
+
 The live `/operators` surface is restricted to the API `admin` role. It lists
 the complete operator register, creates product-role Administrators (`admin`)
 and Technicians (`operator`) through one shared form, presents explicit
 default-deny script permission for every role, and provides audited
 compose-then-confirm global/site/agent grant and revoke controls plus confirmed
-sign-out-everywhere. Browser requests go only to same-origin `/api/operators`
-Route Handlers; the bearer token remains in the HTTP-only cookie and is
-forwarded to `/api/v1/auth/*` only by server code.
+sign-out-everywhere, global-role changes, and disable/re-enable controls. The
+last active administrator cannot be demoted or disabled. Browser requests go
+only to same-origin `/api/operators` Route Handlers; the bearer token remains
+in the HTTP-only cookie and is forwarded to `/api/v1/auth/*` only by server
+code.
 
 ## Local development
 
@@ -145,10 +154,14 @@ operators cannot receive a grant and the UI explains that restriction before
 submission. Grant and revoke both require a 3–500 character reason, identify it
 as audit-recorded, and require a review step before the same-origin mutation.
 Session revocation has its own confirmation and leaves the identity enabled.
+Global-role and account-state changes also use compose-then-confirm with a
+mandatory 3-500 character audit reason. They invalidate existing sessions, and
+moving an identity to Read-only atomically clears any script grant. The API
+rejects an attempt to demote or disable the final active administrator.
 
 Known limitations are deliberately omitted from the controls:
 
-- no operator disable or delete endpoint;
+- no operator delete endpoint;
 - no operator password change or reset endpoint;
 - no server-enforced password complexity or forced initial-password rotation;
 - no pagination on the operator list.

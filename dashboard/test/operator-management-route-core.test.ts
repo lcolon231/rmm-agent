@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  handleChangeOperatorRole,
+  handleChangeOperatorStatus,
   handleCreateOperator,
   handleGrantScriptPermission,
   handleListOperators,
@@ -222,4 +224,103 @@ test("returns 204 with no token or body after confirmed sign-out-everywhere", as
   assert.equal(forwardedToken, sessionToken);
   assert.equal(response.status, 204);
   assert.equal(await response.text(), "");
+});
+
+test("role and status handlers enforce same-origin and forward no session token", async () => {
+  let roleCalls = 0;
+  const rejected = await handleChangeOperatorRole(
+    request(
+      "/api/operators/operator-1/role",
+      "PUT",
+      { role: "readonly", reason: "Responsibilities changed" },
+      "https://attacker.example.test",
+    ),
+    "operator-1",
+    {
+      changeOperatorRole: async () => {
+        roleCalls += 1;
+        return upstreamOperator();
+      },
+      getSession: adminSession,
+    },
+  );
+  assert.equal(rejected.status, 403);
+  assert.equal(roleCalls, 0);
+
+  const changed = await handleChangeOperatorRole(
+    request(
+      "/api/operators/operator-1/role",
+      "PUT",
+      { role: "readonly", reason: "Responsibilities changed" },
+    ),
+    "operator-1",
+    {
+      changeOperatorRole: async (token, operatorId, input) => {
+        assert.equal(token, sessionToken);
+        assert.equal(operatorId, "operator-1");
+        assert.deepEqual(input, {
+          role: "readonly",
+          reason: "Responsibilities changed",
+        });
+        return upstreamOperator({
+          role: "readonly",
+          access_token: sessionToken,
+        });
+      },
+      getSession: adminSession,
+    },
+  );
+  const changedText = await changed.text();
+  assert.equal(changed.status, 200);
+  assert.doesNotMatch(changedText, new RegExp(sessionToken));
+  assert.match(changedText, /"role":"readonly"/);
+
+  const disabled = await handleChangeOperatorStatus(
+    request(
+      "/api/operators/operator-1/disabled",
+      "PUT",
+      { disabled: true, reason: "Offboarding approved" },
+    ),
+    "operator-1",
+    {
+      changeOperatorStatus: async (token, operatorId, input) => {
+        assert.equal(token, sessionToken);
+        assert.equal(operatorId, "operator-1");
+        assert.deepEqual(input, {
+          disabled: true,
+          reason: "Offboarding approved",
+        });
+        return upstreamOperator({
+          disabled: true,
+          access_token: sessionToken,
+        });
+      },
+      getSession: adminSession,
+    },
+  );
+  const disabledText = await disabled.text();
+  assert.equal(disabled.status, 200);
+  assert.doesNotMatch(disabledText, new RegExp(sessionToken));
+  assert.match(disabledText, /"disabled":true/);
+});
+
+test("operator state handlers surface last-admin conflicts without internal detail", async () => {
+  const response = await handleChangeOperatorStatus(
+    request(
+      "/api/operators/operator-1/disabled",
+      "PUT",
+      { disabled: true, reason: "Would remove final admin" },
+    ),
+    "operator-1",
+    {
+      changeOperatorStatus: async () => {
+        throw { status: 409, code: "last_active_admin_required", internal: "hidden" };
+      },
+      getSession: adminSession,
+    },
+  );
+  const text = await response.text();
+  assert.equal(response.status, 409);
+  assert.match(text, /retain at least one active administrator/i);
+  assert.doesNotMatch(text, /internal|hidden/i);
 });

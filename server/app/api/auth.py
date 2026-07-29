@@ -32,6 +32,8 @@ from app.schemas.schemas import (
     LoginRequest,
     OperatorCreate,
     OperatorOut,
+    OperatorRoleChange,
+    OperatorStatusChange,
     ScriptExecutionPermissionChange,
     ScriptExecutionPermissionRevoke,
     TokenResponse,
@@ -90,7 +92,8 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
 @router.post("/auth/operators", response_model=OperatorOut, status_code=201)
 async def create_operator(
     body: OperatorCreate,
-    _admin: Operator = Depends(require_role(OperatorRole.admin)),
+    request: Request,
+    admin: Operator = Depends(require_role(OperatorRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new operator. Admin-only.
@@ -109,6 +112,19 @@ async def create_operator(
     )
     db.add(operator)
     await db.flush()
+    await audit.record(
+        db,
+        action="operator.created",
+        actor=admin.email,
+        actor_user_id=admin.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "operator_id": operator.id,
+            "operator_role": operator.role.value,
+            "email": operator.email,
+        },
+    )
     return operator
 
 
@@ -128,6 +144,124 @@ async def list_operators(
     """List operator identities and their current script permission. Admin-only."""
     result = await db.execute(select(Operator).order_by(Operator.email, Operator.id))
     return list(result.scalars().all())
+
+
+async def _operator_or_404(db: AsyncSession, operator_id: str) -> Operator:
+    target = await db.get(Operator, operator_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Operator not found")
+    return target
+
+
+async def _require_another_active_admin(
+    db: AsyncSession,
+    target: Operator,
+) -> None:
+    """Lock the active-admin set before removing one member from it."""
+    if target.role != OperatorRole.admin or target.disabled:
+        return
+    active_admin_ids = list(
+        (
+            await db.execute(
+                select(Operator.id)
+                .where(
+                    Operator.role == OperatorRole.admin,
+                    Operator.disabled.is_(False),
+                )
+                .order_by(Operator.id)
+                .with_for_update()
+            )
+        ).scalars()
+    )
+    if len(active_admin_ids) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "last_active_admin_required"},
+        )
+
+
+@router.put("/auth/operators/{operator_id}/role", response_model=OperatorOut)
+async def change_operator_role(
+    operator_id: str,
+    body: OperatorRoleChange,
+    request: Request,
+    admin: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change a global operator role and invalidate every existing session."""
+    target = await _operator_or_404(db, operator_id)
+    if target.role == body.role:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "operator_role_unchanged"},
+        )
+    if body.role != OperatorRole.admin:
+        await _require_another_active_admin(db, target)
+
+    previous_role = target.role
+    script_permission_revoked = (
+        body.role == OperatorRole.readonly
+        and target.script_execution_scope is not None
+    )
+    target.role = body.role
+    if body.role == OperatorRole.readonly:
+        target.script_execution_scope = None
+        target.script_execution_scope_id = None
+    target.token_generation += 1
+    await audit.record(
+        db,
+        action="operator.role_changed",
+        actor=admin.email,
+        actor_user_id=admin.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "operator_id": target.id,
+            "previous_role": previous_role.value,
+            "new_role": target.role.value,
+            "script_permission_revoked": script_permission_revoked,
+            "reason": body.reason,
+        },
+    )
+    return target
+
+
+@router.put("/auth/operators/{operator_id}/disabled", response_model=OperatorOut)
+async def change_operator_disabled_state(
+    operator_id: str,
+    body: OperatorStatusChange,
+    request: Request,
+    admin: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Disable or re-enable an operator and invalidate all issued sessions."""
+    target = await _operator_or_404(db, operator_id)
+    if target.disabled == body.disabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "operator_state_unchanged"},
+        )
+    if body.disabled:
+        await _require_another_active_admin(db, target)
+
+    previous_disabled = target.disabled
+    target.disabled = body.disabled
+    target.token_generation += 1
+    await audit.record(
+        db,
+        action="operator.status_changed",
+        actor=admin.email,
+        actor_user_id=admin.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "operator_id": target.id,
+            "previous_disabled": previous_disabled,
+            "new_disabled": target.disabled,
+            "reason": body.reason,
+        },
+    )
+    return target
 
 
 async def _validate_script_permission_scope(
