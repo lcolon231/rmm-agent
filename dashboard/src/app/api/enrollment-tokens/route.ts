@@ -2,14 +2,17 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { isSameOrigin } from "@/lib/dashboard-auth-core";
+import { isSameOrigin, requestOrigin } from "@/lib/dashboard-auth-core";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import { NodelinkApiError, nodelinkApiRequest } from "@/lib/nodelink-api";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  if (!isSameOrigin(request.headers.get("origin"), request.nextUrl.origin)) {
+  if (!isSameOrigin(
+    request.headers.get("origin"),
+    requestOrigin(request.url, request.headers.get("host")),
+  )) {
     return NextResponse.json({ error: "Token creation request was rejected." }, { status: 403 });
   }
   const session = await getDashboardSession();

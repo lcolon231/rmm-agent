@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   isSameOrigin,
+  requestOrigin,
   sessionCookieName,
   sessionCookieOptions,
 } from "@/lib/dashboard-auth-core";
@@ -12,7 +13,10 @@ import { revokeOperatorTokens } from "@/lib/nodelink-auth";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  if (!isSameOrigin(request.headers.get("origin"), request.nextUrl.origin)) {
+  if (!isSameOrigin(
+    request.headers.get("origin"),
+    requestOrigin(request.url, request.headers.get("host")),
+  )) {
     return NextResponse.json({ error: "Sign-out request was rejected." }, { status: 403 });
   }
 

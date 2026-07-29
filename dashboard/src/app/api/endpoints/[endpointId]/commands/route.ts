@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { validateDispatchInput } from "@/lib/command-console-core";
 import { dispatchCommand } from "@/lib/command-console";
-import { isSameOrigin, sessionCookieName } from "@/lib/dashboard-auth-core";
+import { isSameOrigin, requestOrigin, sessionCookieName } from "@/lib/dashboard-auth-core";
 import { NodelinkApiError } from "@/lib/nodelink-api";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +44,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ endpointId: string }> },
 ) {
-  if (!isSameOrigin(request.headers.get("origin"), request.nextUrl.origin)) {
+  if (!isSameOrigin(
+    request.headers.get("origin"),
+    requestOrigin(request.url, request.headers.get("host")),
+  )) {
     return NextResponse.json({ error: "Dispatch request was rejected." }, { status: 403 });
   }
 

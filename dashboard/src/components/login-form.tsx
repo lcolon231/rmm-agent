@@ -5,14 +5,12 @@
 import { ArrowRight, LockKeyhole, ShieldCheck } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 type LoginFormProps = {
   initialError?: string;
 };
 
 export function LoginForm({ initialError }: LoginFormProps) {
-  const router = useRouter();
   const [error, setError] = useState(initialError ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -33,8 +31,7 @@ export function LoginForm({ initialError }: LoginFormProps) {
       });
 
       if (response.ok) {
-        router.replace("/");
-        router.refresh();
+        window.location.replace("/");
         return;
       }
 
@@ -54,7 +51,7 @@ export function LoginForm({ initialError }: LoginFormProps) {
         <span className="login-eyebrow"><ShieldCheck size={15} /> Technician access</span>
         <h1 id="login-title">Sign in to operations</h1>
         <p>Use your NodeLink operator account. Your session stays in an HTTP-only cookie and is verified on every dashboard request.</p>
-        <form onSubmit={handleSubmit}>
+        <form action="/api/auth/login" method="post" onSubmit={handleSubmit}>
           <label htmlFor="email">Email</label>
           <input autoComplete="email" id="email" name="email" required type="email" />
           <label htmlFor="password">Password</label>
