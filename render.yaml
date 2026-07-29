@@ -1,0 +1,32 @@
+# Render Blueprint — NodeLink backend (FastAPI) as a Docker web service.
+#
+# The database is external (Supabase), so this service is stateless. Before the
+# first deploy finishes, set the two secret env vars (SECRET_KEY, DATABASE_URL)
+# and upload the Ed25519 signing key as a Secret File named
+# `command_signing_key.pem` (Render mounts it at /etc/secrets/command_signing_key.pem).
+#
+# PUBLIC_BASE_URL is derived at runtime from RENDER_EXTERNAL_URL by
+# docker-entrypoint.sh, so no manual URL step is needed for the *.onrender.com domain.
+services:
+  - type: web
+    name: nodelink-backend
+    runtime: docker
+    dockerfilePath: server/Dockerfile
+    dockerContext: server
+    plan: starter            # always-on; the free tier spins down and would break agent polling
+    healthCheckPath: /healthz
+    autoDeploy: true
+    preDeployCommand: "alembic upgrade head"   # safe no-op when the schema is already at head
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: TRUST_PROXY_HEADERS
+        value: "true"        # correct client IP behind Render's proxy (rate limiting / audit)
+      - key: COMMAND_SIGNING_KEY_PATH
+        value: /etc/secrets/command_signing_key.pem
+      - key: SECRET_KEY
+        sync: false          # set in the Render dashboard (secret)
+      - key: DATABASE_URL
+        sync: false          # set in the Render dashboard (secret) — Supabase session-pooler URL

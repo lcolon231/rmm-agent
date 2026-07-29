@@ -1,0 +1,23 @@
+# Keep secrets, local state, and dev cruft out of the image and build context.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets / local config — never bake into an image.
+.env
+.env.*
+!.env.example
+*.pem
+
+# Local databases, backups, and scratch artifacts.
+*.db
+*.db.*
+*.bak
+*.log
+uvicorn_*.log
+alembic_sql_err.txt
+supabase_*.sql
+
+# Tests are not needed at runtime.
+tests/
