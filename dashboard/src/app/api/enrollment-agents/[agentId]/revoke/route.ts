@@ -2,12 +2,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { isSameOrigin } from "@/lib/dashboard-auth-core";
+import { isSameOrigin, requestOrigin } from "@/lib/dashboard-auth-core";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import { NodelinkApiError, nodelinkApiRequest } from "@/lib/nodelink-api";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ agentId: string }> }) {
-  if (!isSameOrigin(request.headers.get("origin"), request.nextUrl.origin)) {
+  if (!isSameOrigin(
+    request.headers.get("origin"),
+    requestOrigin(request.url, request.headers.get("host")),
+  )) {
     return NextResponse.json({ error: "Revocation request was rejected." }, { status: 403 });
   }
   const session = await getDashboardSession();

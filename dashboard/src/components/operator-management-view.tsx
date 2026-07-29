@@ -11,7 +11,7 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   formatOperatorCreatedAtUtc,
@@ -56,12 +56,16 @@ async function requestOperatorRecords(): Promise<{
 
 export function OperatorManagementView({
   currentOperatorId,
+  initialError,
+  initialOperators,
 }: {
   currentOperatorId: string;
+  initialError: string;
+  initialOperators: OperatorRecord[] | null;
 }) {
-  const [operators, setOperators] = useState<OperatorRecord[] | null>(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [operators, setOperators] = useState<OperatorRecord[] | null>(initialOperators);
+  const [error, setError] = useState(initialError);
+  const [loading, setLoading] = useState(false);
 
   async function loadOperators() {
     setLoading(true);
@@ -71,19 +75,6 @@ export function OperatorManagementView({
     setError(result.error);
     setLoading(false);
   }
-
-  useEffect(() => {
-    let cancelled = false;
-    void requestOperatorRecords().then((result) => {
-      if (cancelled) return;
-      setOperators(result.operators);
-      setError(result.error);
-      setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   function updateOperator(updated: OperatorRecord) {
     setOperators((current) => current?.map((operator) => (

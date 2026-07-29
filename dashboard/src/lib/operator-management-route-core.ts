@@ -11,6 +11,7 @@ import {
   type OperatorRecord,
   type ScriptPermissionInput,
 } from "./operator-management-core.ts";
+import { isSameOrigin, requestOrigin } from "./dashboard-auth-core.ts";
 
 type RouteSession =
   | { kind: "anonymous" }
@@ -38,7 +39,10 @@ function json(body: unknown, status = 200): Response {
 }
 
 function isSameOriginRequest(request: Request): boolean {
-  return request.headers.get("origin") === new URL(request.url).origin;
+  return isSameOrigin(
+    request.headers.get("origin"),
+    requestOrigin(request.url, request.headers.get("host")),
+  );
 }
 
 async function requireAdmin(
