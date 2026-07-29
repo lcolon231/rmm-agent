@@ -43,9 +43,22 @@ class TokenResponse(BaseModel):
 
 
 class OperatorCreate(BaseModel):
-    email: str
+    email: Annotated[
+        str,
+        StringConstraints(
+            min_length=3,
+            max_length=320,
+            strip_whitespace=True,
+            pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$",
+        ),
+    ]
     password: str
     role: OperatorRole = OperatorRole.readonly
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.lower()
 
 
 class OperatorOut(BaseModel):
@@ -83,11 +96,27 @@ class ScriptExecutionPermissionRevoke(BaseModel):
     ]
 
 
+class OperatorRoleChange(BaseModel):
+    role: OperatorRole
+    reason: Annotated[
+        str, StringConstraints(min_length=3, max_length=500, strip_whitespace=True)
+    ]
+
+
+class OperatorStatusChange(BaseModel):
+    disabled: bool
+    reason: Annotated[
+        str, StringConstraints(min_length=3, max_length=500, strip_whitespace=True)
+    ]
+
+
 # --------------------------------------------------------------------------- #
 # Clients / Sites
 # --------------------------------------------------------------------------- #
 class ClientCreate(BaseModel):
-    name: str
+    name: Annotated[
+        str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)
+    ]
 
 
 class ClientOut(BaseModel):
@@ -99,7 +128,9 @@ class ClientOut(BaseModel):
 
 class SiteCreate(BaseModel):
     client_id: str
-    name: str
+    name: Annotated[
+        str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)
+    ]
 
 
 class SiteOut(BaseModel):

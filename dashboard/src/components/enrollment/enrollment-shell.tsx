@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { Activity, ArrowLeft, KeyRound, ListChecks, Monitor, ShieldCheck } from "lucide-react";
+import { Activity, ArrowLeft, Building2, KeyRound, ListChecks, Monitor, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
 import type { DashboardOperator } from "@/lib/dashboard-auth-core";
@@ -22,6 +22,9 @@ export function EnrollmentShell({
         </Link>
         <nav aria-label="Enrollment management">
           <Link href="/enrollment"><Activity size={18} /> Dashboard</Link>
+          {operator.role !== "readonly" ? (
+            <Link href="/enrollment/setup"><Building2 size={18} /> Clients &amp; sites</Link>
+          ) : null}
           <Link href="/enrollment/tokens"><KeyRound size={18} /> Enrollment tokens</Link>
           <Link href="/enrollment/agents"><Monitor size={18} /> Agent inventory</Link>
           <Link href="/enrollment/audit"><ListChecks size={18} /> Audit log</Link>

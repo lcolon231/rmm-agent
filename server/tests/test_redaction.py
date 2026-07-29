@@ -291,6 +291,15 @@ PRODUCER_DETAILS = {
     },
     "client_navigation.client_viewed": {"client_id": ID1},
     "client_navigation.site_viewed": {"site_id": ID1, "client_id": ID2},
+    "client.created": {
+        "client_id": ID1,
+        "name": SENTINEL,
+    },
+    "site.created": {
+        "site_id": ID1,
+        "client_id": ID2,
+        "name": SENTINEL,
+    },
     "enrollment_token.created": {
         "site_id": ID1,
         "name": SENTINEL,
@@ -385,6 +394,24 @@ PRODUCER_DETAILS = {
         "operator_role": "operator",
         "previous_scope": "site",
         "previous_scope_id": ID2,
+        "reason": SENTINEL,
+    },
+    "operator.created": {
+        "operator_id": ID1,
+        "operator_role": "operator",
+        "email": SENTINEL,
+    },
+    "operator.role_changed": {
+        "operator_id": ID1,
+        "previous_role": "operator",
+        "new_role": "readonly",
+        "script_permission_revoked": True,
+        "reason": SENTINEL,
+    },
+    "operator.status_changed": {
+        "operator_id": ID1,
+        "previous_disabled": False,
+        "new_disabled": True,
         "reason": SENTINEL,
     },
     "operator.tokens_revoked": {"operator_id": ID1, "by": "admin"},

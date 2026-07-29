@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowRight, KeyRound, MonitorCheck, MonitorOff, ShieldOf
 import Link from "next/link";
 
 import { getDashboardSession } from "@/lib/dashboard-session";
+import { getClientNavigation } from "@/lib/client-navigation";
 import { getEnrollmentDashboard } from "@/lib/enrollment";
 import { formatEnrollmentDateTime } from "@/lib/enrollment-core";
 import { redirect } from "next/navigation";
@@ -11,7 +12,11 @@ import { redirect } from "next/navigation";
 export default async function EnrollmentDashboardPage() {
   const session = await getDashboardSession();
   if (session.kind !== "authenticated") redirect("/login");
-  const data = await getEnrollmentDashboard(session.sessionToken);
+  const [data, navigation] = await Promise.all([
+    getEnrollmentDashboard(session.sessionToken),
+    getClientNavigation(session.sessionToken),
+  ]);
+  const hasSites = navigation.items.some((client) => client.sites.length > 0);
   const cards = [
     { label: "Total agents", value: data.total_agents, icon: MonitorCheck, tone: "blue" },
     { label: "Active agents", value: data.active_agents, icon: MonitorCheck, tone: "teal" },
@@ -24,8 +29,29 @@ export default async function EnrollmentDashboardPage() {
     <>
       <header className="enrollment-page-head">
         <div><span>Provisioning posture</span><h1>Enrollment dashboard</h1><p>Temporary credentials, endpoint identity, and enrollment evidence in one control surface.</p></div>
-        {session.operator.role !== "readonly" ? <Link className="enrollment-primary-link" href="/enrollment/tokens/new"><KeyRound size={17} /> Create token</Link> : null}
+        {session.operator.role !== "readonly" ? (
+          <Link
+            className="enrollment-primary-link"
+            href={hasSites ? "/enrollment/tokens/new" : "/enrollment/setup"}
+          >
+            {hasSites ? <KeyRound size={17} /> : <ArrowRight size={17} />}
+            {hasSites ? "Create token" : "Start setup"}
+          </Link>
+        ) : null}
       </header>
+      {!hasSites && session.operator.role !== "readonly" ? (
+        <section className="setup-next-step">
+          <AlertTriangle aria-hidden="true" size={24} />
+          <div>
+            <span>First-run setup required</span>
+            <h2>Create a client and site</h2>
+            <p>Enrollment tokens cannot be issued until a site exists.</p>
+          </div>
+          <Link href="/enrollment/setup">
+            Start setup <ArrowRight aria-hidden="true" size={16} />
+          </Link>
+        </section>
+      ) : null}
       <section className="enrollment-stat-grid" aria-label="Enrollment status">
         {cards.map(({ icon: Icon, ...card }) => <article className={`enrollment-stat ${card.tone}`} key={card.label}><Icon size={19} /><span>{card.label}</span><strong>{card.value}</strong></article>)}
       </section>

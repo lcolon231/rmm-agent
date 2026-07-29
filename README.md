@@ -9,6 +9,24 @@ NodeLink is an early-stage, Windows-first project. It is not ready for productio
 HIPAA compliance. The near-term goal is a controlled non-production pilot with
 HIPAA-supporting controls and defensible compliance evidence.
 
+## Project status
+
+| Area | Current state |
+| --- | --- |
+| Latest tagged release | `v0.1.2` |
+| Primary support target | Windows agent and Windows service |
+| Server | FastAPI management and agent APIs with PostgreSQL; SQLite is limited to development and tests |
+| Dashboard | Authenticated Next.js interface with live enrollment, endpoint, command, and administrator workflows; aggregate overview and general audit panels remain fixture-backed |
+| Deployment | Self-hosted Caddy topology and a Render Docker Blueprint for a stateless backend using external PostgreSQL |
+| Current milestone | Milestone 0 pilot gates plus the implemented portion of Milestone 1 |
+| Pilot blockers | Authenticode signing and a recorded multi-day soak run on the intended pilot topology |
+| Production status | Not approved for production or regulated endpoints |
+
+The source of truth for completion claims is the
+[architecture document](docs/ARCHITECTURE.md). Pilot gates are tracked in the
+[deployment-readiness checklist](docs/DEPLOYMENT-READINESS.md), and future
+product scope is tracked in the [phased roadmap](docs/ROADMAP.md).
+
 ## Product direction
 
 NodeLink intends to compete through simpler deployment, policy-controlled and
@@ -48,6 +66,11 @@ The code in this repository currently provides:
 - Fail-closed production startup validation (`ENVIRONMENT=production` rejects
   debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
   URLs) with explicit opt-in proxy trust for client IPs.
+- A Docker deployment path for the FastAPI server and a Render Blueprint that
+  runs Alembic before deployment, uses Render's external URL behind its proxy,
+  expects PostgreSQL through `DATABASE_URL`, and mounts the command-signing key
+  as a secret file. This is deployment scaffolding, not a production-readiness
+  claim.
 - Operator password authentication, JWT sessions, three global roles, complete
   enrollment-token lifecycle management, transactional limited-use redemption,
   token/agent revocation, and in-process login/enrollment throttling.
@@ -63,7 +86,7 @@ The code in this repository currently provides:
   anchors, plus a scheduled publisher that writes anchor roots to external
   immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
-- Forward-only Alembic migrations through revision `0012`, with exact revision
+- Forward-only Alembic migrations through revision `0013`, with exact revision
   enforcement on non-debug startup, legacy debug-schema repair, and a
   disposable PostgreSQL migration test in CI.
 - Encrypted PostgreSQL backup/isolated restore plus a fail-closed release
@@ -84,8 +107,23 @@ The code in this repository currently provides:
   telemetry views, plus a per-endpoint command console: role-gated
   compose-and-confirm dispatch of the supported signed command kinds, paginated
   command history, and per-command records showing envelope evidence, exit
-  code, and bounded stdout/stderr with truncation totals. Aggregate overview
-  and audit panels remain fixture-backed.
+  code, and bounded stdout/stderr with truncation totals.
+- Live dashboard enrollment administration: create/list/filter/revoke temporary
+  enrollment tokens, inspect and revoke agent identities, and review enrollment
+  audit events without placing plaintext tokens in URLs or browser storage.
+  A first-run workflow creates the initial client and site through same-origin,
+  role-authorized, audited handlers before token creation.
+- Administrator-only operator management: list and create administrators or
+  technicians, show explicit default-deny script permission, grant/change/revoke
+  global, site, or agent script scopes with mandatory audited reasons, and
+  invalidate sessions, change global roles, and disable/re-enable identities.
+  Operator creation and every privilege/state mutation are audited, and the API
+  preserves at least one active administrator. The API bearer token remains
+  server-side in an HTTP-only cookie, and browser requests use same-origin route
+  handlers. Operator deletion, password reset/change, forced initial-password
+  rotation, and list pagination are not implemented.
+
+Aggregate operations and general audit panels remain fixture-backed.
 
 The [architecture document](docs/ARCHITECTURE.md) is the source of truth for
 the implementation and its security boundaries.
@@ -93,9 +131,10 @@ the implementation and its security boundaries.
 ## Dashboard preview
 
 The technician dashboard combines authenticated live endpoint inventory,
-telemetry detail, and command console flows with fixture-backed aggregate
-operations and audit panels. The screenshots illustrate the current visual direction; they
-are not production or compliance evidence.
+telemetry detail, command console, enrollment, and administrator/operator
+management flows with fixture-backed aggregate operations and general audit
+panels. The screenshots illustrate the current visual direction; they are not
+production or compliance evidence.
 
 ![NodeLink dashboard operations overview](docs/images/nodelink-dashboard-overview.png)
 
@@ -107,6 +146,32 @@ Milestone 0, Deployment Safety, is nearly complete. Remaining items are an
 Authenticode code signing (needs a paid certificate) and running the multi-day
 soak test (the harness and runbook ship in `deploy/soak/` and
 `docs/SOAK-TEST.md`) before a controlled non-production pilot.
+
+### Recent progress on `main`
+
+The `v0.1.2` release consolidated the secure enrollment work: limited-use
+tokens, agent identity and revocation workflows, the live enrollment dashboard,
+PostgreSQL migration/rollback evidence, and release verification.
+
+After `v0.1.2`, `main` has:
+
+- shipped administrator-only operator identity management and explicit
+  arbitrary-script permission controls in the dashboard, then completed
+  audited role/status changes and last-active-administrator protection;
+- added audited first-run client/site creation with normalized duplicate-name
+  enforcement and a guided enrollment setup flow;
+- hardened the dashboard login flow so credentials use same-origin POST
+  requests, legacy credential query parameters are stripped, and protected
+  pages render from server-validated HTTP-only sessions;
+- added a Dockerized Render deployment path for the FastAPI backend, including
+  pre-deploy migrations, health checks, proxy-aware production configuration,
+  external PostgreSQL configuration, and secret-file signing-key support; and
+- kept the merged branch green across license, Go, Windows, Python, dashboard,
+  migration, installer, and release-target checks.
+
+The current Milestone 1 work remains focused on complete Windows inventory,
+monitoring and alerting, notification delivery, script-library workflows,
+recurring tasks, and tenant-aware authorization design.
 
 ## Planned
 
@@ -129,9 +194,11 @@ soak test (the harness and runbook ship in `deploy/soak/` and
 
 The repository does **not** currently contain:
 
-- A live audit UI or production-ready dashboard. The client/site navigation,
-  endpoint inventory, endpoint telemetry detail, and endpoint command console
-  use live API data; aggregate overview panels remain fixture-backed.
+- A general live audit UI or production-ready dashboard. Client/site
+  navigation, endpoint inventory, endpoint telemetry detail, endpoint command
+  console, enrollment administration/audit, and operator administration use
+  live API data; aggregate overview and general audit panels remain
+  fixture-backed.
 - WebSocket or other live agent transport, interactive remote shell, streaming
   command output, technician-to-end-user chat, or command cancellation. Polling
   remains the only transport and a dispatched command is bounded only by its
@@ -164,10 +231,12 @@ Windows agent -- outbound HTTPS heartbeat/poll --+
 ```
 
 The application does not terminate TLS. The documented deployment topology
-places Caddy in front of uvicorn and binds uvicorn to localhost. This is a
-deployment procedure today, not an application-level production enforcement
-mechanism. See [deployment readiness](docs/DEPLOYMENT-READINESS.md) and the
-[TLS runbook](docs/DEPLOYMENT-TLS.md).
+places Caddy in front of uvicorn and binds uvicorn to localhost. The repository
+also includes `render.yaml` and `server/Dockerfile` for a Render web service
+behind Render's TLS-terminating proxy with an external PostgreSQL database.
+These are deployment procedures and scaffolding, not evidence that NodeLink is
+production-ready. See [deployment readiness](docs/DEPLOYMENT-READINESS.md) and
+the [TLS runbook](docs/DEPLOYMENT-TLS.md).
 
 ## Repository layout
 
@@ -175,16 +244,19 @@ mechanism. See [deployment readiness](docs/DEPLOYMENT-READINESS.md) and the
 rmm-agent/
 ├── agent/       # Go endpoint agent and Windows service integration
 ├── server/      # FastAPI API and persistence layer
+├── dashboard/   # Authenticated Next.js technician and administrator UI
 ├── installer/   # Inno Setup Windows installer
-├── deploy/      # Current reverse-proxy example
+├── deploy/      # Reverse proxy, backup/restore, and soak-test tooling
 ├── contracts/   # Versioned schemas and shared Go/Python canonical vectors
 ├── docs/        # Architecture, security, roadmap, and operations documents
+├── tools/       # License and release-target validation helpers
 └── .github/     # CI, release automation, and contribution templates
 ```
 
-The `dashboard/` directory contains the authenticated technician interface with
-live endpoint inventory, telemetry detail, and the per-endpoint command console
-alongside fixture-backed aggregate operations panels; `tools/` remains planned.
+The root `render.yaml` describes the optional Render backend service. The
+dashboard can be deployed separately and must receive only the server-side
+`NODELINK_API_BASE_URL`; the NodeLink API bearer token must never be exposed as
+a public browser environment variable.
 
 ## Local development
 

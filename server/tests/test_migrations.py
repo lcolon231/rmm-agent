@@ -61,12 +61,22 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         operator_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(operators)")
         }
+        indexes = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            )
+        }
     assert {"alembic_version", "agents", "commands", "audit_events"} <= tables
     assert "agent_completed_at" in command_columns
     assert {
         "script_execution_scope",
         "script_execution_scope_id",
     } <= operator_columns
+    assert {
+        "ux_clients_name_normalized",
+        "ux_sites_client_name_normalized",
+    } <= indexes
 
 
 def test_cli_prefers_dotenv_database_over_alembic_sample_url(tmp_path: Path):
@@ -317,7 +327,26 @@ def test_exact_unversioned_v011_schema_is_adopted_and_upgraded(tmp_path: Path):
             "SELECT version_num FROM alembic_version"
         ).fetchone()
     assert row == ("LEGACY-PC", "0.1.1", "active")
-    assert revision == ("0012",)
+    assert revision == ("0013",)
+
+
+def test_normalized_name_migration_refuses_ambiguous_existing_rows(tmp_path: Path):
+    db_path = tmp_path / "duplicate-names.db"
+    config = migration_config(sqlite_url(db_path))
+    command.upgrade(config, "0012")
+    now = "2026-07-29T12:00:00+00:00"
+    with sqlite3.connect(db_path) as connection:
+        connection.executemany(
+            "INSERT INTO clients (id, name, created_at) VALUES (?, ?, ?)",
+            [
+                ("client-a", "North Clinic", now),
+                ("client-b", " north clinic ", now),
+            ],
+        )
+        connection.commit()
+
+    with pytest.raises(RuntimeError, match="duplicate client group"):
+        command.upgrade(config, "head")
 
 
 def test_v011_adoption_rejects_schema_drift_without_stamping(tmp_path: Path):

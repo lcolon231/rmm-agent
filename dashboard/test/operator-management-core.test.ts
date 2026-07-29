@@ -12,6 +12,8 @@ import {
   operatorRoleLabel,
   permissionReasonBounds,
   validatePermissionReason,
+  validateOperatorRoleChangeInput,
+  validateOperatorStatusChangeInput,
   validateScriptPermissionInput,
 } from "../src/lib/operator-management-core.ts";
 
@@ -91,6 +93,49 @@ test("maps duplicate email conflicts to a distinct actionable message", () => {
     message: "An operator with this email already exists.",
     status: 409,
   });
+});
+
+test("validates audited operator role and account-state changes", () => {
+  assert.deepEqual(
+    validateOperatorRoleChangeInput({
+      role: "readonly",
+      reason: " Responsibilities changed ",
+    }),
+    { role: "readonly", reason: "Responsibilities changed" },
+  );
+  assert.equal(
+    validateOperatorRoleChangeInput({ role: "owner", reason: "Invalid role" }),
+    null,
+  );
+  assert.deepEqual(
+    validateOperatorStatusChangeInput({
+      disabled: true,
+      reason: " Offboarding approved ",
+    }),
+    { disabled: true, reason: "Offboarding approved" },
+  );
+  assert.equal(
+    validateOperatorStatusChangeInput({ disabled: "yes", reason: "Invalid state" }),
+    null,
+  );
+  assert.equal(
+    validateOperatorStatusChangeInput({ disabled: false, reason: "no" }),
+    null,
+  );
+});
+
+test("surfaces last-active-admin protection distinctly", () => {
+  assert.deepEqual(
+    describeOperatorActionError(
+      "change-status",
+      409,
+      "last_active_admin_required",
+    ),
+    {
+      message: "NodeLink must retain at least one active administrator. Promote or re-enable another administrator first.",
+      status: 409,
+    },
+  );
 });
 
 test("formats operator creation timestamps explicitly in UTC", () => {

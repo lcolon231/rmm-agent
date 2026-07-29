@@ -1,8 +1,11 @@
 # Render Blueprint — NodeLink backend (FastAPI) as a Docker web service.
 #
 # The database is external (Supabase), so this service is stateless. Before the
-# first deploy finishes, set the two secret env vars (SECRET_KEY, DATABASE_URL)
-# and upload the Ed25519 signing key as a Secret File named
+# first deploy finishes, set the two secret env vars (SECRET_KEY, DATABASE_URL).
+# DATABASE_URL must be the Supabase Postgres Session pooler connection string
+# from the project's Connect dialog, not https://<project-ref>.supabase.co.
+# The server converts postgres:// or postgresql:// to postgresql+asyncpg://.
+# Also upload the Ed25519 signing key as a Secret File named
 # `command_signing_key.pem` (Render mounts it at /etc/secrets/command_signing_key.pem).
 #
 # PUBLIC_BASE_URL is derived at runtime from RENDER_EXTERNAL_URL by
@@ -29,4 +32,4 @@ services:
       - key: SECRET_KEY
         sync: false          # set in the Render dashboard (secret)
       - key: DATABASE_URL
-        sync: false          # set in the Render dashboard (secret) — Supabase session-pooler URL
+        sync: false          # secret Supabase Session pooler URL (port 5432), never the HTTPS API URL

@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -132,15 +133,42 @@ async def _navigation_client(
 # --------------------------------------------------------------------------- #
 # Clients & sites
 # --------------------------------------------------------------------------- #
-@router.post("/clients", response_model=ClientOut)
+@router.post("/clients", response_model=ClientOut, status_code=status.HTTP_201_CREATED)
 async def create_client(
     body: ClientCreate,
-    _op: Operator = Depends(require_role(OperatorRole.operator)),
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
     db: AsyncSession = Depends(get_db),
 ):
+    duplicate = await db.scalar(
+        select(Client.id).where(
+            func.lower(func.trim(Client.name)) == body.name.casefold()
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "client_name_exists"},
+        )
     client = Client(name=body.name)
     db.add(client)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "client_name_exists"},
+        ) from exc
+    await audit.record(
+        db,
+        action="client.created",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        organization_id=client.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={"client_id": client.id, "name": client.name},
+    )
     return client
 
 
@@ -207,17 +235,49 @@ async def get_client_navigation(
     return await _navigation_client(db, client)
 
 
-@router.post("/sites", response_model=SiteOut)
+@router.post("/sites", response_model=SiteOut, status_code=status.HTTP_201_CREATED)
 async def create_site(
     body: SiteCreate,
-    _op: Operator = Depends(require_role(OperatorRole.operator)),
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
     db: AsyncSession = Depends(get_db),
 ):
     if not await db.get(Client, body.client_id):
         raise HTTPException(status_code=404, detail="Client not found")
+    duplicate = await db.scalar(
+        select(Site.id).where(
+            Site.client_id == body.client_id,
+            func.lower(func.trim(Site.name)) == body.name.casefold(),
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "site_name_exists"},
+        )
     site = Site(client_id=body.client_id, name=body.name)
     db.add(site)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "site_name_exists"},
+        ) from exc
+    await audit.record(
+        db,
+        action="site.created",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        organization_id=body.client_id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "site_id": site.id,
+            "client_id": site.client_id,
+            "name": site.name,
+        },
+    )
     return site
 
 

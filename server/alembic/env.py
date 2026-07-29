@@ -10,7 +10,7 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.core.config import settings
+from app.core.config import normalize_database_url, settings
 from app.core.database import Base
 from app.models import models  # noqa: F401 - registers all mapped tables
 
@@ -25,12 +25,13 @@ target_metadata = Base.metadata
 def _database_url() -> str:
     configured = config.get_main_option("sqlalchemy.url", settings.database_url)
     if config.attributes.get("prefer_configured_url"):
-        return configured
-    return (
+        return normalize_database_url(configured)
+    selected = (
         os.getenv("ALEMBIC_DATABASE_URL")
         or os.getenv("DATABASE_URL")
         or settings.database_url
     )
+    return normalize_database_url(selected)
 
 
 def run_migrations_offline() -> None:

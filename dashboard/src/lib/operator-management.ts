@@ -4,6 +4,8 @@ import "server-only";
 
 import type {
   OperatorCreateInput,
+  OperatorRoleChangeInput,
+  OperatorStatusChangeInput,
   ScriptPermissionInput,
 } from "@/lib/operator-management-core";
 import { nodelinkApiRequest } from "@/lib/nodelink-api";
@@ -67,6 +69,38 @@ export async function revokeManagedOperatorTokens(
     `/api/v1/auth/operators/${encodeURIComponent(operatorId)}/revoke-tokens`,
     {
       method: "POST",
+      sessionToken,
+    },
+  );
+}
+
+export function changeManagedOperatorRole(
+  sessionToken: string,
+  operatorId: string,
+  input: OperatorRoleChangeInput,
+): Promise<unknown> {
+  return nodelinkApiRequest<unknown>(
+    `/api/v1/auth/operators/${encodeURIComponent(operatorId)}/role`,
+    {
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+      sessionToken,
+    },
+  );
+}
+
+export function changeManagedOperatorStatus(
+  sessionToken: string,
+  operatorId: string,
+  input: OperatorStatusChangeInput,
+): Promise<unknown> {
+  return nodelinkApiRequest<unknown>(
+    `/api/v1/auth/operators/${encodeURIComponent(operatorId)}/disabled`,
+    {
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
       sessionToken,
     },
   );

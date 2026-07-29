@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -73,7 +74,7 @@ async def client():
 
 async def _enroll(c) -> tuple[str, str]:
     """Return (agent_id, agent_token)."""
-    cl = (await c.post("/clients", json={"name": "Clinic"})).json()
+    cl = (await c.post("/clients", json={"name": f"Clinic {uuid4().hex}"})).json()
     st = (await c.post("/sites", json={"client_id": cl["id"], "name": "HQ"})).json()
     et = (await c.post("/enrollment-tokens", json={"site_id": st["id"]})).json()
     enr = (

@@ -131,7 +131,7 @@ def test_public_v011_postgresql_schema_adopts_and_upgrades_to_head():
             asyncio.run(
                 _scalar_sql(src_async, "SELECT version_num FROM alembic_version")
             )
-            == "0012"
+            == "0013"
         )
         preserved = asyncio.run(
             _scalar_sql(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -69,7 +70,12 @@ async def clients():
 
 
 async def provision(admin: httpx.AsyncClient, **token_overrides):
-    organization = (await admin.post("/clients", json={"name": "Enrollment Clinic"})).json()
+    organization = (
+        await admin.post(
+            "/clients",
+            json={"name": f"Enrollment Clinic {uuid4().hex}"},
+        )
+    ).json()
     site = (
         await admin.post(
             "/sites", json={"client_id": organization["id"], "name": "Tampa"}

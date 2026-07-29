@@ -15,6 +15,7 @@ Run just this file:  pytest tests/test_command_admission.py -q
 from __future__ import annotations
 
 import os
+from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_admission.db")
 os.environ.setdefault("DEBUG", "false")
@@ -66,7 +67,7 @@ async def client(monkeypatch):
 
 
 async def _enroll(c) -> tuple[str, str]:
-    cl = (await c.post("/clients", json={"name": "Adm Clinic"})).json()
+    cl = (await c.post("/clients", json={"name": f"Adm Clinic {uuid4().hex}"})).json()
     st = (await c.post("/sites", json={"client_id": cl["id"], "name": "HQ"})).json()
     et = (await c.post("/enrollment-tokens", json={"site_id": st["id"], "max_uses": 10})).json()
     enr = (

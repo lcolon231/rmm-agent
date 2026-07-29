@@ -19,6 +19,7 @@ Run just this file:  pytest tests/test_agent_trust.py -q
 from __future__ import annotations
 
 import os
+from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_agent_trust.db")
 os.environ.setdefault("DEBUG", "false")
@@ -83,7 +84,13 @@ async def _auth(c, email, password) -> dict:
 
 async def _enroll(c, op_auth) -> tuple[str, str]:
     """Provision client/site/token and enroll one agent. Returns (id, token)."""
-    cl = (await c.post("/clients", json={"name": "Trust Clinic"}, headers=op_auth)).json()
+    cl = (
+        await c.post(
+            "/clients",
+            json={"name": f"Trust Clinic {uuid4().hex}"},
+            headers=op_auth,
+        )
+    ).json()
     st = (
         await c.post("/sites", json={"client_id": cl["id"], "name": "HQ"}, headers=op_auth)
     ).json()
