@@ -132,6 +132,25 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     ),
     "agent.commands_expired_on_revoke": _schema("command_ids"),
     "audit.anchored": _schema("anchor_id", "merkle_root", "event_count"),
+    # Reading the evidence is itself an auditable act, so the timeline and
+    # single-event views record who looked and what they scoped the view to.
+    # Free-text filters are recorded as booleans, and ``event_type`` only as a
+    # registered action name, so an operator cannot write arbitrary prose into
+    # the tamper-evident chain through a query string.
+    "audit_timeline.viewed": _schema(
+        "event_type",
+        "actor_filter",
+        "agent_id",
+        "organization_id",
+        "date_from",
+        "date_to",
+        "before_seq",
+        "page",
+        "page_size",
+        "result_count",
+        "total",
+    ),
+    "audit_event.viewed": _schema("event_id", "action", "seq"),
     "client_navigation.list_viewed": _schema("client_count", "truncated"),
     "client_navigation.client_viewed": _schema("client_id"),
     "client_navigation.site_viewed": _schema("site_id", "client_id"),

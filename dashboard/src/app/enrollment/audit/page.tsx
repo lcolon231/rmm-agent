@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Filter, ListChecks } from "lucide-react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getDashboardSession } from "@/lib/dashboard-session";
@@ -25,7 +26,7 @@ export default async function EnrollmentAuditPage({ searchParams }: { searchPara
   const data = await getAuditEvents(session.sessionToken, { eventType, page });
   return (
     <>
-      <header className="enrollment-page-head"><div><span>Tamper-evident activity</span><h1>Audit log</h1><p>Token issuance, redemption failures, successful enrollments, credential changes, and revocation.</p></div></header>
+      <header className="enrollment-page-head"><div><span>Tamper-evident activity</span><h1>Audit log</h1><p>Token issuance, redemption failures, successful enrollments, credential changes, and revocation. For every recorded action, chain verification, and external anchor receipts, use the <Link href="/audit">full audit timeline</Link>.</p></div></header>
       <form className="enrollment-filter" method="get"><label><Filter size={16} /><span className="sr-only">Filter event type</span><select defaultValue={eventType ?? ""} name="event"><option value="">All enrollment events</option>{eventOptions.map((event) => <option key={event} value={event}>{event.replaceAll(".", " ")}</option>)}</select></label><button type="submit">Apply</button></form>
       <section className="enrollment-panel">
         <header><div><span>Audit register</span><h2>{data.total} event{data.total === 1 ? "" : "s"}</h2></div><ListChecks size={19} /></header>

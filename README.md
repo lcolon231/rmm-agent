@@ -16,7 +16,7 @@ HIPAA-supporting controls and defensible compliance evidence.
 | Latest tagged release | `v0.1.2` |
 | Primary support target | Windows agent and Windows service |
 | Server | FastAPI management and agent APIs with PostgreSQL; SQLite is limited to development and tests |
-| Dashboard | Authenticated Next.js interface with live enrollment, endpoint, command, and administrator workflows; aggregate overview and general audit panels remain fixture-backed |
+| Dashboard | Authenticated Next.js interface with live enrollment, endpoint, command, audit-evidence, and administrator workflows; the aggregate operations overview remains fixture-backed |
 | Deployment | Self-hosted Caddy topology and a Render Docker Blueprint for a stateless backend using external PostgreSQL |
 | Current milestone | Milestone 0 pilot gates plus the implemented portion of Milestone 1 |
 | Pilot blockers | Authenticode signing and a recorded multi-day soak run on the intended pilot topology |
@@ -113,6 +113,15 @@ The code in this repository currently provides:
   audit events without placing plaintext tokens in URLs or browser storage.
   A first-run workflow creates the initial client and site through same-origin,
   role-authorized, audited handlers before token creation.
+- Live dashboard audit evidence: a sequence-ordered timeline with event-type,
+  actor, agent, and UTC date filters; per-event views of the sanitized detail
+  that was hashed; and anchor views carrying local anchor verification, external
+  publication lag, and per-receipt tamper checks. Filter options come from the
+  redaction registry, so they cannot drift from the actions the chain can hold.
+  A verification that could not be performed reads as unknown, never as
+  verified. Paging is pinned to a sequence ceiling because the chain only
+  appends — and because reading the views is itself audited, so the register
+  grows as it is read.
 - Administrator-only operator management: list and create administrators or
   technicians, show explicit default-deny script permission, grant/change/revoke
   global, site, or agent script scopes with mandatory audited reasons, and
@@ -163,6 +172,8 @@ After `v0.1.2`, `main` has:
 - hardened the dashboard login flow so credentials use same-origin POST
   requests, legacy credential query parameters are stripped, and protected
   pages render from server-validated HTTP-only sessions;
+- replaced the fixture-backed audit panel with live timeline, event-detail, and
+  anchor/receipt verification views, and made audit reads auditable;
 - added a Dockerized Render deployment path for the FastAPI backend, including
   pre-deploy migrations, health checks, proxy-aware production configuration,
   external PostgreSQL configuration, and secret-file signing-key support; and
