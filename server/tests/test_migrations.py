@@ -17,7 +17,11 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.core.schema_revision import SchemaRevisionMismatch, ensure_schema_current
+from app.core.schema_revision import (
+    SchemaRevisionMismatch,
+    ensure_schema_current,
+    expected_schema_heads,
+)
 from scripts import adopt_v011_schema
 
 
@@ -327,7 +331,10 @@ def test_exact_unversioned_v011_schema_is_adopted_and_upgraded(tmp_path: Path):
             "SELECT version_num FROM alembic_version"
         ).fetchone()
     assert row == ("LEGACY-PC", "0.1.1", "active")
-    assert revision == ("0013",)
+    # Derived rather than hardcoded: the point of the assertion is that an
+    # adopted legacy database lands on the *current* head, not on one specific
+    # revision number that every later migration would have to come edit.
+    assert revision == expected_schema_heads()
 
 
 def test_normalized_name_migration_refuses_ambiguous_existing_rows(tmp_path: Path):

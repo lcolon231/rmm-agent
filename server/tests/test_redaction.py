@@ -303,6 +303,17 @@ PRODUCER_DETAILS = {
         "action": "agent.revoked",
         "seq": 42,
     },
+    "inventory.received": {
+        "stored_sections": ["cpu", "system"],
+        "unchanged_sections": ["memory"],
+        "schema_version": 1,
+        "total_bytes": 4096,
+    },
+    "inventory.rejected": {
+        "reason": "section_schema_invalid",
+        "section": "storage",
+        "byte_size": 512,
+    },
     "client_navigation.list_viewed": {
         "client_count": 3,
         "truncated": False,

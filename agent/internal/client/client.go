@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lcolon231/rmm/agent/internal/inventory"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/redact"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
@@ -234,6 +235,10 @@ type HeartbeatAck struct {
 	// "quarantined" the agent must not execute anything, even if commands were
 	// somehow present in the ack.
 	TrustState string `json:"trust_state"`
+	// InventoryRequested names the inventory sections whose stored copy the
+	// server considers missing, changed, or stale. Empty on a steady-state
+	// beat, which is the common case. An older server omits it entirely.
+	InventoryRequested []string `json:"inventory_requested"`
 }
 
 // PendingResultNotice tells the server that execution has finished locally but
@@ -244,10 +249,10 @@ type PendingResultNotice struct {
 	AgentCompletedAt string `json:"agent_completed_at,omitempty"`
 }
 
-// Heartbeat posts telemetry and returns any queued commands. inventory may be
-// nil for ordinary beats.
-func (c *Client) Heartbeat(ctx context.Context, s telemetry.Sample, inventory map[string]any) (*HeartbeatAck, error) {
-	return c.HeartbeatWithPendingResults(ctx, s, inventory, nil)
+// Heartbeat posts telemetry and returns any queued commands. inventoryHashes
+// may be nil when the agent has nothing collected yet.
+func (c *Client) Heartbeat(ctx context.Context, s telemetry.Sample, inventoryHashes map[string]string) (*HeartbeatAck, error) {
+	return c.HeartbeatWithPendingResults(ctx, s, inventoryHashes, nil)
 }
 
 // HeartbeatWithPendingResults is Heartbeat plus a bounded list of durable
@@ -255,7 +260,7 @@ func (c *Client) Heartbeat(ctx context.Context, s telemetry.Sample, inventory ma
 func (c *Client) HeartbeatWithPendingResults(
 	ctx context.Context,
 	s telemetry.Sample,
-	inventory map[string]any,
+	inventoryHashes map[string]string,
 	pendingResults []PendingResultNotice,
 ) (*HeartbeatAck, error) {
 	body := map[string]any{
@@ -267,11 +272,33 @@ func (c *Client) HeartbeatWithPendingResults(
 		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
 		"pending_results":                     pendingResults,
 	}
-	if inventory != nil {
-		body["inventory"] = inventory
+	// Only digests ride on the beat. Full snapshots go to SubmitInventory when
+	// the server asks, so heartbeat size stays independent of how much hardware
+	// an endpoint has.
+	if len(inventoryHashes) > 0 {
+		body["inventory_hashes"] = inventoryHashes
 	}
 	var ack HeartbeatAck
 	if err := c.do(ctx, "POST", "/api/v1/heartbeat", body, &ack, true); err != nil {
+		return nil, err
+	}
+	return &ack, nil
+}
+
+// InventoryAck reports what the server did with each submitted section.
+type InventoryAck struct {
+	OK                bool     `json:"ok"`
+	StoredSections    []string `json:"stored_sections"`
+	UnchangedSections []string `json:"unchanged_sections"`
+}
+
+// SubmitInventory uploads the sections the server asked for. The server bounds
+// and validates every section and rejects the whole submission rather than
+// storing a truncated one, so a rejection here means the agent and server
+// disagree about the contract — not that some data was quietly dropped.
+func (c *Client) SubmitInventory(ctx context.Context, s inventory.Submission) (*InventoryAck, error) {
+	var ack InventoryAck
+	if err := c.do(ctx, "POST", "/api/v1/agents/me/inventory", s, &ack, true); err != nil {
 		return nil, err
 	}
 	return &ack, nil
