@@ -564,6 +564,10 @@ class AuditEventOut(BaseModel):
 
 class AuditEventListOut(BaseModel):
     items: list[AuditEventOut] = Field(default_factory=list)
+    #: Sequence ceiling this page was taken against. Pass it back as the
+    #: ``before_seq`` query parameter so later pages read the same snapshot of
+    #: an append-only chain. Null only when no sequenced event exists yet.
+    before_seq: int | None = None
     page: int = Field(ge=1)
     page_size: int = Field(ge=1, le=100)
     total: int = Field(ge=0)

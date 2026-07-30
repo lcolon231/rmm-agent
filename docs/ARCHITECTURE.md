@@ -199,6 +199,34 @@ route stores new state and no schema change was required, so rollback is
 limited to the server and dashboard deployment. In-flight views poll by
 re-fetching bounded server data; output remains buffered, never streamed.
 
+### Audit timeline and verification views
+
+`/audit` presents the audit chain to a technician: a sequence-ordered timeline
+with event-type, actor, agent, and UTC date filters; a per-event view of the
+sanitized detail that was hashed; and an anchor view carrying local anchor
+verification, external publication lag, and per-receipt tamper checks. Chain
+verification and publication status render as banners above the register, and a
+failed verification is announced as an alert rather than a status.
+
+Three properties are deliberate. First, filter options come from
+`GET /audit/event-types`, which is the redaction registry itself, so the filter
+list cannot drift from the actions the chain can contain. Second, a verification
+that could not be performed renders as *unknown*, never as verified — including
+when external publication is disabled, because an unpublished anchor does not
+constrain an attacker holding the database. Third, pagination is pinned to a
+sequence ceiling (`before_seq`, echoed by the list response and carried by the
+pager): the chain only appends, so newest-first offset pagination would shift
+rows onto later pages and show one twice.
+
+That last property is not only about concurrency. Reading these views is itself
+audited (`audit_timeline.viewed`, `audit_event.viewed`) — who read the evidence
+is evidence — which makes the register grow as it is read and would otherwise
+duplicate a row on *every* page turn. Free-text filter values are recorded as
+booleans and an unregistered event-type filter is collapsed to `unregistered`,
+so a query string cannot write operator prose into the tamper-evident chain.
+Both routes are read-only and required no schema change, so rollback is limited
+to the server and dashboard deployment.
+
 Milestone 1 adds the remaining live audit workflows, inventory, monitoring,
 alerts, notifications, script library, and recurring tasks. Later phases add
 patching, remediation, technician-to-end-user chat (planned for Milestone 2:
@@ -284,14 +312,18 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/agents/{id}/revoke` | Permanently revoke agent credentials | Admin |
 | GET | `/signing-keys` | View redacted active/overlap/retired key state | Readonly |
 | POST/GET | `/agents/{id}/commands` | Dispatch/list commands | Operator / Readonly |
+| GET | `/audit/events` | Sequence-ordered, filtered, snapshot-paginated timeline | Readonly |
+| GET | `/audit/events/{id}` | One event with its sanitized detail | Readonly |
+| GET | `/audit/event-types` | Registered audit actions (filter source) | Readonly |
 | GET | `/audit/verify` | Verify hash chain | Readonly |
 | POST/GET | `/audit/anchors` | Create/list local anchors | Operator / Readonly |
 | GET | `/audit/anchors/{id}/verify` | Verify local anchor | Readonly |
 | GET | `/audit/anchors/{id}/receipt` | External publication receipt + tamper check | Readonly |
 | GET | `/audit/publication-status` | External anchor publication lag/health | Readonly |
 
-Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, and
-a filtered enrollment audit-event list are implemented. Client/site first-run
+Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, a
+filtered enrollment audit-event list, and the general audit timeline,
+event-detail, and anchor/receipt verification views are implemented. Client/site first-run
 creation and operator listing, creation, global-role change, disable/re-enable,
 script-permission administration, and session revocation are implemented in the
 dashboard. Deleting identities and password lifecycle operations remain absent.

@@ -55,7 +55,7 @@ const navItems = [
   { label: "Endpoints", icon: Monitor, count: null },
   { label: "Alerts", icon: AlertTriangle, count: 7 },
   { label: "Automation", icon: Bot, count: null },
-  { label: "Audit", icon: ShieldCheck, count: null, href: "/enrollment/audit" },
+  { label: "Audit", icon: ShieldCheck, count: null, href: "/audit" },
   { label: "Administration", icon: Settings, count: null, href: "/enrollment" },
   { label: "Operators", icon: Users, count: null, href: "/operators", adminOnly: true },
 ];

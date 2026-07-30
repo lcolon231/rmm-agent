@@ -38,6 +38,8 @@ and SHA-256/Merkle roots—remains readable.
 | `agent.revoked` | `api/management.py` trust transition | `previous_trust_state`, `trust_state`, `reason_sha256`, `reason_bytes` |
 | `agent.commands_expired_on_revoke` | `api/management.py` revoke cleanup | `command_ids` |
 | `audit.anchored` | `api/management.py` local anchor creation | `anchor_id`, `merkle_root`, `event_count` |
+| `audit_timeline.viewed` | `api/management.py` audit timeline list | `event_type`, `actor_filter`, `agent_id`, `organization_id`, `date_from`, `date_to`, `before_seq`, `page`, `page_size`, `result_count`, `total` |
+| `audit_event.viewed` | `api/management.py` audit event detail | `event_id`, `action`, `seq` |
 | `client_navigation.list_viewed` | `api/management.py` navigation list | `client_count`, `truncated` |
 | `client_navigation.client_viewed` | `api/management.py` client view | `client_id` |
 | `client_navigation.site_viewed` | `api/management.py` site view | `site_id`, `client_id` |

@@ -36,6 +36,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
 from app.core.keyring import active_signing_key, load_keyring
+from app.core.redaction import AUDIT_DETAIL_SCHEMAS
 from app.core.script_authorization import (
     authorize_command,
     decision_audit_detail,
@@ -1217,19 +1218,57 @@ async def enrollment_dashboard(db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/audit/event-types")
+async def list_audit_event_types():
+    """Every audit action a production producer may emit.
+
+    Sourced from the redaction policy registry, which ``audit.record`` enforces
+    fail-closed, so a filter list built from this endpoint cannot drift from the
+    actions that can actually appear in the chain."""
+    return {"items": sorted(AUDIT_DETAIL_SCHEMAS)}
+
+
 @router.get("/audit/events", response_model=AuditEventListOut)
 async def list_audit_events(
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
     event_type: str | None = Query(default=None, max_length=100),
     actor: str | None = Query(default=None, max_length=255),
     agent_id: str | None = Query(default=None, max_length=36),
     organization_id: str | None = Query(default=None, max_length=36),
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    before_seq: int | None = Query(default=None, ge=1),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
+    """Audit events newest first by sequence number.
+
+    Ordering is by ``seq`` rather than timestamp: the sequence is the value the
+    chain hashes and verification walks, so a page boundary here matches the
+    boundary verification uses. Legacy pre-sequence events sort last.
+
+    Pagination is pinned to a sequence ceiling. The chain only ever appends, and
+    newest-first offset pagination over a growing list shifts rows onto later
+    pages — a caller turning the page would see a row twice and could conclude
+    the register was inconsistent. The first request's ceiling is returned as
+    ``before_seq``; passing it back makes every later page a view of that same
+    snapshot. This view is also self-referential (reading it records an
+    ``audit_timeline.viewed`` event), so without the ceiling paging would
+    duplicate a row on every single page turn rather than only under concurrent
+    activity.
+    """
+    if before_seq is None:
+        before_seq = (
+            await db.execute(select(func.max(AuditEvent.seq)))
+        ).scalar_one_or_none()
     filters = []
+    if before_seq is not None:
+        # Legacy pre-sequence rows have no ceiling to compare against and sort
+        # last; excluding them here would drop them from every snapshot.
+        filters.append(
+            or_(AuditEvent.seq <= before_seq, AuditEvent.seq.is_(None))
+        )
     if event_type:
         filters.append(AuditEvent.action == event_type)
     if actor:
@@ -1252,18 +1291,76 @@ async def list_audit_events(
             await db.execute(
                 select(AuditEvent)
                 .where(*filters)
-                .order_by(AuditEvent.seq.desc())
+                # nullslast() is explicit because the backends disagree by
+                # default: PostgreSQL sorts NULLs first under DESC, SQLite sorts
+                # them last. Legacy pre-sequence events must land in the same
+                # place on both, and the ts/id tiebreakers keep the total order
+                # stable so a row cannot repeat or be skipped across pages.
+                .order_by(
+                    AuditEvent.seq.desc().nullslast(),
+                    AuditEvent.ts.desc(),
+                    AuditEvent.id.desc(),
+                )
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
         ).scalars().all()
     )
+    await audit.record(
+        db,
+        action="audit_timeline.viewed",
+        actor=operator.email,
+        detail={
+            # Only a registered action name is recorded verbatim; anything else
+            # is collapsed so a query string cannot inject prose into the chain.
+            "event_type": (
+                event_type
+                if event_type in AUDIT_DETAIL_SCHEMAS
+                else "unregistered" if event_type else None
+            ),
+            "actor_filter": bool(actor),
+            "agent_id": agent_id,
+            "organization_id": organization_id,
+            "date_from": bool(date_from),
+            "date_to": bool(date_to),
+            "before_seq": before_seq,
+            "page": page,
+            "page_size": page_size,
+            "result_count": len(events),
+            "total": total,
+        },
+    )
     return AuditEventListOut(
         items=[AuditEventOut.model_validate(event) for event in events],
+        before_seq=before_seq,
         page=page,
         page_size=page_size,
         total=total,
     )
+
+
+@router.get("/audit/events/{event_id}", response_model=AuditEventOut)
+async def get_audit_event(
+    event_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    """One audit event with its full recorded detail.
+
+    The detail was already sanitized by the redaction policy before it was
+    hashed, so this route exposes the same safe representation that chain and
+    anchor verification cover — there is no unredacted form to leak."""
+    event = await db.get(AuditEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Audit event not found")
+    out = AuditEventOut.model_validate(event)
+    await audit.record(
+        db,
+        action="audit_event.viewed",
+        actor=operator.email,
+        detail={"event_id": event.id, "action": event.action, "seq": event.seq},
+    )
+    return out
 
 
 @router.get("/audit/verify")
