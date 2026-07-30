@@ -53,6 +53,24 @@ The dashboard health route is available at `/api/health`. It returns `degraded`
 when the configured NodeLink API is unavailable without exposing the configured
 URL or credentials.
 
+## Vercel deployment
+
+The Next.js app lives in `dashboard/`, not at the repository root. A Vercel
+project that builds from the repository root fails with
+`Couldn't find any 'pages' or 'app' directory`.
+
+Either of the following resolves it:
+
+- Set **Root Directory** to `dashboard` in the Vercel project settings
+  (Settings → Build & Deployment). This is the preferred option; the
+  repository-root `vercel.json` is then ignored because Vercel reads
+  `vercel.json` from the root directory.
+- Leave the root directory unset and rely on the repository-root
+  `vercel.json`, which builds `dashboard/package.json` with `@vercel/next`.
+
+Set `NODELINK_API_BASE_URL` (and optionally `NODELINK_API_TIMEOUT_MS`) as
+project environment variables; see the configuration rules below.
+
 ## Configuration
 
 `NODELINK_API_BASE_URL` is read only by server-side code. Do not create a
