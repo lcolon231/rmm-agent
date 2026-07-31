@@ -510,7 +510,9 @@ class AgentInventorySnapshot(Base):
         ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
     )
     section: Mapped[str] = mapped_column(String(32), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    # 32 rather than 16: "permission_denied" is 17 characters. SQLite ignores
+    # VARCHAR length, so an under-sized column here fails only on PostgreSQL.
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
     # SHA-256 over the canonical section payload. Dedup key and the value the
     # agent compares against to decide whether a resend is worth the bytes.

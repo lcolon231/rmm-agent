@@ -37,6 +37,11 @@ const (
 	// provider_state field distinguishes "a third-party antivirus is primary"
 	// from "Defender is switched off", which a section status cannot express.
 	SectionSecurityDefender = "security_defender"
+	// Platform security is three sections, not one, so a BitLocker permission
+	// failure cannot void an otherwise readable Secure Boot or TPM reading.
+	SectionSecurityBitLocker  = "security_bitlocker"
+	SectionSecuritySecureBoot = "security_secure_boot"
+	SectionSecurityTpm        = "security_tpm"
 )
 
 // AllSections is collection order, which is also the order sections appear in
@@ -49,6 +54,9 @@ var AllSections = []string{
 	SectionNetwork,
 	SectionInstalledSoftware,
 	SectionSecurityDefender,
+	SectionSecurityBitLocker,
+	SectionSecuritySecureBoot,
+	SectionSecurityTpm,
 }
 
 // Status explains why a section looks the way it does. These mirror the
