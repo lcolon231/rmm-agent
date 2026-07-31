@@ -483,3 +483,48 @@ class AnchorPublication(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     anchor: Mapped["AuditAnchor"] = relationship(back_populates="publications")
+
+
+class AgentInventorySnapshot(Base):
+    """One collected inventory section for one agent (issue #35).
+
+    Rows are append-only and inserted only when a section's ``content_hash``
+    changes, so the table is simultaneously the current state (the newest row
+    per ``(agent_id, section)``) and the change history that #40 renders as
+    diffs. Storing one row per section — rather than one document per agent —
+    means later inventory classes are new ``section`` values, not migrations.
+    """
+
+    __tablename__ = "agent_inventory_snapshots"
+    __table_args__ = (
+        Index(
+            "ix_agent_inventory_agent_section_received",
+            "agent_id",
+            "section",
+            "received_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    section: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # SHA-256 over the canonical section payload. Dedup key and the value the
+    # agent compares against to decide whether a resend is worth the bytes.
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # When the endpoint collected it, versus when we received it. A large gap
+    # means a queued or clock-skewed endpoint, which a technician needs to see
+    # before trusting the values.
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False, index=True
+    )
+
+    agent: Mapped["Agent"] = relationship()

@@ -30,7 +30,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import anchor_publish
 from app.core.config import Settings, settings
-from app.models.models import AuditEvent, Command, Heartbeat
+from app.models.models import (
+    AgentInventorySnapshot,
+    AuditEvent,
+    Command,
+    Heartbeat,
+)
 
 
 def _now() -> datetime:
@@ -114,6 +119,12 @@ async def storage_status(db: AsyncSession, s: Settings = settings) -> dict:
     audit_count = (
         await db.execute(select(func.count()).select_from(AuditEvent))
     ).scalar_one()
+    inventory_count = (
+        await db.execute(select(func.count()).select_from(AgentInventorySnapshot))
+    ).scalar_one()
+    inventory_bytes = (
+        await db.execute(select(func.sum(AgentInventorySnapshot.byte_size)))
+    ).scalar_one() or 0
 
     pub = await anchor_publish.publication_status(db, s)
 
@@ -151,6 +162,17 @@ async def storage_status(db: AsyncSession, s: Settings = settings) -> dict:
             # planning, not for retention.
             "event_count": audit_count,
             "oldest_age_seconds": await _age_seconds(db, AuditEvent.ts),
+        },
+        "inventory": {
+            # Snapshots are append-only per section and only written when a
+            # section's content changes, so growth tracks real hardware churn
+            # rather than heartbeat frequency. Reported for capacity planning;
+            # retention of inventory history is #88's scope, not this module's.
+            "snapshot_count": inventory_count,
+            "total_bytes": inventory_bytes,
+            "oldest_age_seconds": await _age_seconds(
+                db, AgentInventorySnapshot.received_at
+            ),
         },
         "anchor_publication": {
             "backend": pub.backend,

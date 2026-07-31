@@ -302,7 +302,16 @@ class HeartbeatIn(CommandEnvelopeCapabilities):
     disk_percent: float = 0.0
     uptime_seconds: int = 0
     logged_in_user: str | None = None
-    inventory: dict | None = None  # optional full snapshot piggybacked on a beat
+    # Per-section SHA-256 of the agent's current inventory, e.g.
+    # {"system": "<hex>", "cpu": "<hex>"}. Tiny by construction, so the beat
+    # stays small; the server compares it against what it has stored and asks
+    # for a resend through `inventory_requested` only when it differs or is
+    # stale. Full snapshots go to POST /agents/me/inventory, never through a
+    # heartbeat — that path was previously an unbounded, unvalidated sink.
+    inventory_hashes: dict[
+        Annotated[str, StringConstraints(max_length=32)],
+        Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")],
+    ] = Field(default_factory=dict, max_length=16)
     pending_results: list["PendingResultNotice"] = Field(
         default_factory=list, max_length=256
     )
@@ -316,6 +325,19 @@ class HeartbeatIn(CommandEnvelopeCapabilities):
         if len(ids) != len(set(ids)):
             raise ValueError("pending result command IDs must be unique")
         return value
+
+
+class InventoryAck(BaseModel):
+    """What the server did with a submission, per section.
+
+    Distinguishing stored from unchanged lets the agent confirm the server
+    holds its current state without a follow-up read, and makes a resend loop
+    (agent keeps sending, server keeps deduping) visible in one response.
+    """
+
+    ok: bool = True
+    stored_sections: list[str] = Field(default_factory=list)
+    unchanged_sections: list[str] = Field(default_factory=list)
 
 
 class PendingResultNotice(BaseModel):
@@ -342,6 +364,11 @@ class HeartbeatAck(BaseModel):
     # Additive: lets a quarantined agent see its own state so it can stop
     # executing locally. Older agents ignore the field.
     trust_state: AgentTrustState = AgentTrustState.active
+    # Sections the server wants resent, because their hash differs from what is
+    # stored, they were never reported, or the stored copy is older than the
+    # refresh interval. Empty means "nothing to send" — the common case, so a
+    # steady-state endpoint transfers no inventory bytes at all.
+    inventory_requested: list[str] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #

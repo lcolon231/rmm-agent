@@ -278,9 +278,16 @@ authenticated operator can currently access records across every client and
 site. Tenant identifiers are not carried through every row or authorization
 decision.
 
-`Agent.inventory` stores only a latest optional JSON value received in a
-heartbeat. The agent always sends `nil`, and there are no normalized inventory
-tables, history, provenance, or diffs.
+`AgentInventorySnapshot` stores one validated row per `(agent, section)`,
+appended only when that section's content hash changes, so the table is
+simultaneously current state and change history. Sections carry a status
+(`ok`, `partial`, `unavailable`, `unsupported`) and both a `collected_at` and a
+`received_at`, so an absent field is distinguishable from an unread one and a
+queued or clock-skewed endpoint is visible. Hardware sections are implemented
+(#35); installed software, Defender, BitLocker/TPM, and local administrators
+are later `section` values, and operator-facing history and diffs are #40. The
+legacy free-form `Agent.inventory` column is no longer written and is dropped
+in a later revision.
 
 ### 4.2 API surface
 
@@ -299,7 +306,8 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/auth/revoke-tokens` | Revoke caller sessions | Readonly+ |
 | POST | `/auth/operators/{id}/revoke-tokens` | Revoke operator sessions | Admin |
 | POST | `/enroll` | Enroll with site token | Enrollment token |
-| POST | `/heartbeat` | Store telemetry and poll commands | Agent token |
+| POST | `/heartbeat` | Store telemetry, advertise inventory hashes, poll commands | Agent token |
+| POST | `/agents/me/inventory` | Submit requested inventory sections | Agent token |
 | POST | `/commands/{id}/result` | Submit buffered result | Agent token |
 | POST/GET | `/clients` | Create/list clients | Operator / Readonly |
 | POST | `/sites` | Create site | Operator |
@@ -341,9 +349,43 @@ process. Go build and unit tests run on Windows CI, but Windows service and
 installer lifecycle behavior is exercised in Windows CI: a lifecycle script drives install/start/stop/restart/refuse-double-install/uninstall against the SCM, and a silent installer install+uninstall smoke test builds and runs the Inno Setup package.
 
 The current Windows telemetry collector shells out to PowerShell/CIM once per
-heartbeat for CPU, memory, system drive, uptime, user, and OS version. It does
-not collect complete hardware, installed software, Defender, BitLocker, Secure
-Boot, TPM, or local administrator state.
+heartbeat for CPU, memory, system drive, uptime, user, and OS version.
+
+Hardware inventory is collected separately and once per process, not per beat:
+manufacturer/model/serial/BIOS, CPU, memory totals and modules, disks and
+volumes, and network adapters. Each section is collected independently under
+its own timeout, so a wedged CIM provider degrades one section to `unavailable`
+rather than voiding the snapshot or stalling check-in. Installed software,
+Defender, BitLocker, Secure Boot, TPM, and local administrator state are not
+yet collected.
+
+### 6.1 Inventory transport
+
+The agent advertises a per-section SHA-256 on every heartbeat; the ack names
+only the sections whose stored copy is missing, changed, or older than the
+24-hour refresh interval; the agent then POSTs just those to
+`/agents/me/inventory`. A steady-state endpoint therefore transfers no
+inventory bytes at all, and heartbeat size stays independent of how much
+hardware an endpoint has.
+
+Both sides canonicalize identically — Go's `encoding/json` sorts map keys and
+emits no incidental whitespace, matching Python's
+`json.dumps(sort_keys=True, separators=(",", ":"))` — and pinned digest vectors
+are asserted in both test suites, because a canonicalization drift would make
+every section look permanently changed or permanently unchanged.
+
+Submissions are atomic and bounded: every section is validated before any is
+stored, and an oversized or malformed section fails the whole request with 422
+rather than being truncated, so what is persisted is exactly what the endpoint
+reported. The agent trims its own lists to the same caps and reports `partial`.
+A quarantined or revoked agent is refused, with the refusal audited. Audit
+records carry section names, counts, and sizes only — never payload contents,
+which include serials, adapter addresses, and volume labels.
+
+This replaced an unvalidated path in which the heartbeat body's free-form
+`inventory` object was written straight to the database with no schema and no
+size bound. No released agent ever populated it, so there was nothing to
+migrate.
 
 After enrollment, `identity.json` holds the agent token, server URL, and command
 public keys inside a versioned envelope that declares its protection scheme. On

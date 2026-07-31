@@ -36,6 +36,7 @@ from alembic import command  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
+from app.core.schema_revision import expected_schema_heads  # noqa: E402
 from tests.test_migrations import migration_config  # noqa: E402
 from scripts import adopt_v011_schema  # noqa: E402
 
@@ -127,12 +128,14 @@ def test_public_v011_postgresql_schema_adopts_and_upgrades_to_head():
         assert adopt_v011_schema.run(src_async, stamp=True) == 0
         command.upgrade(migration_config(src_async), "head")
 
-        assert (
-            asyncio.run(
-                _scalar_sql(src_async, "SELECT version_num FROM alembic_version")
-            )
-            == "0013"
-        )
+        # Derived rather than hardcoded: the point is that an adopted v0.1.1
+        # database reaches the *current* head, not one specific revision that
+        # every later migration would have to come edit. This test only runs
+        # with TEST_POSTGRES_URL set, so a literal here goes unnoticed locally
+        # and fails in CI.
+        assert asyncio.run(
+            _scalar_sql(src_async, "SELECT version_num FROM alembic_version")
+        ) in expected_schema_heads()
         preserved = asyncio.run(
             _scalar_sql(
                 src_async,

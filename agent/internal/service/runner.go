@@ -17,11 +17,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/client"
 	"github.com/lcolon231/rmm/agent/internal/config"
 	"github.com/lcolon231/rmm/agent/internal/executor"
+	"github.com/lcolon231/rmm/agent/internal/inventory"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 	"github.com/lcolon231/rmm/agent/internal/verify"
@@ -135,6 +137,11 @@ type session struct {
 	// quarantined mirrors the server-reported trust state so transitions are
 	// logged once instead of on every beat.
 	quarantined bool
+	// inventorySections is the last collected hardware snapshot. It is kept in
+	// memory only: on restart the agent recollects and re-advertises, and the
+	// server's content-hash comparison means an unchanged machine still uploads
+	// nothing. Persisting it would add a cache to keep coherent for no gain.
+	inventorySections []inventory.Section
 }
 
 // Run enrolls if needed and then checks in until ctx is cancelled. On
@@ -354,6 +361,29 @@ func (a *Agent) ensureEnrolled(ctx context.Context, cfg *config.Config, idPath s
 	return id, nil
 }
 
+// submitInventory uploads the requested sections. The server validates and
+// bounds each one and rejects the whole submission rather than storing a
+// truncated copy, so a rejection means the two sides disagree about the
+// contract — worth surfacing rather than silently retrying forever.
+func (a *Agent) submitInventory(ctx context.Context, s *session, requested []string) error {
+	sections := inventory.Select(s.inventorySections, requested)
+	if len(sections) == 0 {
+		return nil
+	}
+	ack, err := s.api.SubmitInventory(ctx, inventory.Submission{
+		InventorySchemaVersion: inventory.SchemaVersion,
+		AgentVersion:           a.version,
+		Sections:               sections,
+	})
+	if err != nil {
+		return err
+	}
+	if len(ack.StoredSections) > 0 {
+		a.log.Printf("inventory stored for sections: %s", strings.Join(ack.StoredSections, ", "))
+	}
+	return nil
+}
+
 // checkIn performs one heartbeat and processes any returned commands. It returns
 // an error only for a failed heartbeat (which drives backoff); command failures
 // are reported to the server and logged but do not fail the beat. ctx signals
@@ -371,8 +401,14 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 		}
 	}
 	sample := telemetry.CollectContext(ctx)
+	// Collect once per process, then advertise digests every beat. Hardware
+	// changes rarely and collection spawns PowerShell, so re-collecting on each
+	// beat would cost far more than it could ever discover.
+	if s.inventorySections == nil {
+		s.inventorySections = inventory.Collect(ctx)
+	}
 	ack, err := s.api.HeartbeatWithPendingResults(
-		ctx, sample, nil, pendingResultNotices(s.seen, 256),
+		ctx, sample, inventory.Hashes(s.inventorySections), pendingResultNotices(s.seen, 256),
 	)
 	if err != nil {
 		return err
@@ -390,6 +426,15 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	if s.quarantined {
 		a.log.Printf("server restored this agent from quarantine; resuming normal operation")
 		s.quarantined = false
+	}
+	// Upload only what the server asked for. A failure here is logged and
+	// retried on the next beat rather than failing the check-in: inventory is
+	// evidence, not control flow, and losing a beat over it would also delay
+	// command delivery.
+	if len(ack.InventoryRequested) > 0 {
+		if err := a.submitInventory(ctx, s, ack.InventoryRequested); err != nil {
+			a.log.Printf("failed to submit inventory: %v", err)
+		}
 	}
 	// Results are persisted before upload. Flush anything recovered from a
 	// prior outage/restart before adding more work to the outbox.

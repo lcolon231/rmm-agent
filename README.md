@@ -52,6 +52,16 @@ The code in this repository currently provides:
   response, and rollback are operator-run via `scripts/rotate_command_key.py`
   (`docs/KEY-ROTATION.md`).
 - Basic CPU, memory, system-disk, uptime, and logged-in-user telemetry.
+- Windows hardware inventory: manufacturer/model/serial/BIOS, CPU, memory
+  totals and modules, disks and volumes, and network adapters. Each section is
+  collected under its own timeout and carries a status, so a failed CIM query
+  degrades one section to `unavailable` instead of voiding the snapshot — an
+  absent field is never reported as an empty one. The agent advertises a
+  per-section hash on each heartbeat and uploads only what the server asks for,
+  so an unchanged endpoint transfers no inventory bytes. Submissions are atomic
+  and bounded: an oversized or malformed section is rejected rather than
+  truncated. Installed software, Defender, BitLocker, Secure Boot, TPM, and
+  local administrator state are not yet collected.
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation
   recorded in command and audit data). Completed results are DPAPI-protected
@@ -86,7 +96,7 @@ The code in this repository currently provides:
   anchors, plus a scheduled publisher that writes anchor roots to external
   immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
-- Forward-only Alembic migrations through revision `0013`, with exact revision
+- Forward-only Alembic migrations through revision `0014`, with exact revision
   enforcement on non-debug startup, legacy debug-schema repair, and a
   disposable PostgreSQL migration test in CI.
 - Encrypted PostgreSQL backup/isolated restore plus a fail-closed release
@@ -174,15 +184,19 @@ After `v0.1.2`, `main` has:
   pages render from server-validated HTTP-only sessions;
 - replaced the fixture-backed audit panel with live timeline, event-detail, and
   anchor/receipt verification views, and made audit reads auditable;
+- added bounded Windows hardware inventory with hash-negotiated upload,
+  per-section snapshot history, and observable storage growth, replacing an
+  unvalidated free-form inventory field that no released agent ever wrote;
 - added a Dockerized Render deployment path for the FastAPI backend, including
   pre-deploy migrations, health checks, proxy-aware production configuration,
   external PostgreSQL configuration, and secret-file signing-key support; and
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
-The current Milestone 1 work remains focused on complete Windows inventory,
-monitoring and alerting, notification delivery, script-library workflows,
-recurring tasks, and tenant-aware authorization design.
+The current Milestone 1 work remains focused on the remaining inventory classes
+(installed software, security posture, local administrators) with history and
+diffs, monitoring and alerting, notification delivery, script-library
+workflows, recurring tasks, and tenant-aware authorization design.
 
 ## Planned
 

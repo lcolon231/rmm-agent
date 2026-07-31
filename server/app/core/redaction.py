@@ -151,6 +151,15 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "total",
     ),
     "audit_event.viewed": _schema("event_id", "action", "seq"),
+    # Inventory payloads carry serials, adapter addresses, and volume labels.
+    # Only section names, counts, and sizes reach the permanent chain.
+    "inventory.received": _schema(
+        "stored_sections",
+        "unchanged_sections",
+        "schema_version",
+        "total_bytes",
+    ),
+    "inventory.rejected": _schema("reason", "section", "byte_size"),
     "client_navigation.list_viewed": _schema("client_count", "truncated"),
     "client_navigation.client_viewed": _schema("client_id"),
     "client_navigation.site_viewed": _schema("site_id", "client_id"),

@@ -13,7 +13,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_agent
-from app.core import audit, metrics
+from app.core import audit, inventory, metrics
 from app.core.clientip import client_ip
 from app.core.command_envelope import (
     SUPPORTED_COMMAND_ENVELOPE_VERSIONS,
@@ -40,8 +40,14 @@ from app.models.models import (
     CommandStatus,
     Site,
 )
+from app.schemas.inventory import (
+    InventorySubmission,
+    canonical_inventory_bytes,
+    inventory_content_hash,
+)
 from app.schemas.schemas import (
     AgentCredentialRenewResponse,
+    InventoryAck,
     CommandOut,
     CommandResult,
     EnrollRequest,
@@ -260,8 +266,16 @@ async def heartbeat(
     agent.status = AgentStatus.online
     previous_versions = list(agent.command_envelope_versions or [])
     agent.command_envelope_versions = body.supported_command_envelope_versions
-    if body.inventory is not None:
-        agent.inventory = body.inventory
+    # Inventory refresh negotiation. Only hashes travel on the beat; the server
+    # decides what is worth resending and the agent POSTs those sections to the
+    # bounded inventory endpoint. A steady-state endpoint transfers nothing.
+    inventory_requested: list[str] = []
+    if body.inventory_hashes:
+        inventory_requested = inventory.sections_to_request(
+            await inventory.latest_sections(db, agent.id),
+            body.inventory_hashes,
+            now,
+        )
 
     if previous_versions != body.supported_command_envelope_versions:
         await audit.record(
@@ -366,6 +380,126 @@ async def heartbeat(
         pending_commands=[CommandOut.model_validate(c) for c in pending],
         command_public_keys=public_key_bundle_pem(),
         trust_state=agent.trust_state,
+        inventory_requested=inventory_requested,
+    )
+
+
+@router.post("/agents/me/inventory", response_model=InventoryAck)
+async def submit_inventory(
+    body: InventorySubmission,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    """Accept the inventory sections the heartbeat ack asked for.
+
+    The submission is atomic: every section is validated before any section is
+    stored, so a malformed one cannot leave a half-applied snapshot behind.
+    Bounds are enforced by rejection rather than truncation, which keeps what is
+    persisted exactly what the endpoint reported — the agent is responsible for
+    trimming its own lists and saying so with ``partial``.
+
+    Sections are stored independently and deduped on content hash, so an agent
+    that resends an unchanged section costs one comparison and no storage.
+    """
+    # Same fail-closed posture as command results: a quarantined or revoked
+    # endpoint has suspended trust, so its self-reported state is not recorded.
+    if agent.trust_state != AgentTrustState.active:
+        await audit.record(
+            db,
+            action="inventory.rejected",
+            actor=f"agent:{agent.id}",
+            agent_id=agent.id,
+            detail={"reason": "agent_not_active", "section": None, "byte_size": None},
+        )
+        # Commit explicitly: the refusal is the only mutation, and the raise
+        # below would otherwise roll the evidence back with the request.
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "agent_quarantined"},
+        )
+
+    # Pass one: validate everything. Nothing is written yet, so the rejection
+    # audit can be committed without dragging half a snapshot along with it.
+    validated: list[tuple[str, str, dict, str, int, datetime]] = []
+    for entry in body.sections:
+        byte_size = len(canonical_inventory_bytes(entry.payload))
+        try:
+            entry.typed_payload()
+        except ValueError:
+            await audit.record(
+                db,
+                action="inventory.rejected",
+                actor=f"agent:{agent.id}",
+                agent_id=agent.id,
+                detail={
+                    "reason": "section_schema_invalid",
+                    "section": entry.section.value,
+                    "byte_size": byte_size,
+                },
+            )
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "inventory_section_invalid",
+                    "section": entry.section.value,
+                },
+            )
+        validated.append(
+            (
+                entry.section.value,
+                entry.status.value,
+                entry.payload,
+                inventory_content_hash(entry.payload),
+                byte_size,
+                ensure_utc(entry.collected_at),
+            )
+        )
+
+    # Pass two: store. Every section is known good by this point.
+    stored_sections: list[str] = []
+    unchanged_sections: list[str] = []
+    total_bytes = 0
+    for section, section_status, payload, content_hash, byte_size, collected_at in validated:
+        total_bytes += byte_size
+        snapshot = await inventory.store_section(
+            db,
+            agent_id=agent.id,
+            section=section,
+            status=section_status,
+            schema_version=body.inventory_schema_version,
+            payload=payload,
+            content_hash=content_hash,
+            byte_size=byte_size,
+            collected_at=collected_at,
+        )
+        if snapshot is None:
+            unchanged_sections.append(section)
+        else:
+            stored_sections.append(section)
+
+    site = await db.get(Site, agent.site_id)
+    await audit.record(
+        db,
+        action="inventory.received",
+        actor=f"agent:{agent.id}",
+        agent_id=agent.id,
+        organization_id=site.client_id if site else None,
+        detail={
+            # Section names and sizes only. Inventory payloads carry serials,
+            # hostnames, and user-adjacent strings, none of which belong in the
+            # permanent chain.
+            "stored_sections": sorted(stored_sections),
+            "unchanged_sections": sorted(unchanged_sections),
+            "schema_version": body.inventory_schema_version,
+            "total_bytes": total_bytes,
+        },
+    )
+    metrics.increment("inventory_sections_stored_total", len(stored_sections))
+    return InventoryAck(
+        stored_sections=sorted(stored_sections),
+        unchanged_sections=sorted(unchanged_sections),
     )
 
 
