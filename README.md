@@ -16,7 +16,7 @@ HIPAA-supporting controls and defensible compliance evidence.
 | Latest tagged release | `v0.1.2` |
 | Primary support target | Windows agent and Windows service |
 | Server | FastAPI management and agent APIs with PostgreSQL; SQLite is limited to development and tests |
-| Dashboard | Authenticated Next.js interface with live enrollment, endpoint, command, audit-evidence, and administrator workflows; the aggregate operations overview remains fixture-backed |
+| Dashboard | Authenticated Next.js interface with live enrollment, endpoint, command, inventory, audit-evidence, and administrator workflows; the aggregate operations overview remains fixture-backed |
 | Deployment | Self-hosted Caddy topology and a Render Docker Blueprint for a stateless backend using external PostgreSQL |
 | Current milestone | Milestone 0 pilot gates plus the implemented portion of Milestone 1 |
 | Pilot blockers | Authenticode signing and a recorded multi-day soak run on the intended pilot topology |
@@ -85,6 +85,14 @@ The code in this repository currently provides:
   an empty volume list recorded as healthy would read as "nothing is
   encrypted". Secure Boot on legacy BIOS is reported unsupported rather than
   disabled, and an absent TPM is a successful reading, not a failure.
+- Inventory history and deterministic diffs, with per-endpoint dashboard views.
+  Snapshots are written only when a section's content changes, so history is a
+  change log rather than a sample. Diffs are identity-keyed rather than
+  positional: uninstalling one program reports one removal instead of rewriting
+  the whole list. Retention is bounded per section and never prunes the newest
+  snapshot, so an endpoint always keeps its current reported state. A section
+  that could not be read renders distinctly from one that was read and found
+  empty.
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation
   recorded in command and audit data). Completed results are DPAPI-protected
@@ -216,8 +224,8 @@ After `v0.1.2`, `main` has:
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
-The current Milestone 1 work remains focused on the remaining inventory classes
-(local administrators) with history and diffs, monitoring and alerting, notification delivery, script-library
+The current Milestone 1 work remains focused on the remaining inventory class
+(local administrators), monitoring and alerting, notification delivery, script-library
 workflows, recurring tasks, and tenant-aware authorization design.
 
 ## Planned

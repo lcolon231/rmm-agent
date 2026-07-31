@@ -42,6 +42,8 @@ and SHA-256/Merkle roots—remains readable.
 | `audit_event.viewed` | `api/management.py` audit event detail | `event_id`, `action`, `seq` |
 | `inventory.received` | `api/agents.py` inventory submission | `stored_sections`, `unchanged_sections`, `schema_version`, `total_bytes` |
 | `inventory.rejected` | `api/agents.py` inventory submission | `reason`, `section`, `byte_size` |
+| `inventory.viewed` | `api/management.py` inventory view | `sections`, `missing_sections` |
+| `inventory.diff_viewed` | `api/management.py` inventory diff | `section`, `from_snapshot`, `to_snapshot` |
 | `client_navigation.list_viewed` | `api/management.py` navigation list | `client_count`, `truncated` |
 | `client_navigation.client_viewed` | `api/management.py` client view | `client_id` |
 | `client_navigation.site_viewed` | `api/management.py` site view | `site_id`, `client_id` |

@@ -410,6 +410,42 @@ precisely why such a machine cannot use a TPM-backed BitLocker protector.
 
 Local administrator state is not yet collected.
 
+### 6.2 Inventory history and diffs
+
+Because a snapshot is written only when a section's content hash changes, the
+snapshot table is already a change log rather than a sample of collections.
+`GET /endpoints/{id}/inventory` returns the newest row per section plus the
+sections this build knows about that the endpoint has never reported — named
+rather than omitted, so a coverage gap is visible instead of looking like the
+section does not exist. `.../inventory/{section}/history` pages that section's
+changes, and `.../inventory/{section}/diff` compares two snapshots, defaulting
+to the two most recent.
+
+Diffs are **identity-keyed, not positional**. A positional list diff would be
+worse than no diff: uninstalling one program shifts every later entry, so a
+single change would render as hundreds of modifications and the real event
+would be invisible. Each list field therefore declares what identifies an
+element — software by name and version, volumes by mount point, adapters by MAC
+— and the diff reports elements added, removed, and changed. Identity is
+deliberately not equality: a corrected publisher on the same name and version is
+a *change* to one program, while a version bump is an add plus a remove, which
+states the upgrade explicitly. Lists with no declared identity degrade to
+add/remove rather than failing. Output ordering is canonical, so the same two
+snapshots always render the same diff.
+
+Retention bounds history per `(agent, section)` rather than by age, because
+sections change at wildly different rates — hardware almost never, software on
+every patch cycle — and one age rule would either keep nothing useful for the
+slow ones or unbounded history for the fast ones. The newest row is never a
+pruning candidate at any limit: it is the endpoint's current reported state, and
+deleting it would make a managed machine look like it had never reported.
+
+Reading inventory is audited (`inventory.viewed`, `inventory.diff_viewed`) with
+section names only — never collected values, which include serials, installed
+program lists, and encryption state. A diff whose snapshots belong to a
+different endpoint returns the same 404 as a nonexistent one, so the parameter
+cannot be used to probe across endpoints or to compare unrelated machines.
+
 ### 6.1 Inventory transport
 
 The agent advertises a per-section SHA-256 on every heartbeat; the ack names

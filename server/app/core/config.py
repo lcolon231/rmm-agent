@@ -154,6 +154,11 @@ class Settings(BaseSettings):
     # events — are kept. 0 disables clearing. Audit events, anchors, and anchor
     # receipts are NEVER pruned, so chain/anchor verification is unaffected.
     command_output_retention_days: int = 90
+    # How many historical snapshots to keep per (agent, section). The newest is
+    # never pruned regardless of this value: it is the endpoint's current
+    # reported state, not history, and deleting it would make a managed machine
+    # look like it had never reported. 0 disables inventory pruning.
+    inventory_history_per_section: int = 50
     # How often the retention sweep runs.
     retention_sweep_interval_seconds: int = 86_400  # daily
     # Filesystem path whose free space is reported/alerted in /storage/status

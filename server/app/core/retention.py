@@ -46,6 +46,7 @@ def _now() -> datetime:
 class PruneResult:
     heartbeats_deleted: int
     command_outputs_cleared: int
+    inventory_snapshots_deleted: int = 0
 
 
 async def prune_expired(
@@ -85,10 +86,71 @@ async def prune_expired(
         )
         command_outputs_cleared = res.rowcount or 0
 
+    inventory_deleted = 0
+    if s.inventory_history_per_section > 0:
+        inventory_deleted = await _prune_inventory_history(
+            db, s.inventory_history_per_section
+        )
+
     return PruneResult(
         heartbeats_deleted=heartbeats_deleted,
         command_outputs_cleared=command_outputs_cleared,
+        inventory_snapshots_deleted=inventory_deleted,
     )
+
+
+async def _prune_inventory_history(db: AsyncSession, keep: int) -> int:
+    """Keep the newest `keep` snapshots per (agent, section).
+
+    The newest row is never a candidate for deletion, whatever `keep` is set
+    to: it is the endpoint's *current* reported state rather than history, and
+    removing it would make a managed machine indistinguishable from one that
+    never reported at all.
+
+    Pruning is done per group rather than by a global age cutoff because
+    sections change at wildly different rates — hardware almost never, software
+    on every patch cycle — and an age rule would either keep nothing useful for
+    the slow ones or unbounded history for the fast ones.
+    """
+    groups = (
+        await db.execute(
+            select(
+                AgentInventorySnapshot.agent_id,
+                AgentInventorySnapshot.section,
+                func.count().label("total"),
+            )
+            .group_by(AgentInventorySnapshot.agent_id, AgentInventorySnapshot.section)
+            .having(func.count() > keep)
+        )
+    ).all()
+
+    deleted = 0
+    for agent_id, section, _total in groups:
+        survivors = (
+            select(AgentInventorySnapshot.id)
+            .where(
+                AgentInventorySnapshot.agent_id == agent_id,
+                AgentInventorySnapshot.section == section,
+            )
+            .order_by(
+                AgentInventorySnapshot.received_at.desc(),
+                AgentInventorySnapshot.id.desc(),
+            )
+            .limit(keep)
+        )
+        # Materialize the survivor ids: a correlated LIMIT subquery inside
+        # DELETE is not portable across SQLite and PostgreSQL.
+        keep_ids = [row[0] for row in (await db.execute(survivors)).all()]
+        result = await db.execute(
+            delete(AgentInventorySnapshot).where(
+                AgentInventorySnapshot.agent_id == agent_id,
+                AgentInventorySnapshot.section == section,
+                AgentInventorySnapshot.id.not_in(keep_ids),
+            ),
+            execution_options={"synchronize_session": False},
+        )
+        deleted += result.rowcount or 0
+    return deleted
 
 
 async def _age_seconds(db: AsyncSession, column) -> float | None:
@@ -173,6 +235,7 @@ async def storage_status(db: AsyncSession, s: Settings = settings) -> dict:
             "oldest_age_seconds": await _age_seconds(
                 db, AgentInventorySnapshot.received_at
             ),
+            "history_per_section_limit": s.inventory_history_per_section,
         },
         "anchor_publication": {
             "backend": pub.backend,
