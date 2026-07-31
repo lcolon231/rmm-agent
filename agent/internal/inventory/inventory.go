@@ -33,6 +33,10 @@ const (
 	// SectionInstalledSoftware is the first section whose payload is bounded by
 	// bytes rather than by row count; see software.go.
 	SectionInstalledSoftware = "installed_software"
+	// SectionSecurityDefender reports posture rather than description: its
+	// provider_state field distinguishes "a third-party antivirus is primary"
+	// from "Defender is switched off", which a section status cannot express.
+	SectionSecurityDefender = "security_defender"
 )
 
 // AllSections is collection order, which is also the order sections appear in
@@ -44,6 +48,7 @@ var AllSections = []string{
 	SectionStorage,
 	SectionNetwork,
 	SectionInstalledSoftware,
+	SectionSecurityDefender,
 }
 
 // Status explains why a section looks the way it does. These mirror the

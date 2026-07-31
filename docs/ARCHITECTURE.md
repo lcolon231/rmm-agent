@@ -357,8 +357,33 @@ manufacturer/model/serial/BIOS, CPU, memory totals and modules, disks and
 volumes, and network adapters. Each section is collected independently under
 its own timeout, so a wedged CIM provider degrades one section to `unavailable`
 rather than voiding the snapshot or stalling check-in. Installed software,
-Defender, BitLocker, Secure Boot, TPM, and local administrator state are not
-yet collected.
+Windows Defender status is collected read-only through `Get-MpComputerStatus`,
+plus the `root/SecurityCenter2` antivirus registry where it exists. Nothing in
+this path changes configuration.
+
+The section carries a `provider_state` field — `active`, `passive`,
+`third_party`, `disabled`, or `unknown` — deliberately separate from the
+section status. The status answers "could we collect this?"; `provider_state`
+answers "what is this machine's posture?". They are independent, and
+conflating them would be actively harmful: Defender reports
+`AntivirusEnabled=false` while running in passive mode, which is exactly what a
+correctly configured machine with a third-party antivirus looks like. Reading
+that as "Defender disabled" would raise an alarm on every such endpoint and
+bury the genuinely unprotected ones in the noise. Running mode is therefore
+evaluated before the enabled flag.
+
+Signature age is computed on the endpoint and stored alongside the update
+timestamp rather than derived on read. It is the value staleness is judged on,
+and because it is a local subtraction, an endpoint with a wrong clock reports a
+misleading timestamp but a still-correct age. A signature timestamp in the
+future yields no age rather than a negative one.
+
+Server SKUs have no Security Center. That case is reported as `partial` with
+Defender's own facts intact, so an empty third-party product list is never
+mistaken for "no antivirus installed".
+
+BitLocker, Secure Boot, TPM, and local administrator state are not yet
+collected.
 
 ### 6.1 Inventory transport
 

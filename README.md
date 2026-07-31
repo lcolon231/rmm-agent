@@ -69,6 +69,14 @@ The code in this repository currently provides:
   is bounded by encoded bytes rather than row count, so a machine with unusually
   long program names reports a `partial` list instead of being rejected and
   reporting nothing.
+- Read-only Windows Defender status: provider state, real-time and tamper
+  protection, engine/signature versions, signature age, and scan times. Posture
+  is a separate field from collection status, so a machine running a
+  third-party antivirus with Defender stood down is reported as configured
+  rather than as unprotected — Defender reports itself disabled while passive,
+  and treating that as an alarm would bury the genuinely unprotected endpoints.
+  Signature age is computed on the endpoint so a wrong clock still yields a
+  correct age. Nothing in this path changes configuration.
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation
   recorded in command and audit data). Completed results are DPAPI-protected
@@ -201,7 +209,7 @@ After `v0.1.2`, `main` has:
   migration, installer, and release-target checks.
 
 The current Milestone 1 work remains focused on the remaining inventory classes
-(security posture, local administrators) with history and diffs, monitoring and alerting, notification delivery, script-library
+(BitLocker/Secure Boot/TPM, local administrators) with history and diffs, monitoring and alerting, notification delivery, script-library
 workflows, recurring tasks, and tenant-aware authorization design.
 
 ## Planned
