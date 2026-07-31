@@ -879,3 +879,221 @@ async def test_defender_participates_in_hash_negotiation(operator_client):
             )
         ).json()
         assert ack["inventory_requested"] == []
+
+
+# --------------------------------------------------------------------------- #
+# BitLocker, Secure Boot, and TPM (issue #38)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_bitlocker_schema_has_nowhere_to_put_a_recovery_key(operator_client):
+    """Recovery keys must be unrepresentable, not merely unrequested.
+
+    The collector never queries key material, but the schema is the backstop:
+    there is no field able to hold a recovery key, and extra="forbid" means an
+    agent that tried to send one is rejected outright rather than having it
+    quietly dropped somewhere it might still be logged.
+    """
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        for smuggled in (
+            {"recovery_password": "123456-654321-111111-222222-333333-444444-555555-666666"},
+            {"recovery_key": "abc"},
+            {"key_protectors": ["RecoveryPassword"]},
+        ):
+            volume = {"mount_point": "C:", "protection_status": "on", **smuggled}
+            response = await agent.post(
+                "/agents/me/inventory",
+                json=_submission(
+                    [_section("security_bitlocker", {"volumes": [volume]})]
+                ),
+            )
+            assert response.status_code == 422, smuggled
+
+    async with AsyncSessionLocal() as db:
+        assert (await db.execute(select(AgentInventorySnapshot))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_bitlocker_volumes_are_stored_with_protection_state(operator_client):
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        response = await agent.post(
+            "/agents/me/inventory",
+            json=_submission(
+                [
+                    _section(
+                        "security_bitlocker",
+                        {
+                            "volumes": [
+                                {
+                                    "mount_point": "C:",
+                                    "protection_status": "on",
+                                    "volume_status": "FullyEncrypted",
+                                    "encryption_method": "XtsAes256",
+                                    "encryption_percentage": 100,
+                                    "is_system_volume": True,
+                                },
+                                {"mount_point": "D:", "protection_status": "off"},
+                            ]
+                        },
+                    )
+                ]
+            ),
+        )
+        assert response.status_code == 200
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(select(AgentInventorySnapshot))).scalar_one()
+    assert row.payload["volumes"][0]["protection_status"] == "on"
+    assert row.payload["volumes"][1]["protection_status"] == "off"
+
+
+@pytest.mark.asyncio
+async def test_permission_denied_status_is_stored_and_distinct(operator_client):
+    """The status column had to widen for this value; prove it round-trips.
+
+    "permission_denied" is 17 characters against the original String(16).
+    SQLite ignores VARCHAR length, so an unmigrated column would pass here and
+    fail only against PostgreSQL — which is why the suite is also run against a
+    real PostgreSQL instance.
+    """
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        response = await agent.post(
+            "/agents/me/inventory",
+            json=_submission(
+                [_section("security_bitlocker", {}, status="permission_denied")]
+            ),
+        )
+        assert response.status_code == 200
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(select(AgentInventorySnapshot))).scalar_one()
+    assert row.status == "permission_denied"
+    assert len(row.status) == 17
+
+
+@pytest.mark.asyncio
+async def test_a_denied_bitlocker_read_is_not_an_unencrypted_machine(operator_client):
+    """The distinction that makes permission_denied worth having.
+
+    An empty volume list stored as `ok` would read as "nothing on this machine
+    is encrypted" — the most dangerous possible misreading of a permission
+    failure on a compliance-evidence section.
+    """
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        await agent.post(
+            "/agents/me/inventory",
+            json=_submission(
+                [_section("security_bitlocker", {}, status="permission_denied")]
+            ),
+        )
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(select(AgentInventorySnapshot))).scalar_one()
+    assert row.status != "ok"
+    assert row.payload == {}
+
+
+@pytest.mark.asyncio
+async def test_secure_boot_on_legacy_bios_is_unsupported_not_disabled(operator_client):
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        assert (
+            await agent.post(
+                "/agents/me/inventory",
+                json=_submission(
+                    [
+                        _section(
+                            "security_secure_boot",
+                            {"firmware_type": "bios"},
+                            status="unsupported",
+                        )
+                    ]
+                ),
+            )
+        ).status_code == 200
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(select(AgentInventorySnapshot))).scalar_one()
+    # A BIOS machine is behaving correctly for its firmware. Recording it as
+    # "Secure Boot disabled" would flag it as a finding it is not.
+    assert row.status == "unsupported"
+    assert "enabled" not in row.payload
+
+
+@pytest.mark.asyncio
+async def test_tpm_absence_is_recorded_as_a_successful_reading(operator_client):
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        assert (
+            await agent.post(
+                "/agents/me/inventory",
+                json=_submission(
+                    [_section("security_tpm", {"present": False, "ready": False})]
+                ),
+            )
+        ).status_code == 200
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(select(AgentInventorySnapshot))).scalar_one()
+    assert row.status == "ok"
+    assert row.payload["present"] is False
+
+
+@pytest.mark.asyncio
+async def test_platform_security_sections_fail_independently(operator_client):
+    """Three sections rather than one: a denied BitLocker read must not void
+    an otherwise perfectly readable Secure Boot or TPM state."""
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        response = await agent.post(
+            "/agents/me/inventory",
+            json=_submission(
+                [
+                    _section("security_bitlocker", {}, status="permission_denied"),
+                    _section(
+                        "security_secure_boot",
+                        {"firmware_type": "uefi", "enabled": True},
+                    ),
+                    _section("security_tpm", {"present": True, "ready": True}),
+                ]
+            ),
+        )
+        assert response.status_code == 200
+        assert response.json()["stored_sections"] == [
+            "security_bitlocker",
+            "security_secure_boot",
+            "security_tpm",
+        ]
+
+    async with AsyncSessionLocal() as db:
+        rows = {
+            row.section: row
+            for row in (
+                await db.execute(select(AgentInventorySnapshot))
+            ).scalars().all()
+        }
+    assert rows["security_bitlocker"].status == "permission_denied"
+    assert rows["security_secure_boot"].status == "ok"
+    assert rows["security_tpm"].status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_platform_security_payloads_reject_drift(operator_client):
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        for section, payload in (
+            ("security_bitlocker", {"volumes": [{"mount_point": "C:", "encrypted": True}]}),
+            ("security_secure_boot", {"firmware_type": "coreboot"}),
+            ("security_tpm", {"present": True, "pcr_values": [1, 2, 3]}),
+            ("security_bitlocker", {"volumes": [{"encryption_percentage": 150}]}),
+            ("security_bitlocker", {"volumes": [{"protection_status": "maybe"}]}),
+        ):
+            assert (
+                await agent.post(
+                    "/agents/me/inventory",
+                    json=_submission([_section(section, payload)]),
+                )
+            ).status_code == 422, (section, payload)

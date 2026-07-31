@@ -65,21 +65,37 @@ class InventorySection(str, Enum):
     network = "network"
     installed_software = "installed_software"
     security_defender = "security_defender"
+    # Platform security is three sections rather than one so a single
+    # permission failure cannot void the rest: BitLocker's cmdlets need
+    # elevation, while Secure Boot and TPM generally do not.
+    security_bitlocker = "security_bitlocker"
+    security_secure_boot = "security_secure_boot"
+    security_tpm = "security_tpm"
 
 
 class InventorySectionStatus(str, Enum):
     """Why a section looks the way it does.
 
-    ``ok``          collected completely.
-    ``partial``     collected, but bounded away — some rows are missing.
-    ``unavailable`` the platform supports this but collection failed.
-    ``unsupported`` the platform cannot report it at all.
+    ``ok``                collected completely.
+    ``partial``           collected, but bounded away — some rows are missing.
+    ``unavailable``       the platform supports this but collection failed.
+    ``unsupported``       the platform cannot report it at all.
+    ``permission_denied`` the platform supports it and it exists, but the agent
+                          lacks the rights to read it.
+
+    ``permission_denied`` is separated from ``unavailable`` because the two
+    call for different responses. An unavailable section is a transient fault
+    to retry; a denied one is a fixable deployment problem — the agent is not
+    running with the privileges its collectors need — and would otherwise hide
+    inside generic failures forever. BitLocker is the first collector that can
+    hit it, since its cmdlets require elevation.
     """
 
     ok = "ok"
     partial = "partial"
     unavailable = "unavailable"
     unsupported = "unsupported"
+    permission_denied = "permission_denied"
 
 
 class SystemInventory(BaseModel):
@@ -267,6 +283,81 @@ class DefenderInventory(BaseModel):
     )
 
 
+class BitLockerProtectionStatus(str, Enum):
+    """Whether protection is on for a volume, as BitLocker reports it."""
+
+    on = "on"
+    off = "off"
+    unknown = "unknown"
+
+
+class BitLockerVolume(BaseModel):
+    """One volume's BitLocker state.
+
+    There is deliberately **no field capable of holding a recovery key**, and
+    ``extra="forbid"`` means an agent that tried to send one is rejected rather
+    than having it quietly dropped. Recovery keys are the one piece of data
+    whose disclosure defeats the control entirely; the safest schema is one
+    with nowhere to put them. Key-protector *types* would be reportable, but
+    are omitted here because they are not needed to answer "is this volume
+    encrypted" and every additional field is another chance to leak.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mount_point: ShortText | None = None
+    protection_status: BitLockerProtectionStatus = BitLockerProtectionStatus.unknown
+    #: BitLocker's own volume state, e.g. FullyEncrypted, EncryptionInProgress.
+    volume_status: ShortText | None = None
+    encryption_method: ShortText | None = None
+    encryption_percentage: int | None = Field(default=None, ge=0, le=100)
+    is_system_volume: bool | None = None
+
+
+class BitLockerInventory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    volumes: list[BitLockerVolume] = Field(default_factory=list, max_length=MAX_VOLUMES)
+
+
+class FirmwareType(str, Enum):
+    uefi = "uefi"
+    bios = "bios"
+    unknown = "unknown"
+
+
+class SecureBootInventory(BaseModel):
+    """Secure Boot state.
+
+    ``enabled`` is only meaningful under UEFI. A legacy-BIOS machine cannot
+    have Secure Boot at all, and reporting it as "disabled" would describe a
+    machine that is behaving correctly for its firmware as though it had been
+    switched off — the same false-alarm shape as reading passive Defender as
+    disabled. That case is reported as an unsupported section instead.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool | None = None
+    firmware_type: FirmwareType = FirmwareType.unknown
+
+
+class TpmInventory(BaseModel):
+    """TPM presence and readiness.
+
+    ``present=False`` is a real, useful answer — it is the reason a machine
+    cannot enable BitLocker with a TPM protector — and is distinct from a
+    section that could not be read at all.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    present: bool | None = None
+    enabled: bool | None = None
+    activated: bool | None = None
+    #: True only when the TPM is present, enabled, activated, and owned.
+    ready: bool | None = None
+    spec_version: ShortText | None = None
+    manufacturer: ShortText | None = None
+
+
 #: Section name -> payload model. The submission validator uses this to pick the
 #: right model, so an unknown section is rejected rather than stored unparsed.
 SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
@@ -277,6 +368,9 @@ SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
     InventorySection.network: NetworkInventory,
     InventorySection.installed_software: InstalledSoftwareInventory,
     InventorySection.security_defender: DefenderInventory,
+    InventorySection.security_bitlocker: BitLockerInventory,
+    InventorySection.security_secure_boot: SecureBootInventory,
+    InventorySection.security_tpm: TpmInventory,
 }
 
 

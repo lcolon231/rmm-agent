@@ -382,8 +382,33 @@ Server SKUs have no Security Center. That case is reported as `partial` with
 Defender's own facts intact, so an empty third-party product list is never
 mistaken for "no antivirus installed".
 
-BitLocker, Secure Boot, TPM, and local administrator state are not yet
-collected.
+BitLocker, Secure Boot, and TPM are collected as three independent sections
+rather than one, so a BitLocker read denied for lack of elevation cannot void
+an otherwise readable Secure Boot or TPM state.
+
+**No BitLocker recovery key is ever collected.** The volume query names its
+properties explicitly, so `KeyProtector` — which carries recovery passwords —
+is never read and never enters the agent process. The schema is the backstop:
+no field can hold key material and `extra="forbid"` rejects any attempt to send
+it, so there is no path by which a key could be collected and then dropped. A
+test asserts the collector's own source never references key material.
+
+Section status gains `permission_denied`, distinct from `unavailable`. The two
+call for different responses — unavailable is a transient fault to retry, while
+denied means the agent lacks the privileges its collectors need, a fixable
+deployment problem that would otherwise hide inside generic failures forever.
+The distinction matters most here: an empty volume list recorded as `ok` would
+read as "nothing on this machine is encrypted", the most dangerous possible
+misreading of a permission failure on a compliance-evidence section.
+
+Secure Boot on legacy-BIOS firmware is reported `unsupported`, not
+`enabled=false`. Secure Boot is a UEFI feature, and describing a BIOS machine
+as having it switched off would flag a machine behaving correctly for its
+firmware — the same false-alarm shape as reading passive Defender as disabled.
+An absent TPM is likewise a successful reading rather than a failure: it is
+precisely why such a machine cannot use a TPM-backed BitLocker protector.
+
+Local administrator state is not yet collected.
 
 ### 6.1 Inventory transport
 

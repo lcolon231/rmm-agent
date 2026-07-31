@@ -77,6 +77,14 @@ The code in this repository currently provides:
   and treating that as an alarm would bury the genuinely unprotected endpoints.
   Signature age is computed on the endpoint so a wrong clock still yields a
   correct age. Nothing in this path changes configuration.
+- Read-only BitLocker, Secure Boot, and TPM state as three independent
+  sections, so one permission failure cannot void the others. **No BitLocker
+  recovery key is ever collected** — the query names its properties explicitly
+  so key material is never read, and the schema has no field able to hold it.
+  Section status distinguishes `permission_denied` from `unavailable`, because
+  an empty volume list recorded as healthy would read as "nothing is
+  encrypted". Secure Boot on legacy BIOS is reported unsupported rather than
+  disabled, and an absent TPM is a successful reading, not a failure.
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation
   recorded in command and audit data). Completed results are DPAPI-protected
@@ -111,7 +119,7 @@ The code in this repository currently provides:
   anchors, plus a scheduled publisher that writes anchor roots to external
   immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
-- Forward-only Alembic migrations through revision `0014`, with exact revision
+- Forward-only Alembic migrations through revision `0015`, with exact revision
   enforcement on non-debug startup, legacy debug-schema repair, and a
   disposable PostgreSQL migration test in CI.
 - Encrypted PostgreSQL backup/isolated restore plus a fail-closed release
@@ -209,7 +217,7 @@ After `v0.1.2`, `main` has:
   migration, installer, and release-target checks.
 
 The current Milestone 1 work remains focused on the remaining inventory classes
-(BitLocker/Secure Boot/TPM, local administrators) with history and diffs, monitoring and alerting, notification delivery, script-library
+(local administrators) with history and diffs, monitoring and alerting, notification delivery, script-library
 workflows, recurring tasks, and tenant-aware authorization design.
 
 ## Planned
