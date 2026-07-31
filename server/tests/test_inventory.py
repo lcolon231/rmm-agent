@@ -659,3 +659,223 @@ async def test_software_audit_records_sizes_but_never_program_names(operator_cli
         ).scalars().one()
     assert event.detail["stored_sections"] == ["installed_software"]
     assert telling_name not in str(event.detail)
+
+
+# --------------------------------------------------------------------------- #
+# Defender status (issue #37)
+# --------------------------------------------------------------------------- #
+def _defender(payload: dict, status: str = "ok") -> dict:
+    return _section("security_defender", payload, status=status)
+
+
+@pytest.mark.asyncio
+async def test_defender_status_is_stored_as_a_section_without_migration(
+    operator_client,
+):
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        response = await agent.post(
+            "/agents/me/inventory",
+            json=_submission(
+                [
+                    _defender(
+                        {
+                            "provider_state": "active",
+                            "antivirus_enabled": True,
+                            "realtime_protection_enabled": True,
+                            "tamper_protection_enabled": True,
+                            "antivirus_signature_version": "1.417.28.0",
+                            "antivirus_signature_updated_at": "2026-07-31T06:00:00Z",
+                            "antivirus_signature_age_hours": 6,
+                            "engine_version": "1.1.24070.3",
+                            "last_quick_scan_at": "2026-07-31T05:00:00Z",
+                        }
+                    )
+                ]
+            ),
+        )
+        assert response.status_code == 200
+        assert response.json()["stored_sections"] == ["security_defender"]
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(select(AgentInventorySnapshot))).scalar_one()
+    assert row.section == "security_defender"
+    assert row.payload["provider_state"] == "active"
+    assert row.payload["antivirus_signature_age_hours"] == 6
+
+
+@pytest.mark.asyncio
+async def test_every_documented_provider_state_is_accepted(operator_client):
+    """Posture is a field, not a status: all five states collect successfully."""
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        for state in ("active", "passive", "third_party", "disabled", "unknown"):
+            response = await agent.post(
+                "/agents/me/inventory",
+                json=_submission([_defender({"provider_state": state})]),
+            )
+            assert response.status_code == 200, state
+
+
+@pytest.mark.asyncio
+async def test_third_party_provider_is_recorded_as_a_healthy_collection(
+    operator_client,
+):
+    """A machine running a competing antivirus is configured, not broken.
+
+    The section status reports whether collection worked; provider_state
+    reports posture. Conflating them would raise an alarm on every endpoint
+    with a third-party product and bury the genuinely unprotected ones.
+    """
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        response = await agent.post(
+            "/agents/me/inventory",
+            json=_submission(
+                [
+                    _defender(
+                        {
+                            "provider_state": "third_party",
+                            "antivirus_enabled": False,
+                            "third_party_products": ["Contoso Endpoint Security"],
+                        }
+                    )
+                ]
+            ),
+        )
+        assert response.status_code == 200
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(select(AgentInventorySnapshot))).scalar_one()
+    assert row.status == "ok"
+    assert row.payload["provider_state"] == "third_party"
+    assert row.payload["third_party_products"] == ["Contoso Endpoint Security"]
+
+
+@pytest.mark.asyncio
+async def test_unsupported_and_unavailable_defender_readings_are_distinguishable(
+    operator_client,
+):
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        for state in ("unsupported", "unavailable"):
+            assert (
+                await agent.post(
+                    "/agents/me/inventory",
+                    json=_submission([_defender({}, status=state)]),
+                )
+            ).status_code == 200
+
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(AgentInventorySnapshot)
+                .where(AgentInventorySnapshot.section == "security_defender")
+                .order_by(AgentInventorySnapshot.received_at)
+            )
+        ).scalars().all()
+    # A SKU that cannot report Defender and one that failed to are different
+    # facts, and both are different from "Defender is off".
+    assert [row.status for row in rows] == ["unsupported", "unavailable"]
+
+
+@pytest.mark.asyncio
+async def test_defender_payload_rejects_drift_and_invalid_values(operator_client):
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        # An unrecognized provider state is refused rather than stored.
+        assert (
+            await agent.post(
+                "/agents/me/inventory",
+                json=_submission([_defender({"provider_state": "probably_fine"})]),
+            )
+        ).status_code == 422
+
+        # Field drift fails loudly.
+        assert (
+            await agent.post(
+                "/agents/me/inventory",
+                json=_submission([_defender({"cloud_protection": True})]),
+            )
+        ).status_code == 422
+
+        # A negative signature age is nonsensical, not merely unusual.
+        assert (
+            await agent.post(
+                "/agents/me/inventory",
+                json=_submission([_defender({"antivirus_signature_age_hours": -3})]),
+            )
+        ).status_code == 422
+
+        # The third-party product list is bounded like every other list.
+        assert (
+            await agent.post(
+                "/agents/me/inventory",
+                json=_submission(
+                    [_defender({"third_party_products": [f"AV {i}" for i in range(17)]})]
+                ),
+            )
+        ).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_defender_posture_changes_are_kept_as_history(operator_client):
+    """A machine losing protection must leave a trail, not overwrite one."""
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        healthy = {"provider_state": "active", "realtime_protection_enabled": True}
+        assert (
+            await agent.post(
+                "/agents/me/inventory", json=_submission([_defender(healthy)])
+            )
+        ).json()["stored_sections"] == ["security_defender"]
+
+        # Unchanged posture costs no storage.
+        assert (
+            await agent.post(
+                "/agents/me/inventory", json=_submission([_defender(healthy)])
+            )
+        ).json()["unchanged_sections"] == ["security_defender"]
+
+        degraded = {"provider_state": "disabled", "realtime_protection_enabled": False}
+        assert (
+            await agent.post(
+                "/agents/me/inventory", json=_submission([_defender(degraded)])
+            )
+        ).json()["stored_sections"] == ["security_defender"]
+
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(AgentInventorySnapshot)
+                .where(AgentInventorySnapshot.section == "security_defender")
+                .order_by(AgentInventorySnapshot.received_at)
+            )
+        ).scalars().all()
+    assert len(rows) == 2
+    assert rows[0].payload["provider_state"] == "active"
+    assert rows[1].payload["provider_state"] == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_defender_participates_in_hash_negotiation(operator_client):
+    _, token = await _enroll(operator_client)
+    payload = {"provider_state": "active"}
+    digest = inventory_content_hash(payload)
+    async with _agent_client(token) as agent:
+        ack = (
+            await agent.post(
+                "/heartbeat", json={"inventory_hashes": {"security_defender": digest}}
+            )
+        ).json()
+        assert ack["inventory_requested"] == ["security_defender"]
+
+        await agent.post(
+            "/agents/me/inventory", json=_submission([_defender(payload)])
+        )
+        ack = (
+            await agent.post(
+                "/heartbeat", json={"inventory_hashes": {"security_defender": digest}}
+            )
+        ).json()
+        assert ack["inventory_requested"] == []

@@ -29,6 +29,7 @@ func collect(ctx context.Context) []Section {
 		SectionStorage:           collectStorage,
 		SectionNetwork:           collectNetwork,
 		SectionInstalledSoftware: collectSoftware,
+		SectionSecurityDefender:  collectDefender,
 	}
 	for _, name := range AllSections {
 		payload, status := collectors[name](ctx)

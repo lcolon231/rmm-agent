@@ -64,6 +64,7 @@ class InventorySection(str, Enum):
     storage = "storage"
     network = "network"
     installed_software = "installed_software"
+    security_defender = "security_defender"
 
 
 class InventorySectionStatus(str, Enum):
@@ -204,6 +205,68 @@ class InstalledSoftwareInventory(BaseModel):
     )
 
 
+#: Cap on named third-party antivirus products. Security Center registers few,
+#: but the list is endpoint-controlled and so is bounded like everything else.
+MAX_THIRD_PARTY_PRODUCTS = 16
+
+
+class DefenderProviderState(str, Enum):
+    """What role Defender is actually playing on the endpoint.
+
+    This is deliberately a *field* rather than a section status, because the
+    distinction a technician needs cannot be carried by ``ok``/``unavailable``.
+    A machine running a third-party antivirus with Defender stood down is
+    healthy and correctly configured; a machine where Defender is simply off is
+    not. Collapsing both into "Defender disabled" would generate false alarms
+    on every endpoint with a competing product installed — and, worse, would
+    hide the genuinely unprotected ones in that noise.
+    """
+
+    #: Defender is the primary antivirus and running normally.
+    active = "active"
+    #: Defender is present but stood down (passive, SxS passive, or EDR block),
+    #: normally because another product is primary.
+    passive = "passive"
+    #: A non-Defender product is the registered antivirus provider.
+    third_party = "third_party"
+    #: Defender is the provider but is switched off. This is the alarming one.
+    disabled = "disabled"
+    #: Defender responded but its role could not be determined.
+    unknown = "unknown"
+
+
+class DefenderInventory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_state: DefenderProviderState = DefenderProviderState.unknown
+    antivirus_enabled: bool | None = None
+    realtime_protection_enabled: bool | None = None
+    tamper_protection_enabled: bool | None = None
+
+    antivirus_signature_version: ShortText | None = None
+    antivirus_signature_updated_at: datetime | None = None
+    #: Signature age at the moment of collection, in hours.
+    #:
+    #: Stored alongside the timestamp rather than derived from it on read, for
+    #: two reasons. It is the value a technician actually judges staleness on,
+    #: and it is computed entirely on the endpoint — so an endpoint whose clock
+    #: is wrong reports a misleading ``updated_at`` but a still-correct age,
+    #: because the skew cancels in the subtraction.
+    antivirus_signature_age_hours: int | None = Field(default=None, ge=0)
+
+    engine_version: ShortText | None = None
+    product_version: ShortText | None = None
+    last_quick_scan_at: datetime | None = None
+    last_full_scan_at: datetime | None = None
+
+    #: Products registered with Security Center, when it is queryable. Server
+    #: SKUs have no Security Center, which is reported as an empty list rather
+    #: than as evidence that no antivirus exists.
+    third_party_products: list[ShortText] = Field(
+        default_factory=list, max_length=MAX_THIRD_PARTY_PRODUCTS
+    )
+
+
 #: Section name -> payload model. The submission validator uses this to pick the
 #: right model, so an unknown section is rejected rather than stored unparsed.
 SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
@@ -213,6 +276,7 @@ SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
     InventorySection.storage: StorageInventory,
     InventorySection.network: NetworkInventory,
     InventorySection.installed_software: InstalledSoftwareInventory,
+    InventorySection.security_defender: DefenderInventory,
 }
 
 
