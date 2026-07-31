@@ -158,6 +158,9 @@ export function EndpointDetailView({ endpoint, operator }: { endpoint: EndpointD
             <Link className="detail-console-link" href={`/endpoints/${encodeURIComponent(endpoint.id)}/commands`}>
               <TerminalSquare size={15} /> Command console
             </Link>
+            <Link className="detail-console-link" href={`/endpoints/${encodeURIComponent(endpoint.id)}/inventory`}>
+              <HardDrive size={15} /> Inventory
+            </Link>
           </div>
         </section>
 

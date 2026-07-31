@@ -471,3 +471,32 @@ class InventoryOut(BaseModel):
     sections: list[InventorySectionOut] = Field(default_factory=list)
     #: Sections this build knows about that the endpoint has never reported.
     missing_sections: list[InventorySection] = Field(default_factory=list)
+
+
+class InventoryHistoryOut(BaseModel):
+    """Snapshots for one section, newest first.
+
+    Rows exist only where content changed, so this is a list of *changes*
+    rather than a sample of every collection.
+    """
+
+    agent_id: str
+    section: InventorySection
+    items: list[InventorySectionOut] = Field(default_factory=list)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total: int = Field(ge=0)
+
+
+class InventoryDiffOut(BaseModel):
+    """What changed between two snapshots of one section."""
+
+    agent_id: str
+    section: InventorySection
+    #: False when the endpoint has fewer than two snapshots for this section —
+    #: not an error, just nothing to compare yet.
+    comparable: bool
+    before: InventorySectionOut | None = None
+    after: InventorySectionOut | None = None
+    diff: dict = Field(default_factory=dict)
+    summary: dict = Field(default_factory=dict)

@@ -22,7 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_role
-from app.core import anchor, anchor_publish, audit, metrics, retention
+from app.core import (
+    anchor,
+    anchor_publish,
+    audit,
+    inventory,
+    inventory_diff,
+    metrics,
+    retention,
+)
 from app.core.clientip import client_ip
 from app.core.command_envelope import (
     ACTIVE_COMMAND_ENVELOPE_VERSION,
@@ -37,6 +45,13 @@ from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
 from app.core.keyring import active_signing_key, load_keyring
 from app.core.redaction import AUDIT_DETAIL_SCHEMAS
+from app.schemas.inventory import (
+    InventoryDiffOut,
+    InventoryHistoryOut,
+    InventoryOut,
+    InventorySection,
+    InventorySectionOut,
+)
 from app.core.script_authorization import (
     authorize_command,
     decision_audit_detail,
@@ -45,6 +60,7 @@ from app.models.models import (
     Agent,
     AgentStatus,
     AgentTrustState,
+    AgentInventorySnapshot,
     AnchorPublication,
     AuditEvent,
     AuditAnchor,
@@ -1215,6 +1231,199 @@ async def enrollment_dashboard(db: AsyncSession = Depends(get_db)):
         ),
         recently_enrolled_agents=recent_agents,
         recent_enrollment_failures=recent_failures,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Inventory views (issue #40)
+# --------------------------------------------------------------------------- #
+@router.get("/endpoints/{endpoint_id}/inventory", response_model=InventoryOut)
+async def get_endpoint_inventory(
+    endpoint_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    """The endpoint's current inventory: the newest snapshot per section.
+
+    Sections this build knows about but the endpoint has never reported are
+    listed separately rather than omitted, so "we have no data for this" is
+    visible instead of looking like the section does not exist.
+    """
+    agent = await db.get(Agent, endpoint_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+
+    latest = await inventory.latest_sections(db, endpoint_id)
+    items = [
+        InventorySectionOut.model_validate(latest[name])
+        for name in sorted(latest)
+    ]
+    missing = [
+        section for section in InventorySection if section.value not in latest
+    ]
+    await audit.record(
+        db,
+        action="inventory.viewed",
+        actor=operator.email,
+        agent_id=endpoint_id,
+        detail={
+            "sections": sorted(latest),
+            "missing_sections": [section.value for section in missing],
+        },
+    )
+    return InventoryOut(
+        agent_id=endpoint_id, sections=items, missing_sections=missing
+    )
+
+
+@router.get(
+    "/endpoints/{endpoint_id}/inventory/{section}/history",
+    response_model=InventoryHistoryOut,
+)
+async def get_inventory_history(
+    endpoint_id: str,
+    section: InventorySection,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """Snapshots for one section, newest first.
+
+    Rows exist only where content actually changed, so the history is a list of
+    *changes* rather than a sample of every collection. Retention bounds how far
+    back it reaches; the newest row is never pruned.
+    """
+    agent = await db.get(Agent, endpoint_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+
+    filters = [
+        AgentInventorySnapshot.agent_id == endpoint_id,
+        AgentInventorySnapshot.section == section.value,
+    ]
+    total = (
+        await db.execute(
+            select(func.count()).select_from(AgentInventorySnapshot).where(*filters)
+        )
+    ).scalar_one()
+    rows = list(
+        (
+            await db.execute(
+                select(AgentInventorySnapshot)
+                .where(*filters)
+                .order_by(
+                    AgentInventorySnapshot.received_at.desc(),
+                    AgentInventorySnapshot.id.desc(),
+                )
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).scalars().all()
+    )
+    return InventoryHistoryOut(
+        agent_id=endpoint_id,
+        section=section,
+        items=[InventorySectionOut.model_validate(row) for row in rows],
+        page=page,
+        page_size=page_size,
+        total=total,
+    )
+
+
+@router.get(
+    "/endpoints/{endpoint_id}/inventory/{section}/diff",
+    response_model=InventoryDiffOut,
+)
+async def get_inventory_diff(
+    endpoint_id: str,
+    section: InventorySection,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    from_snapshot: str | None = Query(default=None, max_length=36),
+    to_snapshot: str | None = Query(default=None, max_length=36),
+    db: AsyncSession = Depends(get_db),
+):
+    """What changed between two snapshots of one section.
+
+    With no explicit snapshots this compares the two most recent, which is the
+    common question: "what changed on this endpoint most recently?". Both
+    snapshots must belong to this endpoint and this section — a diff across
+    endpoints would silently compare unrelated machines.
+    """
+    agent = await db.get(Agent, endpoint_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+
+    async def _load(snapshot_id: str) -> AgentInventorySnapshot:
+        row = await db.get(AgentInventorySnapshot, snapshot_id)
+        if (
+            row is None
+            or row.agent_id != endpoint_id
+            or row.section != section.value
+        ):
+            # Same response whether it belongs to another endpoint or does not
+            # exist: no cross-endpoint probing through this parameter.
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        return row
+
+    if from_snapshot and to_snapshot:
+        before = await _load(from_snapshot)
+        after = await _load(to_snapshot)
+    else:
+        recent = list(
+            (
+                await db.execute(
+                    select(AgentInventorySnapshot)
+                    .where(
+                        AgentInventorySnapshot.agent_id == endpoint_id,
+                        AgentInventorySnapshot.section == section.value,
+                    )
+                    .order_by(
+                        AgentInventorySnapshot.received_at.desc(),
+                        AgentInventorySnapshot.id.desc(),
+                    )
+                    .limit(2)
+                )
+            ).scalars().all()
+        )
+        if len(recent) < 2:
+            # One snapshot (or none) is not an error: the endpoint simply has
+            # not changed this section since it was first reported.
+            return InventoryDiffOut(
+                agent_id=endpoint_id,
+                section=section,
+                comparable=False,
+                before=(
+                    InventorySectionOut.model_validate(recent[0]) if recent else None
+                ),
+                after=None,
+                diff={"field_changes": [], "list_changes": {}},
+                summary=inventory_diff.summarize_diff({}),
+            )
+        after, before = recent[0], recent[1]
+
+    computed = inventory_diff.diff_payloads(
+        section.value, before.payload, after.payload
+    )
+    await audit.record(
+        db,
+        action="inventory.diff_viewed",
+        actor=operator.email,
+        agent_id=endpoint_id,
+        detail={
+            "section": section.value,
+            "from_snapshot": before.id,
+            "to_snapshot": after.id,
+        },
+    )
+    return InventoryDiffOut(
+        agent_id=endpoint_id,
+        section=section,
+        comparable=True,
+        before=InventorySectionOut.model_validate(before),
+        after=InventorySectionOut.model_validate(after),
+        diff=computed,
+        summary=inventory_diff.summarize_diff(computed),
     )
 
 

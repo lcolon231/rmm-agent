@@ -160,6 +160,11 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "total_bytes",
     ),
     "inventory.rejected": _schema("reason", "section", "byte_size"),
+    # Reading inventory is audited like reading the audit log itself: section
+    # names only, never the collected values, which include serials, program
+    # lists, and encryption state.
+    "inventory.viewed": _schema("sections", "missing_sections"),
+    "inventory.diff_viewed": _schema("section", "from_snapshot", "to_snapshot"),
     "client_navigation.list_viewed": _schema("client_count", "truncated"),
     "client_navigation.client_viewed": _schema("client_id"),
     "client_navigation.site_viewed": _schema("site_id", "client_id"),

@@ -314,6 +314,15 @@ PRODUCER_DETAILS = {
         "section": "storage",
         "byte_size": 512,
     },
+    "inventory.viewed": {
+        "sections": ["cpu", "system"],
+        "missing_sections": ["security_tpm"],
+    },
+    "inventory.diff_viewed": {
+        "section": "installed_software",
+        "from_snapshot": ID1,
+        "to_snapshot": ID2,
+    },
     "client_navigation.list_viewed": {
         "client_count": 3,
         "truncated": False,
