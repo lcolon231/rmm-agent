@@ -60,8 +60,15 @@ The code in this repository currently provides:
   per-section hash on each heartbeat and uploads only what the server asks for,
   so an unchanged endpoint transfers no inventory bytes. Submissions are atomic
   and bounded: an oversized or malformed section is rejected rather than
-  truncated. Installed software, Defender, BitLocker, Secure Boot, TPM, and
-  local administrator state are not yet collected.
+  truncated. Defender, BitLocker, Secure Boot, TPM, and local administrator
+  state are not yet collected.
+- Windows installed-software inventory from the uninstall registry across the
+  native 64-bit, `WOW6432Node`, and per-user views, deduplicated across them
+  and sorted deterministically so an unchanged machine keeps a stable content
+  hash. Install dates are reported only when they parse cleanly. This section
+  is bounded by encoded bytes rather than row count, so a machine with unusually
+  long program names reports a `partial` list instead of being rejected and
+  reporting nothing.
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation
   recorded in command and audit data). Completed results are DPAPI-protected
@@ -194,8 +201,7 @@ After `v0.1.2`, `main` has:
   migration, installer, and release-target checks.
 
 The current Milestone 1 work remains focused on the remaining inventory classes
-(installed software, security posture, local administrators) with history and
-diffs, monitoring and alerting, notification delivery, script-library
+(security posture, local administrators) with history and diffs, monitoring and alerting, notification delivery, script-library
 workflows, recurring tasks, and tenant-aware authorization design.
 
 ## Planned

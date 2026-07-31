@@ -37,6 +37,7 @@ from app.models.models import (  # noqa: E402
 )
 from app.schemas.inventory import (  # noqa: E402
     MAX_INVENTORY_SECTION_BYTES,
+    MAX_SOFTWARE_ENTRIES,
     inventory_content_hash,
 )
 
@@ -464,3 +465,197 @@ async def test_a_section_collected_as_unavailable_is_recorded_as_such(operator_c
     assert row.section == "storage"
     assert row.status == "unavailable"
     assert row.payload == {}
+
+
+# --------------------------------------------------------------------------- #
+# Installed software (issue #36)
+# --------------------------------------------------------------------------- #
+def _software(entries: list[dict]) -> dict:
+    return _section("installed_software", {"entries": entries})
+
+
+@pytest.mark.asyncio
+async def test_installed_software_is_stored_as_a_section_without_migration(
+    operator_client,
+):
+    """The section framework from #35 absorbs a new class with no schema change."""
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        response = await agent.post(
+            "/agents/me/inventory",
+            json=_submission(
+                [
+                    _software(
+                        [
+                            {
+                                "name": "7-Zip 23.01 (x64)",
+                                "version": "23.01",
+                                "publisher": "Igor Pavlov",
+                                "architecture": "x64",
+                                "scope": "machine",
+                                "identifier": "7-Zip",
+                            },
+                            {"name": "Contoso Agent", "scope": "user"},
+                        ]
+                    )
+                ]
+            ),
+        )
+        assert response.status_code == 200
+        assert response.json()["stored_sections"] == ["installed_software"]
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(select(AgentInventorySnapshot))).scalar_one()
+    assert row.section == "installed_software"
+    assert len(row.payload["entries"]) == 2
+    # Defaults are explicit, not inferred later by a reader.
+    assert row.payload["entries"][1]["name"] == "Contoso Agent"
+
+
+@pytest.mark.asyncio
+async def test_software_entries_require_a_name_and_reject_unknown_fields(
+    operator_client,
+):
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        # A row with no display name is a registry artifact, not a program.
+        assert (
+            await agent.post(
+                "/agents/me/inventory",
+                json=_submission([_software([{"version": "1.0"}])]),
+            )
+        ).status_code == 422
+
+        # Field drift fails loudly rather than being silently discarded.
+        assert (
+            await agent.post(
+                "/agents/me/inventory",
+                json=_submission([_software([{"name": "X", "install_size": 42}])]),
+            )
+        ).status_code == 422
+
+        # Enumerated values are constrained.
+        assert (
+            await agent.post(
+                "/agents/me/inventory",
+                json=_submission([_software([{"name": "X", "scope": "everyone"}])]),
+            )
+        ).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_software_section_is_bounded_by_bytes_before_entry_count(
+    operator_client,
+):
+    """The count ceiling is not the binding constraint for this section.
+
+    At the schema's 255-character field bounds an entry approaches 1 KiB, so a
+    payload well under MAX_SOFTWARE_ENTRIES can still exceed the byte cap. The
+    server must reject it — which is exactly why the agent fits to bytes rather
+    than trimming to the count, or such a machine would be refused forever and
+    would silently never report software at all.
+    """
+    _, token = await _enroll(operator_client)
+    fat_entry = {
+        "name": "n" * 255,
+        "version": "v" * 255,
+        "publisher": "p" * 255,
+        "identifier": "i" * 128,
+    }
+    entries = [dict(fat_entry, name=f"{i:04d}" + "n" * 250) for i in range(400)]
+    assert len(entries) < MAX_SOFTWARE_ENTRIES  # under the count ceiling
+
+    async with _agent_client(token) as agent:
+        response = await agent.post(
+            "/agents/me/inventory", json=_submission([_software(entries)])
+        )
+    assert response.status_code == 422
+
+    # Nothing partial was stored.
+    async with AsyncSessionLocal() as db:
+        assert (await db.execute(select(AgentInventorySnapshot))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_software_entry_count_ceiling_is_enforced(operator_client):
+    _, token = await _enroll(operator_client)
+    entries = [{"name": f"P{i}"} for i in range(MAX_SOFTWARE_ENTRIES + 1)]
+    async with _agent_client(token) as agent:
+        assert (
+            await agent.post(
+                "/agents/me/inventory", json=_submission([_software(entries)])
+            )
+        ).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_software_dedupes_on_content_hash_like_every_other_section(
+    operator_client,
+):
+    _, token = await _enroll(operator_client)
+    entries = [{"name": "Stable App", "version": "1.0"}]
+    async with _agent_client(token) as agent:
+        first = await agent.post(
+            "/agents/me/inventory", json=_submission([_software(entries)])
+        )
+        assert first.json()["stored_sections"] == ["installed_software"]
+
+        repeat = await agent.post(
+            "/agents/me/inventory", json=_submission([_software(entries)])
+        )
+        assert repeat.json()["unchanged_sections"] == ["installed_software"]
+
+        upgraded = [{"name": "Stable App", "version": "1.1"}]
+        changed = await agent.post(
+            "/agents/me/inventory", json=_submission([_software(upgraded)])
+        )
+        assert changed.json()["stored_sections"] == ["installed_software"]
+
+
+@pytest.mark.asyncio
+async def test_software_participates_in_hash_negotiation(operator_client):
+    _, token = await _enroll(operator_client)
+    payload = {"entries": [{"name": "Negotiated App"}]}
+    digest = inventory_content_hash(payload)
+
+    async with _agent_client(token) as agent:
+        ack = (
+            await agent.post(
+                "/heartbeat", json={"inventory_hashes": {"installed_software": digest}}
+            )
+        ).json()
+        assert ack["inventory_requested"] == ["installed_software"]
+
+        await agent.post(
+            "/agents/me/inventory",
+            json=_submission(
+                [_section("installed_software", payload)]
+            ),
+        )
+        ack = (
+            await agent.post(
+                "/heartbeat", json={"inventory_hashes": {"installed_software": digest}}
+            )
+        ).json()
+        assert ack["inventory_requested"] == []
+
+
+@pytest.mark.asyncio
+async def test_software_audit_records_sizes_but_never_program_names(operator_client):
+    """Installed programs are sensitive: they disclose what runs on an endpoint."""
+    _, token = await _enroll(operator_client)
+    telling_name = "Confidential Trading Platform 9.4"
+    async with _agent_client(token) as agent:
+        await agent.post(
+            "/agents/me/inventory",
+            json=_submission([_software([{"name": telling_name}])]),
+        )
+
+    async with AsyncSessionLocal() as db:
+        event = (
+            await db.execute(
+                select(AuditEvent).where(AuditEvent.action == "inventory.received")
+            )
+        ).scalars().one()
+    assert event.detail["stored_sections"] == ["installed_software"]
+    assert telling_name not in str(event.detail)

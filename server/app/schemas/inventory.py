@@ -43,6 +43,14 @@ MAX_VOLUMES = 128
 MAX_NETWORK_ADAPTERS = 64
 MAX_ADDRESSES_PER_ADAPTER = 32
 
+#: Sanity bound on installed-software rows. Unlike the hardware caps, this is
+#: *not* the binding constraint: at the 255-character field bounds an entry can
+#: reach ~1 KiB, so ``MAX_INVENTORY_SECTION_BYTES`` is reached first. The agent
+#: must fit its payload to the byte budget rather than to this count, or a
+#: machine with unusually long program names would be rejected on every attempt
+#: and would silently never report software at all.
+MAX_SOFTWARE_ENTRIES = 1024
+
 ShortText = Annotated[str, StringConstraints(max_length=255)]
 Identifier = Annotated[str, StringConstraints(max_length=128)]
 
@@ -55,6 +63,7 @@ class InventorySection(str, Enum):
     memory = "memory"
     storage = "storage"
     network = "network"
+    installed_software = "installed_software"
 
 
 class InventorySectionStatus(str, Enum):
@@ -150,6 +159,51 @@ class NetworkInventory(BaseModel):
     )
 
 
+class SoftwareArchitecture(str, Enum):
+    """Which registry view the program was registered under.
+
+    This is the *registration* architecture, not a claim about the binary — a
+    64-bit installer can register a 32-bit program. ``unknown`` covers per-user
+    entries, where the view does not imply an architecture.
+    """
+
+    x86 = "x86"
+    x64 = "x64"
+    arm64 = "arm64"
+    unknown = "unknown"
+
+
+class SoftwareScope(str, Enum):
+    """Whether the program is registered for the machine or one user."""
+
+    machine = "machine"
+    user = "user"
+
+
+class SoftwareEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: Display name. The only field an entry cannot be reported without — a row
+    #: with no name is a registry artifact, not an installed program.
+    name: ShortText
+    version: ShortText | None = None
+    publisher: ShortText | None = None
+    architecture: SoftwareArchitecture = SoftwareArchitecture.unknown
+    scope: SoftwareScope = SoftwareScope.machine
+    #: Only populated when the registry value parsed cleanly. Windows stores
+    #: InstallDate inconsistently (missing, localized, or malformed), so an
+    #: unparseable value is omitted rather than guessed at.
+    install_date: datetime | None = None
+    #: Registry key name or product code, for correlating across snapshots.
+    identifier: Identifier | None = None
+
+
+class InstalledSoftwareInventory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    entries: list[SoftwareEntry] = Field(
+        default_factory=list, max_length=MAX_SOFTWARE_ENTRIES
+    )
+
+
 #: Section name -> payload model. The submission validator uses this to pick the
 #: right model, so an unknown section is rejected rather than stored unparsed.
 SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
@@ -158,6 +212,7 @@ SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
     InventorySection.memory: MemoryInventory,
     InventorySection.storage: StorageInventory,
     InventorySection.network: NetworkInventory,
+    InventorySection.installed_software: InstalledSoftwareInventory,
 }
 
 
