@@ -283,9 +283,10 @@ appended only when that section's content hash changes, so the table is
 simultaneously current state and change history. Sections carry a status
 (`ok`, `partial`, `unavailable`, `unsupported`) and both a `collected_at` and a
 `received_at`, so an absent field is distinguishable from an unread one and a
-queued or clock-skewed endpoint is visible. Hardware sections are implemented
-(#35); installed software, Defender, BitLocker/TPM, and local administrators
-are later `section` values, and operator-facing history and diffs are #40. The
+queued or clock-skewed endpoint is visible. Hardware (#35) and installed
+software (#36) are implemented; Defender, BitLocker/TPM, and local
+administrators are later `section` values, and operator-facing history and
+diffs are #40. The
 legacy free-form `Agent.inventory` column is no longer written and is dropped
 in a later revision.
 
@@ -378,6 +379,16 @@ Submissions are atomic and bounded: every section is validated before any is
 stored, and an oversized or malformed section fails the whole request with 422
 rather than being truncated, so what is persisted is exactly what the endpoint
 reported. The agent trims its own lists to the same caps and reports `partial`.
+
+For hardware sections a row-count cap keeps payloads far below the 256 KiB
+per-section limit, so the two bounds never disagree. Installed software is the
+first section where they can: at the schema's 255-character field bounds a
+single entry approaches 1 KiB, so roughly 250 worst-case entries already exceed
+the byte limit while remaining well under the 1024-row ceiling. The agent
+therefore fits that section to *bytes* — trimming entries until the encoded
+payload fits and reporting `partial` — because trimming only to the row count
+would produce a payload the server rejects on every attempt, leaving the
+machines with the most software silently reporting none at all.
 A quarantined or revoked agent is refused, with the refusal audited. Audit
 records carry section names, counts, and sizes only — never payload contents,
 which include serials, adapter addresses, and volume labels.

@@ -23,11 +23,12 @@ const sectionTimeout = 30 * time.Second
 func collect(ctx context.Context) []Section {
 	sections := make([]Section, 0, len(AllSections))
 	collectors := map[string]func(context.Context) (map[string]any, string){
-		SectionSystem:  collectSystem,
-		SectionCPU:     collectCPU,
-		SectionMemory:  collectMemory,
-		SectionStorage: collectStorage,
-		SectionNetwork: collectNetwork,
+		SectionSystem:            collectSystem,
+		SectionCPU:               collectCPU,
+		SectionMemory:            collectMemory,
+		SectionStorage:           collectStorage,
+		SectionNetwork:           collectNetwork,
+		SectionInstalledSoftware: collectSoftware,
 	}
 	for _, name := range AllSections {
 		payload, status := collectors[name](ctx)

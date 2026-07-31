@@ -30,6 +30,9 @@ const (
 	SectionMemory  = "memory"
 	SectionStorage = "storage"
 	SectionNetwork = "network"
+	// SectionInstalledSoftware is the first section whose payload is bounded by
+	// bytes rather than by row count; see software.go.
+	SectionInstalledSoftware = "installed_software"
 )
 
 // AllSections is collection order, which is also the order sections appear in
@@ -40,6 +43,7 @@ var AllSections = []string{
 	SectionMemory,
 	SectionStorage,
 	SectionNetwork,
+	SectionInstalledSoftware,
 }
 
 // Status explains why a section looks the way it does. These mirror the
