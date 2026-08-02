@@ -132,9 +132,13 @@ rmm-agent.exe install -config "C:\path\to\config.json"
 rmm-agent.exe start
 ```
 
-The graphical installer can collect a one-time token and lets the LocalSystem
-service enroll. Installer prompts and silent-install secret-manager integration
-remain limited; do not automate GUI fields through logged command lines.
+The production graphical installer collects only a one-time token, configures
+`https://nodelink-backend-733e.onrender.com` automatically, and lets the
+LocalSystem service enroll. An unattended install accepts
+`/VERYSILENT /TOKEN=<token>` without a server argument. Treat the command line
+as sensitive because process inspection or orchestration logs can expose the
+token. Self-hosted deployments continue to use the CLI/configuration path with
+their own server origin.
 
 ## Verify
 
