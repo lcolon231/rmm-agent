@@ -29,6 +29,7 @@ from app.core import (
     inventory,
     inventory_diff,
     metrics,
+    monitoring as monitoring_core,
     retention,
 )
 from app.core.clientip import client_ip
@@ -68,9 +69,14 @@ from app.models.models import (
     Command,
     CommandKind,
     CommandStatus,
+    CheckResult,
     EnrollmentToken,
     EnrollmentTokenStatus,
     Heartbeat,
+    MaintenanceWindow,
+    MonitoringPolicy,
+    MonitoringPolicyRevision,
+    MonitoringScope,
     Operator,
     OperatorRole,
     Site,
@@ -104,6 +110,18 @@ from app.schemas.schemas import (
     SiteOut,
     TrustStateChange,
 )
+from app.schemas.monitoring import (
+    CheckResultListOut,
+    EffectiveCheckOut,
+    EffectivePolicyOut,
+    MaintenanceWindowCreate,
+    MaintenanceWindowOut,
+    MonitoringPolicyCreate,
+    MonitoringPolicyDetailOut,
+    MonitoringPolicyOut,
+    MonitoringPolicyRevisionOut,
+    MonitoringPolicyUpdate,
+)
 
 # Router-level dependency: every route here needs at least a readonly operator.
 router = APIRouter(
@@ -117,6 +135,90 @@ def _now() -> datetime:
 
 
 MAX_NAVIGATION_CLIENTS = 200
+
+
+async def _require_monitoring_scope_target(
+    db: AsyncSession, scope: MonitoringScope, scope_id: str | None
+) -> None:
+    """Verify the polymorphic monitoring scope target before persisting it."""
+    if scope == MonitoringScope.global_:
+        return
+    model = {
+        MonitoringScope.client: Client,
+        MonitoringScope.site: Site,
+        MonitoringScope.agent: Agent,
+    }[scope]
+    if scope_id is None or await db.get(model, scope_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "monitoring_scope_target_not_found"},
+        )
+
+
+def _require_monitoring_check_bounds(checks) -> None:
+    if len(checks) > settings.monitoring_max_checks_per_policy:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "monitoring_policy_check_limit_exceeded"},
+        )
+    if any(
+        check.schedule.interval_seconds
+        < settings.monitoring_check_interval_min_seconds
+        or check.schedule.interval_seconds
+        > settings.monitoring_check_interval_max_seconds
+        for check in checks
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "monitoring_check_interval_out_of_bounds"},
+        )
+
+
+async def _policy_revisions(
+    db: AsyncSession, policy_id: str
+) -> list[MonitoringPolicyRevision]:
+    result = await db.execute(
+        select(MonitoringPolicyRevision)
+        .where(MonitoringPolicyRevision.policy_id == policy_id)
+        .order_by(
+            MonitoringPolicyRevision.version.desc(),
+            MonitoringPolicyRevision.created_at.desc(),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def _policy_out(
+    db: AsyncSession, policy: MonitoringPolicy
+) -> MonitoringPolicyOut:
+    revision = await monitoring_core.current_revision(db, policy.id)
+    checks = revision.checks if revision is not None else []
+    return MonitoringPolicyOut(
+        id=policy.id,
+        name=policy.name,
+        scope=policy.scope,
+        scope_id=policy.scope_id,
+        enabled=policy.enabled,
+        created_at=policy.created_at,
+        current_version=revision.version if revision is not None else 0,
+        check_count=len(checks or []),
+    )
+
+
+async def _policy_detail(
+    db: AsyncSession, policy: MonitoringPolicy
+) -> MonitoringPolicyDetailOut:
+    revisions = await _policy_revisions(db, policy.id)
+    current = revisions[0] if revisions else None
+    summary = await _policy_out(db, policy)
+    return MonitoringPolicyDetailOut(
+        **summary.model_dump(),
+        checks=current.checks if current is not None else [],
+        revisions=[
+            MonitoringPolicyRevisionOut.model_validate(revision)
+            for revision in revisions
+        ],
+    )
 
 
 async def _navigation_client(
@@ -1183,6 +1285,369 @@ async def get_command(
         detail={"command_id": cmd.id, "status": detail.status.value},
     )
     return detail
+
+
+# --------------------------------------------------------------------------- #
+# Monitoring policies, windows, and result views (issue #41)
+# --------------------------------------------------------------------------- #
+@router.post(
+    "/monitoring/policies",
+    response_model=MonitoringPolicyDetailOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_monitoring_policy(
+    body: MonitoringPolicyCreate,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_monitoring_scope_target(db, body.scope, body.scope_id)
+    policy_count = (
+        await db.execute(select(func.count()).select_from(MonitoringPolicy))
+    ).scalar_one()
+    if policy_count >= settings.monitoring_max_policies:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "monitoring_policy_limit_reached"},
+        )
+    _require_monitoring_check_bounds(body.checks)
+    duplicate = await db.scalar(
+        select(MonitoringPolicy.id).where(
+            MonitoringPolicy.scope == body.scope,
+            MonitoringPolicy.scope_id == body.scope_id,
+            func.lower(func.trim(MonitoringPolicy.name)) == body.name.casefold(),
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "monitoring_policy_name_exists"},
+        )
+
+    policy = MonitoringPolicy(
+        name=body.name,
+        scope=body.scope,
+        scope_id=body.scope_id,
+        enabled=body.enabled,
+    )
+    db.add(policy)
+    await db.flush()
+    revision = MonitoringPolicyRevision(
+        policy_id=policy.id,
+        version=1,
+        checks=[check.model_dump(mode="json") for check in body.checks],
+        change_note=body.change_note,
+        created_by=operator.email,
+    )
+    db.add(revision)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "monitoring_policy_name_exists"},
+        ) from exc
+    await audit.record(
+        db,
+        action="monitoring_policy.created",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "policy_id": policy.id,
+            "scope": policy.scope.value,
+            "scope_id": policy.scope_id,
+            "enabled": policy.enabled,
+            "check_count": len(body.checks),
+            "name": policy.name,
+            "change_note": body.change_note or "",
+        },
+    )
+    return await _policy_detail(db, policy)
+
+
+@router.get("/monitoring/policies", response_model=list[MonitoringPolicyOut])
+async def list_monitoring_policies(db: AsyncSession = Depends(get_db)):
+    policies = list(
+        (
+            await db.execute(
+                select(MonitoringPolicy).order_by(
+                    MonitoringPolicy.scope,
+                    MonitoringPolicy.name,
+                    MonitoringPolicy.id,
+                )
+            )
+        ).scalars().all()
+    )
+    return [await _policy_out(db, policy) for policy in policies]
+
+
+@router.get(
+    "/monitoring/policies/{policy_id}", response_model=MonitoringPolicyDetailOut
+)
+async def get_monitoring_policy(
+    policy_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    policy = await db.get(MonitoringPolicy, policy_id)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Monitoring policy not found")
+    detail = await _policy_detail(db, policy)
+    await audit.record(
+        db,
+        action="monitoring_policy.viewed",
+        actor=operator.email,
+        detail={
+            "policy_id": policy.id,
+            "version": detail.current_version,
+            "check_count": detail.check_count,
+            "revision_count": len(detail.revisions),
+        },
+    )
+    return detail
+
+
+@router.put(
+    "/monitoring/policies/{policy_id}", response_model=MonitoringPolicyDetailOut
+)
+async def revise_monitoring_policy(
+    policy_id: str,
+    body: MonitoringPolicyUpdate,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    policy = await db.get(MonitoringPolicy, policy_id)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Monitoring policy not found")
+    _require_monitoring_check_bounds(body.checks)
+    latest_version = await db.scalar(
+        select(func.max(MonitoringPolicyRevision.version)).where(
+            MonitoringPolicyRevision.policy_id == policy.id
+        )
+    )
+    revision = MonitoringPolicyRevision(
+        policy_id=policy.id,
+        version=(latest_version or 0) + 1,
+        checks=[check.model_dump(mode="json") for check in body.checks],
+        change_note=body.change_note,
+        created_by=operator.email,
+    )
+    if body.enabled is not None:
+        policy.enabled = body.enabled
+    db.add(revision)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "monitoring_policy_revision_conflict"},
+        ) from exc
+    await audit.record(
+        db,
+        action="monitoring_policy.revised",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "policy_id": policy.id,
+            "version": revision.version,
+            "enabled": policy.enabled,
+            "check_count": len(body.checks),
+            "change_note": body.change_note or "",
+        },
+    )
+    return await _policy_detail(db, policy)
+
+
+@router.delete("/monitoring/policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_monitoring_policy(
+    policy_id: str,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    policy = await db.get(MonitoringPolicy, policy_id)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Monitoring policy not found")
+    await audit.record(
+        db,
+        action="monitoring_policy.deleted",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "policy_id": policy.id,
+            "scope": policy.scope.value,
+            "scope_id": policy.scope_id,
+            "name": policy.name,
+        },
+    )
+    await db.delete(policy)
+    return None
+
+
+@router.get(
+    "/monitoring/policies/{policy_id}/revisions",
+    response_model=list[MonitoringPolicyRevisionOut],
+)
+async def list_monitoring_policy_revisions(
+    policy_id: str, db: AsyncSession = Depends(get_db)
+):
+    if await db.get(MonitoringPolicy, policy_id) is None:
+        raise HTTPException(status_code=404, detail="Monitoring policy not found")
+    return [
+        MonitoringPolicyRevisionOut.model_validate(revision)
+        for revision in await _policy_revisions(db, policy_id)
+    ]
+
+
+@router.get(
+    "/agents/{agent_id}/monitoring/effective-policy",
+    response_model=EffectivePolicyOut,
+)
+async def get_agent_effective_monitoring_policy(
+    agent_id: str, db: AsyncSession = Depends(get_db)
+):
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    checks = await monitoring_core.resolve_effective_policy(db, agent)
+    return EffectivePolicyOut(
+        agent_id=agent.id,
+        checks=[
+            EffectiveCheckOut(
+                definition=item.definition,
+                source_scope=item.source_scope,
+                source_policy_id=item.source_policy_id,
+                source_policy_name=item.source_policy_name,
+            )
+            for item in checks
+        ],
+    )
+
+
+@router.post(
+    "/monitoring/maintenance-windows",
+    response_model=MaintenanceWindowOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_maintenance_window(
+    body: MaintenanceWindowCreate,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_monitoring_scope_target(db, body.scope, body.scope_id)
+    window_count = (
+        await db.execute(select(func.count()).select_from(MaintenanceWindow))
+    ).scalar_one()
+    if window_count >= settings.monitoring_max_maintenance_windows:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "maintenance_window_limit_reached"},
+        )
+    window = MaintenanceWindow(
+        name=body.name,
+        scope=body.scope,
+        scope_id=body.scope_id,
+        starts_at=body.starts_at,
+        ends_at=body.ends_at,
+        created_by=operator.email,
+    )
+    db.add(window)
+    await db.flush()
+    await audit.record(
+        db,
+        action="maintenance_window.created",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "maintenance_window_id": window.id,
+            "scope": window.scope.value,
+            "scope_id": window.scope_id,
+            "starts_at": window.starts_at.isoformat(),
+            "ends_at": window.ends_at.isoformat(),
+            "name": window.name,
+        },
+    )
+    return window
+
+
+@router.get(
+    "/monitoring/maintenance-windows", response_model=list[MaintenanceWindowOut]
+)
+async def list_maintenance_windows(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(MaintenanceWindow).order_by(
+            MaintenanceWindow.starts_at, MaintenanceWindow.id
+        )
+    )
+    return list(result.scalars().all())
+
+
+@router.delete(
+    "/monitoring/maintenance-windows/{window_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_maintenance_window(
+    window_id: str,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    window = await db.get(MaintenanceWindow, window_id)
+    if window is None:
+        raise HTTPException(status_code=404, detail="Maintenance window not found")
+    await audit.record(
+        db,
+        action="maintenance_window.deleted",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "maintenance_window_id": window.id,
+            "scope": window.scope.value,
+            "scope_id": window.scope_id,
+            "name": window.name,
+        },
+    )
+    await db.delete(window)
+    return None
+
+
+@router.get(
+    "/agents/{agent_id}/monitoring/results", response_model=CheckResultListOut
+)
+async def list_agent_monitoring_results(
+    agent_id: str,
+    check_key: str | None = Query(default=None, max_length=64),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    if await db.get(Agent, agent_id) is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    conditions = [CheckResult.agent_id == agent_id]
+    if check_key is not None:
+        conditions.append(CheckResult.check_key == check_key)
+    rows = list(
+        (
+            await db.execute(
+                select(CheckResult)
+                .where(*conditions)
+                .order_by(CheckResult.received_at.desc(), CheckResult.id.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+    )
+    return CheckResultListOut(agent_id=agent_id, items=rows)
 
 
 # --------------------------------------------------------------------------- #

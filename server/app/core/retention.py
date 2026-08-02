@@ -28,11 +28,12 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import anchor_publish
+from app.core import anchor_publish, monitoring
 from app.core.config import Settings, settings
 from app.models.models import (
     AgentInventorySnapshot,
     AuditEvent,
+    CheckResult,
     Command,
     Heartbeat,
 )
@@ -47,6 +48,7 @@ class PruneResult:
     heartbeats_deleted: int
     command_outputs_cleared: int
     inventory_snapshots_deleted: int = 0
+    check_results_deleted: int = 0
 
 
 async def prune_expired(
@@ -92,10 +94,17 @@ async def prune_expired(
             db, s.inventory_history_per_section
         )
 
+    check_results_deleted = 0
+    if s.check_result_history_per_key > 0:
+        check_results_deleted = await monitoring.prune_check_results(
+            db, s.check_result_history_per_key
+        )
+
     return PruneResult(
         heartbeats_deleted=heartbeats_deleted,
         command_outputs_cleared=command_outputs_cleared,
         inventory_snapshots_deleted=inventory_deleted,
+        check_results_deleted=check_results_deleted,
     )
 
 
@@ -187,6 +196,9 @@ async def storage_status(db: AsyncSession, s: Settings = settings) -> dict:
     inventory_bytes = (
         await db.execute(select(func.sum(AgentInventorySnapshot.byte_size)))
     ).scalar_one() or 0
+    check_result_count = (
+        await db.execute(select(func.count()).select_from(CheckResult))
+    ).scalar_one()
 
     pub = await anchor_publish.publication_status(db, s)
 
@@ -236,6 +248,11 @@ async def storage_status(db: AsyncSession, s: Settings = settings) -> dict:
                 db, AgentInventorySnapshot.received_at
             ),
             "history_per_section_limit": s.inventory_history_per_section,
+        },
+        "check_results": {
+            "count": check_result_count,
+            "oldest_age_seconds": await _age_seconds(db, CheckResult.received_at),
+            "history_per_key_limit": s.check_result_history_per_key,
         },
         "anchor_publication": {
             "backend": pub.backend,

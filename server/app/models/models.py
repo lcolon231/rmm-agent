@@ -110,6 +110,48 @@ class CommandStatus(str, enum.Enum):
     expired = "expired"
 
 
+class MonitoringScope(str, enum.Enum):
+    """Where a monitoring policy or maintenance window applies (issue #41).
+
+    Ordered least- to most-specific. Effective policy for an agent merges the
+    applicable levels with most-specific-wins, so a per-agent policy overrides
+    the site, client, and global ones for the same check. A client level is
+    included beyond ``ScriptExecutionScope`` because MSPs manage monitoring at
+    the customer boundary, not only per site.
+    """
+
+    global_ = "global"
+    client = "client"
+    site = "site"
+    agent = "agent"
+
+
+class CheckType(str, enum.Enum):
+    """The check kinds a policy may configure. #41 defines and validates their
+    shape; #42 implements the agent-side evaluation that produces results."""
+
+    cpu = "cpu"
+    memory = "memory"
+    disk = "disk"
+    service = "service"
+    reboot_pending = "reboot_pending"
+    uptime = "uptime"
+
+
+class CheckResultStatus(str, enum.Enum):
+    """Evaluation outcome for one check on one agent.
+
+    ``unknown`` is distinct from ``ok``: it means the check could not be
+    evaluated (the agent did not report, or the metric was unavailable), which
+    a technician must be able to tell apart from a passing check.
+    """
+
+    ok = "ok"
+    warning = "warning"
+    critical = "critical"
+    unknown = "unknown"
+
+
 class Client(Base):
     __tablename__ = "clients"
 
@@ -523,6 +565,159 @@ class AgentInventorySnapshot(Base):
     # means a queued or clock-skewed endpoint, which a technician needs to see
     # before trusting the values.
     collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False, index=True
+    )
+
+    agent: Mapped["Agent"] = relationship()
+
+
+# --------------------------------------------------------------------------- #
+# Monitoring (issue #41)
+# --------------------------------------------------------------------------- #
+class MonitoringPolicy(Base):
+    """A named set of monitoring checks bound to a scope (issue #41).
+
+    The row is the stable *identity* — name, scope, enabled flag. Its check
+    content is held in append-only :class:`MonitoringPolicyRevision` rows, so a
+    policy's history is preserved and every edit is an auditable new version.
+    ``scope_id`` is the id of the client/site/agent the policy targets, and is
+    NULL for a global policy, mirroring ``Operator.script_execution_scope_id``.
+    """
+
+    __tablename__ = "monitoring_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    scope: Mapped[MonitoringScope] = mapped_column(
+        Enum(MonitoringScope, values_callable=lambda enum_type: [item.value for item in enum_type]),
+        nullable=False,
+    )
+    # NULL only for the global scope. Not a hard FK: it addresses one of three
+    # different tables (clients/sites/agents) depending on scope, and the scope
+    # column is what disambiguates which. Referential integrity is enforced in
+    # the API when a policy is created.
+    scope_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    revisions: Mapped[list["MonitoringPolicyRevision"]] = relationship(
+        back_populates="policy", cascade="all, delete-orphan"
+    )
+
+
+# One policy name per scope target, case- and whitespace-insensitive, matching
+# the client/site normalization rule. Standard SQL treats NULL scope_ids as
+# distinct, so this index does not by itself block duplicate *global* names; the
+# API enforces duplicate-name rejection for every scope (this index is
+# defense-in-depth for the client/site/agent cases).
+Index(
+    "ux_monitoring_policies_scope_name_normalized",
+    MonitoringPolicy.scope,
+    MonitoringPolicy.scope_id,
+    func.lower(func.trim(MonitoringPolicy.name)),
+    unique=True,
+)
+
+
+class MonitoringPolicyRevision(Base):
+    """One immutable version of a policy's check set (issue #41).
+
+    Appended on every edit; the current revision is the highest ``version`` for
+    a policy. ``checks`` is a bounded, schema-validated JSON list (validated by
+    ``app/schemas/monitoring.py`` before storage), so adding a new check type is
+    a schema change, not a migration.
+    """
+
+    __tablename__ = "monitoring_policy_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "policy_id", "version", name="ux_monitoring_policy_revision_version"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    policy_id: Mapped[str] = mapped_column(
+        ForeignKey("monitoring_policies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    checks: Mapped[list] = mapped_column(JSON, nullable=False)
+    change_note: Mapped[str | None] = mapped_column(Text)
+    # Operator email, for provenance in the revision history. Kept denormalized
+    # so a deleted operator does not erase who last changed a live policy.
+    created_by: Mapped[str | None] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    policy: Mapped["MonitoringPolicy"] = relationship(back_populates="revisions")
+
+
+class MaintenanceWindow(Base):
+    """A scoped time span during which alerting is suppressed (issue #41).
+
+    #41 defines the model and its authorized CRUD; the suppression *enforcement*
+    during alert evaluation is #43/#44. Scope/scope_id follow the same rule as
+    :class:`MonitoringPolicy`.
+    """
+
+    __tablename__ = "maintenance_windows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    scope: Mapped[MonitoringScope] = mapped_column(
+        Enum(MonitoringScope, values_callable=lambda enum_type: [item.value for item in enum_type]),
+        nullable=False,
+    )
+    scope_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class CheckResult(Base):
+    """One check evaluation for one agent (issue #41).
+
+    This is the contract #42's agent-side evaluation writes to. #41 defines the
+    table, its schema, retention, and an operator read API, plus a
+    ``record_check_result`` core seam exercised by tests; the ingestion route is
+    #42. Rows are append-only and retained newest-N per ``(agent_id,
+    check_key)``, mirroring inventory-snapshot retention.
+    """
+
+    __tablename__ = "check_results"
+    __table_args__ = (
+        Index(
+            "ix_check_results_agent_key_received",
+            "agent_id",
+            "check_key",
+            "received_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The policy/revision the evaluation was made against, for provenance. Not a
+    # hard FK to the revision so pruning old revisions never orphans results.
+    policy_id: Mapped[str | None] = mapped_column(String(36))
+    policy_revision_id: Mapped[str | None] = mapped_column(String(36))
+    # Stable key of the check within the effective policy.
+    check_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[CheckResultStatus] = mapped_column(
+        Enum(
+            CheckResultStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    value: Mapped[float | None] = mapped_column(Float)
+    detail: Mapped[dict | None] = mapped_column(JSON)
+    evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
     received_at: Mapped[datetime] = mapped_column(

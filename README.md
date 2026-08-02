@@ -16,7 +16,7 @@ HIPAA-supporting controls and defensible compliance evidence.
 | Latest tagged release | `v0.1.2` |
 | Primary support target | Windows agent and Windows service |
 | Server | FastAPI management and agent APIs with PostgreSQL; SQLite is limited to development and tests |
-| Dashboard | Authenticated Next.js interface with live enrollment, endpoint, command, inventory, audit-evidence, and administrator workflows; the aggregate operations overview remains fixture-backed |
+| Dashboard | Authenticated Next.js interface with live enrollment, endpoint, command, inventory, monitoring-policy, audit-evidence, and administrator workflows; the aggregate operations overview remains fixture-backed |
 | Deployment | Self-hosted Caddy topology and a Render Docker Blueprint for a stateless backend using external PostgreSQL |
 | Current milestone | Milestone 0 pilot gates plus the implemented portion of Milestone 1 |
 | Pilot blockers | Authenticode signing and a recorded multi-day soak run on the intended pilot topology |
@@ -100,6 +100,14 @@ The code in this repository currently provides:
   snapshot, so an endpoint always keeps its current reported state. A section
   that could not be read renders distinctly from one that was read and found
   empty.
+- Versioned monitoring-policy identities at global, client, site, and agent
+  scopes, with bounded typed check definitions, most-specific-wins resolution,
+  scoped maintenance-window records, and an append-only check-result contract
+  retained newest-N per endpoint/check key. Operator APIs provide role-gated,
+  audited policy/window management plus effective-policy and result reads; the
+  dashboard provides a read-only policy list, current check set, and revision
+  history. Agent-side execution, result ingestion, alert state, and maintenance
+  enforcement remain later issues.
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation
   recorded in command and audit data). Completed results are DPAPI-protected
@@ -134,7 +142,7 @@ The code in this repository currently provides:
   anchors, plus a scheduled publisher that writes anchor roots to external
   immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
-- Forward-only Alembic migrations through revision `0015`, with exact revision
+- Forward-only Alembic migrations through revision `0016`, with exact revision
   enforcement on non-debug startup, legacy debug-schema repair, and a
   disposable PostgreSQL migration test in CI.
 - Encrypted PostgreSQL backup/isolated restore plus a fail-closed release
@@ -231,7 +239,11 @@ After `v0.1.2`, `main` has:
 - added read-only local Administrators inventory (#39): a locale-independent
   collector that resolves the built-in group by its well-known SID and
   classifies each member's identity type (local, domain, or Entra ID),
-  validated and stored as a bounded inventory section; and
+  validated and stored as a bounded inventory section;
+- added the phase-1 monitoring foundation (#41): append-only scoped policy
+  revisions, typed check definitions, deterministic inheritance, maintenance
+  windows, bounded check-result history, role-gated audited APIs, and read-only
+  dashboard policy views; and
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
@@ -271,8 +283,10 @@ The repository does **not** currently contain:
   signed expiry.
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, or TPM
   inventory beyond the read-only sections described above.
-- Monitoring policy/check/alert models, alert acknowledgement, email, or
-  webhook notifications.
+- Agent-side monitoring check execution and result ingestion, alert
+  deduplication/state, acknowledgement, maintenance-window enforcement, email,
+  or webhook notifications. Policy, maintenance-window, and check-result
+  foundation models are implemented.
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
 - A least-privilege agent service account.

@@ -2799,6 +2799,36 @@ textarea:focus-visible,
 .inventory-diff-table td.diff-added { background: var(--teal-soft); }
 .inventory-diff-table td.diff-removed { background: var(--red-soft); }
 
+/* Monitoring policy foundation (issue #41) */
+.monitoring-readonly-note { display: inline-flex; align-items: center; min-height: 30px; padding: 0 10px; color: #17685f; font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; background: var(--teal-soft); border: 1px solid #b9dfda; border-radius: 999px; }
+.monitoring-status { display: inline-flex; min-height: 24px; align-items: center; padding: 0 8px; font-size: 9px; font-weight: 800; border-radius: 999px; }
+.monitoring-status.enabled { color: #096b60; background: var(--teal-soft); }
+.monitoring-status.disabled { color: #85580f; background: var(--amber-soft); }
+.monitoring-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+.monitoring-summary-grid > section { display: flex; min-height: 92px; flex-direction: column; justify-content: center; padding: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 5px; box-shadow: 0 7px 22px rgb(9 27 41 / 4%); }
+.monitoring-summary-grid span { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.monitoring-summary-grid strong { margin-top: 6px; color: var(--ink); font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
+.monitoring-check-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; padding: 14px; }
+.monitoring-check-grid > article { overflow: hidden; border: 1px solid var(--line); border-radius: 5px; }
+.monitoring-check-grid > article.disabled { background: #fafafa; border-style: dashed; }
+.monitoring-check-grid article > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: #f7f9fa; border-bottom: 1px solid var(--line); }
+.monitoring-check-grid h3 { margin: 4px 0 0; font-size: 14px; text-transform: capitalize; }
+.monitoring-check-grid header code { color: var(--muted); font-size: 9px; }
+.monitoring-check-grid header > span { color: #096b60; font-size: 9px; font-weight: 800; text-align: right; }
+.monitoring-check-grid article.disabled header > span { color: #85580f; }
+.monitoring-check-grid dl { margin: 0; }
+.monitoring-check-grid dl > div { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 9px 14px; border-bottom: 1px solid #edf0f2; }
+.monitoring-check-grid dl > div:last-child { border-bottom: 0; }
+.monitoring-check-grid dt { color: var(--muted); font-size: 9px; font-weight: 800; text-transform: uppercase; }
+.monitoring-check-grid dd { margin: 0; color: var(--slate); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.monitoring-revisions { display: flex; flex-direction: column; }
+.monitoring-revisions > article { display: grid; grid-template-columns: 48px 1fr; gap: 13px; padding: 14px 18px; border-bottom: 1px solid #e8edef; }
+.monitoring-revisions > article:last-child { border-bottom: 0; }
+.monitoring-revision-number { display: grid; width: 40px; height: 40px; place-items: center; color: #17685f; font-family: var(--font-data); font-size: 11px; font-weight: 800; background: var(--teal-soft); border-radius: 50%; }
+.monitoring-revisions strong { color: var(--ink); font-size: 11px; }
+.monitoring-revisions p { margin: 4px 0; color: var(--slate); font-size: 10px; line-height: 1.45; }
+.monitoring-revisions small { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 9px; }
+
 
 @media (max-width: 900px) {
   .section-workspace { padding: 22px 16px; }
@@ -2807,6 +2837,7 @@ textarea:focus-visible,
   .audit-anchor > header { align-items: stretch; flex-direction: column; }
   .audit-root { align-items: stretch; flex-direction: column; gap: 4px; }
   .inventory-grid { grid-template-columns: 1fr; }
+  .monitoring-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 620px) {
@@ -2823,4 +2854,6 @@ textarea:focus-visible,
   .operator-created footer a, .operator-created footer button { justify-content: center; }
   .operator-confirm { grid-template-columns: 1fr; }
   .operator-confirm dl div { grid-template-columns: 1fr; gap: 2px; }
+  .monitoring-summary-grid { grid-template-columns: 1fr; }
+  .monitoring-check-grid { grid-template-columns: 1fr; padding: 10px; }
 }

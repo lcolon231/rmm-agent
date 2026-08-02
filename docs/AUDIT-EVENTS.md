@@ -49,6 +49,12 @@ and SHA-256/Merkle roots—remains readable.
 | `client_navigation.site_viewed` | `api/management.py` site view | `site_id`, `client_id` |
 | `client.created` | `api/management.py` client creation | `client_id`, `name_sha256`, `name_bytes` |
 | `site.created` | `api/management.py` site creation | `site_id`, `client_id`, `name_sha256`, `name_bytes` |
+| `monitoring_policy.created` | `api/management.py` policy creation | `policy_id`, `scope`, `scope_id`, `enabled`, `check_count`, `name_sha256`, `name_bytes`, `change_note_sha256`, `change_note_bytes` |
+| `monitoring_policy.revised` | `api/management.py` policy revision | `policy_id`, `version`, `enabled`, `check_count`, `change_note_sha256`, `change_note_bytes` |
+| `monitoring_policy.deleted` | `api/management.py` policy deletion | `policy_id`, `scope`, `scope_id`, `name_sha256`, `name_bytes` |
+| `monitoring_policy.viewed` | `api/management.py` policy detail view | `policy_id`, `version`, `check_count`, `revision_count` |
+| `maintenance_window.created` | `api/management.py` maintenance-window creation | `maintenance_window_id`, `scope`, `scope_id`, `starts_at`, `ends_at`, `name_sha256`, `name_bytes` |
+| `maintenance_window.deleted` | `api/management.py` maintenance-window deletion | `maintenance_window_id`, `scope`, `scope_id`, `name_sha256`, `name_bytes` |
 | `command.authorization_allowed` | `api/management.py` dispatch policy | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |
 | `command.authorization_denied` | `api/management.py` dispatch policy | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |
 | `command.completed` | `api/agents.py` result acceptance | `command_id`, `kind`, `exit_code`, `status`, `agent_completed_at`, `stdout_truncated`, `stderr_truncated`, `stdout_total_bytes`, `stderr_total_bytes` |

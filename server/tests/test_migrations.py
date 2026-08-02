@@ -71,7 +71,16 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
                 "SELECT name FROM sqlite_master WHERE type = 'index'"
             )
         }
-    assert {"alembic_version", "agents", "commands", "audit_events"} <= tables
+    assert {
+        "alembic_version",
+        "agents",
+        "commands",
+        "audit_events",
+        "monitoring_policies",
+        "monitoring_policy_revisions",
+        "maintenance_windows",
+        "check_results",
+    } <= tables
     assert "agent_completed_at" in command_columns
     assert {
         "script_execution_scope",
@@ -80,6 +89,7 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
     assert {
         "ux_clients_name_normalized",
         "ux_sites_client_name_normalized",
+        "ux_monitoring_policies_scope_name_normalized",
     } <= indexes
 
 
