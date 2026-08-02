@@ -7,15 +7,21 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"time"
 )
 
 // Sample is one heartbeat's worth of host metrics.
 type Sample struct {
-	CPUPercent    float64 `json:"cpu_percent"`
-	MemPercent    float64 `json:"mem_percent"`
-	DiskPercent   float64 `json:"disk_percent"`
-	UptimeSeconds int64   `json:"uptime_seconds"`
-	LoggedInUser  string  `json:"logged_in_user,omitempty"`
+	CPUPercent      float64   `json:"cpu_percent"`
+	MemPercent      float64   `json:"mem_percent"`
+	DiskPercent     float64   `json:"disk_percent"`
+	UptimeSeconds   int64     `json:"uptime_seconds"`
+	LoggedInUser    string    `json:"logged_in_user,omitempty"`
+	CollectedAt     time.Time `json:"-"`
+	CPUAvailable    bool      `json:"-"`
+	MemAvailable    bool      `json:"-"`
+	DiskAvailable   bool      `json:"-"`
+	UptimeAvailable bool      `json:"-"`
 }
 
 // HostInfo is collected once at enrollment.

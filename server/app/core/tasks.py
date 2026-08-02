@@ -7,10 +7,10 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from app.core import audit
+from app.core import audit, metrics, monitoring
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models.models import Agent, AgentStatus
+from app.models.models import Agent, AgentStatus, AgentTrustState
 
 
 async def _sweep_once() -> None:
@@ -38,6 +38,15 @@ async def _sweep_once() -> None:
                 agent_id=agent.id,
                 detail={"last_seen_at": last_seen.isoformat() if last_seen else None},
             )
+        active_agents = (
+            await db.execute(
+                select(Agent).where(Agent.trust_state == AgentTrustState.active)
+            )
+        ).scalars().all()
+        evaluated = 0
+        for agent in active_agents:
+            evaluated += await monitoring.evaluate_offline_checks(db, agent)
+        metrics.increment("monitoring_offline_evaluation_total", evaluated)
         await db.commit()
 
 

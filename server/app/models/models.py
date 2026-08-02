@@ -127,9 +127,9 @@ class MonitoringScope(str, enum.Enum):
 
 
 class CheckType(str, enum.Enum):
-    """The check kinds a policy may configure. #41 defines and validates their
-    shape; #42 implements the agent-side evaluation that produces results."""
+    """The check kinds a policy may configure and #42 evaluates."""
 
+    offline = "offline"
     cpu = "cpu"
     memory = "memory"
     disk = "disk"
@@ -681,10 +681,9 @@ class MaintenanceWindow(Base):
 class CheckResult(Base):
     """One check evaluation for one agent (issue #41).
 
-    This is the contract #42's agent-side evaluation writes to. #41 defines the
-    table, its schema, retention, and an operator read API, plus a
-    ``record_check_result`` core seam exercised by tests; the ingestion route is
-    #42. Rows are append-only and retained newest-N per ``(agent_id,
+    #42's authenticated agent ingestion and server-owned offline evaluation
+    write through the #41 storage seam. Rows are append-only and retained
+    newest-N per ``(agent_id,
     check_key)``, mirroring inventory-snapshot retention.
     """
 

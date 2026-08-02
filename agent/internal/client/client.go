@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/inventory"
+	"github.com/lcolon231/rmm/agent/internal/monitoring"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/redact"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
@@ -239,6 +240,9 @@ type HeartbeatAck struct {
 	// server considers missing, changed, or stale. Empty on a steady-state
 	// beat, which is the common case. An older server omits it entirely.
 	InventoryRequested []string `json:"inventory_requested"`
+	// MonitoringChecks is the current revision-pinned effective policy. Older
+	// servers omit it, which safely evaluates nothing.
+	MonitoringChecks []monitoring.Assignment `json:"monitoring_checks"`
 }
 
 // PendingResultNotice tells the server that execution has finished locally but
@@ -299,6 +303,18 @@ type InventoryAck struct {
 func (c *Client) SubmitInventory(ctx context.Context, s inventory.Submission) (*InventoryAck, error) {
 	var ack InventoryAck
 	if err := c.do(ctx, "POST", "/api/v1/agents/me/inventory", s, &ack, true); err != nil {
+		return nil, err
+	}
+	return &ack, nil
+}
+
+// SubmitMonitoringResults uploads one durable, bounded result batch. The
+// server validates the policy revision and treats repeated result IDs as
+// successful duplicates.
+func (c *Client) SubmitMonitoringResults(ctx context.Context, results []monitoring.Result) (*monitoring.ResultAck, error) {
+	var ack monitoring.ResultAck
+	body := map[string]any{"results": results}
+	if err := c.do(ctx, "POST", "/api/v1/agents/me/monitoring/results", body, &ack, true); err != nil {
 		return nil, err
 	}
 	return &ack, nil

@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Monitoring policy and check-result contracts (issue #41).
+"""Monitoring policy, assignment, and check-result contracts (#41/#42).
 
 This module defines the *shape* of monitoring — versioned, scoped policies whose
-check sets are validated here before storage, plus the check-result record #42's
-agent-side evaluation will produce. It deliberately does not implement
-evaluation, alerting, or suppression; those are #42/#43+.
+check sets are validated here before storage, plus the revision-pinned agent
+assignment and idempotent result-ingestion shapes implemented by #42. Alerting
+and maintenance suppression remain #43+.
 
 The conventions mirror ``app/schemas/inventory.py``: ``extra="forbid"`` on every
 model so an unexpected field is rejected rather than silently stored, bounded
@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+import json
+import math
 from typing import Annotated
 
 from pydantic import (
@@ -41,6 +43,8 @@ MIN_CHECK_INTERVAL_SECONDS = 30
 MAX_CHECK_INTERVAL_SECONDS = 86_400
 #: Consecutive-sample bounds for hysteresis (breach/clear debouncing).
 MAX_HYSTERESIS_SAMPLES = 100
+MAX_RESULTS_PER_BATCH = 100
+MAX_RESULT_DETAIL_BYTES = 16 * 1024
 
 ShortText = Annotated[str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)]
 #: A stable, lowercase slug identifying a check within a policy. It is the key
@@ -134,6 +138,7 @@ class ServiceParams(BaseModel):
 #: Check type -> params model. ``typed_params`` uses this so an unknown or
 #: malformed params object is rejected at policy-submit time, not at evaluation.
 CHECK_PARAM_MODELS: dict[CheckType, type[BaseModel]] = {
+    CheckType.offline: _NoParams,
     CheckType.cpu: _NoParams,
     CheckType.memory: _NoParams,
     CheckType.disk: DiskParams,
@@ -142,10 +147,11 @@ CHECK_PARAM_MODELS: dict[CheckType, type[BaseModel]] = {
     CheckType.uptime: _NoParams,
 }
 
-#: Check types that carry a numeric threshold. ``reboot_pending`` is a boolean
-#: state (a reboot is or is not pending), so it is threshold-free; the rest are
-#: measured against warning/critical bounds.
+#: State checks derive status directly rather than comparing a numeric sample.
 THRESHOLD_FREE_TYPES = frozenset({CheckType.reboot_pending})
+#: #41 originally required a numeric threshold for service checks. #42 does
+#: not use it, but accepts it so already-stored revisions remain readable.
+THRESHOLD_OPTIONAL_TYPES = frozenset({CheckType.service})
 
 
 class CheckDefinition(BaseModel):
@@ -169,7 +175,7 @@ class CheckDefinition(BaseModel):
         if self.type in THRESHOLD_FREE_TYPES:
             if self.threshold is not None:
                 raise ValueError(f"{self.type.value} check does not take a threshold")
-        elif self.threshold is None:
+        elif self.type not in THRESHOLD_OPTIONAL_TYPES and self.threshold is None:
             raise ValueError(f"{self.type.value} check requires a threshold")
         return self
 
@@ -259,12 +265,94 @@ class EffectiveCheckOut(BaseModel):
     definition: CheckDefinition
     source_scope: MonitoringScope
     source_policy_id: str
+    source_revision_id: str
     source_policy_name: str
 
 
 class EffectivePolicyOut(BaseModel):
     agent_id: str
     checks: list[EffectiveCheckOut] = Field(default_factory=list)
+
+
+class AgentCheckAssignment(BaseModel):
+    """Revision-pinned check definition delivered to an authenticated agent."""
+
+    model_config = ConfigDict(extra="forbid")
+    definition: CheckDefinition
+    policy_id: str
+    policy_revision_id: str
+
+
+class AgentCheckResultIn(BaseModel):
+    """One durable agent evaluation. ``id`` is its idempotency key."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
+    policy_id: Annotated[str, StringConstraints(min_length=1, max_length=36)]
+    policy_revision_id: Annotated[str, StringConstraints(min_length=1, max_length=36)]
+    check_key: CheckKey
+    status: CheckResultStatus
+    value: float | None = None
+    detail: dict | None = None
+    evaluated_at: datetime
+
+    @field_validator("value")
+    @classmethod
+    def value_must_be_finite(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("check result value must be finite")
+        return value
+
+    @field_validator("detail")
+    @classmethod
+    def detail_must_be_bounded_json(cls, value: dict | None) -> dict | None:
+        if value is None:
+            return None
+        try:
+            encoded = json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError, RecursionError) as exc:
+            raise ValueError("check result detail must be finite JSON") from exc
+        if len(encoded) > MAX_RESULT_DETAIL_BYTES:
+            raise ValueError(
+                f"check result detail exceeds {MAX_RESULT_DETAIL_BYTES} bytes"
+            )
+        return value
+
+    @field_validator("evaluated_at")
+    @classmethod
+    def evaluated_at_must_include_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("evaluated_at must include a timezone offset")
+        return value
+
+
+class AgentCheckResultBatchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    results: list[AgentCheckResultIn] = Field(
+        default_factory=list, min_length=1, max_length=MAX_RESULTS_PER_BATCH
+    )
+
+    @field_validator("results")
+    @classmethod
+    def result_ids_must_be_unique(
+        cls, value: list[AgentCheckResultIn]
+    ) -> list[AgentCheckResultIn]:
+        ids = [result.id for result in value]
+        if len(ids) != len(set(ids)):
+            raise ValueError("check result IDs must be unique within a batch")
+        return value
+
+
+class AgentCheckResultAck(BaseModel):
+    ok: bool = True
+    accepted: int = Field(ge=0)
+    duplicates: int = Field(ge=0)
 
 
 # --------------------------------------------------------------------------- #

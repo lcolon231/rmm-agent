@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Versioned monitoring-policy and check-result foundation (issue #41)."""
+"""Monitoring policy, evaluation, and check-result behavior (#41/#42)."""
 from __future__ import annotations
 
 import os
@@ -68,6 +68,34 @@ def _reboot_check(key: str, *, enabled: bool = True) -> dict:
     }
 
 
+def _service_check(key: str, service_name: str = "Spooler") -> dict:
+    return {
+        "key": key,
+        "type": "service",
+        "enabled": True,
+        "schedule": {"interval_seconds": 60},
+        "hysteresis": {"raise_samples": 1, "clear_samples": 1},
+        "params": {"service_name": service_name},
+    }
+
+
+def _offline_check(
+    key: str, *, raise_samples: int = 1, clear_samples: int = 1
+) -> dict:
+    return {
+        "key": key,
+        "type": "offline",
+        "enabled": True,
+        "schedule": {"interval_seconds": 30},
+        "threshold": {"op": "gte", "warning": 60, "critical": 120},
+        "hysteresis": {
+            "raise_samples": raise_samples,
+            "clear_samples": clear_samples,
+        },
+        "params": {},
+    }
+
+
 @pytest_asyncio.fixture
 async def operator_client():
     async with engine.begin() as conn:
@@ -110,7 +138,7 @@ async def operator_client():
     await engine.dispose()
 
 
-async def _enroll(client) -> tuple[str, str, str]:
+async def _enroll(client) -> tuple[str, str, str, str]:
     customer = (
         await client.post(
             "/clients", json={"name": f"Monitoring Clinic {uuid4().hex}"}
@@ -135,7 +163,7 @@ async def _enroll(client) -> tuple[str, str, str]:
             },
         )
     ).json()
-    return customer["id"], site["id"], enrollment["agent_id"]
+    return customer["id"], site["id"], enrollment["agent_id"], enrollment["agent_token"]
 
 
 async def _create_policy(
@@ -269,7 +297,7 @@ async def test_policy_crud_revisioning_duplicate_names_and_audit(operator_client
 
 @pytest.mark.asyncio
 async def test_effective_policy_merges_all_scope_levels(operator_client):
-    client_id, site_id, agent_id = await _enroll(operator_client)
+    client_id, site_id, agent_id, _ = await _enroll(operator_client)
     await _create_policy(
         operator_client,
         name="Global",
@@ -321,7 +349,7 @@ async def test_effective_policy_merges_all_scope_levels(operator_client):
 
 @pytest.mark.asyncio
 async def test_windows_authz_scope_targets_and_unknown_ids(operator_client):
-    client_id, _, _ = await _enroll(operator_client)
+    client_id, _, _, _ = await _enroll(operator_client)
     login = await operator_client.post(
         "/auth/login",
         json={
@@ -404,7 +432,7 @@ async def test_windows_authz_scope_targets_and_unknown_ids(operator_client):
 
 @pytest.mark.asyncio
 async def test_check_result_read_contract_and_per_key_retention(operator_client):
-    _, _, agent_id = await _enroll(operator_client)
+    _, _, agent_id, _ = await _enroll(operator_client)
     async with AsyncSessionLocal() as db:
         for index in range(4):
             await monitoring_core.record_check_result(
@@ -463,7 +491,7 @@ async def test_check_result_read_contract_and_per_key_retention(operator_client)
 
 @pytest.mark.asyncio
 async def test_check_result_seam_rejects_unbounded_or_ambiguous_input(operator_client):
-    _, _, agent_id = await _enroll(operator_client)
+    _, _, agent_id, _ = await _enroll(operator_client)
     async with AsyncSessionLocal() as db:
         with pytest.raises(ValueError, match="lowercase slug"):
             await monitoring_core.record_check_result(
@@ -488,3 +516,184 @@ async def test_check_result_seam_rejects_unbounded_or_ambiguous_input(operator_c
                 status=CheckResultStatus.ok,
                 detail={"message": "x" * 20_000},
             )
+
+
+@pytest.mark.asyncio
+async def test_agent_receives_revision_pinned_checks_and_ingests_idempotently(
+    operator_client,
+):
+    _, _, agent_id, agent_token = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name="Agent evaluation",
+        scope="global",
+        scope_id=None,
+        checks=[
+            _numeric_check("cpu"),
+            _service_check("spooler"),
+            _offline_check("offline"),
+        ],
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://t/api/v1",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    ) as agent_client:
+        heartbeat = await agent_client.post(
+            "/heartbeat",
+            json={
+                "cpu_percent": 85,
+                "mem_percent": 50,
+                "disk_percent": 40,
+                "uptime_seconds": 1000,
+                "supported_command_envelope_versions": [COMMAND_ENVELOPE_V3],
+            },
+        )
+        assert heartbeat.status_code == 200, heartbeat.text
+        assignments = {
+            item["definition"]["key"]: item
+            for item in heartbeat.json()["monitoring_checks"]
+        }
+        assert set(assignments) == {"cpu", "spooler"}
+        assert assignments["cpu"]["policy_id"] == policy["id"]
+        assert assignments["cpu"]["policy_revision_id"]
+
+        evaluated_at = datetime.now(timezone.utc).isoformat()
+        results = [
+            {
+                "id": "a" * 32,
+                "policy_id": policy["id"],
+                "policy_revision_id": assignments["cpu"]["policy_revision_id"],
+                "check_key": "cpu",
+                "status": "warning",
+                "value": 85,
+                "detail": {"reason": "threshold_evaluated"},
+                "evaluated_at": evaluated_at,
+            },
+            {
+                "id": "b" * 32,
+                "policy_id": policy["id"],
+                "policy_revision_id": assignments["spooler"]["policy_revision_id"],
+                "check_key": "spooler",
+                "status": "ok",
+                "value": 1,
+                "detail": {"reason": "service_running"},
+                "evaluated_at": evaluated_at,
+            },
+        ]
+        accepted = await agent_client.post(
+            "/agents/me/monitoring/results", json={"results": results}
+        )
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json() == {"ok": True, "accepted": 2, "duplicates": 0}
+
+        duplicate = await agent_client.post(
+            "/agents/me/monitoring/results", json={"results": results}
+        )
+        assert duplicate.status_code == 200
+        assert duplicate.json()["duplicates"] == 2
+
+        conflicting_retry = await agent_client.post(
+            "/agents/me/monitoring/results",
+            json={"results": [dict(results[0], status="critical")]},
+        )
+        assert conflicting_retry.status_code == 409
+        assert conflicting_retry.json()["detail"]["code"] == "monitoring_result_id_conflict"
+
+        superseded = dict(results[0], id="c" * 32, policy_revision_id=str(uuid4()))
+        rejected = await agent_client.post(
+            "/agents/me/monitoring/results", json={"results": [superseded]}
+        )
+        assert rejected.status_code == 409
+        assert rejected.json()["detail"]["code"] == "monitoring_policy_superseded"
+
+        stale = dict(
+            results[0],
+            id="d" * 32,
+            evaluated_at=(datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),
+        )
+        rejected = await agent_client.post(
+            "/agents/me/monitoring/results", json={"results": [stale]}
+        )
+        assert rejected.status_code == 422
+        assert rejected.json()["detail"]["code"] == "monitoring_result_stale"
+
+    stored = await operator_client.get(
+        f"/agents/{agent_id}/monitoring/results"
+    )
+    assert stored.status_code == 200
+    assert {item["check_key"] for item in stored.json()["items"]} == {
+        "cpu",
+        "spooler",
+    }
+
+
+@pytest.mark.asyncio
+async def test_offline_check_cadence_hysteresis_and_recovery(operator_client):
+    _, _, agent_id, _ = await _enroll(operator_client)
+    await _create_policy(
+        operator_client,
+        name="Offline evaluation",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_offline_check("offline", raise_samples=2, clear_samples=2)],
+    )
+    start = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as db:
+        agent = await db.get(Agent, agent_id)
+        agent.last_seen_at = start - timedelta(seconds=180)
+
+        assert await monitoring_core.evaluate_offline_checks(db, agent, start) == 1
+        await db.flush()
+        first = await db.scalar(
+            select(CheckResult).where(CheckResult.agent_id == agent_id)
+        )
+        assert first.status == CheckResultStatus.unknown
+        assert first.detail["raw_status"] == "critical"
+        assert first.detail["hysteresis"]["pending_count"] == 1
+
+        assert (
+            await monitoring_core.evaluate_offline_checks(
+                db, agent, start + timedelta(seconds=10)
+            )
+            == 0
+        )
+        assert (
+            await monitoring_core.evaluate_offline_checks(
+                db, agent, start + timedelta(seconds=31)
+            )
+            == 1
+        )
+        agent.last_seen_at = start + timedelta(seconds=31)
+        assert (
+            await monitoring_core.evaluate_offline_checks(
+                db, agent, start + timedelta(seconds=62)
+            )
+            == 1
+        )
+        agent.last_seen_at = start + timedelta(seconds=62)
+        assert (
+            await monitoring_core.evaluate_offline_checks(
+                db, agent, start + timedelta(seconds=93)
+            )
+            == 1
+        )
+        await db.commit()
+
+        history = list(
+            (
+                await db.execute(
+                    select(CheckResult)
+                    .where(CheckResult.agent_id == agent_id)
+                    .order_by(CheckResult.evaluated_at)
+                )
+            ).scalars().all()
+        )
+    assert [row.status for row in history] == [
+        CheckResultStatus.unknown,
+        CheckResultStatus.critical,
+        CheckResultStatus.critical,
+        CheckResultStatus.ok,
+    ]
+    assert history[-1].detail["reason"] == "heartbeat_within_threshold"

@@ -47,6 +47,23 @@ def prometheus_text(agent_statuses: dict[str, int] | None = None) -> str:
         )
     lines.extend(
         (
+            "# HELP nodelink_monitoring_operations_total Monitoring result and evaluation counters.",
+            "# TYPE nodelink_monitoring_operations_total counter",
+        )
+    )
+    for name in (
+        "monitoring_result_accepted_total",
+        "monitoring_result_duplicate_total",
+        "monitoring_result_rejected_total",
+        "monitoring_offline_evaluation_total",
+    ):
+        operation = name.removeprefix("monitoring_").removesuffix("_total")
+        lines.append(
+            f'nodelink_monitoring_operations_total{{operation="{operation}"}} '
+            f"{values.get(name, 0)}"
+        )
+    lines.extend(
+        (
             "# HELP nodelink_agents Current agents by operational status.",
             "# TYPE nodelink_agents gauge",
         )

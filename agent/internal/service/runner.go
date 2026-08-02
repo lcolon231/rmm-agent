@@ -24,6 +24,7 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/config"
 	"github.com/lcolon231/rmm/agent/internal/executor"
 	"github.com/lcolon231/rmm/agent/internal/inventory"
+	"github.com/lcolon231/rmm/agent/internal/monitoring"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 	"github.com/lcolon231/rmm/agent/internal/verify"
@@ -142,6 +143,8 @@ type session struct {
 	// server's content-hash comparison means an unchanged machine still uploads
 	// nothing. Persisting it would add a cache to keep coherent for no gain.
 	inventorySections []inventory.Section
+	monitoringStore   *monitoring.Store
+	monitoringEval    *monitoring.Evaluator
 }
 
 // Run enrolls if needed and then checks in until ctx is cancelled. On
@@ -303,15 +306,21 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, fatal(fmt.Errorf("agent HTTP client: %w", err))
 	}
+	monitoringStore, err := monitoring.LoadStore(monitoring.StatePath(a.configPath))
+	if err != nil {
+		return nil, fatal(err)
+	}
 	return &session{
-		api:          api,
-		pub:          pub,
-		pubKeys:      pubKeys,
-		identityPath: idPath,
-		identity:     identity,
-		agentID:      identity.AgentID,
-		interval:     interval,
-		seen:         seen,
+		api:             api,
+		pub:             pub,
+		pubKeys:         pubKeys,
+		identityPath:    idPath,
+		identity:        identity,
+		agentID:         identity.AgentID,
+		interval:        interval,
+		seen:            seen,
+		monitoringStore: monitoringStore,
+		monitoringEval:  monitoring.NewEvaluator(monitoringStore, nil),
 	}, nil
 }
 
@@ -436,9 +445,23 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 			a.log.Printf("failed to submit inventory: %v", err)
 		}
 	}
-	// Results are persisted before upload. Flush anything recovered from a
-	// prior outage/restart before adding more work to the outbox.
 	var firstReportErr error
+	if s.monitoringEval != nil {
+		// Evaluate the revision-pinned effective policy returned by this
+		// heartbeat. Results are persisted to a bounded outbox before upload, so
+		// a lost response or process restart retries the same idempotency IDs.
+		evaluated, err := s.monitoringEval.Evaluate(ctx, ack.MonitoringChecks, sample, time.Now().UTC())
+		if err != nil {
+			return fatal(fmt.Errorf("persist monitoring evaluation: %w", err))
+		}
+		if evaluated > 0 {
+			a.log.Printf("evaluated %d monitoring check(s)", evaluated)
+		}
+		if err := a.flushMonitoringResults(ctx, s); err != nil {
+			a.log.Printf("failed to flush monitoring results: %v", err)
+			firstReportErr = err
+		}
+	}
 	if err := a.flushPendingResults(ctx, s); err != nil {
 		a.log.Printf("failed to flush pending command results: %v", err)
 		firstReportErr = err
@@ -501,6 +524,26 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 		}
 	}
 	return firstReportErr
+}
+
+func (a *Agent) flushMonitoringResults(ctx context.Context, s *session) error {
+	for {
+		batch := s.monitoringStore.PendingBatch(100)
+		if len(batch) == 0 {
+			return nil
+		}
+		ack, err := s.api.SubmitMonitoringResults(ctx, batch)
+		if err != nil {
+			return err
+		}
+		acknowledged := ack.Accepted + ack.Duplicates
+		if acknowledged != len(batch) {
+			return fmt.Errorf("server acknowledged %d of %d monitoring results", acknowledged, len(batch))
+		}
+		if err := s.monitoringStore.AcknowledgePrefix(len(batch)); err != nil {
+			return fatal(fmt.Errorf("persist monitoring acknowledgement: %w", err))
+		}
+	}
 }
 
 // processCommand runs the accept/refuse gate for one command in strict order:

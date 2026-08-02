@@ -28,7 +28,8 @@ separate artifact.
    a status line for each step on the progress page.
 6. On uninstall, runs `rmm-agent.exe uninstall` (stops + removes the service)
    before deleting files, and cleans up the runtime files the agent created
-   (`config.json`, `identity.json`, `seen_commands.json`).
+   (`config.json`, `identity.json`, `seen_commands.json`,
+   `monitoring_state.json`).
 
 After successful service-context enrollment, the agent atomically rewrites
 `config.json` without the consumed plaintext token. Scripted deployments should
