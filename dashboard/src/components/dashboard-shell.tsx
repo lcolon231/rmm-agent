@@ -155,7 +155,19 @@ function Sidebar({
         <div className="sidebar-section client-section">
           <div className="sidebar-label">
             <span>Clients</span>
-            {operator.role === "readonly" ? <small>View only</small> : <button aria-label="Add client" disabled title="Client provisioning is not available yet">+</button>}
+            {operator.role === "readonly" ? (
+              <small>View only</small>
+            ) : (
+              <Link
+                aria-label="Add client"
+                className="add-client-link"
+                href="/enrollment/setup"
+                onClick={onClose}
+                title="Add client"
+              >
+                +
+              </Link>
+            )}
           </div>
           {navigationError ? (
             <div className="navigation-state" role="alert">

@@ -153,13 +153,27 @@ select:focus-visible {
   text-transform: uppercase;
 }
 
-.sidebar-label button {
+.sidebar-label button,
+.sidebar-label .add-client-link {
+  display: inline-grid;
+  min-width: 28px;
+  min-height: 28px;
+  place-items: center;
   padding: 0 5px;
   color: white;
   font-size: 20px;
   line-height: 1;
   background: transparent;
   border: 0;
+  border-radius: 4px;
+  text-decoration: none;
+}
+
+.sidebar-label .add-client-link:hover,
+.sidebar-label .add-client-link:focus-visible {
+  background: #173650;
+  outline: 2px solid #5ecfc8;
+  outline-offset: 1px;
 }
 
 .client-tree + .client-tree {
