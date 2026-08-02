@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Monitoring policy resolution, offline evaluation, and result storage.
+"""Monitoring policy resolution, evaluation, result storage, and alert state.
 
 Responsibilities:
 
@@ -12,22 +12,32 @@ Responsibilities:
   durable agent-generated result ID.
 * :func:`evaluate_offline_checks` records due heartbeat-age checks in the
   server sweeper with the same cadence and hysteresis semantics.
+* :func:`apply_check_result_to_alert` serializes one durable alert identity per
+  policy/endpoint/check, including recovery, retrigger, suppression, and
+  exactly-once observation evidence (#43).
 
 Offline checks are evaluated here because an unreachable endpoint cannot report
-itself. Alert state and maintenance-window suppression remain #43+.
+itself. Technician alert actions and immutable actor history remain #44.
 """
 from __future__ import annotations
 
 import json
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import metrics
 from app.models.models import (
     Agent,
+    Alert,
+    AlertObservation,
+    AlertState,
     CheckResult,
     CheckResultStatus,
     MaintenanceWindow,
@@ -53,6 +63,10 @@ _CHECK_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -195,6 +209,239 @@ async def active_maintenance_windows(
     return list(result.scalars().all())
 
 
+async def _resolve_superseded_alerts(
+    db: AsyncSession, result: CheckResult
+) -> int:
+    """Resolve another policy's active alert for the same endpoint/check."""
+    statement = (
+        update(Alert)
+        .where(
+            Alert.agent_id == result.agent_id,
+            Alert.check_key == result.check_key,
+            Alert.policy_id != result.policy_id,
+            Alert.state != AlertState.resolved,
+        )
+        .values(
+            state=AlertState.resolved,
+            resolved_at=result.evaluated_at,
+            resolution_reason="policy_superseded",
+            suppression_window_id=None,
+            suppressed_until=None,
+            updated_at=_now(),
+        )
+    )
+    changed = (await db.execute(statement)).rowcount or 0
+    if changed:
+        metrics.increment("monitoring_alert_recovered_total", changed)
+        metrics.increment("monitoring_alert_policy_superseded_total", changed)
+    return changed
+
+
+async def _ensure_alert_shell(db: AsyncSession, result: CheckResult) -> None:
+    """Insert the identity row once; concurrent evaluators may race safely."""
+    now = _now()
+    values = {
+        "id": str(uuid.uuid4()),
+        "agent_id": result.agent_id,
+        "policy_id": result.policy_id,
+        "policy_revision_id": result.policy_revision_id,
+        "check_key": result.check_key,
+        "state": AlertState.resolved,
+        "last_result_status": result.status,
+        "occurrence_count": 0,
+        "total_occurrence_count": 0,
+        "generation": 0,
+        "created_at": now,
+        "updated_at": now,
+    }
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        statement = postgresql_insert(Alert).values(**values).on_conflict_do_nothing(
+            constraint="ux_alert_identity"
+        )
+    elif dialect == "sqlite":
+        statement = sqlite_insert(Alert).values(**values).on_conflict_do_nothing(
+            index_elements=["agent_id", "policy_id", "check_key"]
+        )
+    else:  # pragma: no cover - supported deployments are PostgreSQL/SQLite tests
+        raise RuntimeError(f"unsupported alert upsert dialect: {dialect}")
+    await db.execute(statement)
+
+
+async def _record_alert_observation(
+    db: AsyncSession, alert: Alert, result: CheckResult
+) -> bool:
+    """Record a result once. Return false when it was already applied."""
+    values = {
+        "check_result_id": result.id,
+        "alert_id": alert.id,
+        "status": result.status,
+        "value": result.value,
+        "evaluated_at": result.evaluated_at,
+        "out_of_order": False,
+        "created_at": _now(),
+    }
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        statement = (
+            postgresql_insert(AlertObservation)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["check_result_id"])
+        )
+    elif dialect == "sqlite":
+        statement = (
+            sqlite_insert(AlertObservation)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["check_result_id"])
+        )
+    else:  # pragma: no cover
+        raise RuntimeError(f"unsupported alert observation dialect: {dialect}")
+    return ((await db.execute(statement)).rowcount or 0) == 1
+
+
+async def apply_check_result_to_alert(
+    db: AsyncSession, result: CheckResult
+) -> Alert | None:
+    """Apply one revision-pinned result to its deduplicated alert identity.
+
+    PostgreSQL row locking serializes concurrent results for the same identity.
+    A deterministic ``(evaluated_at, result_id)`` order prevents a delayed older
+    result from recovering or downgrading newer state. Results without policy
+    provenance are historical/test seam rows and intentionally do not alert.
+    """
+    if result.policy_id is None or result.policy_revision_id is None:
+        return None
+
+    await _resolve_superseded_alerts(db, result)
+    failing = result.status != CheckResultStatus.ok
+    if failing:
+        await _ensure_alert_shell(db, result)
+
+    alert = await db.scalar(
+        select(Alert)
+        .where(
+            Alert.agent_id == result.agent_id,
+            Alert.policy_id == result.policy_id,
+            Alert.check_key == result.check_key,
+        )
+        .with_for_update()
+    )
+    if alert is None:
+        return None
+
+    if not await _record_alert_observation(db, alert, result):
+        metrics.increment("monitoring_alert_duplicate_observation_total")
+        return alert
+
+    evaluated_at = _utc(result.evaluated_at)
+    if alert.last_evaluated_at is not None:
+        prior_order = (_utc(alert.last_evaluated_at), alert.last_result_id or "")
+        if (evaluated_at, result.id) <= prior_order:
+            await db.execute(
+                update(AlertObservation)
+                .where(AlertObservation.check_result_id == result.id)
+                .values(out_of_order=True)
+            )
+            if failing:
+                alert.total_occurrence_count += 1
+                if (
+                    alert.state != AlertState.resolved
+                    and alert.opened_at is not None
+                    and evaluated_at >= _utc(alert.opened_at)
+                ):
+                    alert.occurrence_count += 1
+                metrics.increment("monitoring_alert_occurrence_total")
+            metrics.increment("monitoring_alert_out_of_order_total")
+            return alert
+
+    alert.policy_revision_id = result.policy_revision_id
+    alert.last_result_status = result.status
+    alert.last_evaluated_at = evaluated_at
+    alert.last_result_id = result.id
+    alert.last_value = result.value
+    alert.updated_at = _now()
+
+    if not failing:
+        alert.suppression_window_id = None
+        alert.suppressed_until = None
+        if alert.state != AlertState.resolved:
+            alert.state = AlertState.resolved
+            alert.resolved_at = evaluated_at
+            alert.resolution_reason = "automatic_recovery"
+            metrics.increment("monitoring_alert_recovered_total")
+        return alert
+
+    agent = await db.get(Agent, result.agent_id)
+    if agent is None:  # The result FK makes this unreachable in a valid DB.
+        raise ValueError("alert result agent does not exist")
+    windows = await active_maintenance_windows(db, agent, evaluated_at)
+    if windows:
+        latest_window = max(windows, key=lambda item: _utc(item.ends_at))
+        alert.suppression_window_id = latest_window.id
+        alert.suppressed_until = latest_window.ends_at
+        metrics.increment("monitoring_alert_suppressed_occurrence_total")
+    else:
+        alert.suppression_window_id = None
+        alert.suppressed_until = None
+
+    alert.last_observed_at = evaluated_at
+    alert.total_occurrence_count += 1
+    if alert.state == AlertState.resolved:
+        first_open = alert.generation == 0
+        alert.state = AlertState.open
+        alert.generation += 1
+        alert.occurrence_count = 1
+        alert.opened_at = evaluated_at
+        alert.resolved_at = None
+        alert.resolution_reason = None
+        if alert.first_opened_at is None:
+            alert.first_opened_at = evaluated_at
+        metrics.increment(
+            "monitoring_alert_opened_total"
+            if first_open
+            else "monitoring_alert_reopened_total"
+        )
+    else:
+        alert.occurrence_count += 1
+    metrics.increment("monitoring_alert_occurrence_total")
+    return alert
+
+
+async def resolve_policy_alerts(
+    db: AsyncSession,
+    policy_id: str,
+    *,
+    active_check_keys: set[str] | None = None,
+    reason: str,
+    at: datetime | None = None,
+) -> int:
+    """Resolve active alerts invalidated by a policy revision or deletion."""
+    at = at or _now()
+    conditions = [
+        Alert.policy_id == policy_id,
+        Alert.state != AlertState.resolved,
+    ]
+    if active_check_keys:
+        conditions.append(Alert.check_key.not_in(active_check_keys))
+    statement = (
+        update(Alert)
+        .where(*conditions)
+        .values(
+            state=AlertState.resolved,
+            resolved_at=at,
+            resolution_reason=reason,
+            suppression_window_id=None,
+            suppressed_until=None,
+            updated_at=_now(),
+        )
+    )
+    changed = (await db.execute(statement)).rowcount or 0
+    if changed:
+        metrics.increment("monitoring_alert_recovered_total", changed)
+        metrics.increment("monitoring_alert_policy_change_total", changed)
+    return changed
+
+
 async def record_check_result(
     db: AsyncSession,
     *,
@@ -245,6 +492,8 @@ async def record_check_result(
         evaluated_at=evaluated_at or _now(),
     )
     db.add(row)
+    await db.flush()
+    await apply_check_result_to_alert(db, row)
     await db.flush()
     return row
 
@@ -420,6 +669,20 @@ async def prune_check_results(db: AsyncSession, keep: int) -> int:
             .limit(keep)
         )
         keep_ids = [row[0] for row in (await db.execute(survivors)).all()]
+        doomed_ids = select(CheckResult.id).where(
+            CheckResult.agent_id == agent_id,
+            CheckResult.check_key == check_key,
+            CheckResult.id.not_in(keep_ids),
+        )
+        # PostgreSQL enforces the observation FK cascade. Delete explicitly as
+        # well so SQLite tests and any non-enforcing maintenance connection
+        # preserve the same bounded-storage contract.
+        await db.execute(
+            delete(AlertObservation).where(
+                AlertObservation.check_result_id.in_(doomed_ids)
+            ),
+            execution_options={"synchronize_session": False},
+        )
         result = await db.execute(
             delete(CheckResult).where(
                 CheckResult.agent_id == agent_id,

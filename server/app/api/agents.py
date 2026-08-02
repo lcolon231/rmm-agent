@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_agent
@@ -506,19 +507,46 @@ async def submit_monitoring_results(
             duplicates += 1
             continue
 
-        await monitoring.record_check_result(
-            db,
-            result_id=result.id,
-            agent_id=agent.id,
-            policy_id=result.policy_id,
-            policy_revision_id=result.policy_revision_id,
-            check_key=result.check_key,
-            status=result.status,
-            value=result.value,
-            detail=result.detail,
-            evaluated_at=evaluated_at,
-        )
-        accepted += 1
+        try:
+            # The savepoint keeps a simultaneous retry's primary-key conflict
+            # from invalidating the whole request transaction. After the
+            # winning transaction commits, the loser validates the stored
+            # payload and acknowledges it as the same idempotent result.
+            async with db.begin_nested():
+                await monitoring.record_check_result(
+                    db,
+                    result_id=result.id,
+                    agent_id=agent.id,
+                    policy_id=result.policy_id,
+                    policy_revision_id=result.policy_revision_id,
+                    check_key=result.check_key,
+                    status=result.status,
+                    value=result.value,
+                    detail=result.detail,
+                    evaluated_at=evaluated_at,
+                )
+        except IntegrityError:
+            concurrent = await db.get(CheckResult, result.id)
+            if concurrent is None:
+                raise
+            if (
+                concurrent.agent_id != agent.id
+                or concurrent.check_key != result.check_key
+                or concurrent.policy_id != result.policy_id
+                or concurrent.policy_revision_id != result.policy_revision_id
+                or concurrent.status != result.status
+                or concurrent.value != result.value
+                or concurrent.detail != result.detail
+                or ensure_utc(concurrent.evaluated_at) != evaluated_at
+            ):
+                metrics.increment("monitoring_result_rejected_total")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "monitoring_result_id_conflict"},
+                )
+            duplicates += 1
+        else:
+            accepted += 1
 
     metrics.increment("monitoring_result_accepted_total", accepted)
     metrics.increment("monitoring_result_duplicate_total", duplicates)

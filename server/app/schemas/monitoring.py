@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Monitoring policy, assignment, and check-result contracts (#41/#42).
+"""Monitoring policy, check-result, and alert contracts (#41-#43).
 
 This module defines the *shape* of monitoring — versioned, scoped policies whose
 check sets are validated here before storage, plus the revision-pinned agent
-assignment and idempotent result-ingestion shapes implemented by #42. Alerting
-and maintenance suppression remain #43+.
+assignment and idempotent result-ingestion shapes implemented by #42, and the
+deduplicated automatic alert-state read contract from #43. Technician alert
+actions remain #44.
 
 The conventions mirror ``app/schemas/inventory.py``: ``extra="forbid"`` on every
 model so an unexpected field is rejected rather than silently stored, bounded
@@ -29,7 +30,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.models.models import CheckResultStatus, CheckType, MonitoringScope
+from app.models.models import AlertState, CheckResultStatus, CheckType, MonitoringScope
 
 # --------------------------------------------------------------------------- #
 # Bounds (schema-level; runtime quotas live in app/core/config.py)
@@ -413,3 +414,51 @@ class CheckResultOut(BaseModel):
 class CheckResultListOut(BaseModel):
     agent_id: str
     items: list[CheckResultOut] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# Deduplicated alert state (#43)
+# --------------------------------------------------------------------------- #
+class AlertOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    agent_id: str
+    policy_id: str
+    policy_revision_id: str
+    check_key: str
+    state: AlertState
+    last_result_status: CheckResultStatus
+    occurrence_count: int = Field(ge=0)
+    total_occurrence_count: int = Field(ge=0)
+    generation: int = Field(ge=0)
+    first_opened_at: datetime | None
+    opened_at: datetime | None
+    last_observed_at: datetime | None
+    resolved_at: datetime | None
+    last_evaluated_at: datetime | None
+    last_result_id: str | None
+    last_value: float | None
+    resolution_reason: str | None
+    suppression_window_id: str | None
+    suppressed_until: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AlertListOut(BaseModel):
+    items: list[AlertOut] = Field(default_factory=list)
+
+
+class AlertObservationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    check_result_id: str
+    alert_id: str
+    status: CheckResultStatus
+    value: float | None
+    evaluated_at: datetime
+    out_of_order: bool
+    created_at: datetime
+
+
+class AlertDetailOut(AlertOut):
+    observations: list[AlertObservationOut] = Field(default_factory=list)

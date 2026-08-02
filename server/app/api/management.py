@@ -59,6 +59,9 @@ from app.core.script_authorization import (
 )
 from app.models.models import (
     Agent,
+    Alert,
+    AlertObservation,
+    AlertState,
     AgentStatus,
     AgentTrustState,
     AgentInventorySnapshot,
@@ -70,6 +73,7 @@ from app.models.models import (
     CommandKind,
     CommandStatus,
     CheckResult,
+    CheckResultStatus,
     EnrollmentToken,
     EnrollmentTokenStatus,
     Heartbeat,
@@ -111,6 +115,9 @@ from app.schemas.schemas import (
     TrustStateChange,
 )
 from app.schemas.monitoring import (
+    AlertDetailOut,
+    AlertListOut,
+    AlertOut,
     CheckResultListOut,
     EffectiveCheckOut,
     EffectivePolicyOut,
@@ -1445,6 +1452,17 @@ async def revise_monitoring_policy(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "monitoring_policy_revision_conflict"},
         ) from exc
+    active_check_keys = (
+        {check.key for check in body.checks if check.enabled}
+        if policy.enabled
+        else set()
+    )
+    await monitoring_core.resolve_policy_alerts(
+        db,
+        policy.id,
+        active_check_keys=active_check_keys,
+        reason="policy_revised",
+    )
     await audit.record(
         db,
         action="monitoring_policy.revised",
@@ -1473,6 +1491,9 @@ async def delete_monitoring_policy(
     policy = await db.get(MonitoringPolicy, policy_id)
     if policy is None:
         raise HTTPException(status_code=404, detail="Monitoring policy not found")
+    await monitoring_core.resolve_policy_alerts(
+        db, policy.id, reason="policy_deleted"
+    )
     await audit.record(
         db,
         action="monitoring_policy.deleted",
@@ -1649,6 +1670,65 @@ async def list_agent_monitoring_results(
         ).scalars().all()
     )
     return CheckResultListOut(agent_id=agent_id, items=rows)
+
+
+@router.get("/monitoring/alerts", response_model=AlertListOut)
+async def list_monitoring_alerts(
+    agent_id: str | None = Query(default=None, max_length=36),
+    policy_id: str | None = Query(default=None, max_length=36),
+    check_key: str | None = Query(default=None, max_length=64),
+    state: AlertState | None = Query(default=None),
+    result_status: CheckResultStatus | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    conditions = []
+    if agent_id is not None:
+        conditions.append(Alert.agent_id == agent_id)
+    if policy_id is not None:
+        conditions.append(Alert.policy_id == policy_id)
+    if check_key is not None:
+        conditions.append(Alert.check_key == check_key)
+    if state is not None:
+        conditions.append(Alert.state == state)
+    if result_status is not None:
+        conditions.append(Alert.last_result_status == result_status)
+    rows = list(
+        (
+            await db.execute(
+                select(Alert)
+                .where(*conditions)
+                .order_by(Alert.last_observed_at.desc(), Alert.id.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+    )
+    return AlertListOut(items=rows)
+
+
+@router.get("/monitoring/alerts/{alert_id}", response_model=AlertDetailOut)
+async def get_monitoring_alert(
+    alert_id: str, db: AsyncSession = Depends(get_db)
+):
+    alert = await db.get(Alert, alert_id)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Monitoring alert not found")
+    observations = list(
+        (
+            await db.execute(
+                select(AlertObservation)
+                .where(AlertObservation.alert_id == alert.id)
+                .order_by(
+                    AlertObservation.evaluated_at.desc(),
+                    AlertObservation.check_result_id.desc(),
+                )
+                .limit(100)
+            )
+        ).scalars().all()
+    )
+    return AlertDetailOut.model_validate(
+        {**AlertOut.model_validate(alert).model_dump(), "observations": observations}
+    )
 
 
 # --------------------------------------------------------------------------- #

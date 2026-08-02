@@ -152,6 +152,19 @@ class CheckResultStatus(str, enum.Enum):
     unknown = "unknown"
 
 
+class AlertState(str, enum.Enum):
+    """Lifecycle state for one deduplicated monitoring alert.
+
+    #43 drives ``open`` and automatic ``resolved`` transitions. The
+    ``acknowledged`` value is reserved for #44's role-gated technician action
+    so mixed server versions share one stable database contract.
+    """
+
+    open = "open"
+    acknowledged = "acknowledged"
+    resolved = "resolved"
+
+
 class Client(Base):
     __tablename__ = "clients"
 
@@ -724,3 +737,102 @@ class CheckResult(Base):
     )
 
     agent: Mapped["Agent"] = relationship()
+
+
+class Alert(Base):
+    """Current state of one policy/endpoint/check alert identity (#43).
+
+    A row is reused across automatic recovery and retrigger cycles. This keeps
+    one logical alert per identity while ``generation`` and the current/lifetime
+    occurrence counters preserve incident boundaries. Policy ids are retained
+    as provenance rather than foreign keys so deleting a policy cannot erase
+    its operational evidence.
+    """
+
+    __tablename__ = "alerts"
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_id", "policy_id", "check_key", name="ux_alert_identity"
+        ),
+        Index("ix_alerts_state_last_observed", "state", "last_observed_at"),
+        Index("ix_alerts_agent_state", "agent_id", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
+    policy_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    policy_revision_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    check_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[AlertState] = mapped_column(
+        Enum(AlertState, values_callable=lambda enum_type: [item.value for item in enum_type]),
+        nullable=False,
+    )
+    last_result_status: Mapped[CheckResultStatus] = mapped_column(
+        Enum(
+            CheckResultStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_occurrence_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    first_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_result_id: Mapped[str | None] = mapped_column(String(36))
+    last_value: Mapped[float | None] = mapped_column(Float)
+    resolution_reason: Mapped[str | None] = mapped_column(String(64))
+    suppression_window_id: Mapped[str | None] = mapped_column(String(36))
+    suppressed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+    agent: Mapped["Agent"] = relationship()
+
+
+class AlertObservation(Base):
+    """Exactly-once evidence that a check result was considered for an alert.
+
+    The result id is the primary key and cascades with check-result retention,
+    keeping this evidence bounded by the existing per-check history policy.
+    ``out_of_order`` distinguishes evidence that was counted but correctly did
+    not overwrite a newer alert state.
+    """
+
+    __tablename__ = "alert_observations"
+    __table_args__ = (
+        Index("ix_alert_observations_alert_evaluated", "alert_id", "evaluated_at"),
+    )
+
+    check_result_id: Mapped[str] = mapped_column(
+        ForeignKey("check_results.id", ondelete="CASCADE"), primary_key=True
+    )
+    alert_id: Mapped[str] = mapped_column(
+        ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[CheckResultStatus] = mapped_column(
+        Enum(
+            CheckResultStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    value: Mapped[float | None] = mapped_column(Float)
+    evaluated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    out_of_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )

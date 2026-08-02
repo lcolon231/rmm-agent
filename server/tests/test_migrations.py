@@ -80,6 +80,8 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "monitoring_policy_revisions",
         "maintenance_windows",
         "check_results",
+        "alerts",
+        "alert_observations",
     } <= tables
     assert "agent_completed_at" in command_columns
     assert {

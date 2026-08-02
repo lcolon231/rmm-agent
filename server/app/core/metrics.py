@@ -56,6 +56,15 @@ def prometheus_text(agent_statuses: dict[str, int] | None = None) -> str:
         "monitoring_result_duplicate_total",
         "monitoring_result_rejected_total",
         "monitoring_offline_evaluation_total",
+        "monitoring_alert_opened_total",
+        "monitoring_alert_occurrence_total",
+        "monitoring_alert_recovered_total",
+        "monitoring_alert_reopened_total",
+        "monitoring_alert_suppressed_occurrence_total",
+        "monitoring_alert_out_of_order_total",
+        "monitoring_alert_policy_change_total",
+        "monitoring_alert_policy_superseded_total",
+        "monitoring_alert_duplicate_observation_total",
     ):
         operation = name.removeprefix("monitoring_").removesuffix("_total")
         lines.append(

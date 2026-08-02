@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Monitoring policy, evaluation, and check-result behavior (#41/#42)."""
+"""Monitoring policy, evaluation, result, and alert behavior (#41-#43)."""
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -25,6 +26,9 @@ from app.core.security import hash_password  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.models import (  # noqa: E402
     Agent,
+    Alert,
+    AlertObservation,
+    AlertState,
     AuditEvent,
     CheckResult,
     CheckResultStatus,
@@ -697,3 +701,353 @@ async def test_offline_check_cadence_hysteresis_and_recovery(operator_client):
         CheckResultStatus.ok,
     ]
     assert history[-1].detail["reason"] == "heartbeat_within_threshold"
+
+
+@pytest.mark.asyncio
+async def test_alert_dedup_recovery_retrigger_suppression_and_read_api(
+    operator_client,
+):
+    _, _, agent_id, agent_token = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name="Alert lifecycle",
+        scope="global",
+        scope_id=None,
+        checks=[_numeric_check("cpu")],
+    )
+    revision_id = policy["revisions"][0]["id"]
+    now = datetime.now(timezone.utc)
+    window = await operator_client.post(
+        "/monitoring/maintenance-windows",
+        json={
+            "name": "Planned work",
+            "scope": "global",
+            "scope_id": None,
+            "starts_at": (now - timedelta(minutes=1)).isoformat(),
+            "ends_at": (now + timedelta(minutes=10)).isoformat(),
+        },
+    )
+    assert window.status_code == 201, window.text
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://t/api/v1",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    ) as agent_client:
+        def result(result_id: str, status: str, offset: int, value: float) -> dict:
+            return {
+                "id": result_id * 32,
+                "policy_id": policy["id"],
+                "policy_revision_id": revision_id,
+                "check_key": "cpu",
+                "status": status,
+                "value": value,
+                "detail": {"reason": "test"},
+                "evaluated_at": (now + timedelta(seconds=offset)).isoformat(),
+            }
+
+        warning = result("1", "warning", 0, 85)
+        critical = result("2", "critical", 1, 99)
+        recovered = result("3", "ok", 2, 20)
+        reopened = result("4", "warning", 3, 82)
+        for payload in (warning, critical):
+            response = await agent_client.post(
+                "/agents/me/monitoring/results", json={"results": [payload]}
+            )
+            assert response.status_code == 200, response.text
+        duplicate = await agent_client.post(
+            "/agents/me/monitoring/results", json={"results": [critical]}
+        )
+        assert duplicate.json()["duplicates"] == 1
+        for payload in (recovered, reopened):
+            response = await agent_client.post(
+                "/agents/me/monitoring/results", json={"results": [payload]}
+            )
+            assert response.status_code == 200, response.text
+
+    listing = await operator_client.get(
+        f"/monitoring/alerts?agent_id={agent_id}&state=open"
+    )
+    assert listing.status_code == 200, listing.text
+    assert len(listing.json()["items"]) == 1
+    alert = listing.json()["items"][0]
+    assert alert["policy_id"] == policy["id"]
+    assert alert["generation"] == 2
+    assert alert["occurrence_count"] == 1
+    assert alert["total_occurrence_count"] == 3
+    assert alert["suppression_window_id"] == window.json()["id"]
+    assert alert["suppressed_until"] is not None
+
+    detail = await operator_client.get(f"/monitoring/alerts/{alert['id']}")
+    assert detail.status_code == 200
+    assert len(detail.json()["observations"]) == 4
+    assert {item["status"] for item in detail.json()["observations"]} == {
+        "ok",
+        "warning",
+        "critical",
+    }
+    async with AsyncSessionLocal() as db:
+        assert await monitoring_core.prune_check_results(db, keep=2) == 2
+        await db.commit()
+    retained = await operator_client.get(f"/monitoring/alerts/{alert['id']}")
+    assert len(retained.json()["observations"]) == 2
+    assert (
+        await operator_client.get("/monitoring/alerts/missing")
+    ).status_code == 404
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://t/api/v1"
+    ) as anonymous:
+        assert (await anonymous.get("/monitoring/alerts")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_alert_ignores_out_of_order_state_and_closes_on_policy_changes(
+    operator_client,
+):
+    _, _, agent_id, agent_token = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name="Policy lifecycle",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_numeric_check("cpu")],
+    )
+    revision_id = policy["revisions"][0]["id"]
+    now = datetime.now(timezone.utc)
+    base = {
+        "policy_id": policy["id"],
+        "policy_revision_id": revision_id,
+        "check_key": "cpu",
+        "value": 90,
+        "detail": {"reason": "test"},
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://t/api/v1",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    ) as agent_client:
+        newer = await agent_client.post(
+            "/agents/me/monitoring/results",
+            json={
+                "results": [
+                    {
+                        **base,
+                        "id": "f" * 32,
+                        "status": "warning",
+                        "evaluated_at": now.isoformat(),
+                    }
+                ]
+            },
+        )
+        assert newer.status_code == 200, newer.text
+        older = await agent_client.post(
+            "/agents/me/monitoring/results",
+            json={
+                "results": [
+                    {
+                        **base,
+                        "id": "e" * 32,
+                        "status": "ok",
+                        "value": 20,
+                        "evaluated_at": (now - timedelta(seconds=1)).isoformat(),
+                    }
+                ]
+            },
+        )
+        assert older.status_code == 200, older.text
+
+    alerts = (
+        await operator_client.get(f"/monitoring/alerts?policy_id={policy['id']}")
+    ).json()["items"]
+    assert len(alerts) == 1
+    assert alerts[0]["state"] == "open"
+    assert alerts[0]["last_result_id"] == "f" * 32
+    detail = (
+        await operator_client.get(f"/monitoring/alerts/{alerts[0]['id']}")
+    ).json()
+    assert sum(item["out_of_order"] for item in detail["observations"]) == 1
+
+    revised = await operator_client.put(
+        f"/monitoring/policies/{policy['id']}",
+        json={"checks": [], "change_note": "Remove CPU"},
+    )
+    assert revised.status_code == 200, revised.text
+    closed = (
+        await operator_client.get(f"/monitoring/alerts?policy_id={policy['id']}")
+    ).json()["items"][0]
+    assert closed["state"] == "resolved"
+    assert closed["resolution_reason"] == "policy_revised"
+
+    deleted_policy = await _create_policy(
+        operator_client,
+        name="Delete lifecycle",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_numeric_check("memory", "memory")],
+    )
+    async with AsyncSessionLocal() as db:
+        await monitoring_core.record_check_result(
+            db,
+            result_id="d" * 32,
+            agent_id=agent_id,
+            policy_id=deleted_policy["id"],
+            policy_revision_id=deleted_policy["revisions"][0]["id"],
+            check_key="memory",
+            status=CheckResultStatus.warning,
+            value=88,
+            evaluated_at=now + timedelta(seconds=2),
+        )
+        await db.commit()
+    deleted = await operator_client.delete(
+        f"/monitoring/policies/{deleted_policy['id']}"
+    )
+    assert deleted.status_code == 204
+    closed = (
+        await operator_client.get(
+            f"/monitoring/alerts?policy_id={deleted_policy['id']}"
+        )
+    ).json()["items"][0]
+    assert closed["state"] == "resolved"
+    assert closed["resolution_reason"] == "policy_deleted"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_results_share_one_alert_and_count_once(operator_client):
+    _, _, agent_id, _ = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name="Concurrent alert",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_numeric_check("cpu")],
+    )
+    revision_id = policy["revisions"][0]["id"]
+    evaluated_at = datetime.now(timezone.utc)
+
+    async def write(result_id: str, status: CheckResultStatus) -> None:
+        async with AsyncSessionLocal() as db:
+            await monitoring_core.record_check_result(
+                db,
+                result_id=result_id,
+                agent_id=agent_id,
+                policy_id=policy["id"],
+                policy_revision_id=revision_id,
+                check_key="cpu",
+                status=status,
+                value=90,
+                evaluated_at=evaluated_at,
+            )
+            await db.commit()
+
+    await asyncio.gather(
+        write("a" * 32, CheckResultStatus.warning),
+        write("b" * 32, CheckResultStatus.critical),
+    )
+    async with AsyncSessionLocal() as db:
+        alerts = list(
+            (
+                await db.execute(
+                    select(Alert).where(Alert.policy_id == policy["id"])
+                )
+            ).scalars().all()
+        )
+        observations = list(
+            (
+                await db.execute(
+                    select(AlertObservation).where(
+                        AlertObservation.alert_id == alerts[0].id
+                    )
+                )
+            ).scalars().all()
+        )
+    assert len(alerts) == 1
+    assert alerts[0].state == AlertState.open
+    assert alerts[0].occurrence_count == 2
+    assert alerts[0].total_occurrence_count == 2
+    assert len(observations) == 2
+
+    async with AsyncSessionLocal() as db:
+        repeated = await db.get(CheckResult, "a" * 32)
+        await monitoring_core.apply_check_result_to_alert(db, repeated)
+        await db.commit()
+        unchanged = await db.get(Alert, alerts[0].id)
+        observation_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(AlertObservation)
+                .where(AlertObservation.alert_id == alerts[0].id)
+            )
+        ).scalar_one()
+    assert unchanged.total_occurrence_count == 2
+    assert observation_count == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_same_result_retry_is_acknowledged_once(operator_client):
+    _, _, agent_id, agent_token = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name="Concurrent retry",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_numeric_check("cpu")],
+    )
+    payload = {
+        "results": [
+            {
+                "id": "c" * 32,
+                "policy_id": policy["id"],
+                "policy_revision_id": policy["revisions"][0]["id"],
+                "check_key": "cpu",
+                "status": "warning",
+                "value": 88,
+                "detail": {"reason": "concurrent_retry"},
+                "evaluated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+    }
+
+    async def submit() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://t/api/v1",
+            headers={"Authorization": f"Bearer {agent_token}"},
+        ) as agent_client:
+            return await agent_client.post(
+                "/agents/me/monitoring/results", json=payload
+            )
+
+    responses = await asyncio.gather(submit(), submit())
+    assert all(response.status_code == 200 for response in responses)
+    assert sorted(
+        (response.json()["accepted"], response.json()["duplicates"])
+        for response in responses
+    ) == [(0, 1), (1, 0)]
+
+    async with AsyncSessionLocal() as db:
+        result_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(CheckResult)
+                .where(CheckResult.id == "c" * 32)
+            )
+        ).scalar_one()
+        alerts = list(
+            (
+                await db.execute(
+                    select(Alert).where(Alert.policy_id == policy["id"])
+                )
+            ).scalars().all()
+        )
+        observation_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(AlertObservation)
+                .where(AlertObservation.alert_id == alerts[0].id)
+            )
+        ).scalar_one()
+    assert result_count == 1
+    assert len(alerts) == 1
+    assert alerts[0].total_occurrence_count == 1
+    assert observation_count == 1
