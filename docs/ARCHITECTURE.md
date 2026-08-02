@@ -301,9 +301,10 @@ the most-specific definition winning for each check key; an `enabled=false`
 definition removes an inherited key. `MaintenanceWindow` records a validated
 scoped time range, while `CheckResult` is the append-only result contract with
 newest-N retention per `(agent, check_key)`. Issue #41 defines these models,
-operator APIs, resolution, retention, and the read-only dashboard only. Agent
-execution and result ingestion are #42; alert state/deduplication and applying
-maintenance windows are #43+.
+operator APIs, resolution, retention, and the read-only dashboard. Issue #42
+adds revision-pinned heartbeat assignments, durable agent evaluation/ingestion,
+and server-owned offline evaluation without changing the result table. Alert
+state/deduplication and applying maintenance windows are #43+.
 
 ### 4.2 API surface
 
@@ -324,6 +325,7 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/enroll` | Enroll with site token | Enrollment token |
 | POST | `/heartbeat` | Store telemetry, advertise inventory hashes, poll commands | Agent token |
 | POST | `/agents/me/inventory` | Submit requested inventory sections | Agent token |
+| POST | `/agents/me/monitoring/results` | Submit revision-pinned idempotent check results | Agent token |
 | POST | `/commands/{id}/result` | Submit buffered result | Agent token |
 | POST/GET | `/clients` | Create/list clients | Operator / Readonly |
 | POST | `/sites` | Create site | Operator |
@@ -358,9 +360,9 @@ event-detail, and anchor/receipt verification views are implemented. Client/site
 creation and operator listing, creation, global-role change, disable/re-enable,
 script-permission administration, and session revocation are implemented in the
 dashboard. Deleting identities and password lifecycle operations remain absent.
-Monitoring policy models and read APIs are implemented; agent-side check
-execution, alert state, notification delivery, scheduling, patching, and
-evidence export remain absent. Telemetry history is
+Monitoring policy models, read APIs, the initial six checks, and result
+ingestion are implemented; alert state, notification delivery, general task
+scheduling, patching, and evidence export remain absent. Telemetry history is
 available only as a bounded read-only endpoint-detail query, not as a general
 analytics API.
 
@@ -374,6 +376,13 @@ installer lifecycle behavior is exercised in Windows CI: a lifecycle script driv
 
 The current Windows telemetry collector shells out to PowerShell/CIM once per
 heartbeat for CPU, memory, system drive, uptime, user, and OS version.
+The heartbeat response also carries the revision-pinned effective monitoring
+policy. The agent evaluates due CPU, memory, disk, service, and pending-reboot
+checks, persists cadence/hysteresis state plus a bounded result outbox, and
+uploads idempotently. The server heartbeat sweeper evaluates offline checks
+from `last_seen_at`. Missing, stale, unsupported, and probe-budget states become
+explicit `unknown` results rather than passing samples. The complete contract,
+rollout order, and bounds are documented in `docs/MONITORING.md`.
 
 Hardware inventory is collected separately and once per process, not per beat:
 manufacturer/model/serial/BIOS, CPU, memory totals and modules, disks and

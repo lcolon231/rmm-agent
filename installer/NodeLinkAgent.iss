@@ -78,6 +78,7 @@ Filename: "{app}\rmm-agent.exe"; Parameters: "uninstall"; Flags: runhidden waitu
 Type: files; Name: "{app}\config.json"
 Type: files; Name: "{app}\identity.json"
 Type: files; Name: "{app}\seen_commands.json"
+Type: files; Name: "{app}\monitoring_state.json"
 Type: dirifempty; Name: "{app}"
 
 [Code]

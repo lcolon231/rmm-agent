@@ -13,7 +13,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_agent
-from app.core import audit, inventory, metrics
+from app.core import audit, inventory, metrics, monitoring
 from app.core.clientip import client_ip
 from app.core.command_envelope import (
     SUPPORTED_COMMAND_ENVELOPE_VERSIONS,
@@ -36,6 +36,9 @@ from app.models.models import (
     Agent,
     AgentStatus,
     AgentTrustState,
+    CheckResult,
+    CheckResultStatus,
+    CheckType,
     Command,
     CommandStatus,
     Site,
@@ -44,6 +47,11 @@ from app.schemas.inventory import (
     InventorySubmission,
     canonical_inventory_bytes,
     inventory_content_hash,
+)
+from app.schemas.monitoring import (
+    AgentCheckAssignment,
+    AgentCheckResultAck,
+    AgentCheckResultBatchIn,
 )
 from app.schemas.schemas import (
     AgentCredentialRenewResponse,
@@ -381,7 +389,140 @@ async def heartbeat(
         command_public_keys=public_key_bundle_pem(),
         trust_state=agent.trust_state,
         inventory_requested=inventory_requested,
+        monitoring_checks=[
+            AgentCheckAssignment(
+                definition=item.definition,
+                policy_id=item.source_policy_id,
+                policy_revision_id=item.source_revision_id,
+            )
+            for item in await monitoring.resolve_effective_policy(db, agent)
+            if item.definition.type != CheckType.offline
+        ],
     )
+
+
+@router.post(
+    "/agents/me/monitoring/results",
+    response_model=AgentCheckResultAck,
+)
+async def submit_monitoring_results(
+    body: AgentCheckResultBatchIn,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    """Accept a bounded, revision-pinned batch of durable evaluations."""
+    if agent.trust_state != AgentTrustState.active:
+        metrics.increment("monitoring_result_rejected_total")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "agent_not_active"},
+        )
+
+    effective = {
+        item.definition.key: item
+        for item in await monitoring.resolve_effective_policy(db, agent)
+    }
+    now = _now()
+    accepted = 0
+    duplicates = 0
+
+    for result in body.results:
+        assignment = effective.get(result.check_key)
+        if (
+            assignment is None
+            or assignment.source_policy_id != result.policy_id
+            or assignment.source_revision_id != result.policy_revision_id
+        ):
+            metrics.increment("monitoring_result_rejected_total")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "monitoring_policy_superseded"},
+            )
+        definition = assignment.definition
+        if definition.type == CheckType.offline:
+            metrics.increment("monitoring_result_rejected_total")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "offline_check_is_server_owned"},
+            )
+
+        evaluated_at = ensure_utc(result.evaluated_at)
+        max_age_seconds = max(definition.schedule.interval_seconds * 3, 300)
+        if evaluated_at > now + timedelta(minutes=5):
+            metrics.increment("monitoring_result_rejected_total")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "monitoring_result_from_future"},
+            )
+        if evaluated_at < now - timedelta(seconds=max_age_seconds):
+            metrics.increment("monitoring_result_rejected_total")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "monitoring_result_stale"},
+            )
+
+        numeric_types = {
+            CheckType.cpu,
+            CheckType.memory,
+            CheckType.disk,
+            CheckType.uptime,
+        }
+        if (
+            definition.type in numeric_types
+            and result.status != CheckResultStatus.unknown
+            and result.value is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "monitoring_result_value_required"},
+            )
+        if (
+            definition.type in {CheckType.cpu, CheckType.memory, CheckType.disk}
+            and result.value is not None
+            and not 0 <= result.value <= 100
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "monitoring_result_value_out_of_range"},
+            )
+
+        existing = await db.get(CheckResult, result.id)
+        if existing is not None:
+            if (
+                existing.agent_id != agent.id
+                or existing.check_key != result.check_key
+                or existing.policy_id != result.policy_id
+                or existing.policy_revision_id != result.policy_revision_id
+                or existing.status != result.status
+                or existing.value != result.value
+                or existing.detail != result.detail
+                or ensure_utc(existing.evaluated_at) != evaluated_at
+            ):
+                metrics.increment("monitoring_result_rejected_total")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "monitoring_result_id_conflict"},
+                )
+            duplicates += 1
+            continue
+
+        await monitoring.record_check_result(
+            db,
+            result_id=result.id,
+            agent_id=agent.id,
+            policy_id=result.policy_id,
+            policy_revision_id=result.policy_revision_id,
+            check_key=result.check_key,
+            status=result.status,
+            value=result.value,
+            detail=result.detail,
+            evaluated_at=evaluated_at,
+        )
+        accepted += 1
+
+    metrics.increment("monitoring_result_accepted_total", accepted)
+    metrics.increment("monitoring_result_duplicate_total", duplicates)
+    return AgentCheckResultAck(accepted=accepted, duplicates=duplicates)
 
 
 @router.post("/agents/me/inventory", response_model=InventoryAck)

@@ -106,8 +106,11 @@ The code in this repository currently provides:
   retained newest-N per endpoint/check key. Operator APIs provide role-gated,
   audited policy/window management plus effective-policy and result reads; the
   dashboard provides a read-only policy list, current check set, and revision
-  history. Agent-side execution, result ingestion, alert state, and maintenance
-  enforcement remain later issues.
+  history. Active agents now execute cadence- and hysteresis-bounded CPU,
+  memory, disk, service, and pending-reboot checks with a durable idempotent
+  result outbox; the server evaluates offline checks from heartbeat age and
+  validates revision-pinned result ingestion. See `docs/MONITORING.md`. Alert
+  state and maintenance enforcement remain later issues.
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation
   recorded in command and audit data). Completed results are DPAPI-protected
@@ -243,7 +246,11 @@ After `v0.1.2`, `main` has:
 - added the phase-1 monitoring foundation (#41): append-only scoped policy
   revisions, typed check definitions, deterministic inheritance, maintenance
   windows, bounded check-result history, role-gated audited APIs, and read-only
-  dashboard policy views; and
+  dashboard policy views;
+- implemented the first monitoring checks (#42): server-owned offline
+  evaluation plus agent CPU, memory, disk, service, pending-reboot, and retained
+  uptime evaluation with bounded cadence, hysteresis, durable idempotent
+  delivery, explicit unknown states, and revision-pinned ingestion; and
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
@@ -283,10 +290,10 @@ The repository does **not** currently contain:
   signed expiry.
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, or TPM
   inventory beyond the read-only sections described above.
-- Agent-side monitoring check execution and result ingestion, alert
-  deduplication/state, acknowledgement, maintenance-window enforcement, email,
-  or webhook notifications. Policy, maintenance-window, and check-result
-  foundation models are implemented.
+- Monitoring alert deduplication/state, acknowledgement,
+  maintenance-window enforcement, email, or webhook notifications. Policy,
+  initial check execution, maintenance-window, and check-result ingestion are
+  implemented.
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
 - A least-privilege agent service account.

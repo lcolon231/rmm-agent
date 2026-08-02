@@ -27,6 +27,7 @@ from app.models.models import (
     ScriptExecutionScope,
 )
 from app.core.command_envelope import format_command_time, validate_command_payload
+from app.schemas.monitoring import AgentCheckAssignment
 
 
 # --------------------------------------------------------------------------- #
@@ -369,6 +370,7 @@ class HeartbeatAck(BaseModel):
     # refresh interval. Empty means "nothing to send" — the common case, so a
     # steady-state endpoint transfers no inventory bytes at all.
     inventory_requested: list[str] = Field(default_factory=list)
+    monitoring_checks: list["AgentCheckAssignment"] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #

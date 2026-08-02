@@ -88,12 +88,18 @@ func collect(ctx context.Context) Sample {
 		disk = float64(totalB-free) / float64(totalB) * 100.0
 	}
 
+	uptime, uptimeOK := uptimeSeconds()
 	return Sample{
-		CPUPercent:    round2(cpu),
-		MemPercent:    round2(mem),
-		DiskPercent:   round2(disk),
-		UptimeSeconds: uptimeSeconds(),
-		LoggedInUser:  os.Getenv("USER"),
+		CPUPercent:      round2(cpu),
+		MemPercent:      round2(mem),
+		DiskPercent:     round2(disk),
+		UptimeSeconds:   uptime,
+		LoggedInUser:    os.Getenv("USER"),
+		CollectedAt:     time.Now().UTC(),
+		CPUAvailable:    total2 > total1,
+		MemAvailable:    memTotal > 0,
+		DiskAvailable:   st.Blocks > 0,
+		UptimeAvailable: uptimeOK,
 	}
 }
 
@@ -119,17 +125,17 @@ func meminfo() (total, avail uint64) {
 	return total, avail
 }
 
-func uptimeSeconds() int64 {
+func uptimeSeconds() (int64, bool) {
 	data, err := os.ReadFile("/proc/uptime")
 	if err != nil {
-		return 0
+		return 0, false
 	}
 	fields := strings.Fields(string(data))
 	if len(fields) == 0 {
-		return 0
+		return 0, false
 	}
-	f, _ := strconv.ParseFloat(fields[0], 64)
-	return int64(f)
+	f, err := strconv.ParseFloat(fields[0], 64)
+	return int64(f), err == nil
 }
 
 func round2(f float64) float64 {

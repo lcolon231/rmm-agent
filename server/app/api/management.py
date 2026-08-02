@@ -1524,6 +1524,7 @@ async def get_agent_effective_monitoring_policy(
                 definition=item.definition,
                 source_scope=item.source_scope,
                 source_policy_id=item.source_policy_id,
+                source_revision_id=item.source_revision_id,
                 source_policy_name=item.source_policy_name,
             )
             for item in checks

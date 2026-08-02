@@ -157,6 +157,14 @@ Each heartbeat reports CPU %, memory %, disk % (system drive), uptime, and the
 logged-in user. On Windows these come from CIM/WMI queries via PowerShell; on
 Linux from `/proc` and `statfs`.
 
+The heartbeat response can also carry revision-pinned monitoring checks. The
+agent evaluates due CPU, memory, disk, Windows-service, and pending-reboot
+checks and persists hysteresis/cadence state plus unsent results in
+`monitoring_state.json`. Uploads use durable result IDs, so a lost response is
+retried idempotently after restart. The server evaluates offline checks because
+an unreachable endpoint cannot report its own state. See
+[`docs/MONITORING.md`](../docs/MONITORING.md).
+
 Complete hardware/software inventory and Windows security-state inventory are
 not implemented. Although the API accepts an optional inventory object, this
 agent currently sends `nil`; `collect_inventory` only executes the supplied

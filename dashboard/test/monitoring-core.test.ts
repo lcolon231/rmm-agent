@@ -73,6 +73,16 @@ test("policy detail validates every nested check and revision", () => {
   );
 });
 
+test("offline checks are accepted as a supported monitoring contract", () => {
+  const detail = monitoringPolicyDetailFromUnknown({
+    ...summary,
+    checks: [{ ...check, key: "offline", type: "offline" }],
+    revisions: [],
+  });
+  assert.ok(detail);
+  assert.equal(detail.checks[0].type, "offline");
+});
+
 test("scope, schedule, threshold, and timestamps format explicitly", () => {
   assert.equal(formatMonitoringScope("global"), "Global");
   assert.equal(formatMonitoringScope("agent"), "Agent");

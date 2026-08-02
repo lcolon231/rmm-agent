@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // osVersion returns the Windows product name and build.
@@ -26,12 +27,21 @@ func osVersion() string {
 // acceptable at a 60s cadence. A future optimization is to call the Win32 APIs
 // directly via golang.org/x/sys/windows.
 func collect(ctx context.Context) Sample {
+	cpu, cpuOK := cpuPercent(ctx)
+	mem, memOK := memPercent(ctx)
+	disk, diskOK := diskPercent(ctx)
+	uptime, uptimeOK := uptimeSeconds(ctx)
 	return Sample{
-		CPUPercent:    round2(cpuPercent(ctx)),
-		MemPercent:    round2(memPercent(ctx)),
-		DiskPercent:   round2(diskPercent(ctx)),
-		UptimeSeconds: uptimeSeconds(ctx),
-		LoggedInUser:  loggedInUser(ctx),
+		CPUPercent:      round2(cpu),
+		MemPercent:      round2(mem),
+		DiskPercent:     round2(disk),
+		UptimeSeconds:   uptime,
+		LoggedInUser:    loggedInUser(ctx),
+		CollectedAt:     time.Now().UTC(),
+		CPUAvailable:    cpuOK,
+		MemAvailable:    memOK,
+		DiskAvailable:   diskOK,
+		UptimeAvailable: uptimeOK,
 	}
 }
 
@@ -42,32 +52,32 @@ func psOutput(ctx context.Context, script string) (string, error) {
 	return string(out), err
 }
 
-func psFloat(ctx context.Context, script string) float64 {
+func psFloat(ctx context.Context, script string) (float64, bool) {
 	out, err := psOutput(ctx, script)
 	if err != nil {
-		return 0
+		return 0, false
 	}
-	f, _ := strconv.ParseFloat(strings.TrimSpace(strings.ReplaceAll(out, ",", ".")), 64)
-	return f
+	f, err := strconv.ParseFloat(strings.TrimSpace(strings.ReplaceAll(out, ",", ".")), 64)
+	return f, err == nil
 }
 
-func cpuPercent(ctx context.Context) float64 {
+func cpuPercent(ctx context.Context) (float64, bool) {
 	return psFloat(ctx, `(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average`)
 }
 
-func memPercent(ctx context.Context) float64 {
+func memPercent(ctx context.Context) (float64, bool) {
 	return psFloat(ctx, `$o=Get-CimInstance Win32_OperatingSystem; `+
 		`[math]::Round((($o.TotalVisibleMemorySize - $o.FreePhysicalMemory) / $o.TotalVisibleMemorySize) * 100, 2)`)
 }
 
-func diskPercent(ctx context.Context) float64 {
+func diskPercent(ctx context.Context) (float64, bool) {
 	return psFloat(ctx, `$d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; `+
 		`[math]::Round((($d.Size - $d.FreeSpace) / $d.Size) * 100, 2)`)
 }
 
-func uptimeSeconds(ctx context.Context) int64 {
-	f := psFloat(ctx, `[int]((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds`)
-	return int64(f)
+func uptimeSeconds(ctx context.Context) (int64, bool) {
+	f, ok := psFloat(ctx, `[int]((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds`)
+	return int64(f), ok
 }
 
 func loggedInUser(ctx context.Context) string {

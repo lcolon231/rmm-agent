@@ -162,6 +162,15 @@ pilot record.
 
 ## Milestone 1 — secure the technician product
 
+Initial monitoring execution now uses revision-pinned check assignments in
+authenticated heartbeat responses and a bounded agent result-ingestion API.
+The server derives agent identity from the credential, rejects superseded,
+stale, future, non-finite, oversized, and server-owned offline results, and
+deduplicates durable agent result IDs. Quarantined agents receive no checks and
+cannot submit results. Cadence, hysteresis, outbox/probe limits, compatibility,
+and rollback behavior are specified in `docs/MONITORING.md`; alert lifecycle
+authorization and maintenance suppression remain subsequent work.
+
 The dashboard boundary is partially implemented: server-mediated HTTP-only
 sessions, API-enforced role authorization, redacted audited
 client/site/endpoint reads, bounded endpoint telemetry history, and the
