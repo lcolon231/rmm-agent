@@ -3,7 +3,8 @@
 ;
 ; Wraps the existing Go agent binary in an Inno Setup installer so a
 ; non-technical person can install the agent without touching a terminal:
-; pick nothing, enter the server URL + enrollment token, watch progress, done.
+; pick nothing, enter the enrollment token, watch progress, done. The
+; production management-server origin is compiled into this installer.
 ;
 ; The installer does NOT reimplement any service logic. It shells out to the
 ; agent's own CLI verbs (install/start/uninstall — see
@@ -27,6 +28,8 @@
 #ifndef AgentExe
   #define AgentExe "..\agent\bin\rmm-agent-windows-amd64.exe"
 #endif
+
+#define ProductionServerURL "https://nodelink-backend-733e.onrender.com"
 
 [Setup]
 ; Fixed GUID so upgrades/uninstalls always target the same installed app.
@@ -84,51 +87,30 @@ var
 procedure InitializeWizard;
 begin
   ConfigPage := CreateInputQueryPage(wpSelectDir,
-    'Server connection',
-    'How this agent reaches your NodeLink RMM server',
-    'Enter the server address and the one-time enrollment token your ' +
-    'administrator gave you, then click Next.');
-  ConfigPage.Add('Server URL:', False);
+    'Agent enrollment',
+    'Connect this agent to NodeLink',
+    'Enter the one-time enrollment token your administrator gave you, then ' +
+    'click Next. The production server is configured automatically.');
   ConfigPage.Add('Enrollment token:', False);
-  { Prefill the scheme to nudge users toward TLS. }
-  ConfigPage.Values[0] := 'https://';
 end;
 
-{ ServerURL/Token prefer the command-line parameters (/SERVERURL= /TOKEN=),
-  falling back to the wizard inputs. This makes the installer scriptable for
-  unattended/CI deployment (`/VERYSILENT /SERVERURL=... /TOKEN=...`) while the
-  interactive wizard still works when no parameters are passed. }
-function ServerURL: String;
-begin
-  Result := Trim(ExpandConstant('{param:ServerURL|}'));
-  if Result = '' then
-    Result := Trim(ConfigPage.Values[0]);
-end;
-
+{ Token prefers /TOKEN= and falls back to the sole wizard input. This keeps
+  unattended deployment token-only while interactive installs remain simple. }
 function EnrollToken: String;
 begin
   Result := Trim(ExpandConstant('{param:Token|}'));
   if Result = '' then
-    Result := Trim(ConfigPage.Values[1]);
+    Result := Trim(ConfigPage.Values[0]);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  URL, Token: String;
+  Token: String;
 begin
   Result := True;
   if CurPageID = ConfigPage.ID then
   begin
-    URL := ServerURL;
     Token := EnrollToken;
-    { The bare prefill counts as empty. }
-    if (URL = '') or (URL = 'https://') then
-    begin
-      MsgBox('Please enter the server URL, e.g. https://rmm.example.com',
-        mbError, MB_OK);
-      Result := False;
-      exit;
-    end;
     if Token = '' then
     begin
       MsgBox('Please enter the enrollment token from your administrator.',
@@ -154,20 +136,17 @@ end;
   registered, so a malformed value fails loudly at install time. }
 procedure WriteConfig;
 var
-  Path, Json, URL, Token: String;
+  Path, Json, Token: String;
 begin
-  URL := ServerURL;
   Token := EnrollToken;
   { In a silent/unattended install the wizard validation never runs, so guard
-    the values here too rather than write a config the agent will reject. }
-  if (URL = '') or (URL = 'https://') then
-    RaiseException('No server URL provided (pass /SERVERURL= for silent install)');
+    the token here too rather than write a config the agent will reject. }
   if Token = '' then
     RaiseException('No enrollment token provided (pass /TOKEN= for silent install)');
   Path := ExpandConstant('{app}\config.json');
   Json :=
     '{' + #13#10 +
-    '  "server_url": "' + JsonEscape(URL) + '",' + #13#10 +
+    '  "server_url": "{#ProductionServerURL}",' + #13#10 +
     '  "enrollment_token": "' + JsonEscape(Token) + '"' + #13#10 +
     '}' + #13#10;
   if not SaveStringToFile(Path, Json, False) then

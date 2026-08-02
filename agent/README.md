@@ -114,11 +114,11 @@ means "keep trying quietly" until it comes back.
 
 For hands-on installs by non-technical users there is a graphical installer
 (`NodeLinkAgentSetup-<version>.exe`, published with each release) that wraps
-this binary: it prompts for the server URL + enrollment token, writes
-`config.json`, and registers + starts the service by calling the CLI verbs
-below under the hood. See [`installer/README.md`](../installer/README.md).
-The CLI path that follows remains fully supported and is what scripted
-deployments should use.
+this binary: it prompts only for an enrollment token, writes `config.json` with
+the production server URL, and registers + starts the service by calling the
+CLI verbs below under the hood. See
+[`installer/README.md`](../installer/README.md). The CLI path that follows
+remains fully supported for self-hosted or custom-server deployments.
 
 ### CLI install
 

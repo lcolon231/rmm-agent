@@ -2,8 +2,9 @@
 
 A graphical Inno Setup installer that wraps the existing agent binary so a
 non-technical person can install the agent on an endpoint: run the setup,
-enter the server URL and enrollment token, watch the progress page, and get a
-clear "Setup Completed" screen. No terminal required.
+enter the enrollment token, watch the progress page, and get a clear "Setup
+Completed" screen. The production server URL is configured automatically; no
+terminal or server-address entry is required.
 
 The installer targets **x64 Windows** (`ArchitecturesAllowed=x64compatible`).
 Supported Windows versions, editions, and the Server Core CLI path are defined
@@ -19,9 +20,10 @@ separate artifact.
 
 1. Requires Administrator (UAC) — registering a Windows service needs elevation.
 2. Installs `rmm-agent.exe` to `C:\Program Files\NodeLink\Agent`.
-3. Prompts for the **server URL** (prefilled `https://`) and the one-time
-   **enrollment token**; both are required before you can continue.
-4. Writes `config.json` next to the binary from those values.
+3. Prompts only for the one-time **enrollment token**; it is required before
+   you can continue.
+4. Writes `config.json` next to the binary with the fixed production origin
+   `https://nodelink-backend-733e.onrender.com` and the supplied token.
 5. Runs `rmm-agent.exe install -config ...` then `rmm-agent.exe start`, showing
    a status line for each step on the progress page.
 6. On uninstall, runs `rmm-agent.exe uninstall` (stops + removes the service)
@@ -69,12 +71,14 @@ alongside the raw binaries.
 
 ## Relation to the CLI install path
 
-The installer is a wrapper for endpoints; the CLI path in
+The production installer is a wrapper for endpoints; the CLI path in
 [`agent/README.md`](../agent/README.md) (`rmm-agent.exe install -config
 config.json` from an elevated prompt) remains fully supported and is what the
 installer itself calls under the hood. Scripted/mass deployments can keep using
-the CLI or drive this setup silently (`/VERYSILENT` is **not** wired to the
-config prompts — silent installs should use the CLI path instead).
+the CLI with a custom server, or drive this setup silently with
+`/VERYSILENT /TOKEN=<token>`. The production installer does not accept a custom
+server URL; self-hosted deployments should provision `config.json` and use the
+CLI path.
 
 The graphical installer does not prompt for optional `tls_spki_pins`.
 High-assurance deployments should provision `config.json` through the CLI/mass
