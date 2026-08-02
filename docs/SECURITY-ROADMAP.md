@@ -169,7 +169,11 @@ stale, future, non-finite, oversized, and server-owned offline results, and
 deduplicates durable agent result IDs. Quarantined agents receive no checks and
 cannot submit results. Cadence, hysteresis, outbox/probe limits, compatibility,
 and rollback behavior are specified in `docs/MONITORING.md`; alert lifecycle
-authorization and maintenance suppression remain subsequent work.
+authorization remains subsequent work. Deduplicated alert state now uses a
+database uniqueness boundary, row locking, result-keyed exactly-once
+observations, deterministic out-of-order handling, and server-derived
+maintenance suppression metadata (`docs/ALERTS.md`). The new PostgreSQL tables
+enable RLS and revoke direct Supabase Data API roles.
 
 The dashboard boundary is partially implemented: server-mediated HTTP-only
 sessions, API-enforced role authorization, redacted audited
@@ -204,8 +208,10 @@ validated against a fail-closed per-check-type schema before storage. Policy
 revisions are append-only. Every mutation is audited; operator-controlled
 policy/window names and revision notes are stored in the audit chain only as a
 SHA-256 digest plus byte count. The dashboard is intentionally read-only.
-Agent-side evaluation, result ingestion, maintenance-window enforcement, alert
-deduplication, acknowledgement, and delivery remain later Milestone 1 work.
+Agent-side evaluation, result ingestion, maintenance-window suppression
+metadata, and alert deduplication/state are implemented. Technician
+acknowledgement/assignment/manual resolution and notification delivery remain
+later Milestone 1 work.
 
 - Use server-mediated dashboard sessions with secure cookie, CSRF, expiration,
   logout, revocation, and role-change behavior. Do not persist operator bearer

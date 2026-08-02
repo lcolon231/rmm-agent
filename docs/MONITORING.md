@@ -2,8 +2,8 @@
 
 Issue #42 implements the first executable monitoring checks on top of the
 versioned policy and result foundation from #41. This document defines the
-runtime contract; alert creation, acknowledgement, notifications, and
-maintenance-window enforcement remain separate issues.
+runtime contract. Issue #43's alert-state extension is documented in
+`docs/ALERTS.md`; technician actions and notifications remain separate issues.
 
 ## Data flow
 
@@ -21,6 +21,9 @@ maintenance-window enforcement remain separate issues.
 6. Agent-generated 128-bit result IDs are idempotency keys. A lost response is
    retried with the same IDs and acknowledged as a duplicate without creating
    another row.
+7. Each accepted revision-pinned result updates one deduplicated
+   policy/endpoint/check alert identity. Failure/unknown results open or update
+   it, healthy results recover it, and a later failure reopens a new generation.
 
 When a successful heartbeat replaces or removes a policy revision, the agent
 discards queued results pinned to the superseded assignment before evaluating
@@ -81,6 +84,9 @@ survive restarts in `monitoring_state.json`.
   make result upload unavailable; command processing remains independent, and
   the bounded outbox retries after the compatible server returns.
 
-Check results are operational evidence and metrics, not audit-log events. Policy
-and maintenance-window mutations remain role-gated and audited. Alert lifecycle
-and maintenance suppression begin with issues #43 and #44.
+Check results and automatic alert transitions are operational evidence and
+metrics, not operator audit events. Policy and maintenance-window mutations
+remain role-gated and audited. Matching maintenance windows annotate failing
+alert occurrences with a server-derived suppression deadline while retaining
+the visible incident. Technician acknowledgement, assignment, comments, manual
+resolution, and immutable actor history begin with issue #44.

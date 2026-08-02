@@ -304,7 +304,10 @@ newest-N retention per `(agent, check_key)`. Issue #41 defines these models,
 operator APIs, resolution, retention, and the read-only dashboard. Issue #42
 adds revision-pinned heartbeat assignments, durable agent evaluation/ingestion,
 and server-owned offline evaluation without changing the result table. Alert
-state/deduplication and applying maintenance windows are #43+.
+state in `Alert` is deduplicated by policy/endpoint/check in #43, with
+check-result-keyed observations, automatic recovery/reopen, policy cleanup,
+and maintenance-window suppression metadata. Technician lifecycle actions and
+immutable actor history are #44.
 
 ### 4.2 API surface
 
@@ -353,6 +356,8 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST/GET | `/monitoring/maintenance-windows` | Create/list scoped maintenance windows | Operator / Readonly |
 | DELETE | `/monitoring/maintenance-windows/{id}` | Delete a maintenance window | Operator |
 | GET | `/agents/{id}/monitoring/results` | Read bounded check-result history | Readonly |
+| GET | `/monitoring/alerts` | Read bounded/filterable current alert state | Readonly |
+| GET | `/monitoring/alerts/{id}` | Read alert state and retained observations | Readonly |
 
 Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, a
 filtered enrollment audit-event list, and the general audit timeline,
@@ -360,9 +365,10 @@ event-detail, and anchor/receipt verification views are implemented. Client/site
 creation and operator listing, creation, global-role change, disable/re-enable,
 script-permission administration, and session revocation are implemented in the
 dashboard. Deleting identities and password lifecycle operations remain absent.
-Monitoring policy models, read APIs, the initial six checks, and result
-ingestion are implemented; alert state, notification delivery, general task
-scheduling, patching, and evidence export remain absent. Telemetry history is
+Monitoring policy models, read APIs, the initial six checks, result ingestion,
+and deduplicated automatic alert state are implemented; technician alert
+actions, notification delivery, general task scheduling, patching, and evidence
+export remain absent. Telemetry history is
 available only as a bounded read-only endpoint-detail query, not as a general
 analytics API.
 

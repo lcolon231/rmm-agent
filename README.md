@@ -145,7 +145,7 @@ The code in this repository currently provides:
   anchors, plus a scheduled publisher that writes anchor roots to external
   immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
-- Forward-only Alembic migrations through revision `0016`, with exact revision
+- Forward-only Alembic migrations through revision `0017`, with exact revision
   enforcement on non-debug startup, legacy debug-schema repair, and a
   disposable PostgreSQL migration test in CI.
 - Encrypted PostgreSQL backup/isolated restore plus a fail-closed release
@@ -250,7 +250,10 @@ After `v0.1.2`, `main` has:
 - implemented the first monitoring checks (#42): server-owned offline
   evaluation plus agent CPU, memory, disk, service, pending-reboot, and retained
   uptime evaluation with bounded cadence, hysteresis, durable idempotent
-  delivery, explicit unknown states, and revision-pinned ingestion; and
+  delivery, explicit unknown states, and revision-pinned ingestion;
+- added deterministic alert state (#43): one policy/endpoint/check identity,
+  exactly-once bounded observations, automatic recovery/reopen, concurrent
+  deduplication, policy cleanup, and maintenance suppression metadata; and
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
@@ -290,10 +293,10 @@ The repository does **not** currently contain:
   signed expiry.
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, or TPM
   inventory beyond the read-only sections described above.
-- Monitoring alert deduplication/state, acknowledgement,
-  maintenance-window enforcement, email, or webhook notifications. Policy,
-  initial check execution, maintenance-window, and check-result ingestion are
-  implemented.
+- Monitoring alert acknowledgement/assignment/manual resolution, email, or
+  webhook notifications. Policy, initial checks, result ingestion, alert
+  deduplication/state, automatic recovery, and maintenance-window suppression
+  metadata are implemented.
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
 - A least-privilege agent service account.
