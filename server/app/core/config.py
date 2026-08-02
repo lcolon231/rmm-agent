@@ -159,6 +159,15 @@ class Settings(BaseSettings):
     # reported state, not history, and deleting it would make a managed machine
     # look like it had never reported. 0 disables inventory pruning.
     inventory_history_per_section: int = 50
+    # Phase-1 monitoring bounds (issue #41). Schema validation applies the
+    # hard per-policy/check limits; these settings cap deployment-wide growth
+    # and the retained result history for each endpoint/check pair.
+    monitoring_max_policies: int = 500
+    monitoring_max_checks_per_policy: int = 100
+    monitoring_check_interval_min_seconds: int = 30
+    monitoring_check_interval_max_seconds: int = 86_400
+    check_result_history_per_key: int = 100
+    monitoring_max_maintenance_windows: int = 500
     # How often the retention sweep runs.
     retention_sweep_interval_seconds: int = 86_400  # daily
     # Filesystem path whose free space is reported/alerted in /storage/status

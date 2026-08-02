@@ -16,6 +16,8 @@ Milestone 4 goal.
 The current repository is an API, agent, and dashboard-foundation scaffold, not
 a complete RMM. The dashboard requires an authenticated operator; client/site
 navigation is live and read-only, while the overview remains fixture-backed.
+Monitoring policy inventory and revision detail are also live and read-only;
+the agent does not execute those checks yet.
 There is no production
 endpoint console, patch engine, live remote shell, remote desktop, compliance
 exporter, or tenant-scoped authorization. Production and regulated endpoint use remain outside the
@@ -290,6 +292,19 @@ class is a new section rather than a schema change. Operator-facing history and
 diffs are #40. The legacy free-form `Agent.inventory` column is no longer
 written and is dropped in a later revision.
 
+`MonitoringPolicy` is a stable named identity at `global`, `client`, `site`, or
+`agent` scope. Its content lives in append-only `MonitoringPolicyRevision`
+rows; the highest version is current. Check definitions are bounded,
+Pydantic-validated JSON with typed per-check parameters. Effective policy is
+resolved for one agent from global through client, site, and agent scope, with
+the most-specific definition winning for each check key; an `enabled=false`
+definition removes an inherited key. `MaintenanceWindow` records a validated
+scoped time range, while `CheckResult` is the append-only result contract with
+newest-N retention per `(agent, check_key)`. Issue #41 defines these models,
+operator APIs, resolution, retention, and the read-only dashboard only. Agent
+execution and result ingestion are #42; alert state/deduplication and applying
+maintenance windows are #43+.
+
 ### 4.2 API surface
 
 All application routes except `/healthz` are under `/api/v1`.
@@ -329,6 +344,13 @@ All application routes except `/healthz` are under `/api/v1`.
 | GET | `/audit/anchors/{id}/verify` | Verify local anchor | Readonly |
 | GET | `/audit/anchors/{id}/receipt` | External publication receipt + tamper check | Readonly |
 | GET | `/audit/publication-status` | External anchor publication lag/health | Readonly |
+| POST/GET | `/monitoring/policies` | Create/list versioned monitoring policies | Operator / Readonly |
+| GET/PUT/DELETE | `/monitoring/policies/{id}` | Read, append a revision, or delete a policy | Readonly / Operator |
+| GET | `/monitoring/policies/{id}/revisions` | Append-only policy history | Readonly |
+| GET | `/agents/{id}/monitoring/effective-policy` | Resolve inherited checks for one agent | Readonly |
+| POST/GET | `/monitoring/maintenance-windows` | Create/list scoped maintenance windows | Operator / Readonly |
+| DELETE | `/monitoring/maintenance-windows/{id}` | Delete a maintenance window | Operator |
+| GET | `/agents/{id}/monitoring/results` | Read bounded check-result history | Readonly |
 
 Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, a
 filtered enrollment audit-event list, and the general audit timeline,
@@ -336,8 +358,9 @@ event-detail, and anchor/receipt verification views are implemented. Client/site
 creation and operator listing, creation, global-role change, disable/re-enable,
 script-permission administration, and session revocation are implemented in the
 dashboard. Deleting identities and password lifecycle operations remain absent.
-Monitoring policies or alerts, scheduling, patching, and evidence export also
-remain absent. Telemetry history is
+Monitoring policy models and read APIs are implemented; agent-side check
+execution, alert state, notification delivery, scheduling, patching, and
+evidence export remain absent. Telemetry history is
 available only as a bounded read-only endpoint-detail query, not as a general
 analytics API.
 

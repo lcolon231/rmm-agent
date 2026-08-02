@@ -188,6 +188,16 @@ prevents removal of the final active administrator. First-run client/site
 creation is also same-origin, role-authorized, normalized for duplicate-name
 handling, and audited with digest-only names.
 
+Monitoring policy and maintenance-window administration is now API-enforced:
+reads require `readonly`, writes require `operator`, every polymorphic scope ID
+must resolve to a real client/site/agent, and policy check lists are bounded and
+validated against a fail-closed per-check-type schema before storage. Policy
+revisions are append-only. Every mutation is audited; operator-controlled
+policy/window names and revision notes are stored in the audit chain only as a
+SHA-256 digest plus byte count. The dashboard is intentionally read-only.
+Agent-side evaluation, result ingestion, maintenance-window enforcement, alert
+deduplication, acknowledgement, and delivery remain later Milestone 1 work.
+
 - Use server-mediated dashboard sessions with secure cookie, CSRF, expiration,
   logout, revocation, and role-change behavior. Do not persist operator bearer
   tokens in browser local storage.
@@ -195,9 +205,10 @@ handling, and audited with digest-only names.
   boundary.
 - Redact secrets in UI, logs, command history, webhooks, and notification
   templates.
-- Audit token, operator, command, alert, script, schedule, and notification
+- Audit token, operator, command, policy, alert, script, schedule, and notification
   administration. Operator creation, role/status changes, script permission,
-  and session revocation are covered; alert, script-library, schedule, and
+  session revocation, monitoring-policy revision/deletion, and maintenance-window
+  creation/deletion are covered; alert, script-library, recurring-schedule, and
   notification administration remain future work.
 - Validate and bound inventory, telemetry, scripts, parameters, schedules, and
   webhook destinations.
