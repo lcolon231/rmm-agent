@@ -71,6 +71,10 @@ class InventorySection(str, Enum):
     security_bitlocker = "security_bitlocker"
     security_secure_boot = "security_secure_boot"
     security_tpm = "security_tpm"
+    #: Local Administrators group membership (issue #39). Who holds local
+    #: administrative rights on the endpoint, resolved by the built-in group's
+    #: well-known SID so the reading is identical on non-English Windows.
+    local_administrators = "local_administrators"
 
 
 class InventorySectionStatus(str, Enum):
@@ -358,6 +362,72 @@ class TpmInventory(BaseModel):
     manufacturer: ShortText | None = None
 
 
+#: Cap on reported Administrators members. A correctly managed group is small;
+#: a machine reporting more than this is either misconfigured or hostile input,
+#: and the excess is reported ``partial`` rather than stored unbounded.
+MAX_LOCAL_ADMIN_MEMBERS = 256
+
+#: Windows SID strings are at most SECURITY_MAX_SID_STRING_CHARACTERS long.
+Sid = Annotated[str, StringConstraints(max_length=184)]
+
+
+class LocalAdminIdentityType(str, Enum):
+    """Where an Administrators member's identity originates.
+
+    Reported by the endpoint from the principal's source. ``unknown`` is used
+    when the platform returns a principal whose origin cannot be classified,
+    rather than guessing a trust origin the operator would rely on.
+    """
+
+    #: A local account or the built-in Administrator.
+    local = "local"
+    #: An Active Directory domain principal.
+    domain = "domain"
+    #: An Entra ID (Azure AD) principal.
+    azuread = "azuread"
+    unknown = "unknown"
+
+
+class LocalAdminPrincipalClass(str, Enum):
+    """Whether an Administrators member is a single account or a nested group."""
+
+    user = "user"
+    group = "group"
+    unknown = "unknown"
+
+
+class LocalAdminMember(BaseModel):
+    """One principal holding local administrative rights.
+
+    ``name`` is the only field a member cannot be reported without. ``sid`` is
+    present when the endpoint resolved it; a member is never expanded beyond
+    this shape, so a nested group is reported as one ``group`` member rather
+    than having its own membership pulled in.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    name: ShortText
+    sid: Sid | None = None
+    identity_type: LocalAdminIdentityType = LocalAdminIdentityType.unknown
+    principal_class: LocalAdminPrincipalClass = LocalAdminPrincipalClass.unknown
+
+
+class LocalAdministratorsInventory(BaseModel):
+    """Members of the built-in Administrators group.
+
+    The group is resolved on the endpoint by its well-known SID (S-1-5-32-544),
+    not the localized display name, so the section behaves identically on
+    non-English Windows. An unreachable directory or unsupported OS is carried
+    by the section *status*, not by an empty ``members`` list that would read as
+    "no administrators".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    members: list[LocalAdminMember] = Field(
+        default_factory=list, max_length=MAX_LOCAL_ADMIN_MEMBERS
+    )
+
+
 #: Section name -> payload model. The submission validator uses this to pick the
 #: right model, so an unknown section is rejected rather than stored unparsed.
 SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
@@ -371,6 +441,7 @@ SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
     InventorySection.security_bitlocker: BitLockerInventory,
     InventorySection.security_secure_boot: SecureBootInventory,
     InventorySection.security_tpm: TpmInventory,
+    InventorySection.local_administrators: LocalAdministratorsInventory,
 }
 
 

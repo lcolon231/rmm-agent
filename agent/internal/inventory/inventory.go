@@ -42,6 +42,9 @@ const (
 	SectionSecurityBitLocker  = "security_bitlocker"
 	SectionSecuritySecureBoot = "security_secure_boot"
 	SectionSecurityTpm        = "security_tpm"
+	// SectionLocalAdministrators reports the built-in Administrators group's
+	// membership, resolved by well-known SID so the reading is locale-independent.
+	SectionLocalAdministrators = "local_administrators"
 )
 
 // AllSections is collection order, which is also the order sections appear in
@@ -57,6 +60,7 @@ var AllSections = []string{
 	SectionSecurityBitLocker,
 	SectionSecuritySecureBoot,
 	SectionSecurityTpm,
+	SectionLocalAdministrators,
 }
 
 // Status explains why a section looks the way it does. These mirror the
