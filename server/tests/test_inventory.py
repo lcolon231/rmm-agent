@@ -1097,3 +1097,98 @@ async def test_platform_security_payloads_reject_drift(operator_client):
                     json=_submission([_section(section, payload)]),
                 )
             ).status_code == 422, (section, payload)
+
+
+# --------------------------------------------------------------------------- #
+# Local Administrators section (issue #39)
+# --------------------------------------------------------------------------- #
+LOCAL_ADMINS_PAYLOAD = {
+    "members": [
+        {
+            "name": "BUILTIN\\Administrator",
+            "sid": "S-1-5-21-1-500",
+            "identity_type": "local",
+            "principal_class": "user",
+        },
+        {
+            "name": "CONTOSO\\Domain Admins",
+            "sid": "S-1-5-21-2-512",
+            "identity_type": "domain",
+            "principal_class": "group",
+        },
+        {
+            "name": "AzureAD\\alice",
+            "sid": "S-1-12-1-1",
+            "identity_type": "azuread",
+            "principal_class": "user",
+        },
+    ]
+}
+
+
+@pytest.mark.asyncio
+async def test_local_administrators_round_trips_and_is_operator_visible(operator_client):
+    agent_id, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        stored = await agent.post(
+            "/agents/me/inventory",
+            json=_submission([_section("local_administrators", LOCAL_ADMINS_PAYLOAD)]),
+        )
+        assert stored.status_code == 200
+        assert stored.json()["stored_sections"] == ["local_administrators"]
+
+    # Operator-visible: the section appears in the endpoint inventory read with
+    # every member's identity type and SID preserved.
+    view = await operator_client.get(f"/endpoints/{agent_id}/inventory")
+    assert view.status_code == 200
+    sections = {s["section"]: s for s in view.json()["sections"]}
+    assert "local_administrators" in sections
+    members = sections["local_administrators"]["payload"]["members"]
+    assert {m["name"] for m in members} == {
+        "BUILTIN\\Administrator",
+        "CONTOSO\\Domain Admins",
+        "AzureAD\\alice",
+    }
+    by_name = {m["name"]: m for m in members}
+    assert by_name["CONTOSO\\Domain Admins"]["identity_type"] == "domain"
+    assert by_name["CONTOSO\\Domain Admins"]["principal_class"] == "group"
+    assert by_name["AzureAD\\alice"]["identity_type"] == "azuread"
+
+
+@pytest.mark.asyncio
+async def test_local_administrators_unavailable_state_carries_no_members(operator_client):
+    """A directory outage is an explicit status, not an empty membership."""
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        ok = await agent.post(
+            "/agents/me/inventory",
+            json=_submission(
+                [_section("local_administrators", {"members": []}, status="unavailable")]
+            ),
+        )
+        assert ok.status_code == 200
+        assert ok.json()["stored_sections"] == ["local_administrators"]
+
+
+@pytest.mark.asyncio
+async def test_local_administrators_rejects_invalid_payloads(operator_client):
+    _, token = await _enroll(operator_client)
+    async with _agent_client(token) as agent:
+        for payload in (
+            # Unknown identity type is not coerced.
+            {"members": [{"name": "x", "identity_type": "root"}]},
+            # Unknown principal class is not coerced.
+            {"members": [{"name": "x", "principal_class": "service"}]},
+            # A member with no name is a registry artifact, not a principal.
+            {"members": [{"sid": "S-1-5-21-1", "identity_type": "local"}]},
+            # extra="forbid": an unexpected field is rejected, not dropped.
+            {"members": [{"name": "x", "enabled": True}]},
+            # Over the member cap.
+            {"members": [{"name": f"u{i}"} for i in range(257)]},
+        ):
+            assert (
+                await agent.post(
+                    "/agents/me/inventory",
+                    json=_submission([_section("local_administrators", payload)]),
+                )
+            ).status_code == 422, payload

@@ -283,12 +283,12 @@ appended only when that section's content hash changes, so the table is
 simultaneously current state and change history. Sections carry a status
 (`ok`, `partial`, `unavailable`, `unsupported`) and both a `collected_at` and a
 `received_at`, so an absent field is distinguishable from an unread one and a
-queued or clock-skewed endpoint is visible. Hardware (#35) and installed
-software (#36) are implemented; Defender, BitLocker/TPM, and local
-administrators are later `section` values, and operator-facing history and
-diffs are #40. The
-legacy free-form `Agent.inventory` column is no longer written and is dropped
-in a later revision.
+queued or clock-skewed endpoint is visible. Hardware (#35), installed software
+(#36), Defender, platform security (BitLocker/Secure Boot/TPM), and local
+Administrators membership (#39) are implemented as `section` values; adding a
+class is a new section rather than a schema change. Operator-facing history and
+diffs are #40. The legacy free-form `Agent.inventory` column is no longer
+written and is dropped in a later revision.
 
 ### 4.2 API surface
 

@@ -60,8 +60,8 @@ The code in this repository currently provides:
   per-section hash on each heartbeat and uploads only what the server asks for,
   so an unchanged endpoint transfers no inventory bytes. Submissions are atomic
   and bounded: an oversized or malformed section is rejected rather than
-  truncated. Defender, BitLocker, Secure Boot, TPM, and local administrator
-  state are not yet collected.
+  truncated. Defender, BitLocker, Secure Boot, TPM, and local Administrators
+  membership are each collected as their own sections, described below.
 - Windows installed-software inventory from the uninstall registry across the
   native 64-bit, `WOW6432Node`, and per-user views, deduplicated across them
   and sorted deterministically so an unchanged machine keeps a stable content
@@ -85,6 +85,13 @@ The code in this repository currently provides:
   an empty volume list recorded as healthy would read as "nothing is
   encrypted". Secure Boot on legacy BIOS is reported unsupported rather than
   disabled, and an absent TPM is a successful reading, not a failure.
+- Read-only local Administrators membership: the built-in group is resolved by
+  its well-known SID (`S-1-5-32-544`) rather than the localized name, and each
+  member is classified by identity type (local, domain, or Entra ID) and
+  principal class. An unreachable directory is reported `unavailable` and a
+  non-Windows host `unsupported`, so an empty membership is never mistaken for
+  "no administrators". Membership is never expanded beyond the group itself — a
+  nested group is one `group` member, not its transitive users.
 - Inventory history and deterministic diffs, with per-endpoint dashboard views.
   Snapshots are written only when a section's content changes, so history is a
   change log rather than a sample. Diffs are identity-keyed rather than
@@ -220,13 +227,17 @@ After `v0.1.2`, `main` has:
   unvalidated free-form inventory field that no released agent ever wrote;
 - added a Dockerized Render deployment path for the FastAPI backend, including
   pre-deploy migrations, health checks, proxy-aware production configuration,
-  external PostgreSQL configuration, and secret-file signing-key support; and
+  external PostgreSQL configuration, and secret-file signing-key support;
+- added read-only local Administrators inventory (#39): a locale-independent
+  collector that resolves the built-in group by its well-known SID and
+  classifies each member's identity type (local, domain, or Entra ID),
+  validated and stored as a bounded inventory section; and
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
-The current Milestone 1 work remains focused on the remaining inventory class
-(local administrators), monitoring and alerting, notification delivery, script-library
-workflows, recurring tasks, and tenant-aware authorization design.
+The current Milestone 1 work remains focused on monitoring and alerting,
+notification delivery, script-library workflows, recurring tasks, and
+tenant-aware authorization design.
 
 ## Planned
 
@@ -258,8 +269,8 @@ The repository does **not** currently contain:
   command output, technician-to-end-user chat, or command cancellation. Polling
   remains the only transport and a dispatched command is bounded only by its
   signed expiry.
-- Complete hardware, software, Windows Defender, BitLocker, Secure Boot, TPM,
-  or local-administrator inventory.
+- Complete hardware, software, Windows Defender, BitLocker, Secure Boot, or TPM
+  inventory beyond the read-only sections described above.
 - Monitoring policy/check/alert models, alert acknowledgement, email, or
   webhook notifications.
 - Script library, scheduled tasks, patch management, remediation operations,
