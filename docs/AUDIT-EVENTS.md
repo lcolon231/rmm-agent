@@ -53,6 +53,10 @@ and SHA-256/Merkle roots—remains readable.
 | `monitoring_policy.revised` | `api/management.py` policy revision | `policy_id`, `version`, `enabled`, `check_count`, `change_note_sha256`, `change_note_bytes` |
 | `monitoring_policy.deleted` | `api/management.py` policy deletion | `policy_id`, `scope`, `scope_id`, `name_sha256`, `name_bytes` |
 | `monitoring_policy.viewed` | `api/management.py` policy detail view | `policy_id`, `version`, `check_count`, `revision_count` |
+| `monitoring_alert.acknowledged` | `api/management.py` technician acknowledgement | `alert_id`, `generation`, `request_id`, `from_state`, `to_state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
+| `monitoring_alert.assigned` | `api/management.py` technician assignment | `alert_id`, `generation`, `request_id`, `assigned_to_operator_id`, `assigned_to_email_sha256`, `assigned_to_email_bytes`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
+| `monitoring_alert.commented` | `api/management.py` technician comment | `alert_id`, `generation`, `request_id`, `state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
+| `monitoring_alert.resolved` | `api/management.py` manual resolution | `alert_id`, `generation`, `request_id`, `from_state`, `to_state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `maintenance_window.created` | `api/management.py` maintenance-window creation | `maintenance_window_id`, `scope`, `scope_id`, `starts_at`, `ends_at`, `name_sha256`, `name_bytes` |
 | `maintenance_window.deleted` | `api/management.py` maintenance-window deletion | `maintenance_window_id`, `scope`, `scope_id`, `name_sha256`, `name_bytes` |
 | `command.authorization_allowed` | `api/management.py` dispatch policy | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |

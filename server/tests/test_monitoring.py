@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Monitoring policy, evaluation, result, and alert behavior (#41-#43)."""
+"""Monitoring policy, evaluation, result, and alert behavior (#41-#44)."""
 from __future__ import annotations
 
 import asyncio
@@ -27,6 +27,8 @@ from app.main import app  # noqa: E402
 from app.models.models import (  # noqa: E402
     Agent,
     Alert,
+    AlertEvent,
+    AlertEventType,
     AlertObservation,
     AlertState,
     AuditEvent,
@@ -1051,3 +1053,206 @@ async def test_concurrent_same_result_retry_is_acknowledged_once(operator_client
     assert len(alerts) == 1
     assert alerts[0].total_occurrence_count == 1
     assert observation_count == 1
+
+
+@pytest.mark.asyncio
+async def test_alert_operator_lifecycle_is_authorized_idempotent_and_audited(
+    operator_client,
+):
+    _, _, agent_id, _ = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name="Technician lifecycle",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_numeric_check("cpu")],
+    )
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as db:
+        await monitoring_core.record_check_result(
+            db,
+            result_id="1" * 32,
+            agent_id=agent_id,
+            policy_id=policy["id"],
+            policy_revision_id=policy["revisions"][0]["id"],
+            check_key="cpu",
+            status=CheckResultStatus.warning,
+            value=87,
+            evaluated_at=now,
+        )
+        await db.commit()
+
+    alert = (
+        await operator_client.get(f"/monitoring/alerts?policy_id={policy['id']}")
+    ).json()["items"][0]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://t/api/v1"
+    ) as viewer:
+        login = await viewer.post(
+            "/auth/login",
+            json={
+                "email": "monitor-viewer@nodelink.test",
+                "password": "viewer-password",
+            },
+        )
+        viewer.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+        denied = await viewer.post(
+            f"/monitoring/alerts/{alert['id']}/acknowledge",
+            json={
+                "request_id": "viewer-request-0001",
+                "expected_version": alert["version"],
+            },
+        )
+        assert denied.status_code == 403
+        assert (await viewer.get("/monitoring/alert-assignees")).status_code == 403
+
+    payload = {
+        "request_id": "ack-request-000001",
+        "expected_version": alert["version"],
+        "comment": "Investigating token=do-not-store",
+    }
+    acknowledged = await operator_client.post(
+        f"/monitoring/alerts/{alert['id']}/acknowledge", json=payload
+    )
+    assert acknowledged.status_code == 200, acknowledged.text
+    detail = acknowledged.json()
+    assert detail["state"] == "acknowledged"
+    assert detail["acknowledged_by"] == "monitor@nodelink.test"
+    ack_event = next(
+        event for event in detail["events"] if event["event_type"] == "acknowledged"
+    )
+    assert ack_event["comment"] == "Investigating token=[redacted]"
+    assert ack_event["comment_redacted"] is True
+
+    replay = await operator_client.post(
+        f"/monitoring/alerts/{alert['id']}/acknowledge", json=payload
+    )
+    assert replay.status_code == 200
+    assert sum(
+        event["event_type"] == "acknowledged" for event in replay.json()["events"]
+    ) == 1
+
+    stale = await operator_client.post(
+        f"/monitoring/alerts/{alert['id']}/comments",
+        json={
+            "request_id": "comment-request-001",
+            "expected_version": alert["version"],
+            "comment": "This update raced with acknowledgement.",
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "alert_version_conflict"
+
+    assignees = (await operator_client.get("/monitoring/alert-assignees")).json()
+    current = replay.json()
+    assigned = await operator_client.post(
+        f"/monitoring/alerts/{alert['id']}/assign",
+        json={
+            "request_id": "assign-request-0001",
+            "expected_version": current["version"],
+            "assigned_to_operator_id": assignees[0]["id"],
+        },
+    )
+    assert assigned.status_code == 200, assigned.text
+    assert assigned.json()["assigned_to_operator_id"] == assignees[0]["id"]
+
+    commented = await operator_client.post(
+        f"/monitoring/alerts/{alert['id']}/comments",
+        json={
+            "request_id": "comment-request-0002",
+            "expected_version": assigned.json()["version"],
+            "comment": "Endpoint owner confirmed the maintenance window.",
+        },
+    )
+    assert commented.status_code == 200, commented.text
+    assert any(
+        event["event_type"] == "commented"
+        and event["comment"] == "Endpoint owner confirmed the maintenance window."
+        for event in commented.json()["events"]
+    )
+
+    resolved = await operator_client.post(
+        f"/monitoring/alerts/{alert['id']}/resolve",
+        json={
+            "request_id": "resolve-request-001",
+            "expected_version": commented.json()["version"],
+            "comment": "Mitigation applied and verified.",
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["state"] == "resolved"
+    assert resolved.json()["resolution_reason"] == "manual_resolution"
+
+    async with AsyncSessionLocal() as db:
+        actions = set(
+            (
+                await db.execute(
+                    select(AuditEvent.action).where(
+                        AuditEvent.agent_id == agent_id,
+                        AuditEvent.action.like("monitoring_alert.%"),
+                    )
+                )
+            ).scalars().all()
+        )
+    assert actions == {
+        "monitoring_alert.acknowledged",
+        "monitoring_alert.assigned",
+        "monitoring_alert.commented",
+        "monitoring_alert.resolved",
+    }
+
+
+@pytest.mark.asyncio
+async def test_alert_automatic_recovery_and_reopen_append_lifecycle_history(
+    operator_client,
+):
+    _, _, agent_id, _ = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name="Automatic lifecycle",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_numeric_check("memory", "memory")],
+    )
+    revision_id = policy["revisions"][0]["id"]
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as db:
+        for result_id, result_status, seconds in (
+            ("2" * 32, CheckResultStatus.critical, 0),
+            ("3" * 32, CheckResultStatus.ok, 1),
+            ("4" * 32, CheckResultStatus.warning, 2),
+        ):
+            await monitoring_core.record_check_result(
+                db,
+                result_id=result_id,
+                agent_id=agent_id,
+                policy_id=policy["id"],
+                policy_revision_id=revision_id,
+                check_key="memory",
+                status=result_status,
+                value=99 if result_status != CheckResultStatus.ok else 25,
+                evaluated_at=now + timedelta(seconds=seconds),
+            )
+        await db.commit()
+        alert = await db.scalar(select(Alert).where(Alert.policy_id == policy["id"]))
+        events = list(
+            (
+                await db.execute(
+                    select(AlertEvent)
+                    .where(AlertEvent.alert_id == alert.id)
+                    .order_by(AlertEvent.created_at, AlertEvent.id)
+                )
+            ).scalars().all()
+        )
+    assert alert.state == AlertState.open
+    assert alert.generation == 2
+    assert [event.event_type for event in events] == [
+        AlertEventType.opened,
+        AlertEventType.automatic_recovery,
+        AlertEventType.reopened,
+    ]
+    assert [event.source_result_id for event in events] == [
+        "2" * 32,
+        "3" * 32,
+        "4" * 32,
+    ]

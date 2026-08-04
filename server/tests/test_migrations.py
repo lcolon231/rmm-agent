@@ -65,6 +65,12 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         operator_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(operators)")
         }
+        alert_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(alerts)")
+        }
+        alert_event_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(alert_events)")
+        }
         indexes = {
             row[0]
             for row in connection.execute(
@@ -81,6 +87,7 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "maintenance_windows",
         "check_results",
         "alerts",
+        "alert_events",
         "alert_observations",
     } <= tables
     assert "agent_completed_at" in command_columns
@@ -88,6 +95,21 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "script_execution_scope",
         "script_execution_scope_id",
     } <= operator_columns
+    assert {
+        "assigned_to_operator_id",
+        "assigned_to_email",
+        "acknowledged_at",
+        "acknowledged_by",
+        "version",
+    } <= alert_columns
+    assert {
+        "alert_id",
+        "generation",
+        "event_type",
+        "actor",
+        "request_id",
+        "created_at",
+    } <= alert_event_columns
     assert {
         "ux_clients_name_normalized",
         "ux_sites_client_name_normalized",

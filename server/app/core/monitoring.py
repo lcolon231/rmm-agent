@@ -13,11 +13,11 @@ Responsibilities:
 * :func:`evaluate_offline_checks` records due heartbeat-age checks in the
   server sweeper with the same cadence and hysteresis semantics.
 * :func:`apply_check_result_to_alert` serializes one durable alert identity per
-  policy/endpoint/check, including recovery, retrigger, suppression, and
-  exactly-once observation evidence (#43).
+  policy/endpoint/check, including recovery, retrigger, suppression,
+  exactly-once observation evidence, and immutable lifecycle history (#43/#44).
 
 Offline checks are evaluated here because an unreachable endpoint cannot report
-itself. Technician alert actions and immutable actor history remain #44.
+itself. Technician actions live at the authenticated management boundary.
 """
 from __future__ import annotations
 
@@ -36,6 +36,8 @@ from app.core import metrics
 from app.models.models import (
     Agent,
     Alert,
+    AlertEvent,
+    AlertEventType,
     AlertObservation,
     AlertState,
     CheckResult,
@@ -67,6 +69,31 @@ def _now() -> datetime:
 
 def _utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _append_alert_event(
+    db: AsyncSession,
+    alert: Alert,
+    event_type: AlertEventType,
+    *,
+    from_state: AlertState | None,
+    to_state: AlertState | None,
+    source_result_id: str | None = None,
+    at: datetime | None = None,
+) -> None:
+    """Append system-owned lifecycle evidence inside the caller's transaction."""
+    db.add(
+        AlertEvent(
+            alert_id=alert.id,
+            generation=alert.generation,
+            event_type=event_type,
+            from_state=from_state,
+            to_state=to_state,
+            actor="system",
+            source_result_id=source_result_id,
+            created_at=at or _now(),
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -213,24 +240,36 @@ async def _resolve_superseded_alerts(
     db: AsyncSession, result: CheckResult
 ) -> int:
     """Resolve another policy's active alert for the same endpoint/check."""
-    statement = (
-        update(Alert)
-        .where(
+    alerts = list(
+        (
+            await db.execute(
+                select(Alert).where(
             Alert.agent_id == result.agent_id,
             Alert.check_key == result.check_key,
             Alert.policy_id != result.policy_id,
             Alert.state != AlertState.resolved,
-        )
-        .values(
-            state=AlertState.resolved,
-            resolved_at=result.evaluated_at,
-            resolution_reason="policy_superseded",
-            suppression_window_id=None,
-            suppressed_until=None,
-            updated_at=_now(),
-        )
+                ).with_for_update()
+            )
+        ).scalars().all()
     )
-    changed = (await db.execute(statement)).rowcount or 0
+    for alert in alerts:
+        previous = alert.state
+        alert.state = AlertState.resolved
+        alert.resolved_at = result.evaluated_at
+        alert.resolution_reason = "policy_superseded"
+        alert.suppression_window_id = None
+        alert.suppressed_until = None
+        alert.version += 1
+        alert.updated_at = _now()
+        _append_alert_event(
+            db,
+            alert,
+            AlertEventType.policy_superseded,
+            from_state=previous,
+            to_state=AlertState.resolved,
+            at=result.evaluated_at,
+        )
+    changed = len(alerts)
     if changed:
         metrics.increment("monitoring_alert_recovered_total", changed)
         metrics.increment("monitoring_alert_policy_superseded_total", changed)
@@ -365,9 +404,20 @@ async def apply_check_result_to_alert(
         alert.suppression_window_id = None
         alert.suppressed_until = None
         if alert.state != AlertState.resolved:
+            previous = alert.state
             alert.state = AlertState.resolved
             alert.resolved_at = evaluated_at
             alert.resolution_reason = "automatic_recovery"
+            alert.version += 1
+            _append_alert_event(
+                db,
+                alert,
+                AlertEventType.automatic_recovery,
+                from_state=previous,
+                to_state=AlertState.resolved,
+                source_result_id=result.id,
+                at=evaluated_at,
+            )
             metrics.increment("monitoring_alert_recovered_total")
         return alert
 
@@ -388,6 +438,7 @@ async def apply_check_result_to_alert(
     alert.total_occurrence_count += 1
     if alert.state == AlertState.resolved:
         first_open = alert.generation == 0
+        previous = alert.state
         alert.state = AlertState.open
         alert.generation += 1
         alert.occurrence_count = 1
@@ -396,6 +447,18 @@ async def apply_check_result_to_alert(
         alert.resolution_reason = None
         if alert.first_opened_at is None:
             alert.first_opened_at = evaluated_at
+        alert.acknowledged_at = None
+        alert.acknowledged_by = None
+        alert.version += 1
+        _append_alert_event(
+            db,
+            alert,
+            AlertEventType.opened if first_open else AlertEventType.reopened,
+            from_state=previous,
+            to_state=AlertState.open,
+            source_result_id=result.id,
+            at=evaluated_at,
+        )
         metrics.increment(
             "monitoring_alert_opened_total"
             if first_open
@@ -423,19 +486,33 @@ async def resolve_policy_alerts(
     ]
     if active_check_keys:
         conditions.append(Alert.check_key.not_in(active_check_keys))
-    statement = (
-        update(Alert)
-        .where(*conditions)
-        .values(
-            state=AlertState.resolved,
-            resolved_at=at,
-            resolution_reason=reason,
-            suppression_window_id=None,
-            suppressed_until=None,
-            updated_at=_now(),
-        )
+    alerts = list(
+        (
+            await db.execute(select(Alert).where(*conditions).with_for_update())
+        ).scalars().all()
     )
-    changed = (await db.execute(statement)).rowcount or 0
+    event_type = {
+        "policy_revised": AlertEventType.policy_revised,
+        "policy_deleted": AlertEventType.policy_deleted,
+    }.get(reason, AlertEventType.policy_superseded)
+    for alert in alerts:
+        previous = alert.state
+        alert.state = AlertState.resolved
+        alert.resolved_at = at
+        alert.resolution_reason = reason
+        alert.suppression_window_id = None
+        alert.suppressed_until = None
+        alert.version += 1
+        alert.updated_at = _now()
+        _append_alert_event(
+            db,
+            alert,
+            event_type,
+            from_state=previous,
+            to_state=AlertState.resolved,
+            at=at,
+        )
+    changed = len(alerts)
     if changed:
         metrics.increment("monitoring_alert_recovered_total", changed)
         metrics.increment("monitoring_alert_policy_change_total", changed)

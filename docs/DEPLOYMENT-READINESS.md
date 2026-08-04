@@ -163,6 +163,13 @@ link to reproducible evidence in the release or pilot record.
       tested — see [`AUDIT-EVENTS.md`](AUDIT-EVENTS.md) and
       [`REDACTION-AUDIT.md`](REDACTION-AUDIT.md)).
 
+- [x] Technician alert acknowledgement, assignment, comments, and manual
+      resolution require `operator` or higher, serialize against automatic
+      transitions with an expected version, deduplicate retries by request ID,
+      and append scrubbed actor history. Their tamper-evident audit records keep
+      comment and assignee-email values digest-only (issue #44;
+      [`ALERTS.md`](ALERTS.md)).
+
 ### Database and recovery
 
 - [x] Alembic can create a fresh schema and upgrade every supported prior

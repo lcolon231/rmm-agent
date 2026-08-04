@@ -75,6 +75,17 @@ raw inventory. History queries are constrained to 168 hours and 500 samples to
 reduce accidental or abusive bulk extraction and resource use. Missing metrics
 remain explicit so an absent value cannot be misread as a healthy zero.
 
+**Alert mutation boundary.** Readonly operators may inspect alerts and their
+scrubbed lifecycle history but cannot mutate them. Acknowledge, assign, comment,
+and manual-resolve routes require `operator` or `admin`; the dashboard's server
+handlers additionally reject cross-origin POSTs and never expose the operator
+bearer token to client JavaScript. Every mutation locks the alert row, checks an
+expected version, and deduplicates a bounded request ID before changing state.
+Technician comments are limited to 2,000 characters and credential-shaped text
+is scrubbed before append-only operational storage. The audit chain receives
+only a digest and byte count for comments and assignee email, preventing
+operator prose or addresses from entering tamper-evident audit detail.
+
 ### (2) Server ↔ Network (transport)
 
 Agents connect **outbound only**. There is no inbound agent port to open at a

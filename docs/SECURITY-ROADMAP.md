@@ -169,11 +169,14 @@ stale, future, non-finite, oversized, and server-owned offline results, and
 deduplicates durable agent result IDs. Quarantined agents receive no checks and
 cannot submit results. Cadence, hysteresis, outbox/probe limits, compatibility,
 and rollback behavior are specified in `docs/MONITORING.md`; alert lifecycle
-authorization remains subsequent work. Deduplicated alert state now uses a
-database uniqueness boundary, row locking, result-keyed exactly-once
-observations, deterministic out-of-order handling, and server-derived
-maintenance suppression metadata (`docs/ALERTS.md`). The new PostgreSQL tables
-enable RLS and revoke direct Supabase Data API roles.
+authorization now requires `operator` or higher, a same-origin dashboard
+request, an expected row version, and an idempotency key. Deduplicated alert
+state uses a database uniqueness boundary, row locking, result-keyed
+exactly-once observations, deterministic out-of-order handling, and
+server-derived maintenance suppression metadata (`docs/ALERTS.md`). Lifecycle
+comments are bounded and scrubbed before append-only operational storage; the
+tamper-evident audit chain retains only their digest and byte count. The new
+PostgreSQL tables enable RLS and revoke direct Supabase Data API roles.
 
 The dashboard boundary is partially implemented: server-mediated HTTP-only
 sessions, API-enforced role authorization, redacted audited
@@ -207,10 +210,10 @@ must resolve to a real client/site/agent, and policy check lists are bounded and
 validated against a fail-closed per-check-type schema before storage. Policy
 revisions are append-only. Every mutation is audited; operator-controlled
 policy/window names and revision notes are stored in the audit chain only as a
-SHA-256 digest plus byte count. The dashboard is intentionally read-only.
-Agent-side evaluation, result ingestion, maintenance-window suppression
-metadata, and alert deduplication/state are implemented. Technician
-acknowledgement/assignment/manual resolution and notification delivery remain
+SHA-256 digest plus byte count. Policy administration in the dashboard remains
+intentionally read-only. Agent-side evaluation, result ingestion,
+maintenance-window suppression metadata, alert deduplication/state, and the
+live technician alert queue are implemented. Notification delivery remains
 later Milestone 1 work.
 
 - Use server-mediated dashboard sessions with secure cookie, CSRF, expiration,
@@ -223,7 +226,8 @@ later Milestone 1 work.
 - Audit token, operator, command, policy, alert, script, schedule, and notification
   administration. Operator creation, role/status changes, script permission,
   session revocation, monitoring-policy revision/deletion, and maintenance-window
-  creation/deletion are covered; alert, script-library, recurring-schedule, and
+  creation/deletion are covered; alert acknowledgement, assignment, comments,
+  and manual resolution are covered; script-library, recurring-schedule, and
   notification administration remain future work.
 - Validate and bound inventory, telemetry, scripts, parameters, schedules, and
   webhook destinations.

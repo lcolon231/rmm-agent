@@ -88,5 +88,10 @@ Check results and automatic alert transitions are operational evidence and
 metrics, not operator audit events. Policy and maintenance-window mutations
 remain role-gated and audited. Matching maintenance windows annotate failing
 alert occurrences with a server-derived suppression deadline while retaining
-the visible incident. Technician acknowledgement, assignment, comments, manual
-resolution, and immutable actor history begin with issue #44.
+the visible incident. Operator-or-higher technicians can acknowledge, assign,
+comment on, and manually resolve alerts through version-checked, idempotent
+requests. These actions append scrubbed immutable lifecycle history and
+digest-only tamper-evident audit records; automatic recovery and reopen use the
+same row lock and version counter. The live dashboard exposes the active queue,
+technician controls, lifecycle history, and recent check evidence. See
+`docs/ALERTS.md` for the complete state, authorization, and rollout contract.

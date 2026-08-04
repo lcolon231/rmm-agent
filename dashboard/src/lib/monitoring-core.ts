@@ -43,6 +43,84 @@ export type MonitoringPolicyDetail = MonitoringPolicy & {
   revisions: MonitoringPolicyRevision[];
 };
 
+export type AlertState = "open" | "acknowledged" | "resolved";
+export type AlertResultStatus = "ok" | "warning" | "critical" | "unknown";
+export type AlertEventType =
+  | "state_imported" | "opened" | "reopened" | "acknowledged" | "assigned"
+  | "commented" | "manual_resolution" | "automatic_recovery"
+  | "policy_revised" | "policy_deleted" | "policy_superseded";
+
+export type MonitoringAlert = {
+  id: string;
+  agent_id: string;
+  policy_id: string;
+  policy_revision_id: string;
+  check_key: string;
+  state: AlertState;
+  last_result_status: AlertResultStatus;
+  occurrence_count: number;
+  total_occurrence_count: number;
+  generation: number;
+  first_opened_at: string | null;
+  opened_at: string | null;
+  last_observed_at: string | null;
+  resolved_at: string | null;
+  last_evaluated_at: string | null;
+  last_result_id: string | null;
+  last_value: number | null;
+  resolution_reason: string | null;
+  suppression_window_id: string | null;
+  suppressed_until: string | null;
+  assigned_to_operator_id: string | null;
+  assigned_to_email: string | null;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AlertEvent = {
+  id: string;
+  alert_id: string;
+  generation: number;
+  event_type: AlertEventType;
+  from_state: AlertState | null;
+  to_state: AlertState | null;
+  actor: string;
+  actor_user_id: string | null;
+  comment: string | null;
+  comment_redacted: boolean;
+  assigned_to_operator_id: string | null;
+  assigned_to_email: string | null;
+  source_result_id: string | null;
+  request_id: string | null;
+  created_at: string;
+};
+
+export type AlertObservation = {
+  check_result_id: string;
+  alert_id: string;
+  status: AlertResultStatus;
+  value: number | null;
+  evaluated_at: string;
+  out_of_order: boolean;
+  created_at: string;
+};
+
+export type MonitoringAlertDetail = MonitoringAlert & {
+  events: AlertEvent[];
+  observations: AlertObservation[];
+};
+
+export type AlertAssignee = { id: string; email: string };
+export type AlertActionInput = {
+  request_id: string;
+  expected_version: number;
+  comment?: string;
+  assigned_to_operator_id?: string | null;
+};
+
 const scopes = new Set<MonitoringScope>(["global", "client", "site", "agent"]);
 const checkTypes = new Set<CheckType>([
   "offline",
@@ -54,6 +132,13 @@ const checkTypes = new Set<CheckType>([
   "uptime",
 ]);
 const thresholdOps = new Set<ThresholdOp>(["gt", "gte", "lt", "lte"]);
+const alertStates = new Set<AlertState>(["open", "acknowledged", "resolved"]);
+const alertStatuses = new Set<AlertResultStatus>(["ok", "warning", "critical", "unknown"]);
+const alertEventTypes = new Set<AlertEventType>([
+  "state_imported", "opened", "reopened", "acknowledged", "assigned", "commented",
+  "manual_resolution", "automatic_recovery", "policy_revised", "policy_deleted",
+  "policy_superseded",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -183,6 +268,153 @@ export function monitoringPolicyDetailFromUnknown(value: unknown): MonitoringPol
     return null;
   }
   return { ...policy, checks, revisions };
+}
+
+function nullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function nullableTimestamp(value: unknown): value is string | null {
+  return value === null || isTimestamp(value);
+}
+
+export function monitoringAlertFromUnknown(value: unknown): MonitoringAlert | null {
+  if (!isRecord(value)) return null;
+  const timestampFields = [
+    "first_opened_at", "opened_at", "last_observed_at", "resolved_at",
+    "last_evaluated_at", "suppressed_until", "acknowledged_at",
+  ];
+  const stringFields = [
+    "last_result_id", "resolution_reason", "suppression_window_id",
+    "assigned_to_operator_id", "assigned_to_email", "acknowledged_by",
+  ];
+  if (
+    typeof value.id !== "string" || typeof value.agent_id !== "string"
+    || typeof value.policy_id !== "string" || typeof value.policy_revision_id !== "string"
+    || typeof value.check_key !== "string" || !alertStates.has(value.state as AlertState)
+    || !alertStatuses.has(value.last_result_status as AlertResultStatus)
+    || !["occurrence_count", "total_occurrence_count", "generation", "version"].every(
+      (key) => Number.isInteger(value[key]) && (value[key] as number) >= (key === "version" ? 1 : 0),
+    )
+    || !timestampFields.every((key) => nullableTimestamp(value[key]))
+    || !stringFields.every((key) => nullableString(value[key]))
+    || (value.last_value !== null && typeof value.last_value !== "number")
+    || !isTimestamp(value.created_at) || !isTimestamp(value.updated_at)
+  ) return null;
+  return {
+    id: value.id, agent_id: value.agent_id, policy_id: value.policy_id,
+    policy_revision_id: value.policy_revision_id, check_key: value.check_key,
+    state: value.state as AlertState,
+    last_result_status: value.last_result_status as AlertResultStatus,
+    occurrence_count: value.occurrence_count as number,
+    total_occurrence_count: value.total_occurrence_count as number,
+    generation: value.generation as number,
+    first_opened_at: value.first_opened_at as string | null,
+    opened_at: value.opened_at as string | null,
+    last_observed_at: value.last_observed_at as string | null,
+    resolved_at: value.resolved_at as string | null,
+    last_evaluated_at: value.last_evaluated_at as string | null,
+    last_result_id: value.last_result_id as string | null,
+    last_value: value.last_value as number | null,
+    resolution_reason: value.resolution_reason as string | null,
+    suppression_window_id: value.suppression_window_id as string | null,
+    suppressed_until: value.suppressed_until as string | null,
+    assigned_to_operator_id: value.assigned_to_operator_id as string | null,
+    assigned_to_email: value.assigned_to_email as string | null,
+    acknowledged_at: value.acknowledged_at as string | null,
+    acknowledged_by: value.acknowledged_by as string | null,
+    version: value.version as number,
+    created_at: value.created_at as string, updated_at: value.updated_at as string,
+  };
+}
+
+function alertEventFromUnknown(value: unknown): AlertEvent | null {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.id !== "string" || typeof value.alert_id !== "string"
+    || !Number.isInteger(value.generation) || (value.generation as number) < 0
+    || !alertEventTypes.has(value.event_type as AlertEventType)
+    || !(value.from_state === null || alertStates.has(value.from_state as AlertState))
+    || !(value.to_state === null || alertStates.has(value.to_state as AlertState))
+    || typeof value.actor !== "string" || !nullableString(value.actor_user_id)
+    || !nullableString(value.comment) || typeof value.comment_redacted !== "boolean"
+    || !nullableString(value.assigned_to_operator_id) || !nullableString(value.assigned_to_email)
+    || !nullableString(value.source_result_id) || !nullableString(value.request_id)
+    || !isTimestamp(value.created_at)
+  ) return null;
+  return {
+    id: value.id, alert_id: value.alert_id, generation: value.generation as number,
+    event_type: value.event_type as AlertEventType,
+    from_state: value.from_state as AlertState | null,
+    to_state: value.to_state as AlertState | null,
+    actor: value.actor, actor_user_id: value.actor_user_id as string | null,
+    comment: value.comment as string | null, comment_redacted: value.comment_redacted,
+    assigned_to_operator_id: value.assigned_to_operator_id as string | null,
+    assigned_to_email: value.assigned_to_email as string | null,
+    source_result_id: value.source_result_id as string | null,
+    request_id: value.request_id as string | null, created_at: value.created_at,
+  };
+}
+
+function alertObservationFromUnknown(value: unknown): AlertObservation | null {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.check_result_id !== "string" || typeof value.alert_id !== "string"
+    || !alertStatuses.has(value.status as AlertResultStatus)
+    || (value.value !== null && typeof value.value !== "number")
+    || !isTimestamp(value.evaluated_at) || typeof value.out_of_order !== "boolean"
+    || !isTimestamp(value.created_at)
+  ) return null;
+  return {
+    check_result_id: value.check_result_id, alert_id: value.alert_id,
+    status: value.status as AlertResultStatus, value: value.value as number | null,
+    evaluated_at: value.evaluated_at, out_of_order: value.out_of_order,
+    created_at: value.created_at,
+  };
+}
+
+export function monitoringAlertListFromUnknown(value: unknown): MonitoringAlert[] | null {
+  if (!isRecord(value) || !Array.isArray(value.items)) return null;
+  const items = value.items.map(monitoringAlertFromUnknown);
+  return items.every((item): item is MonitoringAlert => item !== null) ? items : null;
+}
+
+export function monitoringAlertDetailFromUnknown(value: unknown): MonitoringAlertDetail | null {
+  const alert = monitoringAlertFromUnknown(value);
+  if (!alert || !isRecord(value) || !Array.isArray(value.events) || !Array.isArray(value.observations)) return null;
+  const events = value.events.map(alertEventFromUnknown);
+  const observations = value.observations.map(alertObservationFromUnknown);
+  if (!events.every((item): item is AlertEvent => item !== null)
+      || !observations.every((item): item is AlertObservation => item !== null)) return null;
+  return { ...alert, events, observations };
+}
+
+export function alertAssigneesFromUnknown(value: unknown): AlertAssignee[] | null {
+  if (!Array.isArray(value)) return null;
+  const items = value.map((item): AlertAssignee | null =>
+    isRecord(item) && typeof item.id === "string" && typeof item.email === "string"
+      ? { id: item.id, email: item.email } : null,
+  );
+  return items.every((item): item is AlertAssignee => item !== null) ? items : null;
+}
+
+export function validateAlertActionInput(value: unknown): AlertActionInput | null {
+  if (!isRecord(value) || typeof value.request_id !== "string"
+      || !/^[A-Za-z0-9_-]{16,64}$/.test(value.request_id)
+      || !Number.isInteger(value.expected_version) || (value.expected_version as number) < 1
+      || !(value.comment === undefined || (typeof value.comment === "string" && value.comment.trim().length <= 2000))
+      || !(value.assigned_to_operator_id === undefined || value.assigned_to_operator_id === null || typeof value.assigned_to_operator_id === "string")) return null;
+  return {
+    request_id: value.request_id,
+    expected_version: value.expected_version as number,
+    ...(typeof value.comment === "string" ? { comment: value.comment.trim() } : {}),
+    ...(value.assigned_to_operator_id !== undefined
+      ? { assigned_to_operator_id: value.assigned_to_operator_id as string | null } : {}),
+  };
+}
+
+export function formatAlertEventType(type: AlertEventType): string {
+  return type.replaceAll("_", " ");
 }
 
 export function formatMonitoringScope(scope: MonitoringScope): string {
