@@ -10,6 +10,9 @@ import {
   formatMonitoringTimestamp,
   monitoringPolicyDetailFromUnknown,
   monitoringPolicyListFromUnknown,
+  monitoringAlertDetailFromUnknown,
+  monitoringAlertListFromUnknown,
+  validateAlertActionInput,
 } from "../src/lib/monitoring-core.ts";
 
 const check = {
@@ -108,4 +111,53 @@ test("scope identity consistency and malformed lists fail closed", () => {
     monitoringPolicyListFromUnknown([{ ...summary, check_count: -1 }]),
     null,
   );
+});
+
+const alert = {
+  id: "alert-1", agent_id: "agent-1", policy_id: "policy-1",
+  policy_revision_id: "revision-1", check_key: "cpu", state: "open",
+  last_result_status: "warning", occurrence_count: 2, total_occurrence_count: 3,
+  generation: 1, first_opened_at: "2026-08-01T10:00:00Z",
+  opened_at: "2026-08-01T10:00:00Z", last_observed_at: "2026-08-01T10:01:00Z",
+  resolved_at: null, last_evaluated_at: "2026-08-01T10:01:00Z",
+  last_result_id: "result-1", last_value: 86, resolution_reason: null,
+  suppression_window_id: null, suppressed_until: null,
+  assigned_to_operator_id: null, assigned_to_email: null,
+  acknowledged_at: null, acknowledged_by: null, version: 2,
+  created_at: "2026-08-01T10:00:00Z", updated_at: "2026-08-01T10:01:00Z",
+};
+
+test("alert list and detail parsers return only allowlisted operational data", () => {
+  const list = monitoringAlertListFromUnknown({ items: [{ ...alert, access_token: "secret" }] });
+  assert.ok(list);
+  assert.doesNotMatch(JSON.stringify(list), /access_token|secret/);
+  const detail = monitoringAlertDetailFromUnknown({
+    ...alert,
+    events: [{
+      id: "event-1", alert_id: "alert-1", generation: 1, event_type: "opened",
+      from_state: "resolved", to_state: "open", actor: "system", actor_user_id: null,
+      comment: null, comment_redacted: false, assigned_to_operator_id: null,
+      assigned_to_email: null, source_result_id: "result-1", request_id: null,
+      created_at: "2026-08-01T10:00:00Z", password: "secret",
+    }],
+    observations: [{
+      check_result_id: "result-1", alert_id: "alert-1", status: "warning", value: 86,
+      evaluated_at: "2026-08-01T10:00:00Z", out_of_order: false,
+      created_at: "2026-08-01T10:00:00Z",
+    }],
+  });
+  assert.ok(detail);
+  assert.equal(detail.events[0].event_type, "opened");
+  assert.doesNotMatch(JSON.stringify(detail), /password|secret/);
+});
+
+test("alert action input requires an idempotency key and bounded version", () => {
+  assert.deepEqual(validateAlertActionInput({
+    request_id: "request-12345678", expected_version: 2, comment: "  checking  ",
+  }), { request_id: "request-12345678", expected_version: 2, comment: "checking" });
+  assert.equal(validateAlertActionInput({ request_id: "short", expected_version: 2 }), null);
+  assert.equal(validateAlertActionInput({ request_id: "request-12345678", expected_version: 0 }), null);
+  assert.equal(validateAlertActionInput({
+    request_id: "request-12345678", expected_version: 2, comment: "x".repeat(2001),
+  }), null);
 });

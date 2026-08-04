@@ -45,7 +45,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
 from app.core.keyring import active_signing_key, load_keyring
-from app.core.redaction import AUDIT_DETAIL_SCHEMAS
+from app.core.redaction import AUDIT_DETAIL_SCHEMAS, scrub_text
 from app.schemas.inventory import (
     InventoryDiffOut,
     InventoryHistoryOut,
@@ -60,6 +60,8 @@ from app.core.script_authorization import (
 from app.models.models import (
     Agent,
     Alert,
+    AlertEvent,
+    AlertEventType,
     AlertObservation,
     AlertState,
     AgentStatus,
@@ -116,8 +118,14 @@ from app.schemas.schemas import (
 )
 from app.schemas.monitoring import (
     AlertDetailOut,
+    AlertAcknowledge,
+    AlertAssign,
+    AlertAssigneeOut,
+    AlertComment,
+    AlertEventOut,
     AlertListOut,
     AlertOut,
+    AlertResolve,
     CheckResultListOut,
     EffectiveCheckOut,
     EffectivePolicyOut,
@@ -1706,13 +1714,7 @@ async def list_monitoring_alerts(
     return AlertListOut(items=rows)
 
 
-@router.get("/monitoring/alerts/{alert_id}", response_model=AlertDetailOut)
-async def get_monitoring_alert(
-    alert_id: str, db: AsyncSession = Depends(get_db)
-):
-    alert = await db.get(Alert, alert_id)
-    if alert is None:
-        raise HTTPException(status_code=404, detail="Monitoring alert not found")
+async def _alert_detail(db: AsyncSession, alert: Alert) -> AlertDetailOut:
     observations = list(
         (
             await db.execute(
@@ -1726,9 +1728,303 @@ async def get_monitoring_alert(
             )
         ).scalars().all()
     )
-    return AlertDetailOut.model_validate(
-        {**AlertOut.model_validate(alert).model_dump(), "observations": observations}
+    events = list(
+        (
+            await db.execute(
+                select(AlertEvent)
+                .where(AlertEvent.alert_id == alert.id)
+                .order_by(AlertEvent.created_at.desc(), AlertEvent.id.desc())
+                .limit(200)
+            )
+        ).scalars().all()
     )
+    return AlertDetailOut.model_validate(
+        {
+            **AlertOut.model_validate(alert).model_dump(),
+            "observations": observations,
+            "events": events,
+        }
+    )
+
+
+@router.get("/monitoring/alerts/{alert_id}", response_model=AlertDetailOut)
+async def get_monitoring_alert(
+    alert_id: str, db: AsyncSession = Depends(get_db)
+):
+    alert = await db.get(Alert, alert_id)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Monitoring alert not found")
+    return await _alert_detail(db, alert)
+
+
+@router.get("/monitoring/alert-assignees", response_model=list[AlertAssigneeOut])
+async def list_monitoring_alert_assignees(
+    _operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    return list(
+        (
+            await db.execute(
+                select(Operator)
+                .where(Operator.disabled.is_(False))
+                .order_by(Operator.email, Operator.id)
+            )
+        ).scalars().all()
+    )
+
+
+async def _lock_alert_action(
+    db: AsyncSession,
+    alert_id: str,
+    *,
+    request_id: str,
+    expected_version: int,
+) -> tuple[Alert, bool]:
+    alert = await db.scalar(
+        select(Alert).where(Alert.id == alert_id).with_for_update()
+    )
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Monitoring alert not found")
+    prior = await db.scalar(
+        select(AlertEvent).where(
+            AlertEvent.alert_id == alert_id,
+            AlertEvent.request_id == request_id,
+        )
+    )
+    if prior is not None:
+        return alert, True
+    if alert.version != expected_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "alert_version_conflict",
+                "current_version": alert.version,
+            },
+        )
+    return alert, False
+
+
+def _safe_alert_comment(comment: str | None) -> tuple[str | None, bool]:
+    if comment is None:
+        return None, False
+    safe = scrub_text(comment)
+    return safe, safe != comment
+
+
+def _operator_alert_event(
+    db: AsyncSession,
+    alert: Alert,
+    event_type: AlertEventType,
+    operator: Operator,
+    *,
+    request_id: str,
+    from_state: AlertState | None,
+    to_state: AlertState | None,
+    comment: str | None,
+    assigned_to: Operator | None = None,
+) -> tuple[str | None, bool]:
+    safe_comment, comment_redacted = _safe_alert_comment(comment)
+    db.add(
+        AlertEvent(
+            alert_id=alert.id,
+            generation=alert.generation,
+            event_type=event_type,
+            from_state=from_state,
+            to_state=to_state,
+            actor=operator.email,
+            actor_user_id=operator.id,
+            comment=safe_comment,
+            comment_redacted=comment_redacted,
+            assigned_to_operator_id=assigned_to.id if assigned_to else None,
+            assigned_to_email=assigned_to.email if assigned_to else None,
+            request_id=request_id,
+        )
+    )
+    return safe_comment, comment_redacted
+
+
+def _alert_audit_context(request: Request, operator: Operator) -> dict:
+    return {
+        "actor": operator.email,
+        "actor_user_id": operator.id,
+        "source_ip": client_ip(request),
+        "user_agent": request.headers.get("user-agent", "")[:500] or None,
+    }
+
+
+@router.post(
+    "/monitoring/alerts/{alert_id}/acknowledge", response_model=AlertDetailOut
+)
+async def acknowledge_monitoring_alert(
+    alert_id: str,
+    body: AlertAcknowledge,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    alert, replay = await _lock_alert_action(
+        db, alert_id, request_id=body.request_id,
+        expected_version=body.expected_version,
+    )
+    if replay:
+        return await _alert_detail(db, alert)
+    if alert.state != AlertState.open:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "alert_acknowledge_invalid_state", "state": alert.state.value},
+        )
+    previous = alert.state
+    alert.state = AlertState.acknowledged
+    alert.acknowledged_at = _now()
+    alert.acknowledged_by = operator.email
+    alert.version += 1
+    alert.updated_at = _now()
+    safe_comment, redacted = _operator_alert_event(
+        db, alert, AlertEventType.acknowledged, operator,
+        request_id=body.request_id, from_state=previous,
+        to_state=alert.state, comment=body.comment,
+    )
+    await audit.record(
+        db, action="monitoring_alert.acknowledged",
+        agent_id=alert.agent_id, **_alert_audit_context(request, operator),
+        detail={
+            "alert_id": alert.id, "generation": alert.generation,
+            "request_id": body.request_id, "from_state": previous.value,
+            "to_state": alert.state.value, "comment": safe_comment or "",
+            "comment_redacted": redacted,
+        },
+    )
+    metrics.increment("monitoring_alert_acknowledged_total")
+    await db.flush()
+    return await _alert_detail(db, alert)
+
+
+@router.post("/monitoring/alerts/{alert_id}/assign", response_model=AlertDetailOut)
+async def assign_monitoring_alert(
+    alert_id: str,
+    body: AlertAssign,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    alert, replay = await _lock_alert_action(
+        db, alert_id, request_id=body.request_id,
+        expected_version=body.expected_version,
+    )
+    if replay:
+        return await _alert_detail(db, alert)
+    assignee = None
+    if body.assigned_to_operator_id is not None:
+        assignee = await db.get(Operator, body.assigned_to_operator_id)
+        if assignee is None or assignee.disabled:
+            raise HTTPException(
+                status_code=422, detail={"code": "alert_assignee_unavailable"}
+            )
+    alert.assigned_to_operator_id = assignee.id if assignee else None
+    alert.assigned_to_email = assignee.email if assignee else None
+    alert.version += 1
+    alert.updated_at = _now()
+    safe_comment, redacted = _operator_alert_event(
+        db, alert, AlertEventType.assigned, operator,
+        request_id=body.request_id, from_state=alert.state,
+        to_state=alert.state, comment=body.comment, assigned_to=assignee,
+    )
+    await audit.record(
+        db, action="monitoring_alert.assigned",
+        agent_id=alert.agent_id, **_alert_audit_context(request, operator),
+        detail={
+            "alert_id": alert.id, "generation": alert.generation,
+            "request_id": body.request_id,
+            "assigned_to_operator_id": assignee.id if assignee else "",
+            "assigned_to_email": assignee.email if assignee else "",
+            "comment": safe_comment or "", "comment_redacted": redacted,
+        },
+    )
+    metrics.increment("monitoring_alert_assigned_total")
+    await db.flush()
+    return await _alert_detail(db, alert)
+
+
+@router.post("/monitoring/alerts/{alert_id}/comments", response_model=AlertDetailOut)
+async def comment_on_monitoring_alert(
+    alert_id: str,
+    body: AlertComment,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    alert, replay = await _lock_alert_action(
+        db, alert_id, request_id=body.request_id,
+        expected_version=body.expected_version,
+    )
+    if replay:
+        return await _alert_detail(db, alert)
+    alert.version += 1
+    alert.updated_at = _now()
+    safe_comment, redacted = _operator_alert_event(
+        db, alert, AlertEventType.commented, operator,
+        request_id=body.request_id, from_state=alert.state,
+        to_state=alert.state, comment=body.comment,
+    )
+    await audit.record(
+        db, action="monitoring_alert.commented",
+        agent_id=alert.agent_id, **_alert_audit_context(request, operator),
+        detail={
+            "alert_id": alert.id, "generation": alert.generation,
+            "request_id": body.request_id, "state": alert.state.value,
+            "comment": safe_comment or "", "comment_redacted": redacted,
+        },
+    )
+    metrics.increment("monitoring_alert_commented_total")
+    await db.flush()
+    return await _alert_detail(db, alert)
+
+
+@router.post("/monitoring/alerts/{alert_id}/resolve", response_model=AlertDetailOut)
+async def resolve_monitoring_alert(
+    alert_id: str,
+    body: AlertResolve,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    alert, replay = await _lock_alert_action(
+        db, alert_id, request_id=body.request_id,
+        expected_version=body.expected_version,
+    )
+    if replay:
+        return await _alert_detail(db, alert)
+    if alert.state == AlertState.resolved:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "alert_resolve_invalid_state", "state": alert.state.value},
+        )
+    previous = alert.state
+    alert.state = AlertState.resolved
+    alert.resolved_at = _now()
+    alert.resolution_reason = "manual_resolution"
+    alert.suppression_window_id = None
+    alert.suppressed_until = None
+    alert.version += 1
+    alert.updated_at = _now()
+    safe_comment, redacted = _operator_alert_event(
+        db, alert, AlertEventType.manual_resolution, operator,
+        request_id=body.request_id, from_state=previous,
+        to_state=alert.state, comment=body.comment,
+    )
+    await audit.record(
+        db, action="monitoring_alert.resolved",
+        agent_id=alert.agent_id, **_alert_audit_context(request, operator),
+        detail={
+            "alert_id": alert.id, "generation": alert.generation,
+            "request_id": body.request_id, "from_state": previous.value,
+            "to_state": alert.state.value, "comment": safe_comment or "",
+            "comment_redacted": redacted,
+        },
+    )
+    metrics.increment("monitoring_alert_manually_resolved_total")
+    await db.flush()
+    return await _alert_detail(db, alert)
 
 
 # --------------------------------------------------------------------------- #

@@ -165,6 +165,22 @@ class AlertState(str, enum.Enum):
     resolved = "resolved"
 
 
+class AlertEventType(str, enum.Enum):
+    """Immutable lifecycle transitions and technician actions (#44)."""
+
+    state_imported = "state_imported"
+    opened = "opened"
+    reopened = "reopened"
+    acknowledged = "acknowledged"
+    assigned = "assigned"
+    commented = "commented"
+    manual_resolution = "manual_resolution"
+    automatic_recovery = "automatic_recovery"
+    policy_revised = "policy_revised"
+    policy_deleted = "policy_deleted"
+    policy_superseded = "policy_superseded"
+
+
 class Client(Base):
     __tablename__ = "clients"
 
@@ -789,6 +805,13 @@ class Alert(Base):
     last_result_id: Mapped[str | None] = mapped_column(String(36))
     last_value: Mapped[float | None] = mapped_column(Float)
     resolution_reason: Mapped[str | None] = mapped_column(String(64))
+    assigned_to_operator_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    assigned_to_email: Mapped[str | None] = mapped_column(String(320))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_by: Mapped[str | None] = mapped_column(String(320))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     suppression_window_id: Mapped[str | None] = mapped_column(String(36))
     suppressed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
@@ -799,6 +822,57 @@ class Alert(Base):
     )
 
     agent: Mapped["Agent"] = relationship()
+
+
+class AlertEvent(Base):
+    """Append-only operational history for one alert lifecycle (#44)."""
+
+    __tablename__ = "alert_events"
+    __table_args__ = (
+        UniqueConstraint("alert_id", "request_id", name="ux_alert_event_request"),
+        UniqueConstraint(
+            "alert_id", "source_result_id", name="ux_alert_event_source_result"
+        ),
+        Index("ix_alert_events_alert_created", "alert_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    alert_id: Mapped[str] = mapped_column(
+        ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[AlertEventType] = mapped_column(
+        Enum(
+            AlertEventType,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    from_state: Mapped[AlertState | None] = mapped_column(
+        Enum(
+            AlertState,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        )
+    )
+    to_state: Mapped[AlertState | None] = mapped_column(
+        Enum(
+            AlertState,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        )
+    )
+    actor: Mapped[str] = mapped_column(String(320), nullable=False)
+    actor_user_id: Mapped[str | None] = mapped_column(String(36))
+    comment: Mapped[str | None] = mapped_column(Text)
+    comment_redacted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    assigned_to_operator_id: Mapped[str | None] = mapped_column(String(36))
+    assigned_to_email: Mapped[str | None] = mapped_column(String(320))
+    source_result_id: Mapped[str | None] = mapped_column(String(36))
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class AlertObservation(Base):

@@ -207,6 +207,23 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     "monitoring_policy.viewed": _schema(
         "policy_id", "version", "check_count", "revision_count"
     ),
+    "monitoring_alert.acknowledged": _schema(
+        "alert_id", "generation", "request_id", "from_state", "to_state",
+        "comment", "comment_redacted", digest_fields=("comment",),
+    ),
+    "monitoring_alert.assigned": _schema(
+        "alert_id", "generation", "request_id", "assigned_to_operator_id",
+        "assigned_to_email", "comment", "comment_redacted",
+        digest_fields=("assigned_to_email", "comment"),
+    ),
+    "monitoring_alert.commented": _schema(
+        "alert_id", "generation", "request_id", "state", "comment",
+        "comment_redacted", digest_fields=("comment",),
+    ),
+    "monitoring_alert.resolved": _schema(
+        "alert_id", "generation", "request_id", "from_state", "to_state",
+        "comment", "comment_redacted", digest_fields=("comment",),
+    ),
     "maintenance_window.created": _schema(
         "maintenance_window_id",
         "scope",

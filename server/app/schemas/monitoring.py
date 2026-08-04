@@ -30,7 +30,13 @@ from pydantic import (
     model_validator,
 )
 
-from app.models.models import AlertState, CheckResultStatus, CheckType, MonitoringScope
+from app.models.models import (
+    AlertEventType,
+    AlertState,
+    CheckResultStatus,
+    CheckType,
+    MonitoringScope,
+)
 
 # --------------------------------------------------------------------------- #
 # Bounds (schema-level; runtime quotas live in app/core/config.py)
@@ -439,6 +445,11 @@ class AlertOut(BaseModel):
     last_result_id: str | None
     last_value: float | None
     resolution_reason: str | None
+    assigned_to_operator_id: str | None
+    assigned_to_email: str | None
+    acknowledged_at: datetime | None
+    acknowledged_by: str | None
+    version: int = Field(ge=1)
     suppression_window_id: str | None
     suppressed_until: datetime | None
     created_at: datetime
@@ -462,3 +473,53 @@ class AlertObservationOut(BaseModel):
 
 class AlertDetailOut(AlertOut):
     observations: list[AlertObservationOut] = Field(default_factory=list)
+    events: list["AlertEventOut"] = Field(default_factory=list)
+
+
+class AlertEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    alert_id: str
+    generation: int = Field(ge=0)
+    event_type: AlertEventType
+    from_state: AlertState | None
+    to_state: AlertState | None
+    actor: str
+    actor_user_id: str | None
+    comment: str | None
+    comment_redacted: bool
+    assigned_to_operator_id: str | None
+    assigned_to_email: str | None
+    source_result_id: str | None
+    request_id: str | None
+    created_at: datetime
+
+
+class AlertActionBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,64}$")
+    ]
+    expected_version: int = Field(ge=1)
+    comment: Annotated[str, StringConstraints(max_length=2_000, strip_whitespace=True)] | None = None
+
+
+class AlertAcknowledge(AlertActionBase):
+    pass
+
+
+class AlertComment(AlertActionBase):
+    comment: Annotated[str, StringConstraints(min_length=1, max_length=2_000, strip_whitespace=True)]
+
+
+class AlertResolve(AlertActionBase):
+    comment: Annotated[str, StringConstraints(min_length=1, max_length=2_000, strip_whitespace=True)]
+
+
+class AlertAssign(AlertActionBase):
+    assigned_to_operator_id: str | None
+
+
+class AlertAssigneeOut(BaseModel):
+    id: str
+    email: str
