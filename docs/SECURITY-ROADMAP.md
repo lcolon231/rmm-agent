@@ -213,8 +213,8 @@ policy/window names and revision notes are stored in the audit chain only as a
 SHA-256 digest plus byte count. Policy administration in the dashboard remains
 intentionally read-only. Agent-side evaluation, result ingestion,
 maintenance-window suppression metadata, alert deduplication/state, and the
-live technician alert queue are implemented. Notification delivery remains
-later Milestone 1 work.
+live technician alert queue and durable, redacted email transition delivery are
+implemented. Generic signed webhook delivery remains later Milestone 1 work.
 
 - Use server-mediated dashboard sessions with secure cookie, CSRF, expiration,
   logout, revocation, and role-change behavior. Do not persist operator bearer
@@ -227,8 +227,8 @@ later Milestone 1 work.
   administration. Operator creation, role/status changes, script permission,
   session revocation, monitoring-policy revision/deletion, and maintenance-window
   creation/deletion are covered; alert acknowledgement, assignment, comments,
-  and manual resolution are covered; script-library, recurring-schedule, and
-  notification administration remain future work.
+  manual resolution, and failed-email manual retry are covered; script-library,
+  recurring-schedule, and generic webhook administration remain future work.
 - Validate and bound inventory, telemetry, scripts, parameters, schedules, and
   webhook destinations.
 - Add SSRF controls for webhooks and delivery backoff with signed webhook

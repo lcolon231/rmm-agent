@@ -121,6 +121,36 @@ export type AlertActionInput = {
   assigned_to_operator_id?: string | null;
 };
 
+export type AlertEmailDeliveryStatus = "pending" | "sending" | "retrying" | "sent" | "failed" | "suppressed";
+export type AlertEmailAttemptStatus = "sending" | "sent" | "retrying" | "failed";
+export type AlertEmailAttempt = {
+  id: string;
+  attempt_number: number;
+  status: AlertEmailAttemptStatus;
+  provider_message_id: string | null;
+  error_code: string | null;
+  created_at: string;
+  completed_at: string | null;
+};
+export type AlertEmailDelivery = {
+  id: string;
+  alert_id: string;
+  alert_event_id: string;
+  generation: number;
+  event_type: AlertEventType;
+  recipient: string;
+  status: AlertEmailDeliveryStatus;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at: string;
+  provider_message_id: string | null;
+  last_error_code: string | null;
+  sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+  attempts: AlertEmailAttempt[];
+};
+
 const scopes = new Set<MonitoringScope>(["global", "client", "site", "agent"]);
 const checkTypes = new Set<CheckType>([
   "offline",
@@ -138,6 +168,12 @@ const alertEventTypes = new Set<AlertEventType>([
   "state_imported", "opened", "reopened", "acknowledged", "assigned", "commented",
   "manual_resolution", "automatic_recovery", "policy_revised", "policy_deleted",
   "policy_superseded",
+]);
+const emailDeliveryStatuses = new Set<AlertEmailDeliveryStatus>([
+  "pending", "sending", "retrying", "sent", "failed", "suppressed",
+]);
+const emailAttemptStatuses = new Set<AlertEmailAttemptStatus>([
+  "sending", "sent", "retrying", "failed",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -411,6 +447,60 @@ export function validateAlertActionInput(value: unknown): AlertActionInput | nul
     ...(value.assigned_to_operator_id !== undefined
       ? { assigned_to_operator_id: value.assigned_to_operator_id as string | null } : {}),
   };
+}
+
+function alertEmailAttemptFromUnknown(value: unknown): AlertEmailAttempt | null {
+  if (!isRecord(value) || typeof value.id !== "string"
+      || !Number.isInteger(value.attempt_number) || (value.attempt_number as number) < 1
+      || !emailAttemptStatuses.has(value.status as AlertEmailAttemptStatus)
+      || !nullableString(value.provider_message_id) || !nullableString(value.error_code)
+      || !isTimestamp(value.created_at)
+      || !(value.completed_at === null || isTimestamp(value.completed_at))) return null;
+  return {
+    id: value.id, attempt_number: value.attempt_number as number,
+    status: value.status as AlertEmailAttemptStatus,
+    provider_message_id: value.provider_message_id as string | null,
+    error_code: value.error_code as string | null, created_at: value.created_at,
+    completed_at: value.completed_at as string | null,
+  };
+}
+
+function parseAlertEmailDelivery(value: unknown): AlertEmailDelivery | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.alert_id !== "string"
+      || typeof value.alert_event_id !== "string" || typeof value.recipient !== "string"
+      || !Number.isInteger(value.generation) || (value.generation as number) < 0
+      || !alertEventTypes.has(value.event_type as AlertEventType)
+      || !emailDeliveryStatuses.has(value.status as AlertEmailDeliveryStatus)
+      || !Number.isInteger(value.attempt_count) || (value.attempt_count as number) < 0
+      || !Number.isInteger(value.max_attempts) || (value.max_attempts as number) < 1
+      || !isTimestamp(value.next_attempt_at) || !nullableString(value.provider_message_id)
+      || !nullableString(value.last_error_code)
+      || !(value.sent_at === null || isTimestamp(value.sent_at))
+      || !isTimestamp(value.created_at) || !isTimestamp(value.updated_at)
+      || !Array.isArray(value.attempts)) return null;
+  const attempts = value.attempts.map(alertEmailAttemptFromUnknown);
+  if (!attempts.every((item): item is AlertEmailAttempt => item !== null)) return null;
+  return {
+    id: value.id, alert_id: value.alert_id, alert_event_id: value.alert_event_id,
+    generation: value.generation as number, event_type: value.event_type as AlertEventType,
+    recipient: value.recipient, status: value.status as AlertEmailDeliveryStatus,
+    attempt_count: value.attempt_count as number, max_attempts: value.max_attempts as number,
+    next_attempt_at: value.next_attempt_at,
+    provider_message_id: value.provider_message_id as string | null,
+    last_error_code: value.last_error_code as string | null,
+    sent_at: value.sent_at as string | null, created_at: value.created_at,
+    updated_at: value.updated_at, attempts,
+  };
+}
+
+export function alertEmailDeliveryFromUnknown(value: unknown): AlertEmailDelivery | null {
+  return parseAlertEmailDelivery(value);
+}
+
+export function alertEmailDeliveryListFromUnknown(value: unknown): AlertEmailDelivery[] | null {
+  if (!isRecord(value) || !Array.isArray(value.items)) return null;
+  const items = value.items.map(parseAlertEmailDelivery);
+  return items.every((item): item is AlertEmailDelivery => item !== null) ? items : null;
 }
 
 export function formatAlertEventType(type: AlertEventType): string {

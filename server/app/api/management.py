@@ -26,6 +26,7 @@ from app.core import (
     anchor,
     anchor_publish,
     audit,
+    email_notifications,
     inventory,
     inventory_diff,
     metrics,
@@ -60,6 +61,8 @@ from app.core.script_authorization import (
 from app.models.models import (
     Agent,
     Alert,
+    AlertEmailAttempt,
+    AlertEmailDelivery,
     AlertEvent,
     AlertEventType,
     AlertObservation,
@@ -78,6 +81,7 @@ from app.models.models import (
     CheckResultStatus,
     EnrollmentToken,
     EnrollmentTokenStatus,
+    EmailDeliveryStatus,
     Heartbeat,
     MaintenanceWindow,
     MonitoringPolicy,
@@ -122,6 +126,11 @@ from app.schemas.monitoring import (
     AlertAssign,
     AlertAssigneeOut,
     AlertComment,
+    AlertEmailAttemptOut,
+    AlertEmailDeliveryListOut,
+    AlertEmailDeliveryOut,
+    AlertEmailRetry,
+    AlertEmailStatusOut,
     AlertEventOut,
     AlertListOut,
     AlertOut,
@@ -1824,22 +1833,23 @@ def _operator_alert_event(
     assigned_to: Operator | None = None,
 ) -> tuple[str | None, bool]:
     safe_comment, comment_redacted = _safe_alert_comment(comment)
-    db.add(
-        AlertEvent(
-            alert_id=alert.id,
-            generation=alert.generation,
-            event_type=event_type,
-            from_state=from_state,
-            to_state=to_state,
-            actor=operator.email,
-            actor_user_id=operator.id,
-            comment=safe_comment,
-            comment_redacted=comment_redacted,
-            assigned_to_operator_id=assigned_to.id if assigned_to else None,
-            assigned_to_email=assigned_to.email if assigned_to else None,
-            request_id=request_id,
-        )
+    event = AlertEvent(
+        id=str(uuid.uuid4()),
+        alert_id=alert.id,
+        generation=alert.generation,
+        event_type=event_type,
+        from_state=from_state,
+        to_state=to_state,
+        actor=operator.email,
+        actor_user_id=operator.id,
+        comment=safe_comment,
+        comment_redacted=comment_redacted,
+        assigned_to_operator_id=assigned_to.id if assigned_to else None,
+        assigned_to_email=assigned_to.email if assigned_to else None,
+        request_id=request_id,
     )
+    db.add(event)
+    email_notifications.enqueue_alert_event(db, alert, event)
     return safe_comment, comment_redacted
 
 
@@ -2025,6 +2035,169 @@ async def resolve_monitoring_alert(
     metrics.increment("monitoring_alert_manually_resolved_total")
     await db.flush()
     return await _alert_detail(db, alert)
+
+
+def _email_delivery_out(
+    delivery: AlertEmailDelivery,
+    attempts: list[AlertEmailAttempt],
+) -> AlertEmailDeliveryOut:
+    return AlertEmailDeliveryOut(
+        id=delivery.id,
+        alert_id=delivery.alert_id,
+        alert_event_id=delivery.alert_event_id,
+        generation=delivery.generation,
+        event_type=delivery.event_type,
+        recipient=email_notifications.mask_recipient(delivery.recipient),
+        status=delivery.status,
+        attempt_count=delivery.attempt_count,
+        max_attempts=delivery.max_attempts,
+        next_attempt_at=delivery.next_attempt_at,
+        provider_message_id=delivery.provider_message_id,
+        last_error_code=delivery.last_error_code,
+        sent_at=delivery.sent_at,
+        created_at=delivery.created_at,
+        updated_at=delivery.updated_at,
+        attempts=[AlertEmailAttemptOut.model_validate(item) for item in attempts],
+    )
+
+
+@router.get(
+    "/monitoring/email-alerts/status", response_model=AlertEmailStatusOut
+)
+async def monitoring_email_alert_status(
+    db: AsyncSession = Depends(get_db),
+):
+    status_body = email_notifications.configuration_status(settings)
+    status_body["counts"] = await email_notifications.delivery_counts(db)
+    return status_body
+
+
+@router.get(
+    "/monitoring/alerts/{alert_id}/email-deliveries",
+    response_model=AlertEmailDeliveryListOut,
+)
+async def list_monitoring_alert_email_deliveries(
+    alert_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    if await db.get(Alert, alert_id) is None:
+        raise HTTPException(status_code=404, detail="Monitoring alert not found")
+    deliveries = list(
+        (
+            await db.execute(
+                select(AlertEmailDelivery)
+                .where(AlertEmailDelivery.alert_id == alert_id)
+                .order_by(
+                    AlertEmailDelivery.created_at.desc(),
+                    AlertEmailDelivery.id.desc(),
+                )
+                .limit(250)
+            )
+        ).scalars().all()
+    )
+    attempts_by_delivery: dict[str, list[AlertEmailAttempt]] = {
+        item.id: [] for item in deliveries
+    }
+    if deliveries:
+        attempts = list(
+            (
+                await db.execute(
+                    select(AlertEmailAttempt)
+                    .where(
+                        AlertEmailAttempt.delivery_id.in_(
+                            [item.id for item in deliveries]
+                        )
+                    )
+                    .order_by(
+                        AlertEmailAttempt.created_at,
+                        AlertEmailAttempt.id,
+                    )
+                )
+            ).scalars().all()
+        )
+        for attempt in attempts:
+            attempts_by_delivery[attempt.delivery_id].append(attempt)
+    return AlertEmailDeliveryListOut(
+        items=[
+            _email_delivery_out(item, attempts_by_delivery[item.id])
+            for item in deliveries
+        ]
+    )
+
+
+@router.post(
+    "/monitoring/email-deliveries/{delivery_id}/retry",
+    response_model=AlertEmailDeliveryOut,
+)
+async def retry_monitoring_alert_email_delivery(
+    delivery_id: str,
+    body: AlertEmailRetry,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    delivery = await db.scalar(
+        select(AlertEmailDelivery)
+        .where(AlertEmailDelivery.id == delivery_id)
+        .with_for_update()
+    )
+    if delivery is None:
+        raise HTTPException(status_code=404, detail="Email delivery not found")
+    if delivery.last_retry_request_id == body.request_id:
+        attempts = list(
+            (
+                await db.execute(
+                    select(AlertEmailAttempt)
+                    .where(AlertEmailAttempt.delivery_id == delivery.id)
+                    .order_by(AlertEmailAttempt.created_at, AlertEmailAttempt.id)
+                )
+            ).scalars().all()
+        )
+        return _email_delivery_out(delivery, attempts)
+    if delivery.status != EmailDeliveryStatus.failed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "email_delivery_retry_invalid_state",
+                "status": delivery.status.value,
+            },
+        )
+    if delivery.attempt_count >= 20:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "email_delivery_retry_limit_reached"},
+        )
+    previous_status = delivery.status
+    delivery.status = EmailDeliveryStatus.retrying
+    delivery.next_attempt_at = _now()
+    delivery.claimed_at = None
+    delivery.max_attempts = max(delivery.max_attempts, delivery.attempt_count + 1)
+    delivery.last_retry_request_id = body.request_id
+    delivery.updated_at = _now()
+    await audit.record(
+        db,
+        action="monitoring_alert_email.retried",
+        agent_id=(await db.get(Alert, delivery.alert_id)).agent_id,
+        **_alert_audit_context(request, operator),
+        detail={
+            "delivery_id": delivery.id,
+            "alert_id": delivery.alert_id,
+            "request_id": body.request_id,
+            "previous_status": previous_status.value,
+            "recipient": delivery.recipient,
+        },
+    )
+    metrics.increment("email_alert_manual_retry_total")
+    attempts = list(
+        (
+            await db.execute(
+                select(AlertEmailAttempt)
+                .where(AlertEmailAttempt.delivery_id == delivery.id)
+                .order_by(AlertEmailAttempt.created_at, AlertEmailAttempt.id)
+            )
+        ).scalars().all()
+    )
+    return _email_delivery_out(delivery, attempts)
 
 
 # --------------------------------------------------------------------------- #

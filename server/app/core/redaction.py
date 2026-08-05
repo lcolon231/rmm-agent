@@ -224,6 +224,10 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "alert_id", "generation", "request_id", "from_state", "to_state",
         "comment", "comment_redacted", digest_fields=("comment",),
     ),
+    "monitoring_alert_email.retried": _schema(
+        "delivery_id", "alert_id", "request_id", "previous_status", "recipient",
+        digest_fields=("recipient",),
+    ),
     "maintenance_window.created": _schema(
         "maintenance_window_id",
         "scope",

@@ -4,6 +4,8 @@ Issues #43 and #44 turn revision-pinned check results into one durable alert
 identity per `(agent_id, policy_id, check_key)`, then add the authorized
 technician lifecycle around it. Automatic transitions and technician actions
 share the same row lock, version counter, and append-only history.
+Issue #45 consumes these immutable transitions through the durable email
+boundary documented in [`ALERT-NOTIFICATIONS.md`](ALERT-NOTIFICATIONS.md).
 
 ## State contract
 
@@ -78,6 +80,9 @@ Operator-or-higher technicians may use:
 - `POST /api/v1/monitoring/alerts/{alert_id}/comments`; and
 - `POST /api/v1/monitoring/alerts/{alert_id}/resolve`.
 
+Email configuration status, per-alert delivery history, and role-gated manual
+retry APIs are documented in [`ALERT-NOTIFICATIONS.md`](ALERT-NOTIFICATIONS.md).
+
 Action comments are trimmed, limited to 2,000 characters, scrubbed for
 credential-shaped text before storage, and represented in the tamper-evident
 audit chain only by a SHA-256 digest and byte count. The operational
@@ -101,9 +106,11 @@ fields plus `alert_events`; every pre-existing alert receives a deterministic
 `state_imported` baseline event. Existing check results remain intact. On
 PostgreSQL, all three public-schema alert tables enable RLS and revoke direct
 Data API access from `anon` and `authenticated`; `alert_events` also revokes
-`PUBLIC`. NodeLink's authorized FastAPI service remains the data boundary.
+`PUBLIC`. Revision `0019` adds the durable email queue and append-only provider
+attempt history with the same Data API isolation. NodeLink's authorized
+FastAPI service remains the data boundary.
 
-Deploy revision `0018`, then the server and dashboard. No agent change is
+Deploy through revision `0019`, then the server and dashboard. No agent change is
 required. A new server refuses to start against an older schema; the old server
 ignores the additive columns/table during a staged rollout. NodeLink migrations
 are forward-only. Rollback therefore restores a tested pre-`0018` database

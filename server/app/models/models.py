@@ -181,6 +181,26 @@ class AlertEventType(str, enum.Enum):
     policy_superseded = "policy_superseded"
 
 
+class EmailDeliveryStatus(str, enum.Enum):
+    """Durable state for one alert email recipient (#45)."""
+
+    pending = "pending"
+    sending = "sending"
+    retrying = "retrying"
+    sent = "sent"
+    failed = "failed"
+    suppressed = "suppressed"
+
+
+class EmailAttemptStatus(str, enum.Enum):
+    """Immutable outcome for one provider call."""
+
+    sending = "sending"
+    sent = "sent"
+    retrying = "retrying"
+    failed = "failed"
+
+
 class Client(Base):
     __tablename__ = "clients"
 
@@ -873,6 +893,98 @@ class AlertEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
+
+
+class AlertEmailDelivery(Base):
+    """One durable, idempotent alert-transition email per recipient (#45)."""
+
+    __tablename__ = "alert_email_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "alert_event_id", "recipient", name="ux_alert_email_event_recipient"
+        ),
+        Index(
+            "ix_alert_email_due", "status", "next_attempt_at", "created_at"
+        ),
+        Index(
+            "ix_alert_email_alert_created", "alert_id", "created_at"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    alert_id: Mapped[str] = mapped_column(
+        ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False
+    )
+    alert_event_id: Mapped[str] = mapped_column(
+        ForeignKey("alert_events.id", ondelete="CASCADE"), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[AlertEventType] = mapped_column(
+        Enum(
+            AlertEventType,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    recipient: Mapped[str] = mapped_column(String(320), nullable=False)
+    subject: Mapped[str] = mapped_column(String(500), nullable=False)
+    text_body: Mapped[str] = mapped_column(Text, nullable=False)
+    html_body: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[EmailDeliveryStatus] = mapped_column(
+        Enum(
+            EmailDeliveryStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+        default=EmailDeliveryStatus.pending,
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    last_retry_request_id: Mapped[str | None] = mapped_column(String(64))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class AlertEmailAttempt(Base):
+    """Append-only provider-attempt history without response bodies or secrets."""
+
+    __tablename__ = "alert_email_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "delivery_id", "attempt_number", name="ux_alert_email_attempt_number"
+        ),
+        Index("ix_alert_email_attempt_delivery", "delivery_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    delivery_id: Mapped[str] = mapped_column(
+        ForeignKey("alert_email_deliveries.id", ondelete="CASCADE"), nullable=False
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[EmailAttemptStatus] = mapped_column(
+        Enum(
+            EmailAttemptStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AlertObservation(Base):

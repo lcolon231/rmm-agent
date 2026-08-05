@@ -366,6 +366,9 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/monitoring/alerts/{id}/assign` | Assign or unassign an alert | Operator |
 | POST | `/monitoring/alerts/{id}/comments` | Append a scrubbed technician comment | Operator |
 | POST | `/monitoring/alerts/{id}/resolve` | Manually resolve an active alert | Operator |
+| GET | `/monitoring/email-alerts/status` | Safe provider configuration and delivery counts | Readonly |
+| GET | `/monitoring/alerts/{id}/email-deliveries` | Masked recipient delivery/attempt history | Readonly |
+| POST | `/monitoring/email-deliveries/{id}/retry` | Idempotently retry a failed email | Operator |
 
 Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, a
 filtered enrollment audit-event list, and the general audit timeline,
@@ -374,8 +377,9 @@ creation and operator listing, creation, global-role change, disable/re-enable,
 script-permission administration, and session revocation are implemented in the
 dashboard. Deleting identities and password lifecycle operations remain absent.
 Monitoring policy models, read APIs, the initial six checks, result ingestion,
-deduplicated automatic alert state, and technician alert lifecycle actions are
-implemented; notification delivery, general task scheduling, patching, and
+deduplicated automatic alert state, technician alert lifecycle actions, and
+durable email notification delivery are implemented; generic webhooks, general
+task scheduling, patching, and
 evidence export remain absent. Telemetry history is
 available only as a bounded read-only endpoint-detail query, not as a general
 analytics API.

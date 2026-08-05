@@ -5,11 +5,14 @@ import "server-only";
 import {
   monitoringPolicyDetailFromUnknown,
   monitoringPolicyListFromUnknown,
+  alertEmailDeliveryFromUnknown,
+  alertEmailDeliveryListFromUnknown,
   alertAssigneesFromUnknown,
   monitoringAlertDetailFromUnknown,
   monitoringAlertListFromUnknown,
   type AlertActionInput,
   type AlertAssignee,
+  type AlertEmailDelivery,
   type MonitoringAlert,
   type MonitoringAlertDetail,
   type MonitoringPolicy,
@@ -83,4 +86,36 @@ export function performAlertAction(
       method: "POST", sessionToken,
     },
   );
+}
+
+export async function getAlertEmailDeliveries(
+  sessionToken: string,
+  alertId: string,
+): Promise<AlertEmailDelivery[]> {
+  const value = await nodelinkApiRequest<unknown>(
+    `/api/v1/monitoring/alerts/${encodeURIComponent(alertId)}/email-deliveries`,
+    { method: "GET", sessionToken },
+  );
+  const deliveries = alertEmailDeliveryListFromUnknown(value);
+  if (!deliveries) throw new Error("The management service returned invalid email delivery history.");
+  return deliveries;
+}
+
+export async function retryAlertEmailDelivery(
+  sessionToken: string,
+  deliveryId: string,
+  requestId: string,
+): Promise<AlertEmailDelivery> {
+  const value = await nodelinkApiRequest<unknown>(
+    `/api/v1/monitoring/email-deliveries/${encodeURIComponent(deliveryId)}/retry`,
+    {
+      body: JSON.stringify({ request_id: requestId }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+      sessionToken,
+    },
+  );
+  const delivery = alertEmailDeliveryFromUnknown(value);
+  if (!delivery) throw new Error("The management service returned an invalid email delivery.");
+  return delivery;
 }

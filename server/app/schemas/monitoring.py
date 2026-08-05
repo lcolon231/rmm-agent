@@ -35,6 +35,8 @@ from app.models.models import (
     AlertState,
     CheckResultStatus,
     CheckType,
+    EmailAttemptStatus,
+    EmailDeliveryStatus,
     MonitoringScope,
 )
 
@@ -523,3 +525,55 @@ class AlertAssign(AlertActionBase):
 class AlertAssigneeOut(BaseModel):
     id: str
     email: str
+
+
+class AlertEmailAttemptOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    attempt_number: int = Field(ge=1)
+    status: EmailAttemptStatus
+    provider_message_id: str | None
+    error_code: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class AlertEmailDeliveryOut(BaseModel):
+    id: str
+    alert_id: str
+    alert_event_id: str
+    generation: int = Field(ge=0)
+    event_type: AlertEventType
+    recipient: str
+    status: EmailDeliveryStatus
+    attempt_count: int = Field(ge=0)
+    max_attempts: int = Field(ge=1)
+    next_attempt_at: datetime
+    provider_message_id: str | None
+    last_error_code: str | None
+    sent_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    attempts: list[AlertEmailAttemptOut] = Field(default_factory=list)
+
+
+class AlertEmailDeliveryListOut(BaseModel):
+    items: list[AlertEmailDeliveryOut] = Field(default_factory=list)
+
+
+class AlertEmailStatusOut(BaseModel):
+    provider: str
+    enabled: bool
+    valid: bool
+    problems: list[str] = Field(default_factory=list)
+    recipient_count: int = Field(ge=0, le=50)
+    sender_configured: bool
+    api_key_configured: bool
+    counts: dict[str, int]
+
+
+class AlertEmailRetry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,64}$")
+    ]

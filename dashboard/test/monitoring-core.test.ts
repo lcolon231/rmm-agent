@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   describeThreshold,
+  alertEmailDeliveryListFromUnknown,
   formatCheckInterval,
   formatMonitoringScope,
   formatMonitoringTimestamp,
@@ -159,5 +160,30 @@ test("alert action input requires an idempotency key and bounded version", () =>
   assert.equal(validateAlertActionInput({ request_id: "request-12345678", expected_version: 0 }), null);
   assert.equal(validateAlertActionInput({
     request_id: "request-12345678", expected_version: 2, comment: "x".repeat(2001),
+  }), null);
+});
+
+test("email delivery parser allowlists masked history and rejects malformed attempts", () => {
+  const delivery = {
+    id: "delivery-1", alert_id: "alert-1", alert_event_id: "event-1",
+    generation: 1, event_type: "opened", recipient: "f***@example.test",
+    status: "failed", attempt_count: 1, max_attempts: 3,
+    next_attempt_at: "2026-08-01T10:02:00Z", provider_message_id: null,
+    last_error_code: "rate_limited", sent_at: null,
+    created_at: "2026-08-01T10:00:00Z", updated_at: "2026-08-01T10:01:00Z",
+    attempts: [{
+      id: "attempt-1", attempt_number: 1, status: "failed",
+      provider_message_id: null, error_code: "rate_limited",
+      created_at: "2026-08-01T10:00:00Z", completed_at: "2026-08-01T10:01:00Z",
+      authorization: "must-not-leak",
+    }],
+    text_body: "must-not-leak",
+  };
+  const parsed = alertEmailDeliveryListFromUnknown({ items: [delivery] });
+  assert.ok(parsed);
+  assert.equal(parsed[0].recipient, "f***@example.test");
+  assert.doesNotMatch(JSON.stringify(parsed), /authorization|text_body|must-not-leak/);
+  assert.equal(alertEmailDeliveryListFromUnknown({
+    items: [{ ...delivery, attempts: [{ ...delivery.attempts[0], attempt_number: 0 }] }],
   }), null);
 });
