@@ -25,6 +25,7 @@ from app.core.tasks import (
     email_alert_sender,
     offline_sweeper,
     retention_sweeper,
+    webhook_sender,
 )
 from app.models.models import Agent
 
@@ -54,11 +55,14 @@ async def lifespan(app: FastAPI):
     publisher = asyncio.create_task(anchor_publisher(stop))
     pruner = asyncio.create_task(retention_sweeper(stop))
     email_sender = asyncio.create_task(email_alert_sender(stop))
+    webhook_delivery_sender = asyncio.create_task(webhook_sender(stop))
     try:
         yield
     finally:
         stop.set()
-        await asyncio.gather(sweeper, publisher, pruner, email_sender)
+        await asyncio.gather(
+            sweeper, publisher, pruner, email_sender, webhook_delivery_sender
+        )
 
 
 app = FastAPI(

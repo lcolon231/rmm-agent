@@ -144,6 +144,27 @@ async def email_alert_sender(stop: asyncio.Event) -> None:
             pass
 
 
+async def webhook_sender(stop: asyncio.Event) -> None:
+    """Deliver signed webhooks without coupling destinations to alert writes."""
+    from app.core import webhook_notifications
+
+    interval = settings.webhook_poll_interval_seconds
+    while not stop.is_set():
+        try:
+            result = await webhook_notifications.process_due_deliveries(settings)
+            if result.failed:
+                print(
+                    "[webhook_sender] WARNING "
+                    f"{result.failed} delivery attempt(s) exhausted or failed permanently"
+                )
+        except Exception as exc:
+            print(f"[webhook_sender] error: {type(exc).__name__}")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+
+
 async def anchor_publisher(stop: asyncio.Event) -> None:
     """Create and externally publish audit anchors on a schedule.
 

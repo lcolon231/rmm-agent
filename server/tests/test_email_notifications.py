@@ -128,13 +128,13 @@ async def test_state_transition_enqueues_once_per_recipient(clean_db, monkeypatc
     )
     async with AsyncSessionLocal() as db:
         db.add(alert)
-        monitoring_core._append_alert_event(  # noqa: SLF001
+        await monitoring_core._append_alert_event(  # noqa: SLF001
             db, alert, AlertEventType.opened,
             from_state=AlertState.resolved, to_state=AlertState.open,
             source_result_id="result-1", at=NOW,
         )
         alert.suppression_window_id = "maintenance-1"
-        monitoring_core._append_alert_event(  # noqa: SLF001
+        await monitoring_core._append_alert_event(  # noqa: SLF001
             db, alert, AlertEventType.reopened,
             from_state=AlertState.resolved, to_state=AlertState.open,
             source_result_id="result-2", at=NOW + timedelta(seconds=1),

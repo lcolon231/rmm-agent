@@ -32,6 +32,7 @@ from app.core import (
     metrics,
     monitoring as monitoring_core,
     retention,
+    webhook_notifications,
 )
 from app.core.clientip import client_ip
 from app.core.command_envelope import (
@@ -63,6 +64,8 @@ from app.models.models import (
     Alert,
     AlertEmailAttempt,
     AlertEmailDelivery,
+    AlertWebhookAttempt,
+    AlertWebhookDelivery,
     AlertEvent,
     AlertEventType,
     AlertObservation,
@@ -90,6 +93,9 @@ from app.models.models import (
     Operator,
     OperatorRole,
     Site,
+    WebhookDeliveryStatus,
+    WebhookEndpoint,
+    WebhookSecretVersion,
 )
 from app.schemas.schemas import (
     AgentOut,
@@ -131,6 +137,10 @@ from app.schemas.monitoring import (
     AlertEmailDeliveryOut,
     AlertEmailRetry,
     AlertEmailStatusOut,
+    AlertWebhookAttemptOut,
+    AlertWebhookDeliveryListOut,
+    AlertWebhookDeliveryOut,
+    AlertWebhookRetry,
     AlertEventOut,
     AlertListOut,
     AlertOut,
@@ -145,6 +155,13 @@ from app.schemas.monitoring import (
     MonitoringPolicyOut,
     MonitoringPolicyRevisionOut,
     MonitoringPolicyUpdate,
+    WebhookDestinationValidationOut,
+    WebhookEndpointCreate,
+    WebhookEndpointOut,
+    WebhookEndpointSecretOut,
+    WebhookEndpointUpdate,
+    WebhookSecretRotate,
+    WebhookStatusOut,
 )
 
 # Router-level dependency: every route here needs at least a readonly operator.
@@ -1820,7 +1837,7 @@ def _safe_alert_comment(comment: str | None) -> tuple[str | None, bool]:
     return safe, safe != comment
 
 
-def _operator_alert_event(
+async def _operator_alert_event(
     db: AsyncSession,
     alert: Alert,
     event_type: AlertEventType,
@@ -1850,6 +1867,7 @@ def _operator_alert_event(
     )
     db.add(event)
     email_notifications.enqueue_alert_event(db, alert, event)
+    await webhook_notifications.enqueue_alert_event(db, alert, event)
     return safe_comment, comment_redacted
 
 
@@ -1889,7 +1907,7 @@ async def acknowledge_monitoring_alert(
     alert.acknowledged_by = operator.email
     alert.version += 1
     alert.updated_at = _now()
-    safe_comment, redacted = _operator_alert_event(
+    safe_comment, redacted = await _operator_alert_event(
         db, alert, AlertEventType.acknowledged, operator,
         request_id=body.request_id, from_state=previous,
         to_state=alert.state, comment=body.comment,
@@ -1934,7 +1952,7 @@ async def assign_monitoring_alert(
     alert.assigned_to_email = assignee.email if assignee else None
     alert.version += 1
     alert.updated_at = _now()
-    safe_comment, redacted = _operator_alert_event(
+    safe_comment, redacted = await _operator_alert_event(
         db, alert, AlertEventType.assigned, operator,
         request_id=body.request_id, from_state=alert.state,
         to_state=alert.state, comment=body.comment, assigned_to=assignee,
@@ -1971,7 +1989,7 @@ async def comment_on_monitoring_alert(
         return await _alert_detail(db, alert)
     alert.version += 1
     alert.updated_at = _now()
-    safe_comment, redacted = _operator_alert_event(
+    safe_comment, redacted = await _operator_alert_event(
         db, alert, AlertEventType.commented, operator,
         request_id=body.request_id, from_state=alert.state,
         to_state=alert.state, comment=body.comment,
@@ -2017,7 +2035,7 @@ async def resolve_monitoring_alert(
     alert.suppressed_until = None
     alert.version += 1
     alert.updated_at = _now()
-    safe_comment, redacted = _operator_alert_event(
+    safe_comment, redacted = await _operator_alert_event(
         db, alert, AlertEventType.manual_resolution, operator,
         request_id=body.request_id, from_state=previous,
         to_state=alert.state, comment=body.comment,
@@ -2198,6 +2216,602 @@ async def retry_monitoring_alert_email_delivery(
         ).scalars().all()
     )
     return _email_delivery_out(delivery, attempts)
+
+
+# --------------------------------------------------------------------------- #
+# Signed webhook endpoints and delivery history (issue #46)
+# --------------------------------------------------------------------------- #
+def _webhook_destination_error(exc: webhook_notifications.WebhookError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={"code": exc.code, "state": exc.state},
+    )
+
+
+async def _webhook_endpoint_out(
+    db: AsyncSession, endpoint: WebhookEndpoint
+) -> WebhookEndpointOut:
+    secret = await db.scalar(
+        select(WebhookSecretVersion).where(
+            WebhookSecretVersion.endpoint_id == endpoint.id,
+            WebhookSecretVersion.version == endpoint.current_secret_version,
+        )
+    )
+    if secret is None:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "webhook_secret_version_unavailable"},
+        )
+    return WebhookEndpointOut(
+        id=endpoint.id,
+        name=endpoint.name,
+        url=webhook_notifications.mask_destination(endpoint.url),
+        event_types=endpoint.event_types,
+        enabled=endpoint.enabled,
+        current_secret_version=endpoint.current_secret_version,
+        current_secret_key_id=secret.id,
+        version=endpoint.version,
+        deleted_at=endpoint.deleted_at,
+        created_at=endpoint.created_at,
+        updated_at=endpoint.updated_at,
+    )
+
+
+@router.get("/monitoring/webhooks/status", response_model=WebhookStatusOut)
+async def monitoring_webhook_status(db: AsyncSession = Depends(get_db)):
+    total = await db.scalar(
+        select(func.count()).select_from(WebhookEndpoint).where(
+            WebhookEndpoint.deleted_at.is_(None)
+        )
+    )
+    enabled = await db.scalar(
+        select(func.count()).select_from(WebhookEndpoint).where(
+            WebhookEndpoint.deleted_at.is_(None),
+            WebhookEndpoint.enabled.is_(True),
+        )
+    )
+    return WebhookStatusOut(
+        encryption_key_configured=webhook_notifications.encryption_key_configured(
+            settings
+        ),
+        endpoint_count=total or 0,
+        enabled_endpoint_count=enabled or 0,
+        endpoint_limit=settings.webhook_max_endpoints,
+        counts=await webhook_notifications.delivery_counts(db),
+    )
+
+
+@router.get(
+    "/monitoring/webhook-endpoints", response_model=list[WebhookEndpointOut]
+)
+async def list_webhook_endpoints(db: AsyncSession = Depends(get_db)):
+    endpoints = list(
+        (
+            await db.execute(
+                select(WebhookEndpoint)
+                .where(WebhookEndpoint.deleted_at.is_(None))
+                .order_by(WebhookEndpoint.name, WebhookEndpoint.id)
+            )
+        ).scalars().all()
+    )
+    return [await _webhook_endpoint_out(db, endpoint) for endpoint in endpoints]
+
+
+@router.post(
+    "/monitoring/webhook-endpoints",
+    response_model=WebhookEndpointSecretOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_webhook_endpoint(
+    body: WebhookEndpointCreate,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        destination = await webhook_notifications.validate_destination(
+            body.url, settings
+        )
+    except webhook_notifications.WebhookError as exc:
+        raise _webhook_destination_error(exc) from exc
+    endpoint_count = await db.scalar(
+        select(func.count()).select_from(WebhookEndpoint).where(
+            WebhookEndpoint.deleted_at.is_(None)
+        )
+    )
+    if (endpoint_count or 0) >= settings.webhook_max_endpoints:
+        raise HTTPException(
+            status_code=409, detail={"code": "webhook_endpoint_limit_reached"}
+        )
+    now = _now()
+    endpoint_id = str(uuid.uuid4())
+    secret_id = str(uuid.uuid4())
+    plaintext_secret = webhook_notifications.generate_endpoint_secret()
+    try:
+        encrypted_secret = webhook_notifications.encrypt_secret(
+            plaintext_secret,
+            endpoint_id=endpoint_id,
+            secret_id=secret_id,
+            version=1,
+            config=settings,
+        )
+    except webhook_notifications.WebhookError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": exc.code, "state": exc.state},
+        ) from exc
+    endpoint = WebhookEndpoint(
+        id=endpoint_id,
+        name=body.name,
+        url=destination.url,
+        event_types=[item.value for item in body.event_types],
+        enabled=body.enabled,
+        current_secret_version=1,
+        version=1,
+        created_by=operator.email,
+        updated_by=operator.email,
+        created_at=now,
+        updated_at=now,
+    )
+    secret_version = WebhookSecretVersion(
+        id=secret_id,
+        endpoint_id=endpoint.id,
+        version=1,
+        encrypted_secret=encrypted_secret,
+        created_by=operator.email,
+        created_at=now,
+    )
+    db.add_all([endpoint, secret_version])
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "webhook_endpoint_name_exists"}
+        ) from exc
+    await audit.record(
+        db,
+        action="webhook_endpoint.created",
+        **_alert_audit_context(request, operator),
+        detail={
+            "endpoint_id": endpoint.id,
+            "name": endpoint.name,
+            "url": endpoint.url,
+            "enabled": endpoint.enabled,
+            "event_types": endpoint.event_types,
+            "secret_version": 1,
+        },
+    )
+    public = await _webhook_endpoint_out(db, endpoint)
+    return WebhookEndpointSecretOut(
+        **public.model_dump(), secret=plaintext_secret
+    )
+
+
+@router.put(
+    "/monitoring/webhook-endpoints/{endpoint_id}",
+    response_model=WebhookEndpointOut,
+)
+async def update_webhook_endpoint(
+    endpoint_id: str,
+    body: WebhookEndpointUpdate,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    endpoint = await db.scalar(
+        select(WebhookEndpoint)
+        .where(
+            WebhookEndpoint.id == endpoint_id,
+            WebhookEndpoint.deleted_at.is_(None),
+        )
+        .with_for_update()
+    )
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+    if endpoint.version != body.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "webhook_endpoint_version_conflict",
+                "current_version": endpoint.version,
+            },
+        )
+    if body.url is not None:
+        try:
+            endpoint.url = (
+                await webhook_notifications.validate_destination(body.url, settings)
+            ).url
+        except webhook_notifications.WebhookError as exc:
+            raise _webhook_destination_error(exc) from exc
+    if body.name is not None:
+        endpoint.name = body.name
+    if body.event_types is not None:
+        endpoint.event_types = [item.value for item in body.event_types]
+    if body.enabled is not None:
+        endpoint.enabled = body.enabled
+    previous_version = endpoint.version
+    endpoint.version += 1
+    endpoint.updated_by = operator.email
+    endpoint.updated_at = _now()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "webhook_endpoint_name_exists"}
+        ) from exc
+    await audit.record(
+        db,
+        action="webhook_endpoint.updated",
+        **_alert_audit_context(request, operator),
+        detail={
+            "endpoint_id": endpoint.id,
+            "request_id": body.request_id,
+            "previous_version": previous_version,
+            "version": endpoint.version,
+            "name": endpoint.name,
+            "url": endpoint.url,
+            "enabled": endpoint.enabled,
+            "event_types": endpoint.event_types,
+        },
+    )
+    return await _webhook_endpoint_out(db, endpoint)
+
+
+@router.post(
+    "/monitoring/webhook-endpoints/{endpoint_id}/validate",
+    response_model=WebhookDestinationValidationOut,
+)
+async def validate_webhook_endpoint(
+    endpoint_id: str,
+    _operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    endpoint = await db.get(WebhookEndpoint, endpoint_id)
+    if endpoint is None or endpoint.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+    try:
+        destination = await webhook_notifications.validate_destination(
+            endpoint.url, settings
+        )
+    except webhook_notifications.WebhookError as exc:
+        return WebhookDestinationValidationOut(
+            endpoint_id=endpoint.id,
+            state=exc.state,
+            code=exc.code,
+            resolved_address_count=0,
+        )
+    return WebhookDestinationValidationOut(
+        endpoint_id=endpoint.id,
+        state="valid",
+        resolved_address_count=len(destination.addresses),
+    )
+
+
+@router.post(
+    "/monitoring/webhook-endpoints/{endpoint_id}/rotate-secret",
+    response_model=WebhookEndpointSecretOut,
+)
+async def rotate_webhook_endpoint_secret(
+    endpoint_id: str,
+    body: WebhookSecretRotate,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    endpoint = await db.scalar(
+        select(WebhookEndpoint)
+        .where(
+            WebhookEndpoint.id == endpoint_id,
+            WebhookEndpoint.deleted_at.is_(None),
+        )
+        .with_for_update()
+    )
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+    if endpoint.version != body.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "webhook_endpoint_version_conflict",
+                "current_version": endpoint.version,
+            },
+        )
+    old_secret = await db.scalar(
+        select(WebhookSecretVersion).where(
+            WebhookSecretVersion.endpoint_id == endpoint.id,
+            WebhookSecretVersion.version == endpoint.current_secret_version,
+        )
+    )
+    if old_secret is None:
+        raise HTTPException(
+            status_code=409, detail={"code": "webhook_secret_version_unavailable"}
+        )
+    new_version_number = endpoint.current_secret_version + 1
+    new_secret_id = str(uuid.uuid4())
+    plaintext_secret = webhook_notifications.generate_endpoint_secret()
+    try:
+        encrypted_secret = webhook_notifications.encrypt_secret(
+            plaintext_secret,
+            endpoint_id=endpoint.id,
+            secret_id=new_secret_id,
+            version=new_version_number,
+            config=settings,
+        )
+    except webhook_notifications.WebhookError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": exc.code, "state": exc.state},
+        ) from exc
+    now = _now()
+    old_secret.retired_at = now
+    db.add(
+        WebhookSecretVersion(
+            id=new_secret_id,
+            endpoint_id=endpoint.id,
+            version=new_version_number,
+            encrypted_secret=encrypted_secret,
+            created_by=operator.email,
+            created_at=now,
+        )
+    )
+    previous_version = endpoint.version
+    previous_secret_version = endpoint.current_secret_version
+    endpoint.current_secret_version = new_version_number
+    endpoint.version += 1
+    endpoint.updated_by = operator.email
+    endpoint.updated_at = now
+    await db.flush()
+    await audit.record(
+        db,
+        action="webhook_endpoint.secret_rotated",
+        **_alert_audit_context(request, operator),
+        detail={
+            "endpoint_id": endpoint.id,
+            "request_id": body.request_id,
+            "previous_version": previous_version,
+            "version": endpoint.version,
+            "previous_secret_version": previous_secret_version,
+            "secret_version": new_version_number,
+        },
+    )
+    public = await _webhook_endpoint_out(db, endpoint)
+    return WebhookEndpointSecretOut(
+        **public.model_dump(), secret=plaintext_secret
+    )
+
+
+@router.delete(
+    "/monitoring/webhook-endpoints/{endpoint_id}", status_code=204
+)
+async def delete_webhook_endpoint(
+    endpoint_id: str,
+    request: Request,
+    request_id: str = Query(min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"),
+    expected_version: int = Query(ge=1),
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    endpoint = await db.scalar(
+        select(WebhookEndpoint)
+        .where(
+            WebhookEndpoint.id == endpoint_id,
+            WebhookEndpoint.deleted_at.is_(None),
+        )
+        .with_for_update()
+    )
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+    if endpoint.version != expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "webhook_endpoint_version_conflict",
+                "current_version": endpoint.version,
+            },
+        )
+    previous_version = endpoint.version
+    endpoint.enabled = False
+    endpoint.deleted_at = _now()
+    endpoint.version += 1
+    endpoint.updated_by = operator.email
+    endpoint.updated_at = endpoint.deleted_at
+    await audit.record(
+        db,
+        action="webhook_endpoint.deleted",
+        **_alert_audit_context(request, operator),
+        detail={
+            "endpoint_id": endpoint.id,
+            "request_id": request_id,
+            "previous_version": previous_version,
+            "version": endpoint.version,
+            "name": endpoint.name,
+            "url": endpoint.url,
+        },
+    )
+    return None
+
+
+def _webhook_delivery_out(
+    delivery: AlertWebhookDelivery,
+    endpoint_name: str,
+    attempts: list[AlertWebhookAttempt],
+) -> AlertWebhookDeliveryOut:
+    return AlertWebhookDeliveryOut(
+        id=delivery.id,
+        endpoint_id=delivery.endpoint_id,
+        endpoint_name=endpoint_name,
+        alert_id=delivery.alert_id,
+        alert_event_id=delivery.alert_event_id,
+        generation=delivery.generation,
+        event_type=delivery.event_type,
+        destination=webhook_notifications.mask_destination(
+            delivery.destination_url
+        ),
+        status=delivery.status,
+        attempt_count=delivery.attempt_count,
+        max_attempts=delivery.max_attempts,
+        next_attempt_at=delivery.next_attempt_at,
+        last_http_status=delivery.last_http_status,
+        last_error_code=delivery.last_error_code,
+        delivered_at=delivery.delivered_at,
+        created_at=delivery.created_at,
+        updated_at=delivery.updated_at,
+        attempts=[
+            AlertWebhookAttemptOut.model_validate(item) for item in attempts
+        ],
+    )
+
+
+@router.get(
+    "/monitoring/alerts/{alert_id}/webhook-deliveries",
+    response_model=AlertWebhookDeliveryListOut,
+)
+async def list_monitoring_alert_webhook_deliveries(
+    alert_id: str, db: AsyncSession = Depends(get_db)
+):
+    if await db.get(Alert, alert_id) is None:
+        raise HTTPException(status_code=404, detail="Monitoring alert not found")
+    deliveries = list(
+        (
+            await db.execute(
+                select(AlertWebhookDelivery)
+                .where(AlertWebhookDelivery.alert_id == alert_id)
+                .order_by(
+                    AlertWebhookDelivery.created_at.desc(),
+                    AlertWebhookDelivery.id.desc(),
+                )
+                .limit(250)
+            )
+        ).scalars().all()
+    )
+    attempts_by_delivery: dict[str, list[AlertWebhookAttempt]] = {
+        item.id: [] for item in deliveries
+    }
+    endpoint_names: dict[str, str] = {}
+    if deliveries:
+        attempts = list(
+            (
+                await db.execute(
+                    select(AlertWebhookAttempt)
+                    .where(
+                        AlertWebhookAttempt.delivery_id.in_(
+                            [item.id for item in deliveries]
+                        )
+                    )
+                    .order_by(
+                        AlertWebhookAttempt.created_at,
+                        AlertWebhookAttempt.id,
+                    )
+                )
+            ).scalars().all()
+        )
+        for attempt in attempts:
+            attempts_by_delivery[attempt.delivery_id].append(attempt)
+        endpoints = list(
+            (
+                await db.execute(
+                    select(WebhookEndpoint).where(
+                        WebhookEndpoint.id.in_(
+                            [item.endpoint_id for item in deliveries]
+                        )
+                    )
+                )
+            ).scalars().all()
+        )
+        endpoint_names = {item.id: item.name for item in endpoints}
+    return AlertWebhookDeliveryListOut(
+        items=[
+            _webhook_delivery_out(
+                item,
+                endpoint_names.get(item.endpoint_id, "Deleted endpoint"),
+                attempts_by_delivery[item.id],
+            )
+            for item in deliveries
+        ]
+    )
+
+
+@router.post(
+    "/monitoring/webhook-deliveries/{delivery_id}/retry",
+    response_model=AlertWebhookDeliveryOut,
+)
+async def retry_monitoring_alert_webhook_delivery(
+    delivery_id: str,
+    body: AlertWebhookRetry,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    delivery = await db.scalar(
+        select(AlertWebhookDelivery)
+        .where(AlertWebhookDelivery.id == delivery_id)
+        .with_for_update()
+    )
+    if delivery is None:
+        raise HTTPException(status_code=404, detail="Webhook delivery not found")
+    endpoint = await db.get(WebhookEndpoint, delivery.endpoint_id)
+    endpoint_name = endpoint.name if endpoint else "Deleted endpoint"
+    if delivery.last_retry_request_id == body.request_id:
+        attempts = list(
+            (
+                await db.execute(
+                    select(AlertWebhookAttempt)
+                    .where(AlertWebhookAttempt.delivery_id == delivery.id)
+                    .order_by(
+                        AlertWebhookAttempt.created_at, AlertWebhookAttempt.id
+                    )
+                )
+            ).scalars().all()
+        )
+        return _webhook_delivery_out(delivery, endpoint_name, attempts)
+    if delivery.status != WebhookDeliveryStatus.failed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "webhook_delivery_retry_invalid_state",
+                "status": delivery.status.value,
+            },
+        )
+    if delivery.attempt_count >= 20:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "webhook_delivery_retry_limit_reached"},
+        )
+    previous_status = delivery.status
+    delivery.status = WebhookDeliveryStatus.retrying
+    delivery.next_attempt_at = _now()
+    delivery.claimed_at = None
+    delivery.max_attempts = max(delivery.max_attempts, delivery.attempt_count + 1)
+    delivery.last_retry_request_id = body.request_id
+    delivery.updated_at = _now()
+    alert = await db.get(Alert, delivery.alert_id)
+    await audit.record(
+        db,
+        action="monitoring_alert_webhook.retried",
+        agent_id=alert.agent_id if alert else None,
+        **_alert_audit_context(request, operator),
+        detail={
+            "delivery_id": delivery.id,
+            "alert_id": delivery.alert_id,
+            "endpoint_id": delivery.endpoint_id,
+            "request_id": body.request_id,
+            "previous_status": previous_status.value,
+            "destination": delivery.destination_url,
+        },
+    )
+    metrics.increment("webhook_manual_retry_total")
+    attempts = list(
+        (
+            await db.execute(
+                select(AlertWebhookAttempt)
+                .where(AlertWebhookAttempt.delivery_id == delivery.id)
+                .order_by(
+                    AlertWebhookAttempt.created_at, AlertWebhookAttempt.id
+                )
+            )
+        ).scalars().all()
+    )
+    return _webhook_delivery_out(delivery, endpoint_name, attempts)
 
 
 # --------------------------------------------------------------------------- #

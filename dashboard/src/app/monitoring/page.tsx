@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { Activity, BellRing, Layers3 } from "lucide-react";
+import { Activity, BellRing, Layers3, Webhook } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -52,6 +52,12 @@ export default async function MonitoringPoliciesPage() {
           </span>
         </div>
       </section>
+
+      <Link className="monitoring-webhook-entry" href="/monitoring/webhooks">
+        <span><Webhook aria-hidden="true" size={20} /></span>
+        <div><strong>Signed webhook destinations</strong><small>Configure public HTTPS receivers, rotate signing secrets, and inspect delivery health.</small></div>
+        <b>Manage destinations →</b>
+      </Link>
 
       <section className="enrollment-panel monitoring-alert-panel">
         <header>

@@ -2,6 +2,7 @@
 """Application configuration loaded from environment variables."""
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -187,6 +188,21 @@ class Settings(BaseSettings):
     email_alert_backoff_max_seconds: int = 3600
     email_alert_claim_timeout_seconds: int = 300
     email_alert_request_timeout_seconds: int = 10
+
+    # --- Signed webhook delivery (issue #46) ---
+    # Base64url-encoded 32-byte AES-GCM key used only to encrypt endpoint
+    # signing secrets at rest. Endpoint creation and rotation fail closed when
+    # it is absent or malformed; the value is never returned or persisted.
+    webhook_secret_encryption_key: str | None = None
+    webhook_poll_interval_seconds: int = Field(default=15, ge=1, le=3600)
+    webhook_batch_size: int = Field(default=25, ge=1, le=100)
+    webhook_max_attempts: int = Field(default=5, ge=1, le=20)
+    webhook_backoff_base_seconds: int = Field(default=30, ge=1, le=3600)
+    webhook_backoff_max_seconds: int = Field(default=3600, ge=1, le=86_400)
+    webhook_claim_timeout_seconds: int = Field(default=300, ge=30, le=3600)
+    webhook_request_timeout_seconds: int = Field(default=10, ge=1, le=30)
+    webhook_dns_timeout_seconds: int = Field(default=5, ge=1, le=30)
+    webhook_max_endpoints: int = Field(default=50, ge=1, le=100)
 
     # How often the retention sweep runs.
     retention_sweep_interval_seconds: int = 86_400  # daily

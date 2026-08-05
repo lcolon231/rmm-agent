@@ -32,7 +32,7 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import email_notifications, metrics
+from app.core import email_notifications, metrics, webhook_notifications
 from app.models.models import (
     Agent,
     Alert,
@@ -71,7 +71,7 @@ def _utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
-def _append_alert_event(
+async def _append_alert_event(
     db: AsyncSession,
     alert: Alert,
     event_type: AlertEventType,
@@ -95,6 +95,7 @@ def _append_alert_event(
     )
     db.add(event)
     email_notifications.enqueue_alert_event(db, alert, event)
+    await webhook_notifications.enqueue_alert_event(db, alert, event)
 
 
 @dataclass(frozen=True)
@@ -262,7 +263,7 @@ async def _resolve_superseded_alerts(
         alert.suppressed_until = None
         alert.version += 1
         alert.updated_at = _now()
-        _append_alert_event(
+        await _append_alert_event(
             db,
             alert,
             AlertEventType.policy_superseded,
@@ -410,7 +411,7 @@ async def apply_check_result_to_alert(
             alert.resolved_at = evaluated_at
             alert.resolution_reason = "automatic_recovery"
             alert.version += 1
-            _append_alert_event(
+            await _append_alert_event(
                 db,
                 alert,
                 AlertEventType.automatic_recovery,
@@ -451,7 +452,7 @@ async def apply_check_result_to_alert(
         alert.acknowledged_at = None
         alert.acknowledged_by = None
         alert.version += 1
-        _append_alert_event(
+        await _append_alert_event(
             db,
             alert,
             AlertEventType.opened if first_open else AlertEventType.reopened,
@@ -505,7 +506,7 @@ async def resolve_policy_alerts(
         alert.suppressed_until = None
         alert.version += 1
         alert.updated_at = _now()
-        _append_alert_event(
+        await _append_alert_event(
             db,
             alert,
             event_type,

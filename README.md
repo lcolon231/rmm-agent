@@ -109,8 +109,11 @@ The code in this repository currently provides:
   history. Active agents now execute cadence- and hysteresis-bounded CPU,
   memory, disk, service, and pending-reboot checks with a durable idempotent
   result outbox; the server evaluates offline checks from heartbeat age and
-  validates revision-pinned result ingestion. See `docs/MONITORING.md`. Alert
-  state and maintenance enforcement remain later issues.
+  validates revision-pinned result ingestion. Deterministic alert state,
+  maintenance suppression, technician lifecycle actions, durable email, and
+  signed generic-webhook notification paths are implemented with live delivery
+  history. See `docs/MONITORING.md`, `docs/ALERT-NOTIFICATIONS.md`, and
+  `docs/SIGNED-WEBHOOKS.md`.
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation
   recorded in command and audit data). Completed results are DPAPI-protected
@@ -145,7 +148,7 @@ The code in this repository currently provides:
   anchors, plus a scheduled publisher that writes anchor roots to external
   immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
-- Forward-only Alembic migrations through revision `0017`, with exact revision
+- Forward-only Alembic migrations through revision `0020`, with exact revision
   enforcement on non-debug startup, legacy debug-schema repair, and a
   disposable PostgreSQL migration test in CI.
 - Encrypted PostgreSQL backup/isolated restore plus a fail-closed release
@@ -261,12 +264,16 @@ After `v0.1.2`, `main` has:
 - added alert email delivery (#45): environment-owned Resend configuration,
   escaped/redacted transition templates, transactionally durable recipient
   queues, provider idempotency, bounded retry/backoff, maintenance suppression,
-  delivery history, audited manual retry, and live dashboard visibility; and
+  delivery history, audited manual retry, and live dashboard visibility;
+- added signed generic webhook delivery (#46): versioned canonical payloads,
+  per-destination encrypted rotating secrets, HMAC-SHA256 verification,
+  SSRF- and DNS-rebinding-resistant HTTPS delivery, durable bounded retries,
+  audited operations, and a live destination and attempt ledger; and
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
-The current Milestone 1 work remains focused on generic webhook notifications,
-script-library workflows, recurring tasks, and
+The current Milestone 1 work remains focused on script-library workflows,
+recurring tasks, and
 tenant-aware authorization design.
 
 ## Planned
@@ -301,10 +308,11 @@ The repository does **not** currently contain:
   signed expiry.
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, or TPM
   inventory beyond the read-only sections described above.
-- Generic webhook alert notifications. Email alert notifications, policy,
-  initial checks, result ingestion, alert deduplication/state, technician
-  lifecycle actions, automatic recovery, and maintenance-window suppression
-  are implemented (`docs/ALERT-NOTIFICATIONS.md`).
+- Additional notification providers beyond email and signed generic webhooks.
+  Policy, initial checks, result ingestion, alert deduplication/state,
+  technician lifecycle actions, automatic recovery, maintenance-window
+  suppression, email, and generic webhooks are implemented
+  (`docs/ALERT-NOTIFICATIONS.md`, `docs/SIGNED-WEBHOOKS.md`).
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
 - A least-privilege agent service account.

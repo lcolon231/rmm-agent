@@ -151,6 +151,74 @@ export type AlertEmailDelivery = {
   attempts: AlertEmailAttempt[];
 };
 
+export type WebhookEventType =
+  | "opened" | "reopened" | "acknowledged" | "manual_resolution"
+  | "automatic_recovery" | "policy_revised" | "policy_deleted"
+  | "policy_superseded";
+export type WebhookEndpoint = {
+  id: string;
+  name: string;
+  url: string;
+  event_types: WebhookEventType[];
+  enabled: boolean;
+  current_secret_version: number;
+  current_secret_key_id: string;
+  version: number;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+export type WebhookEndpointSecret = WebhookEndpoint & {
+  secret: string;
+  signing_algorithm: "HMAC-SHA256";
+  signature_header: "X-NodeLink-Signature";
+};
+export type WebhookStatus = {
+  encryption_key_configured: boolean;
+  endpoint_count: number;
+  enabled_endpoint_count: number;
+  endpoint_limit: number;
+  counts: Record<string, number>;
+};
+export type WebhookDestinationValidation = {
+  endpoint_id: string;
+  state: "valid" | "invalid" | "unavailable" | "unsupported";
+  code: string | null;
+  resolved_address_count: number;
+};
+export type AlertWebhookDeliveryStatus =
+  | "pending" | "sending" | "retrying" | "delivered" | "failed" | "suppressed";
+export type AlertWebhookAttemptStatus = "sending" | "delivered" | "retrying" | "failed";
+export type AlertWebhookAttempt = {
+  id: string;
+  attempt_number: number;
+  status: AlertWebhookAttemptStatus;
+  http_status: number | null;
+  error_code: string | null;
+  created_at: string;
+  completed_at: string | null;
+};
+export type AlertWebhookDelivery = {
+  id: string;
+  endpoint_id: string;
+  endpoint_name: string;
+  alert_id: string;
+  alert_event_id: string;
+  generation: number;
+  event_type: AlertEventType;
+  destination: string;
+  status: AlertWebhookDeliveryStatus;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at: string;
+  last_http_status: number | null;
+  last_error_code: string | null;
+  delivered_at: string | null;
+  created_at: string;
+  updated_at: string;
+  attempts: AlertWebhookAttempt[];
+};
+
 const scopes = new Set<MonitoringScope>(["global", "client", "site", "agent"]);
 const checkTypes = new Set<CheckType>([
   "offline",
@@ -174,6 +242,16 @@ const emailDeliveryStatuses = new Set<AlertEmailDeliveryStatus>([
 ]);
 const emailAttemptStatuses = new Set<AlertEmailAttemptStatus>([
   "sending", "sent", "retrying", "failed",
+]);
+const webhookEventTypes = new Set<WebhookEventType>([
+  "opened", "reopened", "acknowledged", "manual_resolution",
+  "automatic_recovery", "policy_revised", "policy_deleted", "policy_superseded",
+]);
+const webhookDeliveryStatuses = new Set<AlertWebhookDeliveryStatus>([
+  "pending", "sending", "retrying", "delivered", "failed", "suppressed",
+]);
+const webhookAttemptStatuses = new Set<AlertWebhookAttemptStatus>([
+  "sending", "delivered", "retrying", "failed",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -501,6 +579,139 @@ export function alertEmailDeliveryListFromUnknown(value: unknown): AlertEmailDel
   if (!isRecord(value) || !Array.isArray(value.items)) return null;
   const items = value.items.map(parseAlertEmailDelivery);
   return items.every((item): item is AlertEmailDelivery => item !== null) ? items : null;
+}
+
+function parseWebhookEndpoint(value: unknown): WebhookEndpoint | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string"
+      || typeof value.url !== "string" || !Array.isArray(value.event_types)
+      || !value.event_types.every((item) => webhookEventTypes.has(item as WebhookEventType))
+      || new Set(value.event_types).size !== value.event_types.length
+      || typeof value.enabled !== "boolean"
+      || !Number.isInteger(value.current_secret_version)
+      || (value.current_secret_version as number) < 1
+      || typeof value.current_secret_key_id !== "string"
+      || !Number.isInteger(value.version) || (value.version as number) < 1
+      || !(value.deleted_at === null || isTimestamp(value.deleted_at))
+      || !isTimestamp(value.created_at) || !isTimestamp(value.updated_at)) return null;
+  return {
+    id: value.id, name: value.name, url: value.url,
+    event_types: value.event_types as WebhookEventType[], enabled: value.enabled,
+    current_secret_version: value.current_secret_version as number,
+    current_secret_key_id: value.current_secret_key_id,
+    version: value.version as number, deleted_at: value.deleted_at as string | null,
+    created_at: value.created_at, updated_at: value.updated_at,
+  };
+}
+
+export function webhookEndpointFromUnknown(value: unknown): WebhookEndpoint | null {
+  return parseWebhookEndpoint(value);
+}
+
+export function webhookEndpointListFromUnknown(value: unknown): WebhookEndpoint[] | null {
+  if (!Array.isArray(value)) return null;
+  const endpoints = value.map(parseWebhookEndpoint);
+  return endpoints.every((item): item is WebhookEndpoint => item !== null) ? endpoints : null;
+}
+
+export function webhookEndpointSecretFromUnknown(value: unknown): WebhookEndpointSecret | null {
+  const endpoint = parseWebhookEndpoint(value);
+  if (!endpoint || !isRecord(value) || typeof value.secret !== "string"
+      || value.signing_algorithm !== "HMAC-SHA256"
+      || value.signature_header !== "X-NodeLink-Signature") return null;
+  return {
+    ...endpoint, secret: value.secret,
+    signing_algorithm: "HMAC-SHA256", signature_header: "X-NodeLink-Signature",
+  };
+}
+
+export function webhookStatusFromUnknown(value: unknown): WebhookStatus | null {
+  if (!isRecord(value) || typeof value.encryption_key_configured !== "boolean"
+      || !Number.isInteger(value.endpoint_count) || (value.endpoint_count as number) < 0
+      || !Number.isInteger(value.enabled_endpoint_count)
+      || (value.enabled_endpoint_count as number) < 0
+      || !Number.isInteger(value.endpoint_limit) || (value.endpoint_limit as number) < 1
+      || !isRecord(value.counts)
+      || !Object.values(value.counts).every((item) => Number.isInteger(item) && (item as number) >= 0)) return null;
+  return {
+    encryption_key_configured: value.encryption_key_configured,
+    endpoint_count: value.endpoint_count as number,
+    enabled_endpoint_count: value.enabled_endpoint_count as number,
+    endpoint_limit: value.endpoint_limit as number,
+    counts: value.counts as Record<string, number>,
+  };
+}
+
+export function webhookValidationFromUnknown(value: unknown): WebhookDestinationValidation | null {
+  if (!isRecord(value) || typeof value.endpoint_id !== "string"
+      || !new Set(["valid", "invalid", "unavailable", "unsupported"]).has(value.state as string)
+      || !nullableString(value.code) || !Number.isInteger(value.resolved_address_count)
+      || (value.resolved_address_count as number) < 0) return null;
+  return {
+    endpoint_id: value.endpoint_id,
+    state: value.state as WebhookDestinationValidation["state"],
+    code: value.code as string | null,
+    resolved_address_count: value.resolved_address_count as number,
+  };
+}
+
+function parseWebhookAttempt(value: unknown): AlertWebhookAttempt | null {
+  if (!isRecord(value) || typeof value.id !== "string"
+      || !Number.isInteger(value.attempt_number) || (value.attempt_number as number) < 1
+      || !webhookAttemptStatuses.has(value.status as AlertWebhookAttemptStatus)
+      || !(value.http_status === null || (Number.isInteger(value.http_status)
+        && (value.http_status as number) >= 100 && (value.http_status as number) <= 599))
+      || !nullableString(value.error_code) || !isTimestamp(value.created_at)
+      || !(value.completed_at === null || isTimestamp(value.completed_at))) return null;
+  return {
+    id: value.id, attempt_number: value.attempt_number as number,
+    status: value.status as AlertWebhookAttemptStatus,
+    http_status: value.http_status as number | null,
+    error_code: value.error_code as string | null, created_at: value.created_at,
+    completed_at: value.completed_at as string | null,
+  };
+}
+
+function parseWebhookDelivery(value: unknown): AlertWebhookDelivery | null {
+  if (!isRecord(value) || typeof value.id !== "string"
+      || typeof value.endpoint_id !== "string" || typeof value.endpoint_name !== "string"
+      || typeof value.alert_id !== "string" || typeof value.alert_event_id !== "string"
+      || !Number.isInteger(value.generation) || (value.generation as number) < 0
+      || !alertEventTypes.has(value.event_type as AlertEventType)
+      || typeof value.destination !== "string"
+      || !webhookDeliveryStatuses.has(value.status as AlertWebhookDeliveryStatus)
+      || !Number.isInteger(value.attempt_count) || (value.attempt_count as number) < 0
+      || !Number.isInteger(value.max_attempts) || (value.max_attempts as number) < 1
+      || !isTimestamp(value.next_attempt_at)
+      || !(value.last_http_status === null || (Number.isInteger(value.last_http_status)
+        && (value.last_http_status as number) >= 100 && (value.last_http_status as number) <= 599))
+      || !nullableString(value.last_error_code)
+      || !(value.delivered_at === null || isTimestamp(value.delivered_at))
+      || !isTimestamp(value.created_at) || !isTimestamp(value.updated_at)
+      || !Array.isArray(value.attempts)) return null;
+  const attempts = value.attempts.map(parseWebhookAttempt);
+  if (!attempts.every((item): item is AlertWebhookAttempt => item !== null)) return null;
+  return {
+    id: value.id, endpoint_id: value.endpoint_id, endpoint_name: value.endpoint_name,
+    alert_id: value.alert_id, alert_event_id: value.alert_event_id,
+    generation: value.generation as number, event_type: value.event_type as AlertEventType,
+    destination: value.destination, status: value.status as AlertWebhookDeliveryStatus,
+    attempt_count: value.attempt_count as number, max_attempts: value.max_attempts as number,
+    next_attempt_at: value.next_attempt_at,
+    last_http_status: value.last_http_status as number | null,
+    last_error_code: value.last_error_code as string | null,
+    delivered_at: value.delivered_at as string | null, created_at: value.created_at,
+    updated_at: value.updated_at, attempts,
+  };
+}
+
+export function alertWebhookDeliveryFromUnknown(value: unknown): AlertWebhookDelivery | null {
+  return parseWebhookDelivery(value);
+}
+
+export function alertWebhookDeliveryListFromUnknown(value: unknown): AlertWebhookDelivery[] | null {
+  if (!isRecord(value) || !Array.isArray(value.items)) return null;
+  const items = value.items.map(parseWebhookDelivery);
+  return items.every((item): item is AlertWebhookDelivery => item !== null) ? items : null;
 }
 
 export function formatAlertEventType(type: AlertEventType): string {

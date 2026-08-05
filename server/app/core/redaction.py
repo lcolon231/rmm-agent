@@ -228,6 +228,26 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "delivery_id", "alert_id", "request_id", "previous_status", "recipient",
         digest_fields=("recipient",),
     ),
+    "webhook_endpoint.created": _schema(
+        "endpoint_id", "name", "url", "enabled", "event_types",
+        "secret_version", digest_fields=("name", "url"),
+    ),
+    "webhook_endpoint.updated": _schema(
+        "endpoint_id", "request_id", "previous_version", "version", "name",
+        "url", "enabled", "event_types", digest_fields=("name", "url"),
+    ),
+    "webhook_endpoint.deleted": _schema(
+        "endpoint_id", "request_id", "previous_version", "version", "name",
+        "url", digest_fields=("name", "url"),
+    ),
+    "webhook_endpoint.secret_rotated": _schema(
+        "endpoint_id", "request_id", "previous_version", "version",
+        "previous_secret_version", "secret_version",
+    ),
+    "monitoring_alert_webhook.retried": _schema(
+        "delivery_id", "alert_id", "endpoint_id", "request_id",
+        "previous_status", "destination", digest_fields=("destination",),
+    ),
     "maintenance_window.created": _schema(
         "maintenance_window_id",
         "scope",

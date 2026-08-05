@@ -81,6 +81,28 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
             row[1]
             for row in connection.execute("PRAGMA table_info(alert_email_attempts)")
         }
+        webhook_endpoint_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(webhook_endpoints)")
+        }
+        webhook_secret_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(webhook_secret_versions)"
+            )
+        }
+        webhook_delivery_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(alert_webhook_deliveries)"
+            )
+        }
+        webhook_attempt_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(alert_webhook_attempts)"
+            )
+        }
         indexes = {
             row[0]
             for row in connection.execute(
@@ -101,6 +123,10 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "alert_observations",
         "alert_email_deliveries",
         "alert_email_attempts",
+        "webhook_endpoints",
+        "webhook_secret_versions",
+        "alert_webhook_deliveries",
+        "alert_webhook_attempts",
     } <= tables
     assert "agent_completed_at" in command_columns
     assert {
@@ -130,6 +156,22 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
     assert {
         "delivery_id", "attempt_number", "status", "error_code", "created_at",
     } <= email_attempt_columns
+    assert {
+        "name", "url", "event_types", "enabled", "current_secret_version",
+        "version", "deleted_at",
+    } <= webhook_endpoint_columns
+    assert {
+        "endpoint_id", "version", "encrypted_secret", "retired_at",
+    } <= webhook_secret_columns
+    assert {
+        "endpoint_id", "secret_version_id", "alert_id", "alert_event_id",
+        "payload", "signature_timestamp", "status", "attempt_count",
+        "last_retry_request_id",
+    } <= webhook_delivery_columns
+    assert {
+        "delivery_id", "attempt_number", "status", "http_status",
+        "error_code",
+    } <= webhook_attempt_columns
     assert {
         "ux_clients_name_normalized",
         "ux_sites_client_name_normalized",

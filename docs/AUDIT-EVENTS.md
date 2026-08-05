@@ -58,6 +58,11 @@ and SHA-256/Merkle roots—remains readable.
 | `monitoring_alert.commented` | `api/management.py` technician comment | `alert_id`, `generation`, `request_id`, `state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.resolved` | `api/management.py` manual resolution | `alert_id`, `generation`, `request_id`, `from_state`, `to_state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert_email.retried` | `api/management.py` operator-requested failed-delivery retry | `delivery_id`, `alert_id`, `request_id`, `previous_status`, `recipient_sha256`, `recipient_bytes` |
+| `webhook_endpoint.created` | `api/management.py` endpoint creation | `endpoint_id`, `name_sha256`, `name_bytes`, `url_sha256`, `url_bytes`, `enabled`, `event_types`, `secret_version` |
+| `webhook_endpoint.updated` | `api/management.py` endpoint revision | `endpoint_id`, `request_id`, `previous_version`, `version`, `name_sha256`, `name_bytes`, `url_sha256`, `url_bytes`, `enabled`, `event_types` |
+| `webhook_endpoint.deleted` | `api/management.py` endpoint soft deletion | `endpoint_id`, `request_id`, `previous_version`, `version`, `name_sha256`, `name_bytes`, `url_sha256`, `url_bytes` |
+| `webhook_endpoint.secret_rotated` | `api/management.py` signing-secret rotation | `endpoint_id`, `request_id`, `previous_version`, `version`, `previous_secret_version`, `secret_version` |
+| `monitoring_alert_webhook.retried` | `api/management.py` operator-requested failed webhook retry | `delivery_id`, `alert_id`, `endpoint_id`, `request_id`, `previous_status`, `destination_sha256`, `destination_bytes` |
 | `maintenance_window.created` | `api/management.py` maintenance-window creation | `maintenance_window_id`, `scope`, `scope_id`, `starts_at`, `ends_at`, `name_sha256`, `name_bytes` |
 | `maintenance_window.deleted` | `api/management.py` maintenance-window deletion | `maintenance_window_id`, `scope`, `scope_id`, `name_sha256`, `name_bytes` |
 | `command.authorization_allowed` | `api/management.py` dispatch policy | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |
