@@ -5,8 +5,13 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { AlertActions } from "@/components/alert-actions";
+import { EmailDeliveryHistory } from "@/components/email-delivery-history";
 import { getDashboardSession } from "@/lib/dashboard-session";
-import { getAlertAssignees, getMonitoringAlert } from "@/lib/monitoring";
+import {
+  getAlertAssignees,
+  getAlertEmailDeliveries,
+  getMonitoringAlert,
+} from "@/lib/monitoring";
 import { formatAlertEventType, formatMonitoringTimestamp } from "@/lib/monitoring-core";
 import { NodelinkApiError } from "@/lib/nodelink-api";
 
@@ -17,15 +22,20 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ al
   if (session.kind !== "authenticated") redirect("/login");
   const { alertId } = await params;
   let alert;
+  let deliveries;
+  let assignees;
   try {
-    alert = await getMonitoringAlert(session.sessionToken, alertId);
+    [alert, deliveries, assignees] = await Promise.all([
+      getMonitoringAlert(session.sessionToken, alertId),
+      getAlertEmailDeliveries(session.sessionToken, alertId),
+      session.operator.role === "readonly"
+        ? Promise.resolve([])
+        : getAlertAssignees(session.sessionToken).catch(() => []),
+    ]);
   } catch (error) {
     if (error instanceof NodelinkApiError && error.status === 404) notFound();
     throw error;
   }
-  const assignees = session.operator.role === "readonly"
-    ? []
-    : await getAlertAssignees(session.sessionToken).catch(() => []);
 
   return (
     <>
@@ -55,6 +65,12 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ al
           assigned_to_operator_id: alert.assigned_to_operator_id,
         }}
         assignees={assignees}
+        canManage={session.operator.role !== "readonly"}
+      />
+
+      <EmailDeliveryHistory
+        key={deliveries.map((item) => `${item.id}:${item.updated_at}`).join("|")}
+        initialDeliveries={deliveries}
         canManage={session.operator.role !== "readonly"}
       />
 

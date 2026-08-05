@@ -33,3 +33,5 @@ services:
         sync: false          # set in the Render dashboard (secret)
       - key: DATABASE_URL
         sync: false          # secret Supabase Session pooler URL (port 5432), never the HTTPS API URL
+      - key: EMAIL_ALERT_PROVIDER
+        value: disabled      # enable Resend only after adding the secret/config in Render

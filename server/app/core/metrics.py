@@ -73,6 +73,27 @@ def prometheus_text(agent_statuses: dict[str, int] | None = None) -> str:
         )
     lines.extend(
         (
+            "# HELP nodelink_alert_email_operations_total Alert email queue and delivery counters.",
+            "# TYPE nodelink_alert_email_operations_total counter",
+        )
+    )
+    for name in (
+        "email_alert_queued_total",
+        "email_alert_sent_total",
+        "email_alert_retrying_total",
+        "email_alert_failed_total",
+        "email_alert_manual_retry_total",
+        "email_alert_claim_recovered_total",
+        "email_alert_configuration_error_total",
+        "email_alert_suppressed_total",
+    ):
+        operation = name.removeprefix("email_alert_").removesuffix("_total")
+        lines.append(
+            f'nodelink_alert_email_operations_total{{operation="{operation}"}} '
+            f"{values.get(name, 0)}"
+        )
+    lines.extend(
+        (
             "# HELP nodelink_agents Current agents by operational status.",
             "# TYPE nodelink_agents gauge",
         )

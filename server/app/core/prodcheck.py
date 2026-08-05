@@ -56,6 +56,8 @@ def is_production(settings: Settings) -> bool:
 
 def production_config_problems(settings: Settings) -> list[str]:
     """Return every violated production requirement (empty = safe)."""
+    from app.core.email_notifications import configuration_problems
+
     problems: list[str] = []
 
     if settings.debug:
@@ -113,6 +115,14 @@ def production_config_problems(settings: Settings) -> list[str]:
             f"COMMAND_SIGNING_KEY_PATH ({settings.command_signing_key_path}) "
             "does not exist; generate keys with scripts/gen_command_keys.py"
         )
+
+    problems.extend(configuration_problems(settings))
+    if settings.email_alert_dashboard_base_url:
+        dashboard_url = urlparse(settings.email_alert_dashboard_base_url)
+        if dashboard_url.scheme != "https":
+            problems.append(
+                "EMAIL_ALERT_DASHBOARD_BASE_URL must use https:// in production"
+            )
 
     return problems
 

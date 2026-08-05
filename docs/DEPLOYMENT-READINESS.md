@@ -170,6 +170,12 @@ link to reproducible evidence in the release or pilot record.
       comment and assignee-email values digest-only (issue #44;
       [`ALERTS.md`](ALERTS.md)).
 
+- [x] Alert email is disabled by default and production validates its provider,
+      secret presence, sender, recipients, HTTPS dashboard link, and bounded
+      worker limits. Delivery attempts are durable, idempotent, backoff-capped,
+      redacted, visible, and manually retryable (issue #45;
+      [`ALERT-NOTIFICATIONS.md`](ALERT-NOTIFICATIONS.md)).
+
 ### Database and recovery
 
 - [x] Alembic can create a fresh schema and upgrade every supported prior

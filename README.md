@@ -257,12 +257,16 @@ After `v0.1.2`, `main` has:
 - added the technician alert lifecycle (#44): role-gated acknowledgement,
   assignment, comments, manual resolution, automatic recovery/reopen,
   optimistic-concurrency and idempotency protection, immutable actor history,
-  redacted audit evidence, and live dashboard controls; and
+  redacted audit evidence, and live dashboard controls;
+- added alert email delivery (#45): environment-owned Resend configuration,
+  escaped/redacted transition templates, transactionally durable recipient
+  queues, provider idempotency, bounded retry/backoff, maintenance suppression,
+  delivery history, audited manual retry, and live dashboard visibility; and
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
-The current Milestone 1 work remains focused on monitoring and alerting,
-notification delivery, script-library workflows, recurring tasks, and
+The current Milestone 1 work remains focused on generic webhook notifications,
+script-library workflows, recurring tasks, and
 tenant-aware authorization design.
 
 ## Planned
@@ -297,10 +301,10 @@ The repository does **not** currently contain:
   signed expiry.
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, or TPM
   inventory beyond the read-only sections described above.
-- Email or webhook alert notifications. Policy, initial checks, result
-  ingestion, alert deduplication/state, technician lifecycle actions,
-  automatic recovery, and maintenance-window suppression metadata are
-  implemented.
+- Generic webhook alert notifications. Email alert notifications, policy,
+  initial checks, result ingestion, alert deduplication/state, technician
+  lifecycle actions, automatic recovery, and maintenance-window suppression
+  are implemented (`docs/ALERT-NOTIFICATIONS.md`).
 - Script library, scheduled tasks, patch management, remediation operations,
   file transfer, or remote desktop.
 - A least-privilege agent service account.

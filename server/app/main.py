@@ -20,7 +20,12 @@ from app.core.database import AsyncSessionLocal, Base, engine
 from app.core.prodcheck import ensure_safe_production_config
 from app.core.schema_revision import ensure_schema_current
 from app.core.structured_logging import log_event
-from app.core.tasks import anchor_publisher, offline_sweeper, retention_sweeper
+from app.core.tasks import (
+    anchor_publisher,
+    email_alert_sender,
+    offline_sweeper,
+    retention_sweeper,
+)
 from app.models.models import Agent
 
 
@@ -48,11 +53,12 @@ async def lifespan(app: FastAPI):
     sweeper = asyncio.create_task(offline_sweeper(stop))
     publisher = asyncio.create_task(anchor_publisher(stop))
     pruner = asyncio.create_task(retention_sweeper(stop))
+    email_sender = asyncio.create_task(email_alert_sender(stop))
     try:
         yield
     finally:
         stop.set()
-        await asyncio.gather(sweeper, publisher, pruner)
+        await asyncio.gather(sweeper, publisher, pruner, email_sender)
 
 
 app = FastAPI(

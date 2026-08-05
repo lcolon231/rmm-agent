@@ -401,6 +401,13 @@ PRODUCER_DETAILS = {
         "comment": SENTINEL,
         "comment_redacted": False,
     },
+    "monitoring_alert_email.retried": {
+        "delivery_id": ID3,
+        "alert_id": ID1,
+        "request_id": "request-12345682",
+        "previous_status": "failed",
+        "recipient": SENTINEL,
+    },
     "maintenance_window.created": {
         "maintenance_window_id": ID3,
         "scope": "client",

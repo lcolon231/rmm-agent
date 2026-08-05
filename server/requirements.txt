@@ -11,6 +11,7 @@ python-jose[cryptography]==3.3.0
 cryptography==44.0.0
 bcrypt==4.2.1
 python-multipart==0.0.20
+httpx==0.28.1
 websockets==14.1
 # Only needed when anchor_publish_backend=s3 (issue #76); lazy-imported, so
 # deployments not publishing to S3 do not load it.

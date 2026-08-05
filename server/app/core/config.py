@@ -168,6 +168,26 @@ class Settings(BaseSettings):
     monitoring_check_interval_max_seconds: int = 86_400
     check_result_history_per_key: int = 100
     monitoring_max_maintenance_windows: int = 500
+
+    # --- Alert email delivery (issue #45) ---
+    # "disabled" is the safe default. "resend" uses the HTTPS Email API;
+    # credentials remain environment-only and are never persisted or returned.
+    email_alert_provider: str = "disabled"  # disabled | resend
+    email_alert_resend_api_key: str | None = None
+    email_alert_sender: str | None = None
+    # Comma-separated, deployment-owned distribution list (maximum 50).
+    email_alert_recipients: str = ""
+    # Optional dashboard origin used for alert links in messages. When absent,
+    # messages contain the alert id but no clickable link.
+    email_alert_dashboard_base_url: str | None = None
+    email_alert_poll_interval_seconds: int = 15
+    email_alert_batch_size: int = 25
+    email_alert_max_attempts: int = 5
+    email_alert_backoff_base_seconds: int = 30
+    email_alert_backoff_max_seconds: int = 3600
+    email_alert_claim_timeout_seconds: int = 300
+    email_alert_request_timeout_seconds: int = 10
+
     # How often the retention sweep runs.
     retention_sweep_interval_seconds: int = 86_400  # daily
     # Filesystem path whose free space is reported/alerted in /storage/status

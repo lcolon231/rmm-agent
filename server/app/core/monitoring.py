@@ -32,7 +32,7 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import metrics
+from app.core import email_notifications, metrics
 from app.models.models import (
     Agent,
     Alert,
@@ -82,18 +82,19 @@ def _append_alert_event(
     at: datetime | None = None,
 ) -> None:
     """Append system-owned lifecycle evidence inside the caller's transaction."""
-    db.add(
-        AlertEvent(
-            alert_id=alert.id,
-            generation=alert.generation,
-            event_type=event_type,
-            from_state=from_state,
-            to_state=to_state,
-            actor="system",
-            source_result_id=source_result_id,
-            created_at=at or _now(),
-        )
+    event = AlertEvent(
+        id=str(uuid.uuid4()),
+        alert_id=alert.id,
+        generation=alert.generation,
+        event_type=event_type,
+        from_state=from_state,
+        to_state=to_state,
+        actor="system",
+        source_result_id=source_result_id,
+        created_at=at or _now(),
     )
+    db.add(event)
+    email_notifications.enqueue_alert_event(db, alert, event)
 
 
 @dataclass(frozen=True)

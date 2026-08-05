@@ -71,6 +71,16 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         alert_event_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(alert_events)")
         }
+        email_delivery_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(alert_email_deliveries)"
+            )
+        }
+        email_attempt_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(alert_email_attempts)")
+        }
         indexes = {
             row[0]
             for row in connection.execute(
@@ -89,6 +99,8 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "alerts",
         "alert_events",
         "alert_observations",
+        "alert_email_deliveries",
+        "alert_email_attempts",
     } <= tables
     assert "agent_completed_at" in command_columns
     assert {
@@ -110,6 +122,14 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "request_id",
         "created_at",
     } <= alert_event_columns
+    assert {
+        "alert_id", "alert_event_id", "recipient", "subject", "text_body",
+        "html_body", "status", "attempt_count", "max_attempts",
+        "next_attempt_at", "last_retry_request_id", "created_at",
+    } <= email_delivery_columns
+    assert {
+        "delivery_id", "attempt_number", "status", "error_code", "created_at",
+    } <= email_attempt_columns
     assert {
         "ux_clients_name_normalized",
         "ux_sites_client_name_normalized",

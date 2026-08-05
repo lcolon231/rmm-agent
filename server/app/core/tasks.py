@@ -117,6 +117,33 @@ async def retention_sweeper(stop: asyncio.Event) -> None:
             pass
 
 
+async def email_alert_sender(stop: asyncio.Event) -> None:
+    """Deliver durable alert emails without coupling provider health to alerts."""
+    from app.core import email_notifications
+
+    config_status = email_notifications.configuration_status(settings)
+    if not config_status["enabled"]:
+        return
+    if not config_status["valid"]:
+        print("[email_alert_sender] WARNING invalid email configuration; sender disabled")
+        return
+    interval = settings.email_alert_poll_interval_seconds
+    while not stop.is_set():
+        try:
+            result = await email_notifications.process_due_deliveries(settings)
+            if result.failed:
+                print(
+                    "[email_alert_sender] WARNING "
+                    f"{result.failed} delivery attempt(s) exhausted or failed permanently"
+                )
+        except Exception as exc:  # keep the loop alive; never expose provider detail
+            print(f"[email_alert_sender] error: {type(exc).__name__}")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+
+
 async def anchor_publisher(stop: asyncio.Event) -> None:
     """Create and externally publish audit anchors on a schedule.
 

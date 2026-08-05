@@ -57,6 +57,7 @@ and SHA-256/Merkle roots—remains readable.
 | `monitoring_alert.assigned` | `api/management.py` technician assignment | `alert_id`, `generation`, `request_id`, `assigned_to_operator_id`, `assigned_to_email_sha256`, `assigned_to_email_bytes`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.commented` | `api/management.py` technician comment | `alert_id`, `generation`, `request_id`, `state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.resolved` | `api/management.py` manual resolution | `alert_id`, `generation`, `request_id`, `from_state`, `to_state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
+| `monitoring_alert_email.retried` | `api/management.py` operator-requested failed-delivery retry | `delivery_id`, `alert_id`, `request_id`, `previous_status`, `recipient_sha256`, `recipient_bytes` |
 | `maintenance_window.created` | `api/management.py` maintenance-window creation | `maintenance_window_id`, `scope`, `scope_id`, `starts_at`, `ends_at`, `name_sha256`, `name_bytes` |
 | `maintenance_window.deleted` | `api/management.py` maintenance-window deletion | `maintenance_window_id`, `scope`, `scope_id`, `name_sha256`, `name_bytes` |
 | `command.authorization_allowed` | `api/management.py` dispatch policy | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |
