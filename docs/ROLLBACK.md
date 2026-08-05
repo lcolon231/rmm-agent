@@ -1,5 +1,13 @@
 # Release rollback runbook
 
+Script-library note: revision `0021` is additive. A prior application can run
+against it only while new library writes are paused; it cannot preserve or
+operate the review/deprecation workflow. Restoring a pre-`0021` backup discards
+all later script identities, versions, reviews, and deprecations and therefore
+requires the normal explicit data-loss approval. Retain their audit/anchor
+evidence before restore and prefer a forward fix. See
+[`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
+
 This runbook is for a bad NodeLink release. It is deliberately conservative:
 automatic rollout must be paused first, database migrations are forward-only,
 and a schema rollback is a restore with an explicit data-loss decision. The

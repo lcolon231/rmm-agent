@@ -248,6 +248,28 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "delivery_id", "alert_id", "endpoint_id", "request_id",
         "previous_status", "destination", digest_fields=("destination",),
     ),
+    "script_library.list_viewed": _schema(
+        "page", "page_size", "result_count", "total"
+    ),
+    "script_library.item_viewed": _schema("script_id", "version_count"),
+    "script_library.version_viewed": _schema(
+        "script_id", "version", "content_sha256", "content_bytes"
+    ),
+    "script_library.created": _schema(
+        "script_id", "version", "language", "content_sha256", "content_bytes",
+        "tags", "supported_platforms", "name", digest_fields=("name",),
+    ),
+    "script_library.version_created": _schema(
+        "script_id", "version", "language", "content_sha256", "content_bytes",
+        "tags", "supported_platforms",
+    ),
+    "script_library.reviewed": _schema(
+        "script_id", "version", "state", "reason", digest_fields=("reason",),
+    ),
+    "script_library.deprecated": _schema(
+        "script_id", "request_id", "previous_record_version", "record_version",
+        "reason", digest_fields=("reason",),
+    ),
     "maintenance_window.created": _schema(
         "maintenance_window_id",
         "scope",

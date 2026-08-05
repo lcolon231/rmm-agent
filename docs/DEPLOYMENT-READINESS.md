@@ -124,6 +124,11 @@ link to reproducible evidence in the release or pilot record.
 - [x] Payload and script-size limits exist at API and agent boundaries
       (64 KiB dispatch payload cap; server refuses over-cap results, and the
       agent's script arrives inside the signed, capped payload).
+- [x] Reusable script source has an immutable custody workflow (revision
+      `0021`; role-gated creation/review/deprecation, canonical SHA-256 digest,
+      57,344-byte/5,000-line bounds, audited reads and mutations, terminal
+      idempotency, and explicit unsupported/unavailable states; see
+      [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md)).
 - [x] Disk and log growth are bounded and observable (issue #114: telemetry and
       aged command output are pruned on a schedule — audit-safe, so audit events
       and anchors are never touched and chain/anchor verification is unaffected;
@@ -294,6 +299,12 @@ Revision `0010` adds nullable arbitrary-script permission scope fields to
 operators. Null is default deny, including for existing admins. The server and
 dashboard must be deployed together to expose the grant accurately; the agent
 protocol is unchanged. See `docs/SCRIPT-AUTHORIZATION.md`.
+
+Revision `0021` additively introduces the immutable script-library tables and
+review enums. Apply it before the API/dashboard; the agent protocol is
+unchanged. Rollback may retain the additive schema while writes are paused. A
+schema rollback requires a tested pre-`0021` restore and explicit acceptance of
+post-backup library loss. See [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
 
 ## Rollback procedure
 

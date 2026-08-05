@@ -55,7 +55,7 @@ const navItems = [
   { label: "Overview", icon: Activity, href: "/" },
   { label: "Endpoints", icon: Monitor, count: null },
   { label: "Alerts", icon: AlertTriangle, count: 7 },
-  { label: "Automation", icon: Bot, count: null },
+  { label: "Automation", icon: Bot, count: null, href: "/scripts" },
   { label: "Monitoring", icon: HeartPulse, count: null, href: "/monitoring" },
   { label: "Audit", icon: ShieldCheck, count: null, href: "/audit" },
   { label: "Administration", icon: Settings, count: null, href: "/enrollment" },
@@ -211,8 +211,8 @@ function Sidebar({
           <div className="sidebar-label">Navigation</div>
           {navItems.filter((item) => !item.adminOnly || operator.role === "admin").map(({ label, icon: Icon, count, href }) => href ? (
             <Link
-              aria-current={activePath === href ? "page" : undefined}
-              className={activePath === href ? "active" : ""}
+              aria-current={activePath === href || (href !== "/" && activePath.startsWith(`${href}/`)) ? "page" : undefined}
+              className={activePath === href || (href !== "/" && activePath.startsWith(`${href}/`)) ? "active" : ""}
               href={href}
               key={label}
               onClick={onClose}

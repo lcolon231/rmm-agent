@@ -63,6 +63,13 @@ and SHA-256/Merkle roots—remains readable.
 | `webhook_endpoint.deleted` | `api/management.py` endpoint soft deletion | `endpoint_id`, `request_id`, `previous_version`, `version`, `name_sha256`, `name_bytes`, `url_sha256`, `url_bytes` |
 | `webhook_endpoint.secret_rotated` | `api/management.py` signing-secret rotation | `endpoint_id`, `request_id`, `previous_version`, `version`, `previous_secret_version`, `secret_version` |
 | `monitoring_alert_webhook.retried` | `api/management.py` operator-requested failed webhook retry | `delivery_id`, `alert_id`, `endpoint_id`, `request_id`, `previous_status`, `destination_sha256`, `destination_bytes` |
+| `script_library.list_viewed` | `api/script_library.py` bounded register read | `page`, `page_size`, `result_count`, `total` |
+| `script_library.item_viewed` | `api/script_library.py` item/version-ledger read | `script_id`, `version_count` |
+| `script_library.version_viewed` | `api/script_library.py` exact source read | `script_id`, `version`, `content_sha256`, `content_bytes` |
+| `script_library.created` | `api/script_library.py` stable identity and v1 draft | `script_id`, `version`, `language`, `content_sha256`, `content_bytes`, `tags`, `supported_platforms`, `name_sha256`, `name_bytes` |
+| `script_library.version_created` | `api/script_library.py` immutable version append | `script_id`, `version`, `language`, `content_sha256`, `content_bytes`, `tags`, `supported_platforms` |
+| `script_library.reviewed` | `api/script_library.py` final review | `script_id`, `version`, `state`, `reason_sha256`, `reason_bytes` |
+| `script_library.deprecated` | `api/script_library.py` terminal idempotent deprecation | `script_id`, `request_id`, `previous_record_version`, `record_version`, `reason_sha256`, `reason_bytes` |
 | `maintenance_window.created` | `api/management.py` maintenance-window creation | `maintenance_window_id`, `scope`, `scope_id`, `starts_at`, `ends_at`, `name_sha256`, `name_bytes` |
 | `maintenance_window.deleted` | `api/management.py` maintenance-window deletion | `maintenance_window_id`, `scope`, `scope_id`, `name_sha256`, `name_bytes` |
 | `command.authorization_allowed` | `api/management.py` dispatch policy | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |

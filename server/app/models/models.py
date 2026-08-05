@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     Float,
@@ -219,6 +220,20 @@ class WebhookAttemptStatus(str, enum.Enum):
     delivered = "delivered"
     retrying = "retrying"
     failed = "failed"
+
+
+class ScriptLanguage(str, enum.Enum):
+    """Script interpreters supported by the Milestone 1 library."""
+
+    powershell = "powershell"
+    shell = "shell"
+
+
+class ScriptReviewState(str, enum.Enum):
+    """Final review decisions. No row means the version is still a draft."""
+
+    approved = "approved"
+    rejected = "rejected"
 
 
 class Client(Base):
@@ -1005,6 +1020,104 @@ class AlertEmailAttempt(Base):
         DateTime(timezone=True), default=_now, nullable=False
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScriptLibraryItem(Base):
+    """Stable script identity whose content lives in immutable versions."""
+
+    __tablename__ = "script_library_items"
+    __table_args__ = (
+        UniqueConstraint("normalized_name", name="ux_script_library_normalized_name"),
+        CheckConstraint("latest_version >= 1", name="ck_script_library_latest_version"),
+        CheckConstraint("record_version >= 1", name="ck_script_library_record_version"),
+        Index("ix_script_library_deprecated_created", "deprecated_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    latest_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    record_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    deprecated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deprecated_by: Mapped[str | None] = mapped_column(String(320))
+    last_deprecation_request_id: Mapped[str | None] = mapped_column(String(64))
+    deprecation_reason_sha256: Mapped[str | None] = mapped_column(String(64))
+    deprecation_reason_bytes: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class ScriptVersion(Base):
+    """Append-only script content and compatibility metadata."""
+
+    __tablename__ = "script_versions"
+    __table_args__ = (
+        UniqueConstraint("script_id", "version", name="ux_script_version_number"),
+        CheckConstraint("version >= 1", name="ck_script_version_number"),
+        CheckConstraint(
+            "content_bytes BETWEEN 1 AND 57344", name="ck_script_version_content_bytes"
+        ),
+        CheckConstraint(
+            "length(content_sha256) = 64", name="ck_script_version_digest_length"
+        ),
+        Index("ix_script_version_script_created", "script_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    script_id: Mapped[str] = mapped_column(
+        ForeignKey("script_library_items.id", ondelete="RESTRICT"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    language: Mapped[ScriptLanguage] = mapped_column(
+        Enum(
+            ScriptLanguage,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    supported_platforms: Mapped[list] = mapped_column(JSON, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class ScriptVersionReview(Base):
+    """Append-only final review decision for one immutable version."""
+
+    __tablename__ = "script_version_reviews"
+    __table_args__ = (
+        UniqueConstraint("script_version_id", name="ux_script_version_review_final"),
+        Index("ix_script_review_created", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    script_version_id: Mapped[str] = mapped_column(
+        ForeignKey("script_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    state: Mapped[ScriptReviewState] = mapped_column(
+        Enum(
+            ScriptReviewState,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    reviewed_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    reason_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class WebhookEndpoint(Base):

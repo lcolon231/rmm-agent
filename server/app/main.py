@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select, text
 
-from app.api import agents, auth, management
+from app.api import agents, auth, management, script_library
 from app.core import metrics
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, Base, engine
@@ -74,6 +74,7 @@ app = FastAPI(
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(agents.router, prefix="/api/v1")
 app.include_router(management.router, prefix="/api/v1")
+app.include_router(script_library.router, prefix="/api/v1")
 
 
 @app.middleware("http")
