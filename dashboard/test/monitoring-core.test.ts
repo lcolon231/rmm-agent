@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   describeThreshold,
   alertEmailDeliveryListFromUnknown,
+  alertWebhookDeliveryListFromUnknown,
   formatCheckInterval,
   formatMonitoringScope,
   formatMonitoringTimestamp,
@@ -14,6 +15,9 @@ import {
   monitoringAlertDetailFromUnknown,
   monitoringAlertListFromUnknown,
   validateAlertActionInput,
+  webhookEndpointListFromUnknown,
+  webhookEndpointSecretFromUnknown,
+  webhookStatusFromUnknown,
 } from "../src/lib/monitoring-core.ts";
 
 const check = {
@@ -185,5 +189,54 @@ test("email delivery parser allowlists masked history and rejects malformed atte
   assert.doesNotMatch(JSON.stringify(parsed), /authorization|text_body|must-not-leak/);
   assert.equal(alertEmailDeliveryListFromUnknown({
     items: [{ ...delivery, attempts: [{ ...delivery.attempts[0], attempt_number: 0 }] }],
+  }), null);
+});
+
+test("webhook endpoint and status parsers never retain secrets or full destinations", () => {
+  const endpoint = {
+    id: "endpoint-1", name: "Incident relay", url: "https://*.example.test/…",
+    event_types: ["opened", "automatic_recovery"], enabled: true,
+    current_secret_version: 1, current_secret_key_id: "key-1", version: 1,
+    deleted_at: null, created_at: "2026-08-05T10:00:00Z",
+    updated_at: "2026-08-05T10:00:00Z", encrypted_secret: "must-not-leak",
+  };
+  const endpoints = webhookEndpointListFromUnknown([endpoint]);
+  assert.ok(endpoints);
+  assert.equal(endpoints[0].url, "https://*.example.test/…");
+  assert.doesNotMatch(JSON.stringify(endpoints), /encrypted_secret|must-not-leak/);
+  const secret = webhookEndpointSecretFromUnknown({
+    ...endpoint, secret: "whsec_once", signing_algorithm: "HMAC-SHA256",
+    signature_header: "X-NodeLink-Signature",
+  });
+  assert.ok(secret);
+  assert.equal(secret.secret, "whsec_once");
+  assert.ok(webhookStatusFromUnknown({
+    encryption_key_configured: true, endpoint_count: 1,
+    enabled_endpoint_count: 1, endpoint_limit: 50,
+    counts: { pending: 0, delivered: 2, failed: 0 }, api_key: "must-not-leak",
+  }));
+});
+
+test("webhook delivery parser allowlists attempt metadata and rejects payloads", () => {
+  const delivery = {
+    id: "delivery-1", endpoint_id: "endpoint-1", endpoint_name: "Incident relay",
+    alert_id: "alert-1", alert_event_id: "event-1", generation: 1,
+    event_type: "opened", destination: "https://*.example.test/…", status: "failed",
+    attempt_count: 1, max_attempts: 3, next_attempt_at: "2026-08-05T10:02:00Z",
+    last_http_status: 503, last_error_code: "http_503", delivered_at: null,
+    created_at: "2026-08-05T10:00:00Z", updated_at: "2026-08-05T10:01:00Z",
+    payload: "must-not-leak", destination_url: "https://secret.example/path?token=x",
+    attempts: [{
+      id: "attempt-1", attempt_number: 1, status: "failed", http_status: 503,
+      error_code: "http_503", created_at: "2026-08-05T10:00:00Z",
+      completed_at: "2026-08-05T10:01:00Z", response_body: "must-not-leak",
+    }],
+  };
+  const parsed = alertWebhookDeliveryListFromUnknown({ items: [delivery] });
+  assert.ok(parsed);
+  assert.equal(parsed[0].attempts[0].http_status, 503);
+  assert.doesNotMatch(JSON.stringify(parsed), /payload|destination_url|response_body|must-not-leak/);
+  assert.equal(alertWebhookDeliveryListFromUnknown({
+    items: [{ ...delivery, last_http_status: 700 }],
   }), null);
 });

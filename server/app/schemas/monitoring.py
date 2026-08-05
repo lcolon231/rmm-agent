@@ -38,6 +38,8 @@ from app.models.models import (
     EmailAttemptStatus,
     EmailDeliveryStatus,
     MonitoringScope,
+    WebhookAttemptStatus,
+    WebhookDeliveryStatus,
 )
 
 # --------------------------------------------------------------------------- #
@@ -573,6 +575,172 @@ class AlertEmailStatusOut(BaseModel):
 
 
 class AlertEmailRetry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,64}$")
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# Versioned signed webhook notifications (#46)
+# --------------------------------------------------------------------------- #
+WEBHOOK_EVENT_TYPES = frozenset(
+    {
+        AlertEventType.opened,
+        AlertEventType.reopened,
+        AlertEventType.acknowledged,
+        AlertEventType.manual_resolution,
+        AlertEventType.automatic_recovery,
+        AlertEventType.policy_revised,
+        AlertEventType.policy_deleted,
+        AlertEventType.policy_superseded,
+    }
+)
+
+
+class WebhookEndpointCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: Annotated[
+        str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)
+    ]
+    url: Annotated[
+        str, StringConstraints(min_length=1, max_length=2_048, strip_whitespace=True)
+    ]
+    event_types: list[AlertEventType] = Field(
+        default_factory=lambda: sorted(WEBHOOK_EVENT_TYPES, key=lambda item: item.value),
+        min_length=1,
+        max_length=8,
+    )
+    enabled: bool = True
+
+    @field_validator("event_types")
+    @classmethod
+    def validate_webhook_event_types(
+        cls, value: list[AlertEventType]
+    ) -> list[AlertEventType]:
+        if len(set(value)) != len(value) or not set(value) <= WEBHOOK_EVENT_TYPES:
+            raise ValueError("event_types must be unique supported alert transitions")
+        return value
+
+
+class WebhookEndpointUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,64}$")
+    ]
+    expected_version: int = Field(ge=1)
+    name: Annotated[
+        str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)
+    ] | None = None
+    url: Annotated[
+        str, StringConstraints(min_length=1, max_length=2_048, strip_whitespace=True)
+    ] | None = None
+    event_types: list[AlertEventType] | None = Field(
+        default=None, min_length=1, max_length=8
+    )
+    enabled: bool | None = None
+
+    @field_validator("event_types")
+    @classmethod
+    def validate_webhook_event_types(
+        cls, value: list[AlertEventType] | None
+    ) -> list[AlertEventType] | None:
+        if value is not None and (
+            len(set(value)) != len(value) or not set(value) <= WEBHOOK_EVENT_TYPES
+        ):
+            raise ValueError("event_types must be unique supported alert transitions")
+        return value
+
+    @model_validator(mode="after")
+    def require_change(self):
+        if all(
+            value is None
+            for value in (self.name, self.url, self.event_types, self.enabled)
+        ):
+            raise ValueError("at least one endpoint field must be supplied")
+        return self
+
+
+class WebhookEndpointOut(BaseModel):
+    id: str
+    name: str
+    url: str
+    event_types: list[AlertEventType]
+    enabled: bool
+    current_secret_version: int = Field(ge=1)
+    current_secret_key_id: str
+    version: int = Field(ge=1)
+    deleted_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WebhookEndpointSecretOut(WebhookEndpointOut):
+    secret: str
+    signing_algorithm: str = "HMAC-SHA256"
+    signature_header: str = "X-NodeLink-Signature"
+
+
+class WebhookDestinationValidationOut(BaseModel):
+    endpoint_id: str
+    state: str
+    code: str | None = None
+    resolved_address_count: int = Field(ge=0)
+
+
+class WebhookSecretRotate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,64}$")
+    ]
+    expected_version: int = Field(ge=1)
+
+
+class AlertWebhookAttemptOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    attempt_number: int = Field(ge=1)
+    status: WebhookAttemptStatus
+    http_status: int | None
+    error_code: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class AlertWebhookDeliveryOut(BaseModel):
+    id: str
+    endpoint_id: str
+    endpoint_name: str
+    alert_id: str
+    alert_event_id: str
+    generation: int = Field(ge=0)
+    event_type: AlertEventType
+    destination: str
+    status: WebhookDeliveryStatus
+    attempt_count: int = Field(ge=0)
+    max_attempts: int = Field(ge=1)
+    next_attempt_at: datetime
+    last_http_status: int | None
+    last_error_code: str | None
+    delivered_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    attempts: list[AlertWebhookAttemptOut] = Field(default_factory=list)
+
+
+class AlertWebhookDeliveryListOut(BaseModel):
+    items: list[AlertWebhookDeliveryOut] = Field(default_factory=list)
+
+
+class WebhookStatusOut(BaseModel):
+    encryption_key_configured: bool
+    endpoint_count: int = Field(ge=0)
+    enabled_endpoint_count: int = Field(ge=0)
+    endpoint_limit: int = Field(ge=1)
+    counts: dict[str, int]
+
+
+class AlertWebhookRetry(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: Annotated[
         str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,64}$")

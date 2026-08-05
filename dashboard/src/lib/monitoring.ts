@@ -7,16 +7,29 @@ import {
   monitoringPolicyListFromUnknown,
   alertEmailDeliveryFromUnknown,
   alertEmailDeliveryListFromUnknown,
+  alertWebhookDeliveryFromUnknown,
+  alertWebhookDeliveryListFromUnknown,
   alertAssigneesFromUnknown,
   monitoringAlertDetailFromUnknown,
   monitoringAlertListFromUnknown,
+  webhookEndpointFromUnknown,
+  webhookEndpointListFromUnknown,
+  webhookEndpointSecretFromUnknown,
+  webhookStatusFromUnknown,
+  webhookValidationFromUnknown,
   type AlertActionInput,
   type AlertAssignee,
   type AlertEmailDelivery,
+  type AlertWebhookDelivery,
   type MonitoringAlert,
   type MonitoringAlertDetail,
   type MonitoringPolicy,
   type MonitoringPolicyDetail,
+  type WebhookDestinationValidation,
+  type WebhookEndpoint,
+  type WebhookEndpointSecret,
+  type WebhookEventType,
+  type WebhookStatus,
 } from "@/lib/monitoring-core";
 import { nodelinkApiRequest } from "@/lib/nodelink-api";
 
@@ -117,5 +130,126 @@ export async function retryAlertEmailDelivery(
   );
   const delivery = alertEmailDeliveryFromUnknown(value);
   if (!delivery) throw new Error("The management service returned an invalid email delivery.");
+  return delivery;
+}
+
+export async function getWebhookStatus(sessionToken: string): Promise<WebhookStatus> {
+  const value = await nodelinkApiRequest<unknown>("/api/v1/monitoring/webhooks/status", {
+    method: "GET", sessionToken,
+  });
+  const status = webhookStatusFromUnknown(value);
+  if (!status) throw new Error("The management service returned an invalid webhook status.");
+  return status;
+}
+
+export async function getWebhookEndpoints(sessionToken: string): Promise<WebhookEndpoint[]> {
+  const value = await nodelinkApiRequest<unknown>("/api/v1/monitoring/webhook-endpoints", {
+    method: "GET", sessionToken,
+  });
+  const endpoints = webhookEndpointListFromUnknown(value);
+  if (!endpoints) throw new Error("The management service returned invalid webhook endpoints.");
+  return endpoints;
+}
+
+export async function createWebhookEndpoint(
+  sessionToken: string,
+  input: { name: string; url: string; event_types: WebhookEventType[] },
+): Promise<WebhookEndpointSecret> {
+  const value = await nodelinkApiRequest<unknown>("/api/v1/monitoring/webhook-endpoints", {
+    body: JSON.stringify(input), headers: { "Content-Type": "application/json" },
+    method: "POST", sessionToken,
+  });
+  const endpoint = webhookEndpointSecretFromUnknown(value);
+  if (!endpoint) throw new Error("The management service returned an invalid webhook endpoint.");
+  return endpoint;
+}
+
+export async function updateWebhookEndpoint(
+  sessionToken: string,
+  endpointId: string,
+  input: {
+    request_id: string;
+    expected_version: number;
+    name?: string;
+    url?: string;
+    event_types?: WebhookEventType[];
+    enabled?: boolean;
+  },
+): Promise<WebhookEndpoint> {
+  const value = await nodelinkApiRequest<unknown>(
+    `/api/v1/monitoring/webhook-endpoints/${encodeURIComponent(endpointId)}`,
+    {
+      body: JSON.stringify(input), headers: { "Content-Type": "application/json" },
+      method: "PUT", sessionToken,
+    },
+  );
+  const endpoint = webhookEndpointFromUnknown(value);
+  if (!endpoint) throw new Error("The management service returned an invalid webhook endpoint.");
+  return endpoint;
+}
+
+export async function validateWebhookEndpoint(
+  sessionToken: string, endpointId: string,
+): Promise<WebhookDestinationValidation> {
+  const value = await nodelinkApiRequest<unknown>(
+    `/api/v1/monitoring/webhook-endpoints/${encodeURIComponent(endpointId)}/validate`,
+    { method: "POST", sessionToken },
+  );
+  const validation = webhookValidationFromUnknown(value);
+  if (!validation) throw new Error("The management service returned invalid validation evidence.");
+  return validation;
+}
+
+export async function rotateWebhookSecret(
+  sessionToken: string, endpointId: string, requestId: string, expectedVersion: number,
+): Promise<WebhookEndpointSecret> {
+  const value = await nodelinkApiRequest<unknown>(
+    `/api/v1/monitoring/webhook-endpoints/${encodeURIComponent(endpointId)}/rotate-secret`,
+    {
+      body: JSON.stringify({ request_id: requestId, expected_version: expectedVersion }),
+      headers: { "Content-Type": "application/json" }, method: "POST", sessionToken,
+    },
+  );
+  const endpoint = webhookEndpointSecretFromUnknown(value);
+  if (!endpoint) throw new Error("The management service returned an invalid rotated secret.");
+  return endpoint;
+}
+
+export function deleteWebhookEndpoint(
+  sessionToken: string, endpointId: string, requestId: string, expectedVersion: number,
+): Promise<unknown> {
+  const query = new URLSearchParams({
+    request_id: requestId, expected_version: String(expectedVersion),
+  });
+  return nodelinkApiRequest<unknown>(
+    `/api/v1/monitoring/webhook-endpoints/${encodeURIComponent(endpointId)}?${query}`,
+    { method: "DELETE", sessionToken },
+  );
+}
+
+export async function getAlertWebhookDeliveries(
+  sessionToken: string, alertId: string,
+): Promise<AlertWebhookDelivery[]> {
+  const value = await nodelinkApiRequest<unknown>(
+    `/api/v1/monitoring/alerts/${encodeURIComponent(alertId)}/webhook-deliveries`,
+    { method: "GET", sessionToken },
+  );
+  const deliveries = alertWebhookDeliveryListFromUnknown(value);
+  if (!deliveries) throw new Error("The management service returned invalid webhook history.");
+  return deliveries;
+}
+
+export async function retryAlertWebhookDelivery(
+  sessionToken: string, deliveryId: string, requestId: string,
+): Promise<AlertWebhookDelivery> {
+  const value = await nodelinkApiRequest<unknown>(
+    `/api/v1/monitoring/webhook-deliveries/${encodeURIComponent(deliveryId)}/retry`,
+    {
+      body: JSON.stringify({ request_id: requestId }),
+      headers: { "Content-Type": "application/json" }, method: "POST", sessionToken,
+    },
+  );
+  const delivery = alertWebhookDeliveryFromUnknown(value);
+  if (!delivery) throw new Error("The management service returned an invalid webhook delivery.");
   return delivery;
 }

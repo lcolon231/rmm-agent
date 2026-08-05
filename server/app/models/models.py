@@ -201,6 +201,26 @@ class EmailAttemptStatus(str, enum.Enum):
     failed = "failed"
 
 
+class WebhookDeliveryStatus(str, enum.Enum):
+    """Durable state for one signed webhook event delivery (#46)."""
+
+    pending = "pending"
+    sending = "sending"
+    retrying = "retrying"
+    delivered = "delivered"
+    failed = "failed"
+    suppressed = "suppressed"
+
+
+class WebhookAttemptStatus(str, enum.Enum):
+    """Immutable outcome for one pinned webhook HTTP request."""
+
+    sending = "sending"
+    delivered = "delivered"
+    retrying = "retrying"
+    failed = "failed"
+
+
 class Client(Base):
     __tablename__ = "clients"
 
@@ -980,6 +1000,160 @@ class AlertEmailAttempt(Base):
         nullable=False,
     )
     provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WebhookEndpoint(Base):
+    """Operator-managed HTTPS destination for versioned alert events (#46)."""
+
+    __tablename__ = "webhook_endpoints"
+    __table_args__ = (
+        UniqueConstraint("name", name="ux_webhook_endpoint_name"),
+        Index("ix_webhook_endpoint_enabled", "enabled", "deleted_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    event_types: Mapped[list] = mapped_column(JSON, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    current_secret_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class WebhookSecretVersion(Base):
+    """Encrypted signing secret retained for rotation-safe queued delivery."""
+
+    __tablename__ = "webhook_secret_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "endpoint_id", "version", name="ux_webhook_secret_endpoint_version"
+        ),
+        Index("ix_webhook_secret_endpoint", "endpoint_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    endpoint_id: Mapped[str] = mapped_column(
+        ForeignKey("webhook_endpoints.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    encrypted_secret: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class AlertWebhookDelivery(Base):
+    """One idempotent, signed alert event snapshot per webhook endpoint."""
+
+    __tablename__ = "alert_webhook_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "alert_event_id", "endpoint_id", name="ux_alert_webhook_event_endpoint"
+        ),
+        Index(
+            "ix_alert_webhook_due", "status", "next_attempt_at", "created_at"
+        ),
+        Index(
+            "ix_alert_webhook_alert_created", "alert_id", "created_at"
+        ),
+        Index(
+            "ix_alert_webhook_endpoint_created", "endpoint_id", "created_at"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    endpoint_id: Mapped[str] = mapped_column(
+        ForeignKey("webhook_endpoints.id", ondelete="RESTRICT"), nullable=False
+    )
+    secret_version_id: Mapped[str] = mapped_column(
+        ForeignKey("webhook_secret_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    alert_id: Mapped[str] = mapped_column(
+        ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False
+    )
+    alert_event_id: Mapped[str] = mapped_column(
+        ForeignKey("alert_events.id", ondelete="CASCADE"), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[AlertEventType] = mapped_column(
+        Enum(
+            AlertEventType,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    destination_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    signature_timestamp: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[WebhookDeliveryStatus] = mapped_column(
+        Enum(
+            WebhookDeliveryStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+        default=WebhookDeliveryStatus.pending,
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_http_status: Mapped[int | None] = mapped_column(Integer)
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    last_retry_request_id: Mapped[str | None] = mapped_column(String(64))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class AlertWebhookAttempt(Base):
+    """Append-only webhook attempt metadata; response bodies are never stored."""
+
+    __tablename__ = "alert_webhook_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "delivery_id", "attempt_number", name="ux_alert_webhook_attempt_number"
+        ),
+        Index("ix_alert_webhook_attempt_delivery", "delivery_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    delivery_id: Mapped[str] = mapped_column(
+        ForeignKey("alert_webhook_deliveries.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[WebhookAttemptStatus] = mapped_column(
+        Enum(
+            WebhookAttemptStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    http_status: Mapped[int | None] = mapped_column(Integer)
     error_code: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False

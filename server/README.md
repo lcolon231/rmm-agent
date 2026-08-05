@@ -48,6 +48,8 @@ python -m uvicorn app.main:app --reload
 ```
 
 Interactive API documentation is at `/docs`; health is at `/healthz`.
+Signed monitoring-webhook setup, receiver verification, limits, and recovery
+are documented in [`SIGNED-WEBHOOKS.md`](../docs/SIGNED-WEBHOOKS.md).
 
 With `DEBUG=true`, the application creates missing tables on startup for local
 convenience. With `DEBUG=false`, startup requires the database's Alembic

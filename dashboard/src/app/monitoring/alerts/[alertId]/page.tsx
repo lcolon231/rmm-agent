@@ -6,10 +6,12 @@ import { notFound, redirect } from "next/navigation";
 
 import { AlertActions } from "@/components/alert-actions";
 import { EmailDeliveryHistory } from "@/components/email-delivery-history";
+import { WebhookDeliveryHistory } from "@/components/webhook-delivery-history";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import {
   getAlertAssignees,
   getAlertEmailDeliveries,
+  getAlertWebhookDeliveries,
   getMonitoringAlert,
 } from "@/lib/monitoring";
 import { formatAlertEventType, formatMonitoringTimestamp } from "@/lib/monitoring-core";
@@ -23,11 +25,13 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ al
   const { alertId } = await params;
   let alert;
   let deliveries;
+  let webhookDeliveries;
   let assignees;
   try {
-    [alert, deliveries, assignees] = await Promise.all([
+    [alert, deliveries, webhookDeliveries, assignees] = await Promise.all([
       getMonitoringAlert(session.sessionToken, alertId),
       getAlertEmailDeliveries(session.sessionToken, alertId),
+      getAlertWebhookDeliveries(session.sessionToken, alertId),
       session.operator.role === "readonly"
         ? Promise.resolve([])
         : getAlertAssignees(session.sessionToken).catch(() => []),
@@ -71,6 +75,12 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ al
       <EmailDeliveryHistory
         key={deliveries.map((item) => `${item.id}:${item.updated_at}`).join("|")}
         initialDeliveries={deliveries}
+        canManage={session.operator.role !== "readonly"}
+      />
+
+      <WebhookDeliveryHistory
+        key={webhookDeliveries.map((item) => `${item.id}:${item.updated_at}`).join("|")}
+        initialDeliveries={webhookDeliveries}
         canManage={session.operator.role !== "readonly"}
       />
 
