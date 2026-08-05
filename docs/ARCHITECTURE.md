@@ -239,6 +239,18 @@ initiation/acceptance, per-message participant identity, audited session
 lifecycle, bounded retained transcripts, and no remote-control capability on
 the chat channel), evidence workflows, and ecosystem integrations.
 
+### Versioned script custody
+
+The Milestone 1 script library is implemented as a stable
+`script_library_items` identity, append-only `script_versions`, and one optional
+final `script_version_reviews` row per version. Source is canonicalized and
+bound to a SHA-256 digest; updates and deletion do not exist. Operators append
+drafts, admins issue final reviews and terminal deprecation, and readonly users
+inspect audited metadata/source. This storage authority is deliberately
+separate from the default-deny endpoint execution authority. Revision `0021`
+is additive and the full API, state, limit, compatibility, and recovery
+contract is in [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
+
 ## 4. Server
 
 The server uses FastAPI, Pydantic 2, async SQLAlchemy, and Alembic. PostgreSQL is

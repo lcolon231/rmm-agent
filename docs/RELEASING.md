@@ -126,6 +126,15 @@ cloud HSM — never in the repo.
 
 Each release publishes and (where possible) verifies:
 
+For releases containing revision `0021` or later, the compatibility record must
+name the script-library migration, confirm a pre-upgrade backup, and retain
+evidence for operator draft creation, readonly exact-version retrieval and
+digest comparison, admin final review, idempotent deprecation, audit-chain
+verification, and dashboard unavailable-state behavior. If rolling back the
+application while retaining the additive schema, pause library writes; a
+pre-`0021` restore requires an explicit library data-loss decision. See
+[`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
+
 - **SHA-256 checksums** — `SHA256SUMS.txt` for the binaries and a `.sha256`
   sidecar for the installer. *Done.*
 - **SBOM** — `nodelink-<version>.spdx.json`, an SPDX document covering the Go

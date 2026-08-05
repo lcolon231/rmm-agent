@@ -16,6 +16,13 @@ local Merkle anchor verification.
 The system is not approved for production or regulated endpoints. Key gaps are
 listed below and tracked as separate GitHub issues.
 
+The Milestone 1 versioned script-custody control is implemented: exact source
+digests, append-only versions/final reviews, role-gated terminal deprecation,
+bounded inputs, audited reads and mutations, and a strict separation from
+execution permission. Typed parameters, scheduling/run policy, and immutable
+run evidence remain the next automation controls. See
+[`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
+
 ## Milestone 0 — close pilot-blocking trust gaps
 
 ### Version and bind the command envelope

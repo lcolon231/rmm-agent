@@ -125,6 +125,10 @@ The code in this repository currently provides:
   explicit admin-granted global, site, or agent scope even for admins, while
   typed inventory remains role-authorized. Grant changes and every allow/deny
   decision are audited without recording script contents.
+- An immutable versioned script library with canonical SHA-256 content
+  evidence, bounded language/platform/tag metadata, append-only final reviews,
+  terminal idempotent deprecation, role-gated API/dashboard workflows, and no
+  implicit execution permission (`docs/SCRIPT-LIBRARY.md`).
 - Fail-closed production startup validation (`ENVIRONMENT=production` rejects
   debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
   URLs) with explicit opt-in proxy trust for client IPs.
@@ -148,7 +152,7 @@ The code in this repository currently provides:
   anchors, plus a scheduled publisher that writes anchor roots to external
   immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
-- Forward-only Alembic migrations through revision `0020`, with exact revision
+- Forward-only Alembic migrations through revision `0021`, with exact revision
   enforcement on non-debug startup, legacy debug-schema repair, and a
   disposable PostgreSQL migration test in CI.
 - Encrypted PostgreSQL backup/isolated restore plus a fail-closed release
@@ -268,11 +272,14 @@ After `v0.1.2`, `main` has:
 - added signed generic webhook delivery (#46): versioned canonical payloads,
   per-destination encrypted rotating secrets, HMAC-SHA256 verification,
   SSRF- and DNS-rebinding-resistant HTTPS delivery, durable bounded retries,
-  audited operations, and a live destination and attempt ledger; and
+  audited operations, and a live destination and attempt ledger;
+- added the immutable script library (#47): canonical content digests,
+  append-only versions and final reviews, terminal deprecation, bounded
+  role-gated API/dashboard workflows, and recovery documentation; and
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
-The current Milestone 1 work remains focused on script-library workflows,
+The current Milestone 1 work remains focused on typed script parameters,
 recurring tasks, and
 tenant-aware authorization design.
 

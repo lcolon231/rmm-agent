@@ -86,6 +86,17 @@ is scrubbed before append-only operational storage. The audit chain receives
 only a digest and byte count for comments and assignee email, preventing
 operator prose or addresses from entering tamper-evident audit detail.
 
+**Script-library custody boundary.** Reusable source is sensitive endpoint-
+control material even before execution. Readonly operators may inspect it,
+operators may append drafts, and only admins may issue one final review or
+terminal deprecation. Content is immutable and SHA-256-bound, mutations use
+same-origin dashboard handlers, and source/free-form reasons never enter audit
+detail or operational logs. Library roles do not grant the separate
+default-deny execution scope. Remaining risks are privileged database-owner
+tampering before external audit anchoring and a malicious approved script;
+review is accountable evidence, not sandboxing or semantic safety analysis.
+See [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
+
 ### (2) Server ↔ Network (transport)
 
 Agents connect **outbound only**. There is no inbound agent port to open at a

@@ -204,6 +204,15 @@ class Settings(BaseSettings):
     webhook_dns_timeout_seconds: int = Field(default=5, ge=1, le=30)
     webhook_max_endpoints: int = Field(default=50, ge=1, le=100)
 
+    # --- Immutable script library (issue #47) ---
+    script_library_max_items: int = Field(default=1_000, ge=1, le=10_000)
+    script_library_max_versions_per_script: int = Field(
+        default=100, ge=1, le=1_000
+    )
+    script_library_max_content_bytes: int = Field(
+        default=57_344, ge=1_024, le=57_344
+    )
+
     # How often the retention sweep runs.
     retention_sweep_interval_seconds: int = 86_400  # daily
     # Filesystem path whose free space is reported/alerted in /storage/status

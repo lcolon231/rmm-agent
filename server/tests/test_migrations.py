@@ -103,6 +103,22 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
                 "PRAGMA table_info(alert_webhook_attempts)"
             )
         }
+        script_item_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(script_library_items)"
+            )
+        }
+        script_version_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(script_versions)")
+        }
+        script_review_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(script_version_reviews)"
+            )
+        }
         indexes = {
             row[0]
             for row in connection.execute(
@@ -127,6 +143,9 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "webhook_secret_versions",
         "alert_webhook_deliveries",
         "alert_webhook_attempts",
+        "script_library_items",
+        "script_versions",
+        "script_version_reviews",
     } <= tables
     assert "agent_completed_at" in command_columns
     assert {
@@ -172,6 +191,19 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "delivery_id", "attempt_number", "status", "http_status",
         "error_code",
     } <= webhook_attempt_columns
+    assert {
+        "name", "normalized_name", "latest_version", "record_version",
+        "deprecated_at", "last_deprecation_request_id",
+        "deprecation_reason_sha256",
+    } <= script_item_columns
+    assert {
+        "script_id", "version", "language", "content", "content_sha256",
+        "content_bytes", "tags", "supported_platforms",
+    } <= script_version_columns
+    assert {
+        "script_version_id", "state", "reviewed_by", "reason_sha256",
+        "reason_bytes",
+    } <= script_review_columns
     assert {
         "ux_clients_name_normalized",
         "ux_sites_client_name_normalized",
