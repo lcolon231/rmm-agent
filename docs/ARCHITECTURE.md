@@ -251,6 +251,24 @@ separate from the default-deny endpoint execution authority. Revision `0021`
 is additive and the full API, state, limit, compatibility, and recovery
 contract is in [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
 
+Revision `0022` extends each immutable `script_versions` row with ordered
+`script_parameter_definitions` (`string`, `number`, `boolean`, `choice`, or
+`secret`) and adds expiring `script_parameter_value_sets`. The latter contains
+one AES-256-GCM encrypted canonical JSON document, an HMAC-SHA256 fingerprint,
+safe key-name lists, creator/request evidence, and expiry; plaintext values have
+no read route. Definition changes require a new version/review. Only operators
+may prepare values, and only for an approved, non-deprecated exact version.
+Missing encryption configuration, invalid type/bound/choice input, unknown keys,
+and expired state fail closed. The dashboard receives only allowlisted metadata.
+
+PowerShell and POSIX-shell bind values to generated `NL_PARAM_<Key>` variables
+with single-quote escaping rather than source token substitution. Parallel
+Python and Go test vectors cover quoting and secret redaction. The Go execution
+helper is not reachable from legacy signed command schema v1: recurring task
+dispatch (#49) must negotiate a parameter-aware contract and transport secrets
+without writing plaintext into the existing `commands.payload`. See
+[`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md) for limits, compatibility, and recovery.
+
 ## 4. Server
 
 The server uses FastAPI, Pydantic 2, async SQLAlchemy, and Alembic. PostgreSQL is

@@ -214,6 +214,39 @@ Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
 (`cmd.exe` / `/bin/sh`), and `collect_inventory`. Commands run with a 5-minute
 timeout.
 
+### Typed script parameters (dormant)
+
+`executor.RenderParameterizedScript` and `executor.RedactParameterSecrets`
+implement the endpoint half of the server's typed parameter contract (issue
+\#48). **Nothing calls them with real values yet, and that is deliberate.** The
+signed `command-v3` envelope has no parameter field, so wiring them in today
+would mean putting plaintext secrets into `commands.payload` — which the server
+never does. Issue \#49 must negotiate a parameter-aware dispatch schema first;
+until then `RunContext` passes `nil` and behavior is byte-for-byte unchanged.
+
+When a negotiated schema does supply values, the helpers guarantee:
+
+- **Binding, not interpolation.** Values become generated variables prepended to
+  the script — `$NL_PARAM_Key = '…'` for PowerShell, `NL_PARAM_Key='…'` plus
+  `export` for shell. Caller-supplied source is never scanned or rewritten, so
+  there is no placeholder-injection surface.
+- **Native quoting.** Strings/choices/secrets become single-quoted literals with
+  `'` → `''` (PowerShell) and `'` → `'"'"'` (shell). Booleans render as
+  `$true`/`$false` on PowerShell; numbers render unquoted and finite-checked.
+- **Fail-closed typing.** Keys must match `^[A-Za-z][A-Za-z0-9_]{0,63}$` and be
+  unique ignoring case, at most 32 per command, with the JSON type matching the
+  declared kind. Any violation returns an error and the command does not run.
+- **Secret redaction.** Exact declared secret values are removed longest-first
+  from both captured streams before the result is protected in the outbox, so a
+  secret echoed by a script does not reach the durable result or the server.
+  Redaction is exact-substring only: it cannot catch a secret the script
+  transforms, encodes, or splits across the 256 KiB stream cap.
+
+Cross-platform quoting, contract rejection, and redaction ordering are covered
+by `internal/executor/parameters_test.go`, which runs on Linux and Windows. The
+server-side counterpart is documented in
+[`docs/SCRIPT-LIBRARY.md`](../docs/SCRIPT-LIBRARY.md).
+
 Commands from one heartbeat are executed sequentially and stdout/stderr are
 captured in memory up to 256 KiB per stream (384 KiB combined), then protected
 in the durable outbox before upload. Every heartbeat advertises result-pending

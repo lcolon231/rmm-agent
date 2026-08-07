@@ -129,6 +129,12 @@ link to reproducible evidence in the release or pilot record.
       57,344-byte/5,000-line bounds, audited reads and mutations, terminal
       idempotency, and explicit unsupported/unavailable states; see
       [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md)).
+- [x] Script parameter definitions and prepared per-run values are bounded and
+      secret-safe (revision `0022`; five strict types, immutable version binding,
+      approval gating, AES-256-GCM encrypted value documents, keyed idempotency,
+      24-hour expiry, no plaintext read API, safe shell/PowerShell quoting, and
+      redacted evidence). Live parameter dispatch remains gated on #49's
+      negotiated transport and is not claimed by this checkbox.
 - [x] Disk and log growth are bounded and observable (issue #114: telemetry and
       aged command output are pruned on a schedule — audit-safe, so audit events
       and anchors are never touched and chain/anchor verification is unaffected;
@@ -305,6 +311,14 @@ review enums. Apply it before the API/dashboard; the agent protocol is
 unchanged. Rollback may retain the additive schema while writes are paused. A
 schema rollback requires a tested pre-`0021` restore and explicit acceptance of
 post-backup library loss. See [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
+
+Revision `0022` additively introduces typed definitions and encrypted parameter
+value sets. Configure a distinct stable `SCRIPT_PARAMETER_ENCRYPTION_KEY`
+before enabling preparation. Apply migration, server, and dashboard together;
+the legacy command protocol is unchanged and must not receive plaintext secret
+values. A component rollback may retain `0022` only with library/preparation
+writes paused and the encryption key retained. A schema restore discards later
+definitions/value sets and requires explicit data-loss approval.
 
 ## Rollback procedure
 

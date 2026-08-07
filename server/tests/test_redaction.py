@@ -474,6 +474,7 @@ PRODUCER_DETAILS = {
         "content_bytes": 128,
         "tags": ["remediation"],
         "supported_platforms": ["windows"],
+        "parameter_count": 2,
         "name": SENTINEL,
     },
     "script_library.version_created": {
@@ -484,6 +485,20 @@ PRODUCER_DETAILS = {
         "content_bytes": 144,
         "tags": ["remediation"],
         "supported_platforms": ["windows"],
+        "parameter_count": 2,
+    },
+    "script_library.parameter_values_prepared": {
+        "script_id": ID1,
+        "version": 2,
+        "parameter_value_set_id": ID2,
+        "request_id": "request-12345687",
+        # Only key names and a keyed fingerprint are evidence; a submitted
+        # value must never be representable in this schema.
+        "provided_keys": ["ServiceName", "ApiToken"],
+        "defaulted_keys": ["Attempts"],
+        "secret_keys": ["ApiToken"],
+        "values_fingerprint": "f" * 64,
+        "expires_at": "2026-08-06T10:00:00+00:00",
     },
     "script_library.reviewed": {
         "script_id": ID1,

@@ -257,11 +257,17 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     ),
     "script_library.created": _schema(
         "script_id", "version", "language", "content_sha256", "content_bytes",
-        "tags", "supported_platforms", "name", digest_fields=("name",),
+        "tags", "supported_platforms", "parameter_count", "name",
+        digest_fields=("name",),
     ),
     "script_library.version_created": _schema(
         "script_id", "version", "language", "content_sha256", "content_bytes",
-        "tags", "supported_platforms",
+        "tags", "supported_platforms", "parameter_count",
+    ),
+    "script_library.parameter_values_prepared": _schema(
+        "script_id", "version", "parameter_value_set_id", "request_id",
+        "provided_keys", "defaulted_keys", "secret_keys",
+        "values_fingerprint", "expires_at",
     ),
     "script_library.reviewed": _schema(
         "script_id", "version", "state", "reason", digest_fields=("reason",),

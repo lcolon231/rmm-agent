@@ -5,15 +5,17 @@ import { FileCode2, Fingerprint, Library, Plus, ShieldCheck } from "lucide-react
 import Link from "next/link";
 import { useState } from "react";
 import { formatScriptTimestamp, scriptState, type OperatorRole, type ScriptList } from "@/lib/script-library-core";
+import { parameterPayload, ScriptParameterEditor, type ParameterDraft } from "@/components/script-parameter-editor";
 
 export function ScriptLibraryView({ initialList, initialError, role }: { initialList: ScriptList | null; initialError: string; role: OperatorRole }) {
   const [open, setOpen] = useState(false); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const [parameters, setParameters] = useState<ParameterDraft[]>([]);
   async function create(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError(""); const data = new FormData(event.currentTarget);
-    const payload = { name: data.get("name"), language: data.get("language"), content: data.get("content"),
+    try { const payload = { name: data.get("name"), language: data.get("language"), content: data.get("content"),
       description: data.get("description") || undefined, tags: String(data.get("tags") ?? "").split(",").map((v) => v.trim()).filter(Boolean),
-      supported_platforms: data.getAll("platform") };
-    try { const response = await fetch("/api/scripts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      supported_platforms: data.getAll("platform"), parameters: parameterPayload(parameters) };
+      const response = await fetch("/api/scripts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const body = await response.json(); if (!response.ok || !body.script) throw new Error(body.error ?? "Creation was not confirmed.");
       window.location.assign(`/scripts/${encodeURIComponent(body.script.id)}`);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Creation was not confirmed."); setBusy(false); }
@@ -29,7 +31,7 @@ export function ScriptLibraryView({ initialList, initialError, role }: { initial
       <label>Name<input name="name" required maxLength={200} /></label><label>Language<select name="language"><option value="powershell">PowerShell</option><option value="shell">POSIX shell</option></select></label>
       <label className="wide">Description<input name="description" maxLength={2000} /></label><label>Tags <small>comma-separated</small><input name="tags" placeholder="remediation, windows.service" /></label>
       <fieldset><legend>Supported platforms</legend><label><input type="checkbox" name="platform" value="windows" defaultChecked />Windows</label><label><input type="checkbox" name="platform" value="linux" />Linux</label><label><input type="checkbox" name="platform" value="macos" />macOS</label></fieldset>
-      <label className="wide">Script content<textarea name="content" required rows={10} maxLength={57344} spellCheck={false} /></label></div>
+      <label className="wide">Script content<textarea name="content" required rows={10} maxLength={57344} spellCheck={false} /></label><ScriptParameterEditor value={parameters} onChange={setParameters} /></div>
       {error ? <p role="alert">{error}</p> : null}<footer><button type="button" onClick={() => setOpen(false)}>Cancel</button><button disabled={busy} type="submit">{busy ? "Registering…" : "Register immutable draft"}</button></footer></form> : null}
     {initialError ? <section className="script-unavailable" role="alert"><span>Unavailable</span><h2>Library could not be loaded</h2><p>{initialError}</p></section>
       : initialList?.items.length === 0 ? <section className="script-unavailable"><span>Ready</span><h2>No scripts registered</h2><p>An operator can register the first immutable draft.</p></section>

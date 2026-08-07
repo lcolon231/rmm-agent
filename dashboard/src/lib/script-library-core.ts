@@ -4,6 +4,30 @@ export type OperatorRole = "readonly" | "operator" | "admin";
 export type ScriptLanguage = "powershell" | "shell";
 export type ScriptReviewState = "approved" | "rejected";
 export type ScriptPlatform = "windows" | "linux" | "macos";
+export type ScriptParameterKind = "string" | "number" | "boolean" | "choice" | "secret";
+export type ScriptParameterValue = string | number | boolean;
+
+export type ScriptParameter = {
+  key: string;
+  label: string;
+  description: string | null;
+  kind: ScriptParameterKind;
+  required: boolean;
+  has_default: boolean;
+  default_value: ScriptParameterValue | null;
+  min_length: number | null;
+  max_length: number | null;
+  minimum: number | null;
+  maximum: number | null;
+  choices: string[] | null;
+};
+
+export type ScriptParameterValueSet = {
+  id: string; script_id: string; script_version_id: string; version: number;
+  request_id: string; state: "available" | "expired";
+  provided_keys: string[]; defaulted_keys: string[]; secret_keys: string[];
+  values_fingerprint: string; created_by: string; created_at: string; expires_at: string;
+};
 
 export type ScriptReview = {
   state: ScriptReviewState;
@@ -22,6 +46,7 @@ export type ScriptVersion = {
   description: string | null;
   tags: string[];
   supported_platforms: ScriptPlatform[];
+  parameters: ScriptParameter[];
   created_by: string;
   created_at: string;
   review: ScriptReview | null;
@@ -52,6 +77,7 @@ export type ScriptList = {
 const languages = new Set<ScriptLanguage>(["powershell", "shell"]);
 const reviewStates = new Set<ScriptReviewState>(["approved", "rejected"]);
 const platforms = new Set<ScriptPlatform>(["windows", "linux", "macos"]);
+const parameterKinds = new Set<ScriptParameterKind>(["string", "number", "boolean", "choice", "secret"]);
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -73,6 +99,52 @@ function timestamp(value: unknown): string | null {
 function stringArray(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
     ? value : null;
+}
+
+function nullableNumber(value: unknown): number | null | undefined {
+  return value === null ? null : typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function parameterFromUnknown(value: unknown): ScriptParameter | null {
+  const data = record(value); if (!data) return null;
+  const key = string(data.key); const label = string(data.label);
+  const description = data.description === null ? null : string(data.description);
+  const kind = string(data.kind) as ScriptParameterKind | null;
+  const required = typeof data.required === "boolean" ? data.required : null;
+  const hasDefault = typeof data.has_default === "boolean" ? data.has_default : null;
+  const defaultValue = data.default_value === null ? null
+    : typeof data.default_value === "string" || typeof data.default_value === "boolean"
+      || typeof data.default_value === "number" && Number.isFinite(data.default_value)
+      ? data.default_value as ScriptParameterValue : undefined;
+  const minLength = nullableNumber(data.min_length); const maxLength = nullableNumber(data.max_length);
+  const minimum = nullableNumber(data.minimum); const maximum = nullableNumber(data.maximum);
+  const choices = data.choices === null ? null : stringArray(data.choices);
+  if (!key || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key) || !label || !kind
+      || !parameterKinds.has(kind) || required === null || hasDefault === null
+      || description === undefined || defaultValue === undefined || minLength === undefined
+      || maxLength === undefined || minimum === undefined || maximum === undefined
+      || choices === null && data.choices !== null || kind === "secret" && hasDefault) return null;
+  return { key, label, description, kind, required, has_default: hasDefault,
+    default_value: defaultValue, min_length: minLength, max_length: maxLength,
+    minimum, maximum, choices };
+}
+
+export function scriptParameterValueSetFromUnknown(value: unknown): ScriptParameterValueSet | null {
+  const data = record(value); if (!data) return null;
+  const id = string(data.id); const scriptId = string(data.script_id);
+  const scriptVersionId = string(data.script_version_id); const version = positiveInteger(data.version);
+  const requestId = string(data.request_id); const state = string(data.state);
+  const provided = stringArray(data.provided_keys); const defaulted = stringArray(data.defaulted_keys);
+  const secret = stringArray(data.secret_keys); const fingerprint = string(data.values_fingerprint);
+  const createdBy = string(data.created_by); const createdAt = timestamp(data.created_at);
+  const expiresAt = timestamp(data.expires_at);
+  if (!id || !scriptId || !scriptVersionId || version === null || version < 1 || !requestId
+      || state !== "available" && state !== "expired" || !provided || !defaulted || !secret
+      || !fingerprint || fingerprint.length !== 64 || !createdBy || !createdAt || !expiresAt) return null;
+  return { id, script_id: scriptId, script_version_id: scriptVersionId, version,
+    request_id: requestId, state, provided_keys: provided, defaulted_keys: defaulted,
+    secret_keys: secret, values_fingerprint: fingerprint, created_by: createdBy,
+    created_at: createdAt, expires_at: expiresAt };
 }
 
 function reviewFromUnknown(value: unknown): ScriptReview | null | undefined {
@@ -101,17 +173,19 @@ export function scriptVersionFromUnknown(value: unknown): ScriptVersion | null {
   const description = data.description === null ? null : string(data.description);
   const tags = stringArray(data.tags);
   const supported = stringArray(data.supported_platforms) as ScriptPlatform[] | null;
+  const parameters = Array.isArray(data.parameters) ? data.parameters.map(parameterFromUnknown) : null;
   const createdBy = string(data.created_by);
   const createdAt = timestamp(data.created_at);
   const review = reviewFromUnknown(data.review);
   if (!id || version === null || version < 1 || !language || !languages.has(language)
       || !digest || digest.length !== 64 || bytes === null || description === undefined
       || !tags || !supported || !supported.every((item) => platforms.has(item))
+      || !parameters || parameters.some((item) => item === null)
       || !createdBy || !createdAt || review === undefined) return null;
   const content = data.content === undefined ? undefined : string(data.content);
   if (content === null) return null;
   return { id, version, language, content_sha256: digest, content_bytes: bytes,
-    description, tags, supported_platforms: supported, created_by: createdBy,
+    description, tags, supported_platforms: supported, parameters: parameters as ScriptParameter[], created_by: createdBy,
     created_at: createdAt, review, ...(content === undefined ? {} : { content }) };
 }
 

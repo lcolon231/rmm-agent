@@ -19,8 +19,11 @@ listed below and tracked as separate GitHub issues.
 The Milestone 1 versioned script-custody control is implemented: exact source
 digests, append-only versions/final reviews, role-gated terminal deprecation,
 bounded inputs, audited reads and mutations, and a strict separation from
-execution permission. Typed parameters, scheduling/run policy, and immutable
-run evidence remain the next automation controls. See
+execution permission. Typed parameter definitions and encrypted expiring
+per-run value preparation are also implemented with strict JSON types,
+interpreter-safe variable binding, keyed fingerprints, and secret-redacted
+evidence. Scheduling/run policy and immutable run evidence remain the next
+automation controls. See
 [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
 
 ## Milestone 0 — close pilot-blocking trust gaps
@@ -234,8 +237,9 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   administration. Operator creation, role/status changes, script permission,
   session revocation, monitoring-policy revision/deletion, and maintenance-window
   creation/deletion are covered; alert acknowledgement, assignment, comments,
-  manual resolution, and failed-email manual retry are covered; script-library,
-  recurring-schedule, and generic webhook administration remain future work.
+  manual resolution, failed-email manual retry, script-library, typed parameter
+  preparation, and generic webhook administration are covered;
+  recurring-schedule administration remains future work.
 - Validate and bound inventory, telemetry, scripts, parameters, schedules, and
   webhook destinations.
 - Add SSRF controls for webhooks and delivery backoff with signed webhook

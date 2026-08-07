@@ -66,8 +66,9 @@ and SHA-256/Merkle roots—remains readable.
 | `script_library.list_viewed` | `api/script_library.py` bounded register read | `page`, `page_size`, `result_count`, `total` |
 | `script_library.item_viewed` | `api/script_library.py` item/version-ledger read | `script_id`, `version_count` |
 | `script_library.version_viewed` | `api/script_library.py` exact source read | `script_id`, `version`, `content_sha256`, `content_bytes` |
-| `script_library.created` | `api/script_library.py` stable identity and v1 draft | `script_id`, `version`, `language`, `content_sha256`, `content_bytes`, `tags`, `supported_platforms`, `name_sha256`, `name_bytes` |
-| `script_library.version_created` | `api/script_library.py` immutable version append | `script_id`, `version`, `language`, `content_sha256`, `content_bytes`, `tags`, `supported_platforms` |
+| `script_library.created` | `api/script_library.py` stable identity and v1 draft | `script_id`, `version`, `language`, `content_sha256`, `content_bytes`, `tags`, `supported_platforms`, `parameter_count`, `name_sha256`, `name_bytes` |
+| `script_library.version_created` | `api/script_library.py` immutable version append | `script_id`, `version`, `language`, `content_sha256`, `content_bytes`, `tags`, `supported_platforms`, `parameter_count` |
+| `script_library.parameter_values_prepared` | `api/script_library.py` encrypted per-run parameter values | `script_id`, `version`, `parameter_value_set_id`, `request_id`, `provided_keys`, `defaulted_keys`, `secret_keys`, `values_fingerprint`, `expires_at` |
 | `script_library.reviewed` | `api/script_library.py` final review | `script_id`, `version`, `state`, `reason_sha256`, `reason_bytes` |
 | `script_library.deprecated` | `api/script_library.py` terminal idempotent deprecation | `script_id`, `request_id`, `previous_record_version`, `record_version`, `reason_sha256`, `reason_bytes` |
 | `maintenance_window.created` | `api/management.py` maintenance-window creation | `maintenance_window_id`, `scope`, `scope_id`, `starts_at`, `ends_at`, `name_sha256`, `name_bytes` |

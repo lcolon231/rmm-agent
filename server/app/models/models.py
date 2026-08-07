@@ -236,6 +236,16 @@ class ScriptReviewState(str, enum.Enum):
     rejected = "rejected"
 
 
+class ScriptParameterKind(str, enum.Enum):
+    """Supported immutable script parameter definition kinds (issue #48)."""
+
+    string = "string"
+    number = "number"
+    boolean = "boolean"
+    choice = "choice"
+    secret = "secret"
+
+
 class Client(Base):
     __tablename__ = "clients"
 
@@ -1090,6 +1100,94 @@ class ScriptVersion(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
+
+
+class ScriptParameterDefinition(Base):
+    """Ordered, immutable validation metadata owned by one script version."""
+
+    __tablename__ = "script_parameter_definitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "script_version_id", "position", name="ux_script_parameter_position"
+        ),
+        UniqueConstraint(
+            "script_version_id", "key", name="ux_script_parameter_key"
+        ),
+        CheckConstraint("position >= 0", name="ck_script_parameter_position"),
+        CheckConstraint(
+            "min_length IS NULL OR min_length >= 0",
+            name="ck_script_parameter_min_length",
+        ),
+        CheckConstraint(
+            "max_length IS NULL OR max_length >= 1",
+            name="ck_script_parameter_max_length",
+        ),
+        Index("ix_script_parameter_version", "script_version_id", "position"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    script_version_id: Mapped[str] = mapped_column(
+        ForeignKey("script_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500))
+    kind: Mapped[ScriptParameterKind] = mapped_column(
+        Enum(
+            ScriptParameterKind,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    has_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    default_value: Mapped[object | None] = mapped_column(JSON)
+    min_length: Mapped[int | None] = mapped_column(Integer)
+    max_length: Mapped[int | None] = mapped_column(Integer)
+    minimum: Mapped[float | None] = mapped_column(Float)
+    maximum: Mapped[float | None] = mapped_column(Float)
+    choices: Mapped[list | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class ScriptParameterValueSet(Base):
+    """Encrypted, expiring parameter values prepared for one future run."""
+
+    __tablename__ = "script_parameter_value_sets"
+    __table_args__ = (
+        UniqueConstraint(
+            "script_version_id", "request_id", name="ux_script_parameter_set_request"
+        ),
+        CheckConstraint(
+            "length(values_fingerprint) = 64",
+            name="ck_script_parameter_set_fingerprint",
+        ),
+        Index(
+            "ix_script_parameter_set_version_created",
+            "script_version_id",
+            "created_at",
+        ),
+        Index("ix_script_parameter_set_expiry", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    script_version_id: Mapped[str] = mapped_column(
+        ForeignKey("script_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    encrypted_values: Mapped[str] = mapped_column(Text, nullable=False)
+    values_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    provided_keys: Mapped[list] = mapped_column(JSON, nullable=False)
+    defaulted_keys: Mapped[list] = mapped_column(JSON, nullable=False)
+    secret_keys: Mapped[list] = mapped_column(JSON, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ScriptVersionReview(Base):

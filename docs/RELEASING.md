@@ -135,6 +135,14 @@ application while retaining the additive schema, pause library writes; a
 pre-`0021` restore requires an explicit library data-loss decision. See
 [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
 
+For releases containing revision `0022` or later, configure and escrow a stable
+`SCRIPT_PARAMETER_ENCRYPTION_KEY` distinct from webhook keys. The compatibility
+record must name `0022` and retain evidence for all five types, invalid/missing/
+default/choice paths, ciphertext and authenticated-decryption checks,
+idempotent retry/conflict, secret-free API/dashboard/audit evidence, and Go plus
+Python cross-platform quoting tests. Parameter preparation does not activate
+live dispatch; release notes must not claim scheduling or execution before #49.
+
 - **SHA-256 checksums** — `SHA256SUMS.txt` for the binaries and a `.sha256`
   sidecar for the installer. *Done.*
 - **SBOM** — `nodelink-<version>.spdx.json`, an SPDX document covering the Go

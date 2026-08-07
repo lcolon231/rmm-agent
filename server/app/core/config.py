@@ -212,6 +212,18 @@ class Settings(BaseSettings):
     script_library_max_content_bytes: int = Field(
         default=57_344, ge=1_024, le=57_344
     )
+    # Separate 32-byte AES-GCM key for expiring per-run parameter values. It
+    # must remain stable while prepared value sets may still be consumed.
+    script_parameter_encryption_key: str | None = None
+    script_parameter_value_ttl_seconds: int = Field(
+        default=86_400, ge=300, le=604_800
+    )
+    script_parameter_max_values_bytes: int = Field(
+        default=32_768, ge=1_024, le=65_536
+    )
+    script_parameter_max_sets_per_version: int = Field(
+        default=10_000, ge=1, le=100_000
+    )
 
     # How often the retention sweep runs.
     retention_sweep_interval_seconds: int = 86_400  # daily

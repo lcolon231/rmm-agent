@@ -185,6 +185,20 @@ denial occurs before command construction, signing, or queueing. This is not a
 replacement for approval workflows, expiring grants, or a least-privilege agent
 service identity.
 
+Typed script parameters reduce injection and disclosure risk but do not make an
+approved script intrinsically safe. Definitions are immutable with the reviewed
+source. Values are validated without coercion, then the whole resolved document
+is AES-256-GCM encrypted with version/set IDs as authenticated context; the
+idempotency fingerprint is keyed so low-entropy secrets cannot be tested from a
+plain database digest. Secret defaults are forbidden, browser/audit responses
+contain key names only, and missing keys/configuration fail closed. Shell values
+are bound to generated variables with interpreter-specific literal quoting,
+never substituted into source. Exact secret values are redacted from future
+captured output, but scripts can transform/encode a secret, so operators must
+still treat execution output as sensitive. Parameter-aware dispatch remains
+inactive until #49 defines a negotiated transport that avoids plaintext secret
+storage in `commands.payload`.
+
 Each Windows command is created suspended, assigned to its own kill-on-close
 Job Object, then resumed. Timeout, SCM stop, agent termination, and ordinary
 shell exit kill the entire descendant tree, preventing a script from escaping

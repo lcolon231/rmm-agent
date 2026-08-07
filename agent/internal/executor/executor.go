@@ -45,6 +45,25 @@ func Run(kind string, script string) Result {
 // child process rather than orphaning it. The defaultTimeout still bounds the
 // maximum runtime.
 func RunContext(parent context.Context, kind string, script string) Result {
+	return RunContextWithParameters(parent, kind, script, nil)
+}
+
+// RunContextWithParameters binds typed values to generated NL_PARAM_* shell
+// variables before execution and redacts declared secrets from both streams.
+// The legacy signed command schema does not call this yet; the future library
+// dispatch contract must negotiate support before supplying parameters.
+func RunContextWithParameters(parent context.Context, kind string, script string, parameters []ParameterValue) Result {
+	prepared, err := RenderParameterizedScript(kind, script, parameters)
+	if err != nil {
+		return Result{ExitCode: -1, Stderr: "invalid script parameters: " + err.Error()}
+	}
+	result := runPreparedContext(parent, kind, prepared)
+	result.Stdout = RedactParameterSecrets(result.Stdout, parameters)
+	result.Stderr = RedactParameterSecrets(result.Stderr, parameters)
+	return result
+}
+
+func runPreparedContext(parent context.Context, kind string, script string) Result {
 	ctx, cancel := context.WithTimeout(parent, defaultTimeout)
 	defer cancel()
 
