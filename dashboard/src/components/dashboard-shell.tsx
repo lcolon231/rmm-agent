@@ -54,7 +54,7 @@ import {
 const navItems = [
   { label: "Overview", icon: Activity, href: "/" },
   { label: "Endpoints", icon: Monitor, count: null },
-  { label: "Alerts", icon: AlertTriangle, count: 7 },
+  { label: "Alerts", icon: AlertTriangle, count: 7, href: "/monitoring" },
   { label: "Automation", icon: Bot, count: null, href: "/scripts" },
   { label: "Monitoring", icon: HeartPulse, count: null, href: "/monitoring" },
   { label: "Audit", icon: ShieldCheck, count: null, href: "/audit" },
@@ -620,7 +620,7 @@ export function DashboardShell({
                 </button>
               ))}
             </div>
-            <button className="panel-link">View all alerts <ChevronRight size={15} /></button>
+            <Link className="panel-link" href="/monitoring">View all alerts <ChevronRight size={15} /></Link>
           </section>
 
           <section className="panel fleet-panel">
