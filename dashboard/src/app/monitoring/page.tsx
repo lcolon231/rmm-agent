@@ -62,12 +62,12 @@ export default async function MonitoringPoliciesPage() {
       <section className="enrollment-panel monitoring-alert-panel">
         <header>
           <div><span>Technician queue</span><h2>{alerts === null ? "Unavailable" : `${activeAlerts.length} active alerts`}</h2><small>Acknowledgement, assignment, comments, and resolution are preserved in immutable history.</small></div>
-          <BellRing aria-hidden="true" size={19} />
+          <Link className="panel-link" href="/alerts">View full queue <BellRing aria-hidden="true" size={15} /></Link>
         </header>
         {alerts === null ? <div className="enrollment-empty" role="alert"><BellRing size={24} /><h3>Alerts could not be loaded</h3><p>No alert data is shown because the response could not be verified.</p></div>
           : activeAlerts.length === 0 ? <div className="enrollment-empty"><BellRing size={24} /><h3>No active alerts</h3><p>Healthy checks and resolved alerts do not appear in the active queue.</p></div>
           : <div className="enrollment-table-wrap"><table><thead><tr><th>Check</th><th>State</th><th>Latest result</th><th>Occurrences</th><th>Assigned to</th><th>Last observed</th></tr></thead>
-            <tbody>{activeAlerts.map((alert) => <tr key={alert.id}><td><Link href={`/monitoring/alerts/${encodeURIComponent(alert.id)}`}>{alert.check_key.replaceAll("_", " ")}</Link><code>{alert.agent_id}</code></td><td><span className={`alert-state-chip ${alert.state}`}>{alert.state}</span></td><td>{alert.last_result_status}</td><td>{alert.occurrence_count}</td><td>{alert.assigned_to_email ?? "Unassigned"}</td><td>{alert.last_observed_at ? formatMonitoringTimestamp(alert.last_observed_at) : "Unavailable"}</td></tr>)}</tbody>
+            <tbody>{activeAlerts.map((alert) => <tr key={alert.id}><td><Link href={`/alerts/${encodeURIComponent(alert.id)}`}>{alert.check_key.replaceAll("_", " ")}</Link><code>{alert.agent_id}</code></td><td><span className={`alert-state-chip ${alert.state}`}>{alert.state}</span></td><td>{alert.last_result_status}</td><td>{alert.occurrence_count}</td><td>{alert.assigned_to_email ?? "Unassigned"}</td><td>{alert.last_observed_at ? formatMonitoringTimestamp(alert.last_observed_at) : "Unavailable"}</td></tr>)}</tbody>
           </table></div>}
       </section>
 
