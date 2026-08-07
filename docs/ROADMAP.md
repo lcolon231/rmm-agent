@@ -124,7 +124,8 @@ but a later milestone does not redefine an earlier safety gate as complete.
    reboot checks; deduplication; acknowledgement and resolution.
 5. **Notifications:** email and generic webhooks with retry, redaction, and
    delivery history.
-6. **Automation:** versioned script library (**implemented in #47**), typed parameter definitions,
+6. **Automation:** versioned script library (**implemented in #47**), typed parameter definitions
+   and encrypted per-run value preparation (**implemented in #48**),
    recurring task scheduling, and complete task-run history.
 
 ### Exit criteria

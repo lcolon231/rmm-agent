@@ -1,19 +1,90 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 "use client";
 
-import { ArrowLeft, CheckCircle2, Copy, FilePlus2, Fingerprint, ShieldAlert } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Copy, FilePlus2, Fingerprint, KeyRound, ShieldAlert, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { formatScriptTimestamp, scriptState, type OperatorRole, type ScriptItem } from "@/lib/script-library-core";
+import { draftsFromParameters, parameterPayload, ScriptParameterEditor } from "@/components/script-parameter-editor";
+import {
+  formatScriptTimestamp, scriptParameterValueSetFromUnknown, scriptState,
+  type OperatorRole, type ScriptItem, type ScriptParameter, type ScriptParameterValueSet,
+} from "@/lib/script-library-core";
+
+function ParameterInput({ parameter }: { parameter: ScriptParameter }) {
+  const summary = `${parameter.kind} · ${parameter.required ? "required" : parameter.has_default ? `default: ${String(parameter.default_value)}` : "optional"}`;
+  if (parameter.kind === "boolean") return <label>{parameter.label}<small>{summary}</small><select name={parameter.key} required={parameter.required}><option value="">{parameter.has_default ? "Use default" : "Choose…"}</option><option value="true">True</option><option value="false">False</option></select></label>;
+  if (parameter.kind === "choice") return <label>{parameter.label}<small>{summary}</small><select name={parameter.key} required={parameter.required}><option value="">{parameter.has_default ? "Use default" : "Choose…"}</option>{parameter.choices?.map((choice) => <option key={choice} value={choice}>{choice}</option>)}</select></label>;
+  return <label>{parameter.label}<small>{summary}</small><input name={parameter.key} type={parameter.kind === "secret" ? "password" : parameter.kind === "number" ? "number" : "text"} required={parameter.required} minLength={parameter.min_length ?? undefined} maxLength={parameter.max_length ?? undefined} min={parameter.minimum ?? undefined} max={parameter.maximum ?? undefined} autoComplete={parameter.kind === "secret" ? "new-password" : undefined} placeholder={parameter.has_default ? "Use version default" : undefined} /></label>;
+}
 
 export function ScriptDetailView({ initialScript, latestContent, role }: { initialScript: ScriptItem; latestContent: string; role: OperatorRole }) {
-  const router = useRouter(); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [showVersion, setShowVersion] = useState(false);
-  const state = scriptState(initialScript); const latest = initialScript.latest;
-  async function mutate(path: string, payload: unknown) { setBusy(true); setError(""); try { const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const body = await response.json(); if (!response.ok) throw new Error(body.error ?? "The change was not confirmed."); router.refresh(); } catch (caught) { setError(caught instanceof Error ? caught.message : "The change was not confirmed."); } finally { setBusy(false); } }
-  async function addVersion(event: React.FormEvent<HTMLFormElement>) { event.preventDefault(); const data = new FormData(event.currentTarget); await mutate(`/api/scripts/${encodeURIComponent(initialScript.id)}/versions`, { language: data.get("language"), content: data.get("content"), description: data.get("description") || undefined, tags: String(data.get("tags") ?? "").split(",").map((v) => v.trim()).filter(Boolean), supported_platforms: data.getAll("platform") }); }
-  async function review(decision: "approved" | "rejected") { const reason = window.prompt(`${decision === "approved" ? "Approval" : "Rejection"} reason (stored as digest evidence):`); if (!reason) return; await mutate(`/api/scripts/${encodeURIComponent(initialScript.id)}/versions/${latest.version}/review`, { state: decision, reason }); }
-  async function deprecate() { const reason = window.prompt("Deprecation reason (this action is permanent):"); if (!reason) return; await mutate(`/api/scripts/${encodeURIComponent(initialScript.id)}/deprecate`, { expected_record_version: initialScript.record_version, request_id: crypto.randomUUID(), reason }); }
+  const router = useRouter();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [showVersion, setShowVersion] = useState(false);
+  const latest = initialScript.latest;
+  const state = scriptState(initialScript);
+  const [parameters, setParameters] = useState(() => draftsFromParameters(latest.parameters));
+  const [prepared, setPrepared] = useState<ScriptParameterValueSet | null>(null);
+
+  async function mutate(path: string, payload: unknown) {
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "The change was not confirmed.");
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The change was not confirmed.");
+    } finally { setBusy(false); }
+  }
+
+  async function addVersion(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const data = new FormData(event.currentTarget);
+    try {
+      await mutate(`/api/scripts/${encodeURIComponent(initialScript.id)}/versions`, {
+        language: data.get("language"), content: data.get("content"),
+        description: data.get("description") || undefined,
+        tags: String(data.get("tags") ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+        supported_platforms: data.getAll("platform"), parameters: parameterPayload(parameters),
+      });
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Parameter definitions are invalid."); }
+  }
+
+  async function prepareValues(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setError(""); setPrepared(null);
+    const form = event.currentTarget; const data = new FormData(form);
+    const values: Record<string, string | number | boolean> = {};
+    for (const parameter of latest.parameters) {
+      const raw = data.get(parameter.key); if (raw === null || raw === "") continue;
+      values[parameter.key] = parameter.kind === "number" ? Number(raw)
+        : parameter.kind === "boolean" ? raw === "true" : String(raw);
+    }
+    try {
+      const response = await fetch(`/api/scripts/${encodeURIComponent(initialScript.id)}/versions/${latest.version}/parameter-value-sets`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: crypto.randomUUID(), values }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Parameter values were not prepared.");
+      const evidence = scriptParameterValueSetFromUnknown(body.parameter_set);
+      if (!evidence) throw new Error("The service returned invalid parameter evidence.");
+      setPrepared(evidence); form.reset();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Parameter values were not prepared.");
+    } finally { setBusy(false); }
+  }
+
+  async function review(decision: "approved" | "rejected") {
+    const reason = window.prompt(`${decision === "approved" ? "Approval" : "Rejection"} reason (stored as digest evidence):`);
+    if (reason) await mutate(`/api/scripts/${encodeURIComponent(initialScript.id)}/versions/${latest.version}/review`, { state: decision, reason });
+  }
+  async function deprecate() {
+    const reason = window.prompt("Deprecation reason (this action is permanent):");
+    if (reason) await mutate(`/api/scripts/${encodeURIComponent(initialScript.id)}/deprecate`, { expected_record_version: initialScript.record_version, request_id: crypto.randomUUID(), reason });
+  }
+
   return <>
     <Link className="script-back" href="/scripts"><ArrowLeft size={15} />Back to library</Link>
     <header className="script-detail-head"><div><span>Stable script identity</span><h1>{initialScript.name}</h1><p>{latest.description ?? "No description provided."}</p></div><span className={`script-state ${state}`}>{state}</span></header>
@@ -25,7 +96,16 @@ export function ScriptDetailView({ initialScript, latestContent, role }: { initi
         {role === "admin" && !latest.review && !initialScript.deprecated_at ? <><button className="approve" disabled={busy} onClick={() => review("approved")}><CheckCircle2 size={16} />Approve v{latest.version}</button><button className="reject" disabled={busy} onClick={() => review("rejected")}><ShieldAlert size={16} />Reject v{latest.version}</button></> : null}
         {role === "admin" && !initialScript.deprecated_at ? <button className="deprecate" disabled={busy} onClick={deprecate}>Deprecate permanently</button> : null}
         {role === "readonly" ? <small>Readonly operators may inspect content and evidence only.</small> : null}</aside></div>
-    {showVersion ? <form className="script-create-panel" onSubmit={addVersion}><header><span>Append-only revision</span><h2>Create version {initialScript.latest_version + 1}</h2></header><div className="script-form-grid"><label>Language<select name="language" defaultValue={latest.language}><option value="powershell">PowerShell</option><option value="shell">POSIX shell</option></select></label><label>Tags<input name="tags" defaultValue={latest.tags.join(", ")} /></label><label className="wide">Description<input name="description" maxLength={2000} defaultValue={latest.description ?? ""} /></label><fieldset><legend>Supported platforms</legend>{["windows", "linux", "macos"].map((platform) => <label key={platform}><input type="checkbox" name="platform" value={platform} defaultChecked={latest.supported_platforms.includes(platform as never)} />{platform}</label>)}</fieldset><label className="wide">New content<textarea name="content" required rows={10} maxLength={57344} defaultValue={latestContent} spellCheck={false} /></label></div><footer><button type="button" onClick={() => setShowVersion(false)}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving…" : "Append immutable version"}</button></footer></form> : null}
-    <section className="script-version-ledger"><header><div><Fingerprint size={18} /><span>Version ledger</span></div><small>Newest first · content never overwritten</small></header><div>{initialScript.versions?.map((version) => <article key={version.id}><span>v{version.version}</span><div><strong>{version.description ?? "No description"}</strong><small>{version.language} · {version.content_bytes.toLocaleString()} bytes · {formatScriptTimestamp(version.created_at)}</small></div><code>{version.content_sha256}</code><span className={`script-state ${version.review?.state ?? "draft"}`}>{version.review?.state ?? "draft"}</span></article>)}</div></section>
+
+    <section className="script-binding-panel"><header><div><KeyRound size={18} /><span><small>Version-bound inputs</small><strong>{latest.parameters.length} typed parameter{latest.parameters.length === 1 ? "" : "s"}</strong></span></div><code>NL_PARAM_Key</code></header>
+      {latest.parameters.length === 0 ? <p>This version has no runtime parameters.</p> : <div className="script-binding-list">{latest.parameters.map((parameter) => <article key={parameter.key}><code>{parameter.key}</code><div><strong>{parameter.label}</strong><small>{parameter.description ?? "No description"}</small></div><span>{parameter.kind}</span><small>{parameter.required ? "required" : parameter.has_default ? "defaulted" : "optional"}</small>{parameter.kind === "secret" ? <b>redacted</b> : parameter.has_default ? <code>{String(parameter.default_value)}</code> : <span>—</span>}</article>)}</div>}
+    </section>
+
+    {role !== "readonly" && state === "approved" && latest.parameters.length > 0 ? <form className="script-value-panel" onSubmit={prepareValues}><header><span>Encrypted run preparation</span><h2>Prepare parameter values</h2><p>Values expire after 24 hours. Secrets are encrypted and never shown again.</p></header><div className="script-value-grid">{latest.parameters.map((parameter) => <ParameterInput key={parameter.key} parameter={parameter} />)}</div>
+      {prepared ? <output><ShieldCheck size={17} /><span><strong>Encrypted values prepared</strong><small>Set {prepared.id.slice(0, 8)} · expires {formatScriptTimestamp(prepared.expires_at)} · fingerprint {prepared.values_fingerprint.slice(0, 12)}…</small></span></output> : null}
+      <footer><button disabled={busy} type="submit">{busy ? "Encrypting…" : "Encrypt values for a run"}</button></footer></form> : null}
+
+    {showVersion ? <form className="script-create-panel" onSubmit={addVersion}><header><span>Append-only revision</span><h2>Create version {initialScript.latest_version + 1}</h2></header><div className="script-form-grid"><label>Language<select name="language" defaultValue={latest.language}><option value="powershell">PowerShell</option><option value="shell">POSIX shell</option></select></label><label>Tags<input name="tags" defaultValue={latest.tags.join(", ")} /></label><label className="wide">Description<input name="description" maxLength={2000} defaultValue={latest.description ?? ""} /></label><fieldset><legend>Supported platforms</legend>{["windows", "linux", "macos"].map((platform) => <label key={platform}><input type="checkbox" name="platform" value={platform} defaultChecked={latest.supported_platforms.includes(platform as never)} />{platform}</label>)}</fieldset><label className="wide">New content<textarea name="content" required rows={10} maxLength={57344} defaultValue={latestContent} spellCheck={false} /></label><ScriptParameterEditor value={parameters} onChange={setParameters} /></div><footer><button type="button" onClick={() => setShowVersion(false)}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving…" : "Append immutable version"}</button></footer></form> : null}
+    <section className="script-version-ledger"><header><div><Fingerprint size={18} /><span>Version ledger</span></div><small>Newest first · content never overwritten</small></header><div>{initialScript.versions?.map((version) => <article key={version.id}><span>v{version.version}</span><div><strong>{version.description ?? "No description"}</strong><small>{version.language} · {version.parameters.length} parameters · {version.content_bytes.toLocaleString()} bytes · {formatScriptTimestamp(version.created_at)}</small></div><code>{version.content_sha256}</code><span className={`script-state ${version.review?.state ?? "draft"}`}>{version.review?.state ?? "draft"}</span></article>)}</div></section>
   </>;
 }

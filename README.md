@@ -129,6 +129,10 @@ The code in this repository currently provides:
   evidence, bounded language/platform/tag metadata, append-only final reviews,
   terminal idempotent deprecation, role-gated API/dashboard workflows, and no
   implicit execution permission (`docs/SCRIPT-LIBRARY.md`).
+- Immutable typed script parameters (`string`, `number`, `boolean`, `choice`,
+  `secret`) with strict defaults/bounds, encrypted expiring per-run value sets,
+  keyed idempotency, safe PowerShell/POSIX variable binding, and secret-redacted
+  API/dashboard/audit evidence. Live scheduling/dispatch remains issue #49.
 - Fail-closed production startup validation (`ENVIRONMENT=production` rejects
   debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
   URLs) with explicit opt-in proxy trust for client IPs.
@@ -275,12 +279,14 @@ After `v0.1.2`, `main` has:
   audited operations, and a live destination and attempt ledger;
 - added the immutable script library (#47): canonical content digests,
   append-only versions and final reviews, terminal deprecation, bounded
-  role-gated API/dashboard workflows, and recovery documentation; and
+  role-gated API/dashboard workflows, and recovery documentation;
+- added typed script parameters (#48): version-bound definitions, encrypted
+  expiring value preparation, strict validation/default/choice behavior,
+  cross-platform quoting, and secret-redacted evidence; and
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
-The current Milestone 1 work remains focused on typed script parameters,
-recurring tasks, and
+The current Milestone 1 work remains focused on recurring tasks and
 tenant-aware authorization design.
 
 ## Planned

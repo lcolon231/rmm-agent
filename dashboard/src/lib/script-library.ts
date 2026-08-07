@@ -6,10 +6,13 @@ import {
   scriptItemFromUnknown,
   scriptListFromUnknown,
   scriptVersionFromUnknown,
+  scriptParameterValueSetFromUnknown,
   type ScriptItem,
   type ScriptLanguage,
   type ScriptList,
   type ScriptPlatform,
+  type ScriptParameterKind,
+  type ScriptParameterValueSet,
   type ScriptReviewState,
   type ScriptVersion,
 } from "@/lib/script-library-core";
@@ -17,6 +20,12 @@ import {
 export type ScriptVersionInput = {
   language: ScriptLanguage; content: string; description?: string;
   tags: string[]; supported_platforms: ScriptPlatform[];
+  parameters: Array<{
+    key: string; label: string; description?: string; kind: ScriptParameterKind;
+    required: boolean; default_value?: string | number | boolean;
+    min_length?: number; max_length?: number; minimum?: number; maximum?: number;
+    choices?: string[];
+  }>;
 };
 
 function requireValue<T>(value: T | null, message: string): T {
@@ -57,4 +66,16 @@ export function deprecateScript(token: string, id: string, expectedRecordVersion
   return mutate(token, `/api/v1/script-library/${encodeURIComponent(id)}/deprecate`, {
     expected_record_version: expectedRecordVersion, request_id: requestId, reason,
   });
+}
+
+export async function prepareScriptParameterValues(
+  token: string, id: string, version: number, requestId: string,
+  values: Record<string, string | number | boolean>,
+): Promise<ScriptParameterValueSet> {
+  const value = await nodelinkApiRequest<unknown>(
+    `/api/v1/script-library/${encodeURIComponent(id)}/versions/${version}/parameter-value-sets`,
+    { sessionToken: token, method: "POST", body: JSON.stringify({ request_id: requestId, values }),
+      headers: { "Content-Type": "application/json" } },
+  );
+  return requireValue(scriptParameterValueSetFromUnknown(value), "Invalid parameter evidence response.");
 }

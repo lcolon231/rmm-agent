@@ -119,6 +119,18 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
                 "PRAGMA table_info(script_version_reviews)"
             )
         }
+        script_parameter_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(script_parameter_definitions)"
+            )
+        }
+        script_parameter_set_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(script_parameter_value_sets)"
+            )
+        }
         indexes = {
             row[0]
             for row in connection.execute(
@@ -146,6 +158,8 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "script_library_items",
         "script_versions",
         "script_version_reviews",
+        "script_parameter_definitions",
+        "script_parameter_value_sets",
     } <= tables
     assert "agent_completed_at" in command_columns
     assert {
@@ -204,6 +218,15 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "script_version_id", "state", "reviewed_by", "reason_sha256",
         "reason_bytes",
     } <= script_review_columns
+    assert {
+        "script_version_id", "position", "key", "label", "kind", "required",
+        "has_default", "default_value", "choices",
+    } <= script_parameter_columns
+    assert {
+        "script_version_id", "request_id", "encrypted_values",
+        "values_fingerprint", "provided_keys", "defaulted_keys", "secret_keys",
+        "expires_at",
+    } <= script_parameter_set_columns
     assert {
         "ux_clients_name_normalized",
         "ux_sites_client_name_normalized",

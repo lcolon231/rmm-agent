@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { isSameOrigin, requestOrigin } from "./dashboard-auth-core.ts";
-import { scriptItemFromUnknown, type ScriptReviewState } from "./script-library-core.ts";
+import { scriptItemFromUnknown, scriptParameterValueSetFromUnknown, type ScriptReviewState } from "./script-library-core.ts";
 
 type Role = "readonly" | "operator" | "admin";
 type Session = { kind: "anonymous" } | { kind: "unavailable" }
@@ -44,7 +44,7 @@ function validText(value: unknown, min: number, max: number): value is string {
   return typeof value === "string" && value.trim().length >= min && value.trim().length <= max;
 }
 function validVersionInput(body: Record<string, unknown>, includeName: boolean): boolean {
-  const allowed = new Set(["language", "content", "description", "tags", "supported_platforms", ...(includeName ? ["name"] : [])]);
+  const allowed = new Set(["language", "content", "description", "tags", "supported_platforms", "parameters", ...(includeName ? ["name"] : [])]);
   return !Object.keys(body).some((key) => !allowed.has(key))
     && (!includeName || validText(body.name, 1, 200))
     && (body.language === "powershell" || body.language === "shell")
@@ -54,7 +54,36 @@ function validVersionInput(body: Record<string, unknown>, includeName: boolean):
     && body.tags.every((tag) => typeof tag === "string" && /^[a-z0-9][a-z0-9._-]{0,49}$/i.test(tag.trim()))
     && Array.isArray(body.supported_platforms) && body.supported_platforms.length >= 1
     && body.supported_platforms.length <= 3
-    && body.supported_platforms.every((platform) => ["windows", "linux", "macos"].includes(String(platform)));
+    && body.supported_platforms.every((platform) => ["windows", "linux", "macos"].includes(String(platform)))
+    && validParameters(body.parameters);
+}
+
+function validParameters(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > 32) return false;
+  const keys = new Set<string>();
+  for (const candidate of value) {
+    const parameter = object(candidate); if (!parameter) return false;
+    const allowed = new Set(["key", "label", "description", "kind", "required", "default_value",
+      "min_length", "max_length", "minimum", "maximum", "choices"]);
+    if (Object.keys(parameter).some((key) => !allowed.has(key))
+        || typeof parameter.key !== "string" || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(parameter.key)
+        || keys.has(parameter.key.toLowerCase()) || !validText(parameter.label, 1, 100)
+        || parameter.description !== undefined && !validText(parameter.description, 0, 500)
+        || !["string", "number", "boolean", "choice", "secret"].includes(String(parameter.kind))
+        || typeof parameter.required !== "boolean") return false;
+    keys.add(parameter.key.toLowerCase());
+    if (parameter.kind === "secret" && "default_value" in parameter) return false;
+    if (parameter.kind === "choice" && (!Array.isArray(parameter.choices) || parameter.choices.length < 1
+        || parameter.choices.length > 50 || parameter.choices.some((item) => !validText(item, 1, 200)))) return false;
+    if (["string", "secret"].includes(String(parameter.kind))
+        && "default_value" in parameter && typeof parameter.default_value !== "string") return false;
+    if (parameter.kind === "number" && "default_value" in parameter
+        && (typeof parameter.default_value !== "number" || !Number.isFinite(parameter.default_value))) return false;
+    if (parameter.kind === "boolean" && "default_value" in parameter
+        && typeof parameter.default_value !== "boolean") return false;
+  }
+  return true;
 }
 
 function mutationResult(value: unknown, status = 200) {
@@ -105,4 +134,27 @@ export async function handleScriptDeprecate(request: Request, scriptId: string, 
   try { return mutationResult(await dependencies.deprecate(auth.token, scriptId,
     body.expected_record_version as number, body.request_id, body.reason.trim())); }
   catch (error) { return mappedError(error); }
+}
+
+
+export async function handleScriptParameterValues(request: Request, scriptId: string, version: number, dependencies: {
+  getSession: GetSession;
+  prepare: (token: string, id: string, version: number, requestId: string,
+    values: Record<string, string | number | boolean>) => Promise<unknown>;
+}) {
+  const auth = await authorize(request, dependencies.getSession, "operator"); if (isResponse(auth)) return auth;
+  const body = object(await request.json().catch(() => null)); const values = object(body?.values);
+  if (!body || Object.keys(body).some((key) => !["request_id", "values"].includes(key))
+      || !validText(body.request_id, 8, 64) || !/^[A-Za-z0-9._:-]+$/.test(body.request_id)
+      || !values || Object.keys(values).length > 32
+      || Object.values(values).some((value) => !(typeof value === "string" || typeof value === "boolean"
+        || typeof value === "number" && Number.isFinite(value)))
+      || !Number.isInteger(version) || version < 1) return json({ error: "Provide valid typed values and a request id." }, 400);
+  try {
+    const result = scriptParameterValueSetFromUnknown(await dependencies.prepare(
+      auth.token, scriptId, version, body.request_id.trim(), values as Record<string, string | number | boolean>,
+    ));
+    return result ? json({ parameter_set: result }, 201)
+      : json({ error: "The service returned invalid parameter evidence." }, 502);
+  } catch (error) { return mappedError(error); }
 }

@@ -156,6 +156,56 @@ enrollment. Names are trimmed and normalized for uniqueness: clients are unique
 deployment-wide, while sites are unique within their client. Creation is
 audited without retaining plaintext names in audit detail.
 
+### Script library and typed parameters
+
+The library is a custody register for reusable PowerShell and POSIX-shell
+source. It stores and reviews scripts; it does not schedule or execute them, and
+it does not change an operator's separate script-execution scope. Versions are
+append-only: content, metadata, and parameter definitions are fixed when the
+version is created, and each version takes exactly one final `approved` or
+`rejected` review. Deprecation is terminal and admin-only.
+
+Each version carries up to 32 ordered, immutable parameter definitions of kind
+`string`, `number`, `boolean`, `choice`, or `secret`. Changing a definition
+requires a new version and a new review. Defaults are validated against their
+own bounds at definition time, a defaulted parameter cannot also be required,
+and `secret` parameters may never declare a default.
+
+`POST /api/v1/script-library/{id}/versions/{version}/parameter-value-sets`
+resolves per-run values for an **approved, non-deprecated exact version**.
+Explicit values win, then defaults apply, then missing required keys fail.
+Values are type-checked without coercion and bounded to 32 keys and 32,768
+canonical UTF-8 bytes. The resolved document is stored as a single AES-256-GCM
+ciphertext bound by authenticated data to its script-version and value-set IDs;
+the response and audit record expose only safe metadata — provided/defaulted/
+secret key **names**, a keyed HMAC-SHA256 fingerprint, creator, request ID, and
+expiry. No endpoint decrypts or returns values, and plaintext never reaches an
+audit row, a log line, or the browser.
+
+`request_id` is the idempotency boundary per version: the same ID with the same
+values returns the original set, and the same ID with different values returns
+`409`. Sets expire (24 hours by default) and an expired set reports state
+`expired` on retry rather than receiving a fresh lifetime.
+
+Set `SCRIPT_PARAMETER_ENCRYPTION_KEY` to a **urlsafe-base64 32-byte** key,
+generated separately from `WEBHOOK_SECRET_ENCRYPTION_KEY` and kept stable while
+any prepared set can still be consumed:
+
+```bash
+python -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+```
+
+Preparation fails closed with `503` and code `parameter_encryption_unavailable`
+when that key is absent or malformed; nothing is persisted and no audit event
+claims success. `SCRIPT_PARAMETER_VALUE_TTL_SECONDS`,
+`SCRIPT_PARAMETER_MAX_VALUES_BYTES`, and
+`SCRIPT_PARAMETER_MAX_SETS_PER_VERSION` bound lifetime and volume.
+
+Prepared values are not yet dispatched to any agent. The signed `command-v3`
+envelope is unchanged, and issue #49 must negotiate a parameter-aware dispatch
+contract before values are consumed. See
+[`SCRIPT-LIBRARY.md`](../docs/SCRIPT-LIBRARY.md).
+
 ### Audit records
 
 Meaningful actions append redacted, schema-validated, monotonically sequenced,
@@ -197,6 +247,12 @@ Operator/authentication:
 | GET | `/api/v1/enrollment-dashboard`, `/api/v1/audit/events` | Readonly |
 | GET | `/api/v1/agents`, `/api/v1/agents/{id}` | Readonly |
 | POST/GET | `/api/v1/agents/{id}/commands` | Operator / Readonly |
+| POST/GET | `/api/v1/script-library` | Operator / Readonly |
+| GET | `/api/v1/script-library/{id}`, `/api/v1/script-library/{id}/versions/{version}` | Readonly |
+| POST | `/api/v1/script-library/{id}/versions` | Operator |
+| POST | `/api/v1/script-library/{id}/versions/{version}/parameter-value-sets` | Operator |
+| POST | `/api/v1/script-library/{id}/versions/{version}/review` | Admin |
+| POST | `/api/v1/script-library/{id}/deprecate` | Admin |
 | GET | `/api/v1/audit/verify` | Readonly |
 | POST/GET | `/api/v1/audit/anchors` | Operator / Readonly |
 | GET | `/api/v1/audit/anchors/{id}/verify` | Readonly |
@@ -217,6 +273,10 @@ transitions, last-active-admin safety, client/site first-run provisioning and
 duplicates, login throttling, operator-token revocation, enrollment, heartbeat,
 command lifecycle, Python command signing, shared command vectors, Alembic
 upgrades/revision checks, audit-chain tamper detection, and local Merkle
-anchors. CI also migrates a fresh PostgreSQL 16 database.
+anchors. Script-library coverage in `tests/test_script_library.py` and
+`tests/test_script_parameters.py` adds immutability, role gating, typed
+validation, cross-platform quoting, AEAD binding, idempotency/conflict,
+expired-state, and fail-closed missing-key behavior. CI also migrates a fresh
+PostgreSQL 16 database.
 Go-side verification and replay tests live under `agent/` and run on Linux and
 Windows; Windows service and installer lifecycle automation remains open.

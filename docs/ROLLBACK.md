@@ -8,6 +8,15 @@ requires the normal explicit data-loss approval. Retain their audit/anchor
 evidence before restore and prefer a forward fix. See
 [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
 
+Typed-parameter note: revision `0022` is also additive. Before redeploying an
+older application, pause all library/value-preparation writes and retain the
+failed-state database plus `SCRIPT_PARAMETER_ENCRYPTION_KEY` until every value
+set is expired or deliberately invalidated. An older application cannot
+validate, decrypt, expire, or preserve this workflow. Restoring a pre-`0022`
+backup discards later definitions and prepared values and requires explicit
+data-loss approval; never rotate/discard the key as a substitute for the
+incident decision record.
+
 This runbook is for a bad NodeLink release. It is deliberately conservative:
 automatic rollout must be paused first, database migrations are forward-only,
 and a schema rollback is a restore with an explicit data-loss decision. The
