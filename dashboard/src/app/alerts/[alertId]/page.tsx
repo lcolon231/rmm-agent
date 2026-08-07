@@ -43,7 +43,7 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ al
 
   return (
     <>
-      <Link className="detail-back" href="/monitoring"><ArrowLeft size={15} /> Monitoring</Link>
+      <Link className="detail-back" href="/alerts"><ArrowLeft size={15} /> Alerts</Link>
       <header className="enrollment-page-head alert-detail-head">
         <div>
           <span>Alert generation {alert.generation}</span>
