@@ -16,15 +16,6 @@ import (
 
 const installTimeout = 20 * time.Minute
 
-// InstallResult captures the outcome of an on-demand update installation request.
-type InstallResult struct {
-	Status         string   `json:"status"`
-	InstalledKBs   []string `json:"installed_kbs"`
-	FailedKBs      []string `json:"failed_kbs"`
-	RebootRequired bool     `json:"reboot_required"`
-	Message        string   `json:"message"`
-}
-
 const psInstallScript = `
 $ErrorActionPreference = 'Stop'
 param([string[]]$TargetKBs)
