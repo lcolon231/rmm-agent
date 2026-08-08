@@ -36,6 +36,11 @@ type Identity struct {
 	HeartbeatSeconds    int               `json:"heartbeat_seconds"`
 	ServerURL           string            `json:"server_url"`
 	CredentialExpiresAt string            `json:"credential_expires_at,omitempty"`
+	// CredentialObtainedAt is when this agent last received the credential
+	// (local clock, RFC3339). It lets the renewal loop pick a midpoint between
+	// receipt and expiry without needing the server to report the lifetime.
+	// Empty for identities predating credential renewal (issue #125).
+	CredentialObtainedAt string `json:"credential_obtained_at,omitempty"`
 }
 
 // SaveInstallConfig writes a token-free install configuration atomically.

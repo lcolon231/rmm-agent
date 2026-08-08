@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/client"
+	"github.com/lcolon231/rmm/agent/internal/config"
 	"github.com/lcolon231/rmm/agent/internal/executor"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
@@ -540,5 +541,140 @@ func TestUnauthorizedIsTyped(t *testing.T) {
 	}
 	if !client.IsUnauthorized(err) {
 		t.Fatalf("401 not detected as unauthorized: %v", err)
+	}
+}
+
+// --------------------------------------------------------------------------- #
+// Credential renewal (issue #125)
+// --------------------------------------------------------------------------- #
+
+func TestCredentialRenewDue(t *testing.T) {
+	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	rfc := func(tm time.Time) string { return tm.Format(time.RFC3339Nano) }
+	cases := []struct {
+		name     string
+		expires  string
+		obtained string
+		want     bool
+	}{
+		{"no expiry is never due", "", rfc(now.Add(-time.Hour)), false},
+		{"before midpoint not due", rfc(now.Add(time.Hour)), rfc(now.Add(-30 * time.Minute)), false},
+		{"past midpoint due", rfc(now.Add(30 * time.Minute)), rfc(now.Add(-90 * time.Minute)), true},
+		{"unparseable expiry not due", "not-a-time", rfc(now.Add(-time.Hour)), false},
+		{"missing obtained but still valid is due", rfc(now.Add(time.Hour)), "", true},
+		{"missing obtained and expired not due", rfc(now.Add(-time.Minute)), "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := &config.Identity{CredentialExpiresAt: tc.expires, CredentialObtainedAt: tc.obtained}
+			if got := credentialRenewDue(id, now); got != tc.want {
+				t.Fatalf("credentialRenewDue = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMaybeRenewCredentialRotatesAndPersists(t *testing.T) {
+	var renewCalls int
+	var gotNonce, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/agents/credentials/renew") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		renewCalls++
+		gotAuth = r.Header.Get("Authorization")
+		var body struct {
+			RotationNonce string `json:"rotation_nonce"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotNonce = body.RotationNonce
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"agent_id":              "agent-1",
+			"agent_token":           "new-token-xyz",
+			"credential_expires_at": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339Nano),
+			"overlap_expires_at":    time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339Nano),
+			"credential_generation": 2,
+		})
+	}))
+	defer srv.Close()
+
+	idPath := filepath.Join(t.TempDir(), "identity.json")
+	id := &config.Identity{
+		AgentID:              "agent-1",
+		AgentToken:           "old-token",
+		CredentialExpiresAt:  time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano),
+		CredentialObtainedAt: time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339Nano),
+		ServerURL:            srv.URL,
+	}
+	a := &Agent{log: log.New(&bytes.Buffer{}, "", 0)}
+	s := &session{api: client.New(srv.URL, "old-token"), identity: id, identityPath: idPath, agentID: "agent-1"}
+
+	if err := a.maybeRenewCredential(context.Background(), s); err != nil {
+		t.Fatalf("maybeRenewCredential: %v", err)
+	}
+	if renewCalls != 1 {
+		t.Fatalf("want exactly 1 renewal call, got %d", renewCalls)
+	}
+	if gotAuth != "Bearer old-token" {
+		t.Fatalf("renewal must present the current credential, got %q", gotAuth)
+	}
+	if len(gotNonce) < 16 {
+		t.Fatalf("rotation nonce too short: %q", gotNonce)
+	}
+	if s.identity.AgentToken != "new-token-xyz" {
+		t.Fatalf("token not rotated in identity: %q", s.identity.AgentToken)
+	}
+	// The client adopted the new token, so a subsequent authed call carries it.
+	if _, err := s.api.RenewCredential(context.Background(), "second-nonce-000001"); err != nil {
+		t.Fatalf("second renew: %v", err)
+	}
+	if gotAuth != "Bearer new-token-xyz" {
+		t.Fatalf("client did not adopt rotated token, sent %q", gotAuth)
+	}
+}
+
+func TestMaybeRenewCredentialNotDueMakesNoCall(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	id := &config.Identity{
+		AgentID:              "agent-1",
+		AgentToken:           "tok",
+		CredentialExpiresAt:  time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339Nano),
+		CredentialObtainedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	a := &Agent{log: log.New(&bytes.Buffer{}, "", 0)}
+	s := &session{api: client.New(srv.URL, "tok"), identity: id, agentID: "agent-1"}
+	if err := a.maybeRenewCredential(context.Background(), s); err != nil {
+		t.Fatalf("maybeRenewCredential: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("credential not yet due, expected no renewal call, got %d", calls)
+	}
+}
+
+func TestMaybeRenewCredentialRevokedIsSurfaced(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	id := &config.Identity{
+		AgentID:              "agent-1",
+		AgentToken:           "revoked-tok",
+		CredentialExpiresAt:  time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano),
+		CredentialObtainedAt: time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339Nano),
+	}
+	a := &Agent{log: log.New(&bytes.Buffer{}, "", 0)}
+	s := &session{api: client.New(srv.URL, "revoked-tok"), identity: id, agentID: "agent-1"}
+	err := a.maybeRenewCredential(context.Background(), s)
+	if !client.IsUnauthorized(err) {
+		t.Fatalf("a revoked identity must surface an unauthorized error, got %v", err)
+	}
+	if s.identity.AgentToken != "revoked-tok" {
+		t.Fatalf("token must not change on a rejected renewal, got %q", s.identity.AgentToken)
 	}
 }
