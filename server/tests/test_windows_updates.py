@@ -103,9 +103,9 @@ async def _enroll(c, op_auth) -> str:
     return r.json()["agent_id"]
 
 
-async def _dispatch(c, auth, agent_id, kind):
+async def _dispatch(c, auth, agent_id, kind, payload=None):
     return await c.post(
-        f"/agents/{agent_id}/commands", json={"kind": kind, "payload": {}}, headers=auth
+        f"/agents/{agent_id}/commands", json={"kind": kind, "payload": payload or {}}, headers=auth
     )
 
 
@@ -148,6 +148,17 @@ async def test_readonly_cannot_dispatch_scan_updates(client):
     assert r.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_operator_dispatches_signed_install_updates(client):
+    op = await _auth(client, "wu-op@nodelink.test", "op-pass")
+    agent_id = await _enroll(client, op)
+    r = await _dispatch(client, op, agent_id, "install_updates", payload={"kb_ids": ["KB5034123"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["kind"] == "install_updates"
+    assert body["signature"]
+
+
 # --------------------------------------------------------------------------- #
 # windows_updates inventory section
 # --------------------------------------------------------------------------- #
@@ -172,6 +183,7 @@ def test_windows_updates_section_validates_well_formed_payload():
                     "classification": "Security Updates",
                     "severity": "Critical",
                     "reboot_required": True,
+                    "priority_grade": "P1 - Critical",
                 }
             ],
             "installed": [{"kb_id": "KB5030211", "installed_on": "2026-07-01T00:00:00Z"}],
@@ -180,6 +192,7 @@ def test_windows_updates_section_validates_well_formed_payload():
     model = section.typed_payload()
     assert isinstance(model, WindowsUpdatesInventory)
     assert len(model.missing) == 1 and model.missing[0].severity == "Critical"
+    assert model.missing[0].priority_grade == "P1 - Critical"
     assert len(model.installed) == 1
 
 

@@ -4,7 +4,8 @@ export type CommandKind =
   | "powershell"
   | "shell"
   | "collect_inventory"
-  | "scan_updates";
+  | "scan_updates"
+  | "install_updates";
 
 export type CommandStatus =
   | "queued"
@@ -84,6 +85,13 @@ export const commandKindDefinitions: CommandKindDefinition[] = [
     label: "Scan for updates",
     description:
       "Run a Windows Update scan; results appear in the endpoint's Windows Updates inventory.",
+    requiresScript: false,
+  },
+  {
+    kind: "install_updates",
+    label: "Install updates",
+    description:
+      "Selectively download and install targeted Windows updates on the endpoint.",
     requiresScript: false,
   },
 ];

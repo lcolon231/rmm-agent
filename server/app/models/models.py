@@ -104,6 +104,8 @@ class CommandKind(str, enum.Enum):
     # triggers an on-demand scan whose normalized result lands in the
     # windows_updates inventory section.
     scan_updates = "scan_updates"
+    # Selective Windows Update installation typed operation.
+    install_updates = "install_updates"
 
 
 class CommandStatus(str, enum.Enum):

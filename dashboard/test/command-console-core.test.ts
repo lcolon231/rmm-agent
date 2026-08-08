@@ -94,11 +94,11 @@ test("inventory dispatches carry an empty payload", () => {
 test("script command choices require explicit endpoint permission", () => {
   assert.deepEqual(
     commandKindDefinitionsForPermission(false).map((item) => item.kind),
-    ["collect_inventory", "scan_updates"],
+    ["collect_inventory", "scan_updates", "install_updates"],
   );
   assert.deepEqual(
     commandKindDefinitionsForPermission(true).map((item) => item.kind),
-    ["powershell", "shell", "collect_inventory", "scan_updates"],
+    ["powershell", "shell", "collect_inventory", "scan_updates", "install_updates"],
   );
 });
 

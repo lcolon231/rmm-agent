@@ -15,7 +15,7 @@ ACTIVE_COMMAND_ENVELOPE_VERSION = COMMAND_ENVELOPE_V3
 SUPPORTED_COMMAND_ENVELOPE_VERSIONS = (COMMAND_ENVELOPE_V3, COMMAND_ENVELOPE_V2)
 COMMAND_SCHEMA_VERSION = 1
 SUPPORTED_COMMAND_KINDS = frozenset(
-    {"powershell", "shell", "collect_inventory", "scan_updates"}
+    {"powershell", "shell", "collect_inventory", "scan_updates", "install_updates"}
 )
 
 MAX_COMMAND_ENVELOPE_BYTES = 64 * 1024

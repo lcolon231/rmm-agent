@@ -32,6 +32,8 @@ const (
 	// KindScanUpdates is a typed operation handled by the runner, not this
 	// script executor: it triggers a bounded Windows Update scan (issue #51).
 	KindScanUpdates = "scan_updates"
+	// KindInstallUpdates triggers selective installation of Windows updates.
+	KindInstallUpdates = "install_updates"
 )
 
 // defaultTimeout bounds how long any single command may run.

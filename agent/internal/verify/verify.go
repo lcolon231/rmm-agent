@@ -72,7 +72,7 @@ func canonicalCommandBytes(envelopeVersion string, schemaVersion int, commandID,
 		return nil, fmt.Errorf("malformed command envelope: command_id, agent_id, and kind are required")
 	}
 	switch kind {
-	case "powershell", "shell", "collect_inventory", "scan_updates":
+	case "powershell", "shell", "collect_inventory", "scan_updates", "install_updates":
 	default:
 		return nil, fmt.Errorf("unsupported command kind %q", kind)
 	}

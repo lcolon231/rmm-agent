@@ -462,6 +462,8 @@ class MissingUpdate(BaseModel):
     is_downloaded: bool | None = None
     support_url: ShortText | None = None
     last_deployment_change: datetime | None = None
+    #: Computed priority grade, e.g. "P1 - Critical", "P2 - High", "P3 - Medium", "P4 - Low".
+    priority_grade: ShortText | None = None
 
 
 class InstalledUpdate(BaseModel):
