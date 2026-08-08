@@ -7,18 +7,30 @@ package patching
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 const installTimeout = 20 * time.Minute
 
+func encodeUTF16LE(s string) string {
+	runes := []rune(s)
+	encoded := utf16.Encode(runes)
+	buf := make([]byte, len(encoded)*2)
+	for i, u := range encoded {
+		buf[i*2] = byte(u)
+		buf[i*2+1] = byte(u >> 8)
+	}
+	return base64.StdEncoding.EncodeToString(buf)
+}
+
 const psInstallScript = `
 $ErrorActionPreference = 'Stop'
-param([string[]]$TargetKBs)
 
 $result = [ordered]@{
   status = 'success'
@@ -125,17 +137,19 @@ func Install(ctx context.Context, targetKBs []string) (InstallResult, error) {
 		}
 	}
 
-	kbArg := ""
+	kbPrefix := "$TargetKBs = @();"
 	if len(formattedKBs) > 0 {
 		quoted := make([]string, len(formattedKBs))
 		for i, k := range formattedKBs {
 			quoted[i] = fmt.Sprintf("'%s'", k)
 		}
-		kbArg = "-TargetKBs " + strings.Join(quoted, ",")
+		kbPrefix = fmt.Sprintf("$TargetKBs = @(%s);", strings.Join(quoted, ","))
 	}
 
-	cmdStr := fmt.Sprintf("%s\n& { %s } %s", "$ErrorActionPreference = 'Stop'", psInstallScript, kbArg)
-	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmdStr)
+	fullScript := fmt.Sprintf("%s\n%s", kbPrefix, psInstallScript)
+	encoded := encodeUTF16LE(fullScript)
+
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

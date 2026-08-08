@@ -20,3 +20,16 @@ func TestInstallUnsupportedPlatform(t *testing.T) {
 		t.Fatalf("expected status 'unsupported', got %s", res.Status)
 	}
 }
+
+func TestInstallWindowsTargetNotFound(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("skipping Windows test on non-windows host")
+	}
+	res, err := Install(context.Background(), []string{"KB9999999"})
+	if err != nil {
+		t.Fatalf("install failed unexpectedly: %v", err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("expected status 'success', got %s: %s", res.Status, res.Message)
+	}
+}
