@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { Filter, KeyRound, Search } from "lucide-react";
+import { Download, Filter, KeyRound, Search } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -22,7 +22,12 @@ export default async function EnrollmentTokensPage({ searchParams }: { searchPar
     <>
       <header className="enrollment-page-head">
         <div><span>Temporary credentials</span><h1>Enrollment tokens</h1><p>Issue, scope, monitor, and revoke installer credentials. Plaintext is never retrievable.</p></div>
-        {canManage ? <Link className="enrollment-primary-link" href="/enrollment/tokens/new"><KeyRound size={17} /> Create token</Link> : null}
+        {canManage ? (
+          <div className="enrollment-head-actions">
+            <Link className="enrollment-secondary-link" href="/enrollment/installer"><Download size={17} /> Download installer</Link>
+            <Link className="enrollment-primary-link" href="/enrollment/tokens/new"><KeyRound size={17} /> Create token</Link>
+          </div>
+        ) : null}
       </header>
       <form className="enrollment-filter" method="get">
         <label><Search size={16} /><span className="sr-only">Search tokens</span><input defaultValue={search} name="search" placeholder="Search name or description" /></label>
