@@ -2194,6 +2194,15 @@ select:focus-visible {
 }
 
 .dispatch-form textarea { width: 100%; margin-top: 6px; font-family: var(--font-data); resize: vertical; }
+.dispatch-form textarea:disabled { opacity: 0.55; cursor: not-allowed; }
+.dispatch-form .dispatch-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  cursor: pointer;
+}
+.dispatch-form .dispatch-checkbox input { width: 15px; height: 15px; accent-color: var(--teal); }
 .dispatch-kind-note { margin: 10px 0 12px; color: var(--muted); font-size: 10px; }
 
 .dispatch-form button[type="submit"],

@@ -51,21 +51,23 @@ func CalculatePriorityGrade(severity, classification string, rebootRequired bool
 }
 
 var installedFields = []string{
-	"kb_id", "title", "description", "installed_on", "installed_by",
-	"client_application_id", "support_url",
+	"kb_id", "update_id", "revision_number", "title", "description",
+	"installed_on", "installed_by", "client_application_id", "support_url",
+	"result_code", "hresult",
 }
 
 // Summary is the bounded, non-sensitive result reported back as the
 // scan_updates command output so an operator sees an immediate outcome. The full
 // normalized data travels in the windows_updates inventory section.
 type Summary struct {
-	Status         string `json:"status"`
-	ScannedAt      string `json:"scanned_at,omitempty"`
-	MissingCount   int    `json:"missing_count"`
-	InstalledCount int    `json:"installed_count"`
-	RebootRequired *bool  `json:"reboot_required,omitempty"`
-	ErrorCode      string `json:"error_code,omitempty"`
-	Truncated      bool   `json:"truncated,omitempty"`
+	Status           string `json:"status"`
+	ScannedAt        string `json:"scanned_at,omitempty"`
+	MissingCount     int    `json:"missing_count"`
+	InstalledCount   int    `json:"installed_count"`
+	RebootRequired   *bool  `json:"reboot_required,omitempty"`
+	ErrorCode        string `json:"error_code,omitempty"`
+	HistoryErrorCode string `json:"history_error_code,omitempty"`
+	Truncated        bool   `json:"truncated,omitempty"`
 }
 
 // allowlist copies only the permitted keys whose values are non-nil, so the
@@ -99,6 +101,7 @@ func BuildSection(
 	scannedAt time.Time,
 	rebootRequired *bool,
 	errorCode string,
+	historyErrorCode string,
 ) (inventory.Section, Summary) {
 	normMissing := make([]map[string]any, 0, len(missing))
 	for _, row := range missing {
@@ -141,12 +144,15 @@ func BuildSection(
 	if errorCode != "" {
 		payload["error_code"] = errorCode
 	}
+	if historyErrorCode != "" {
+		payload["history_error_code"] = historyErrorCode
+	}
 
 	status := inventory.StatusOK
 	switch {
 	case errorCode != "":
 		status = inventory.StatusUnavailable
-	case truncated:
+	case historyErrorCode != "" || truncated:
 		status = inventory.StatusPartial
 	}
 
@@ -157,13 +163,14 @@ func BuildSection(
 		Payload:     payload,
 	}
 	summary := Summary{
-		Status:         status,
-		ScannedAt:      scannedISO,
-		MissingCount:   len(normMissing),
-		InstalledCount: len(normInstalled),
-		RebootRequired: rebootRequired,
-		ErrorCode:      errorCode,
-		Truncated:      truncated,
+		Status:           status,
+		ScannedAt:        scannedISO,
+		MissingCount:     len(normMissing),
+		InstalledCount:   len(normInstalled),
+		RebootRequired:   rebootRequired,
+		ErrorCode:        errorCode,
+		HistoryErrorCode: historyErrorCode,
+		Truncated:        truncated,
 	}
 	return section, summary
 }

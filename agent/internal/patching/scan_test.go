@@ -36,6 +36,7 @@ func TestBuildSectionNormalizesAndAllowlists(t *testing.T) {
 		time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC),
 		&reboot,
 		"",
+		"",
 	)
 	if section.Section != SectionWindowsUpdates || section.Status != inventory.StatusOK {
 		t.Fatalf("unexpected section head: %+v", section)
@@ -92,7 +93,7 @@ func TestBuildSectionDropsTitlelessMissing(t *testing.T) {
 		{"title": "", "kb_id": "KB2"}, // empty title -> dropped
 		{"title": "Real Update", "kb_id": "KB3"},
 	}
-	section, summary := BuildSection(rows, nil, time.Now(), nil, "")
+	section, summary := BuildSection(rows, nil, time.Now(), nil, "", "")
 	missing, _ := section.Payload["missing"].([]map[string]any)
 	if len(missing) != 1 || missing[0]["kb_id"] != "KB3" {
 		t.Fatalf("titleless rows not dropped: %+v", missing)
@@ -107,7 +108,7 @@ func TestBuildSectionTrimsOverCapAndReportsPartial(t *testing.T) {
 	for i := range rows {
 		rows[i] = map[string]any{"title": "Update", "kb_id": "KB"}
 	}
-	section, summary := BuildSection(rows, nil, time.Now(), nil, "")
+	section, summary := BuildSection(rows, nil, time.Now(), nil, "", "")
 	missing, _ := section.Payload["missing"].([]map[string]any)
 	if len(missing) != MaxMissingUpdates {
 		t.Fatalf("missing not trimmed to cap: got %d", len(missing))
@@ -118,12 +119,29 @@ func TestBuildSectionTrimsOverCapAndReportsPartial(t *testing.T) {
 }
 
 func TestBuildSectionErrorCodeIsUnavailable(t *testing.T) {
-	section, summary := BuildSection(nil, []map[string]any{{"kb_id": "KB1"}}, time.Now(), nil, "0x8024402c")
+	section, summary := BuildSection(nil, []map[string]any{{"kb_id": "KB1"}}, time.Now(), nil, "0x8024402c", "")
 	if section.Status != inventory.StatusUnavailable || summary.Status != inventory.StatusUnavailable {
 		t.Fatalf("error_code must mark section unavailable: %s", section.Status)
 	}
 	if section.Payload["error_code"] != "0x8024402c" {
 		t.Fatalf("error_code not carried: %+v", section.Payload["error_code"])
+	}
+}
+
+func TestBuildSectionHistoryErrorIsPartialAndPreservesMissing(t *testing.T) {
+	section, summary := BuildSection(
+		[]map[string]any{{"title": "Driver update", "update_id": "12345678-1234-1234-1234-1234567890ab"}},
+		nil,
+		time.Now(),
+		nil,
+		"",
+		"0x8024000C",
+	)
+	if section.Status != inventory.StatusPartial || summary.Status != inventory.StatusPartial {
+		t.Fatalf("history error must mark a usable scan partial: %s", section.Status)
+	}
+	if summary.MissingCount != 1 || summary.HistoryErrorCode != "0x8024000C" {
+		t.Fatalf("missing scan or history error lost: %+v", summary)
 	}
 }
 

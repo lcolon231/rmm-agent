@@ -47,6 +47,8 @@ test("accepts a script command and normalizes line endings and whitespace", () =
   assert.deepEqual(input, {
     kind: "powershell",
     script: "Get-Service\nGet-Process",
+    update_targets: [],
+    install_all: false,
     ttl_seconds: 300,
   });
   assert.deepEqual(buildDispatchRequestBody(input!), {
@@ -83,11 +85,61 @@ test("rejects invalid dispatch input instead of forwarding it", () => {
 });
 
 test("inventory dispatches carry an empty payload", () => {
-  const input = validateDispatchInput({ kind: "collect_inventory", script: "", ttl_seconds: 900 });
+  const input = validateDispatchInput({
+    kind: "collect_inventory",
+    script: "",
+    update_targets: [],
+    install_all: false,
+    ttl_seconds: 900,
+  });
   assert.deepEqual(buildDispatchRequestBody(input!), {
     kind: "collect_inventory",
     payload: {},
     ttl_seconds: 900,
+  });
+});
+
+test("install updates accepts KBs and Update IDs and builds a typed payload", () => {
+  const input = validateDispatchInput({
+    kind: "install_updates",
+    script: "",
+    update_targets: "5101650, KB5100998\n12345678-1234-ABCD-9876-1234567890AB",
+    install_all: false,
+    ttl_seconds: 3_600,
+  });
+  assert.deepEqual(input?.update_targets, [
+    "KB5101650",
+    "KB5100998",
+    "12345678-1234-abcd-9876-1234567890ab",
+  ]);
+  assert.deepEqual(buildDispatchRequestBody(input!), {
+    kind: "install_updates",
+    payload: {
+      kb_ids: ["KB5101650", "KB5100998"],
+      update_ids: ["12345678-1234-abcd-9876-1234567890ab"],
+    },
+    ttl_seconds: 3_600,
+  });
+});
+
+test("install updates requires explicit identifiers or install_all", () => {
+  assert.equal(validateDispatchInput({
+    kind: "install_updates", script: "", update_targets: [], install_all: false, ttl_seconds: 300,
+  }), null);
+  assert.equal(validateDispatchInput({
+    kind: "install_updates", script: "", update_targets: ["bad-id"], install_all: false, ttl_seconds: 300,
+  }), null);
+  assert.equal(validateDispatchInput({
+    kind: "install_updates", script: "", update_targets: ["KB5101650"], install_all: true, ttl_seconds: 300,
+  }), null);
+
+  const all = validateDispatchInput({
+    kind: "install_updates", script: "", update_targets: [], install_all: true, ttl_seconds: 300,
+  });
+  assert.deepEqual(buildDispatchRequestBody(all!), {
+    kind: "install_updates",
+    payload: { install_all: true },
+    ttl_seconds: 300,
   });
 });
 

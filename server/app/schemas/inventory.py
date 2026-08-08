@@ -472,6 +472,9 @@ class InstalledUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     #: KB identifier (Get-Hotfix HotFixID) or the update's KB, when known.
     kb_id: Identifier | None = None
+    #: Windows Update identity; present even for drivers and firmware without KBs.
+    update_id: Identifier | None = None
+    revision_number: int | None = Field(default=None, ge=0)
     title: ShortText | None = None
     description: ShortText | None = None
     installed_on: datetime | None = None
@@ -479,6 +482,9 @@ class InstalledUpdate(BaseModel):
     #: Windows Update history client-application id, when sourced from history.
     client_application_id: ShortText | None = None
     support_url: ShortText | None = None
+    #: Windows Update Agent operation result (2=success, 3=success with errors).
+    result_code: int | None = Field(default=None, ge=0, le=5)
+    hresult: Identifier | None = None
 
 
 class WindowsUpdatesInventory(BaseModel):
@@ -499,6 +505,8 @@ class WindowsUpdatesInventory(BaseModel):
     source: ShortText | None = None
     #: Non-secret scan error string/HRESULT when the scan itself failed.
     error_code: ShortText | None = None
+    #: Separate history failure so a valid missing-update scan remains usable.
+    history_error_code: ShortText | None = None
     missing: list[MissingUpdate] = Field(
         default_factory=list, max_length=MAX_MISSING_UPDATES
     )

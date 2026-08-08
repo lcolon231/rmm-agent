@@ -92,15 +92,15 @@ The code in this repository currently provides:
   non-Windows host `unsupported`, so an empty membership is never mistaken for
   "no administrators". Membership is never expanded beyond the group itself — a
   nested group is one `group` member, not its transitive users.
-- On-demand Windows Update scan (issue #51) via the typed `scan_updates`
-  command: a normalized `windows_updates` inventory section of missing/applicable
-  and installed updates (KB, product, classification, severity, reboot state,
-  timestamps), bounded and fail-closed, reported through the inventory pipeline so
-  it inherits history and diffs. The scan runs on the command path, not the
-  heartbeat, so a minutes-long search never stalls check-in. Update
-  **installation/deployment is not implemented** — this is scan and inventory
-  only. The live on-hardware Windows Update COM scan is exercised in Windows CI /
-  an operator step; the agent's normalization is covered by fixture tests.
+- On-demand Windows Update scan and installation (issue #51) via typed
+  `scan_updates` and `install_updates` commands. The normalized
+  `windows_updates` inventory contains applicable updates plus successful Windows
+  Update Agent installation history, including Update IDs for drivers, firmware,
+  and definition updates that have no KB. Scans and history failures are reported
+  as failed commands rather than clean empty results. Installation is fail-closed:
+  an operator must select validated KB/Update IDs or explicitly choose all
+  applicable non-hidden updates. These operations run on the command path, not the
+  heartbeat, so a minutes-long Windows Update operation never stalls check-in.
 - Inventory history and deterministic diffs, with per-endpoint dashboard views.
   Snapshots are written only when a section's content changes, so history is a
   change log rather than a sample. Diffs are identity-keyed rather than
@@ -309,9 +309,10 @@ regenerated backup and rollback evidence. Building on `v0.1.2`, it has:
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
-With `v0.1.3` cut from `main`, current work focuses on the Phase-2 follow-ons —
-the live shell streaming transport (#61) and Windows Update installation
-(#51) — and tenant-aware authorization design.
+The tagged `v0.1.3` agent remains scan-only. Current `main` contains the Phase-2
+Windows Update installation work and requires server schema `0029` plus a rebuilt
+and redeployed Windows agent before `install_updates` can be used. Other current
+work includes live shell streaming (#61) and tenant-aware authorization design.
 
 ## Planned
 
