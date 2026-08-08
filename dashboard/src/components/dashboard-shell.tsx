@@ -54,8 +54,9 @@ import {
 
 const navItems = [
   { label: "Overview", icon: Activity, href: "/" },
-  { label: "Endpoints", icon: Monitor, count: null, href: "/" },
+  { label: "Endpoints", icon: Monitor, count: null, href: "/endpoints" },
   { label: "Alerts", icon: AlertTriangle, count: 7, href: "/alerts" },
+
 
   { label: "Automation", icon: Bot, count: null, href: "/scripts" },
   { label: "Tasks", icon: ListChecks, count: null, href: "/tasks" },
