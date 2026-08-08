@@ -90,6 +90,21 @@ class Settings(BaseSettings):
     agent_credential_lifetime_seconds: int = 86_400  # 24h
     agent_credential_overlap_seconds: int = 600  # 10 min
 
+    # --- Personalized agent installer downloads (issue #9) ---
+    # Path to the pre-built, signed stock Windows installer the server bundles
+    # into a personalized download. The server never rebuilds or re-signs it — it
+    # ships the verified artifact as-is and only adds a sidecar token file. Unset
+    # disables the feature (the download endpoint returns 503).
+    installer_artifact_path: str | None = None
+    # Optional expected SHA-256 (hex) of the artifact. When set, a mismatch fails
+    # closed so a tampered stock installer is never distributed.
+    installer_artifact_sha256: str | None = None
+    # Human-facing version label recorded with each download for audit/lineage.
+    installer_artifact_version: str = "unknown"
+    # Lifetime of the short-lived, single-use enrollment token minted into a
+    # personalized download. Kept small so a leaked package expires quickly.
+    installer_token_ttl_seconds: int = 3_600  # 1h
+
     # Ed25519 private key (PEM) used to SIGN commands sent to agents.
     # Agents hold the matching public key and verify every command before executing.
     # Generate a keypair with the helper in scripts/gen_command_keys.py

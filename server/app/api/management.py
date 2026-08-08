@@ -12,10 +12,14 @@ Authorization model:
 from __future__ import annotations
 
 import hashlib
+import hmac
+import io
 import uuid
+import zipfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,6 +88,7 @@ from app.models.models import (
     CheckResultStatus,
     EnrollmentToken,
     EnrollmentTokenStatus,
+    InstallerDownload,
     EmailDeliveryStatus,
     Heartbeat,
     MaintenanceWindow,
@@ -601,6 +606,158 @@ async def create_enrollment_token(
     metrics.increment("enrollment_token_created_total")
     metadata = await _enrollment_token_metadata(db, etoken)
     return EnrollmentTokenOut(**metadata.model_dump(), token=plaintext)
+
+
+# --------------------------------------------------------------------------- #
+# Personalized agent installer downloads (issue #9)
+# --------------------------------------------------------------------------- #
+_INSTALLER_SIDECAR_NAME = "nodelink-enroll.token"
+
+
+def _load_installer_artifact() -> tuple[bytes, str]:
+    """Return the verified stock installer bytes and its SHA-256 (issue #9).
+
+    Fails closed: the feature is disabled unless an artifact path is configured,
+    a missing/unreadable file is unavailable, and a configured expected digest
+    that does not match means a tampered stock installer is never distributed.
+    """
+    path = settings.installer_artifact_path
+    if not path:
+        raise HTTPException(
+            status_code=503, detail={"code": "installer_downloads_disabled"}
+        )
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        raise HTTPException(
+            status_code=503, detail={"code": "installer_artifact_unavailable"}
+        )
+    digest = hashlib.sha256(data).hexdigest()
+    expected = settings.installer_artifact_sha256
+    if expected and not hmac.compare_digest(digest, expected.lower()):
+        raise HTTPException(
+            status_code=503, detail={"code": "installer_artifact_integrity"}
+        )
+    return data, digest
+
+
+def _build_installer_zip(installer: bytes, token: str, version: str) -> bytes:
+    """Bundle the stock installer with a sidecar token file, in memory.
+
+    The stock .exe is shipped byte-for-byte (never re-signed). The token rides
+    only inside the archive as a sidecar the installer reads at run time, so it
+    never appears in a URL, filename, header, or log.
+    """
+    buf = io.BytesIO()
+    exe_name = f"NodeLinkAgentSetup-{version}.exe"
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(exe_name, installer)
+        zf.writestr(_INSTALLER_SIDECAR_NAME, token + "\n")
+    return buf.getvalue()
+
+
+@router.post("/sites/{site_id}/installer-package")
+async def create_installer_package(
+    site_id: str,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a personalized, site-scoped agent installer (issue #9).
+
+    Bundles the verified stock installer with a short-lived, single-use
+    enrollment token so a technician can deploy without anyone typing a URL or
+    token. The token is minted here, recorded (hashed) via the normal enrollment
+    path, and never leaves the response body — it is not in the URL, filename,
+    headers, or logs. Retry re-mints a fresh package; each token is single-use
+    and expires quickly, and the existing enrollment path rejects an expired,
+    revoked, or replayed token at enroll time. Authorization is site-scoped: an
+    operator without access to the site cannot mint a package for it.
+    """
+    site = await db.get(Site, site_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    try:
+        artifact, artifact_sha256 = _load_installer_artifact()
+    except HTTPException as exc:
+        # Record the fail-closed refusal (disabled/unavailable/tampered) so an
+        # inability to ship a trusted artifact is itself audited evidence.
+        await audit.record(
+            db,
+            action="installer_package.rejected",
+            actor=operator.email,
+            actor_user_id=operator.id,
+            organization_id=site.client_id,
+            source_ip=client_ip(request),
+            user_agent=request.headers.get("user-agent", "")[:500] or None,
+            detail={"site_id": site.id, "reason": exc.detail["code"]},
+        )
+        metrics.increment("installer_package_rejected_total")
+        await db.commit()
+        raise
+
+    now = _now()
+    expires_at = now + timedelta(seconds=settings.installer_token_ttl_seconds)
+    plaintext = f"nlenr_{generate_token()}"
+    etoken = EnrollmentToken(
+        site_id=site.id,
+        token_hash=hash_token(plaintext),
+        token_prefix=plaintext[:12],
+        name="Personalized installer",
+        max_uses=1,
+        expires_at=expires_at,
+        created_by_id=operator.id,
+    )
+    db.add(etoken)
+    await db.flush()
+
+    download = InstallerDownload(
+        site_id=site.id,
+        enrollment_token_id=etoken.id,
+        created_by_id=operator.id,
+        created_by_email=operator.email,
+        artifact_version=settings.installer_artifact_version,
+        artifact_sha256=artifact_sha256,
+        token_expires_at=expires_at,
+    )
+    db.add(download)
+    await db.flush()
+
+    await audit.record(
+        db,
+        action="installer_package.created",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        enrollment_token_id=etoken.id,
+        organization_id=site.client_id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "site_id": site.id,
+            "download_id": download.id,
+            "enrollment_token_id": etoken.id,
+            "artifact_version": settings.installer_artifact_version,
+            "artifact_sha256": artifact_sha256,
+            "token_expires_at": expires_at.isoformat(),
+        },
+    )
+    metrics.increment("installer_package_created_total")
+    await db.commit()
+
+    zip_bytes = _build_installer_zip(
+        artifact, plaintext, settings.installer_artifact_version
+    )
+    # The site id is not a secret; the token lives only inside the archive.
+    filename = f"NodeLinkAgentSetup-{settings.installer_artifact_version}-{site.id}.zip"
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/enrollment-tokens", response_model=EnrollmentTokenListOut)

@@ -388,6 +388,38 @@ class EnrollmentToken(Base):
         return self.status == EnrollmentTokenStatus.active
 
 
+class InstallerDownload(Base):
+    """Audit/retention record for one personalized installer download (issue #9).
+
+    A technician downloads a site-scoped package that bundles the stock signed
+    installer with a short-lived, single-use enrollment token. Only metadata is
+    stored here: the token's secret lives (hashed) on the linked EnrollmentToken,
+    never on this row. The record supports the download audit trail, expiry/
+    revocation display, and retention cleanup.
+    """
+    __tablename__ = "installer_downloads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    site_id: Mapped[str] = mapped_column(
+        ForeignKey("sites.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The single-use token minted into this package. SET NULL keeps the download
+    # record if the token row is ever pruned.
+    enrollment_token_id: Mapped[str | None] = mapped_column(
+        ForeignKey("enrollment_tokens.id", ondelete="SET NULL"), index=True
+    )
+    created_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    created_by_email: Mapped[str | None] = mapped_column(String(320))
+    # Which stock artifact was shipped, and its verified digest — evidence the
+    # download carried a known, untampered installer.
+    artifact_version: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    artifact_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Agent(Base):
     __tablename__ = "agents"
 

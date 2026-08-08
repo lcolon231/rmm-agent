@@ -31,6 +31,13 @@
 
 #define ProductionServerURL "https://nodelink-backend-733e.onrender.com"
 
+; Personalized-installer sidecar (issue #9). A dashboard-generated download
+; bundles this file next to Setup.exe carrying a short-lived, single-use
+; enrollment token, so the person running the installer never sees or types a
+; token. Read from {src} (the folder Setup.exe runs from); absent for a plain
+; stock installer, which falls back to the interactive token prompt.
+#define SidecarTokenFile "nodelink-enroll.token"
+
 [Setup]
 ; Fixed GUID so upgrades/uninstalls always target the same installed app.
 AppId={{20580A78-1C58-45AA-B0FD-EE6C9B075F3A}
@@ -95,13 +102,46 @@ begin
   ConfigPage.Add('Enrollment token:', False);
 end;
 
-{ Token prefers /TOKEN= and falls back to the sole wizard input. This keeps
-  unattended deployment token-only while interactive installs remain simple. }
+{ SidecarToken reads the token from a personalized-download sidecar placed next
+  to Setup.exe. Only the first line is used, trimmed; a missing file yields an
+  empty string. The token is never echoed to the UI or the log. }
+function SidecarToken: String;
+var
+  Path: String;
+  Raw: AnsiString;
+begin
+  Result := '';
+  Path := ExpandConstant('{src}\{#SidecarTokenFile}');
+  if FileExists(Path) and LoadStringFromFile(Path, Raw) then
+  begin
+    Result := String(Raw);
+    { Keep only the first line, then trim surrounding whitespace/newlines. }
+    if Pos(#10, Result) > 0 then
+      Result := Copy(Result, 1, Pos(#10, Result) - 1);
+    Result := Trim(Result);
+  end;
+end;
+
+{ Token precedence: explicit /TOKEN= arg, then the personalized sidecar, then
+  the interactive wizard input. This keeps a dashboard-generated download fully
+  zero-touch while a plain stock installer stays simple and interactive. }
 function EnrollToken: String;
 begin
   Result := Trim(ExpandConstant('{param:Token|}'));
   if Result = '' then
+    Result := SidecarToken;
+  if Result = '' then
     Result := Trim(ConfigPage.Values[0]);
+end;
+
+{ Skip the enrollment-token page entirely when a token is already supplied by a
+  /TOKEN= arg or a bundled sidecar, so a personalized install shows no token
+  prompt at all. The plain stock installer (no arg, no sidecar) still shows it. }
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if PageID = ConfigPage.ID then
+    Result := (Trim(ExpandConstant('{param:Token|}')) <> '') or (SidecarToken <> '');
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;

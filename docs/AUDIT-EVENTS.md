@@ -84,6 +84,8 @@ and SHA-256/Merkle roots—remains readable.
 | `endpoint_list.viewed` | `api/management.py` endpoint list | `client_id`, `site_id`, `status`, `search`, `sort`, `direction`, `page`, `page_size`, `result_count` |
 | `enrollment_token.created` | `api/management.py` token creation | `site_id`, `name_sha256`, `name_bytes`, `expires_at`, `max_uses`, `has_hostname_restriction`, `has_agent_name_restriction`, `labels` |
 | `enrollment_token.revoked` | `api/management.py` token revocation | `site_id`, `reason_sha256`, `reason_bytes` |
+| `installer_package.created` | `api/management.py` personalized installer download | `site_id`, `download_id`, `enrollment_token_id`, `artifact_version`, `artifact_sha256`, `token_expires_at` |
+| `installer_package.rejected` | `api/management.py` personalized installer download | `site_id`, `reason` |
 | `operator.script_permission_changed` | `api/auth.py` permission grant/change | `operator_id`, `operator_role`, `previous_scope`, `previous_scope_id`, `new_scope`, `new_scope_id`, `reason_sha256`, `reason_bytes` |
 | `operator.script_permission_revoked` | `api/auth.py` permission revoke | `operator_id`, `operator_role`, `previous_scope`, `previous_scope_id`, `reason_sha256`, `reason_bytes` |
 | `operator.created` | `api/auth.py` operator creation | `operator_id`, `operator_role`, `email_sha256`, `email_bytes` |
