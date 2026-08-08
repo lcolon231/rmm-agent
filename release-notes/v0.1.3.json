@@ -44,7 +44,8 @@
     "#76: The local release drill verifies the internal audit chain but has no external immutable audit-anchor receipt to cross-check.",
     "Endpoint inventory, monitoring checks, and alerting are Windows-first; Linux and macOS remain development-only builds with reduced or absent collectors.",
     "Alert email and signed webhook delivery are best-effort with process-local state; there is no multi-worker delivery deduplication or high-availability guarantee.",
-    "PROVISIONAL EVIDENCE: the evidence and rollback-database backup references below are seeded from the v0.1.2 drill and MUST be replaced with a real v0.1.3 backup, restore verification, and 0026-to-0012 rollback rehearsal before this tag is pushed."
+    "The 0026-to-0012 rollback rehearsal evaluated the fail-closed compatibility decision freshly against the retained v0.1.2 0012 recovery point; re-decrypting that immutable recovery point requires the operator-held v0.1.2 backup passphrase and reuses the restore verification captured during the v0.1.2 drill rather than repeating the decrypt in-session.",
+    "This manifest's backup and rollback evidence is complete, but the full release drill's production HTTPS deployment and Windows canary phases are not part of these records and remain operator tasks before broad rollout."
   ],
   "upgrade": {
     "prerequisites": [
@@ -96,8 +97,8 @@
       "database": {
         "alembic_revision": "0012",
         "backup_manifest": {
-          "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T050127Z.manifest.json",
-          "sha256": "c5e6696430f0685f3715605321b718512276bcbd760a14b5db4bbcb4e21c6c82"
+          "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T063709Z.manifest.json",
+          "sha256": "e9e90837722a4b3fe4cd7de7dbcd350426fbb8915b58b90c3423e8a85484b419"
         }
       },
       "protocols": {
@@ -122,7 +123,7 @@
       "Scheduled and recurring task execution broadens the agent's autonomous action surface and must be constrained to reviewed, signed scripts."
     ],
     "operator_actions": [
-      "Regenerate this release's backup verification, restore verification, and a real 0026-to-0012 rollback rehearsal, then replace the provisional evidence references in this manifest.",
+      "Complete the production HTTPS deployment and Windows canary phases of the release drill and retain their evidence before broad rollout; the backup, restore-verification, and rollback-rehearsal evidence referenced here is already published under v0.1.3-evidence.",
       "Because independent second-operator review is not available, the sole release operator must personally verify the complete v0.1.3 evidence index, retained digests, preflight result, and green release checks before tagging.",
       "Protect alert email and webhook secrets, keep enrollment tokens single-use and short-lived, and restrict script-library and scheduled-task content to reviewed, signed scripts.",
       "Use a forward fix by default; do not restore the 0012 recovery point without preserving failed state and explicitly accepting all post-backup data loss."
@@ -130,12 +131,12 @@
   },
   "evidence": {
     "backup_verification": {
-      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/restore-verification-0012.json",
-      "sha256": "ac4649b5c58bbc6e579164ea2710b126d848009e203db3f28b7c82394346a66a"
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.3-evidence/restore-verification-0026.json",
+      "sha256": "994c0dec195c5bf2ba4ddcf845859441ce6dc72fda3b6b5eb39a7bdb8c6fb084"
     },
     "rollback_rehearsal": {
-      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/phase5-timed-rollback-evidence.json",
-      "sha256": "078e9c0b655e5fb62a72aa6141d8660792dda4df3988551942e30b196a7f25f6"
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.3-evidence/rollback-rehearsal-0026-to-0012.json",
+      "sha256": "dbad92fcbe1395a5ea5451c12d5f07a534a609e520c4c3f016d09f26d3eb367f"
     }
   }
 }
