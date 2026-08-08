@@ -58,6 +58,8 @@ const navItems = [
   { label: "Alerts", icon: AlertTriangle, count: 7, href: "/alerts" },
   { label: "Automation", icon: Bot, count: null, href: "/scripts" },
   { label: "Tasks", icon: ListChecks, count: null, href: "/tasks" },
+  { label: "Schedules", icon: Clock3, count: null, href: "/schedules" },
+
   { label: "Monitoring", icon: HeartPulse, count: null, href: "/monitoring" },
   { label: "Audit", icon: ShieldCheck, count: null, href: "/audit" },
   { label: "Administration", icon: Settings, count: null, href: "/enrollment" },

@@ -2514,7 +2514,13 @@ textarea:focus-visible,
 .token-reveal-copy > span { color: #a273f2; font-size: 8px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .token-reveal h2 { margin: 5px 0; color: white; font-size: 23px; letter-spacing: -.03em; }
 .token-reveal p { margin: 0; color: #8f87ab; font-size: 11px; }
-.token-secret, .token-command, .token-reveal-actions { z-index: 1; grid-column: 1 / -1; }
+.token-secret, .token-command, .token-installer, .token-reveal-actions { z-index: 1; grid-column: 1 / -1; }
+.token-installer { display: grid; gap: 8px; padding: 14px; background: rgb(255 255 255 / 4%); border-left: 3px solid var(--teal); }
+.token-installer > span { display: inline-flex; align-items: center; gap: 6px; color: var(--teal); font-size: 9px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+.token-installer > p { color: #a79fc0; font-size: 10px; line-height: 1.6; }
+.token-installer .enrollment-form-success { color: #cdeeda; background: rgb(46 160 92 / 14%); border-color: rgb(46 160 92 / 35%); }
+.token-installer > button { display: inline-flex; justify-self: start; align-items: center; gap: 7px; padding: 9px 13px; color: var(--ink-deep); font-size: 9px; font-weight: 800; background: var(--teal); border: 0; border-radius: 4px; }
+.token-installer > button:disabled { opacity: .6; }
 .token-reveal > .enrollment-form-error { z-index: 1; grid-column: 1 / -1; margin: 0; }
 .token-secret { display: flex; align-items: center; gap: 12px; margin-top: 7px; padding: 16px; background: #17132a; border: 1px solid #3a3357; border-radius: 5px; }
 .token-secret code { flex: 1; color: #e9def9; font-family: var(--font-data); font-size: 13px; overflow-wrap: anywhere; user-select: all; }
@@ -3100,3 +3106,35 @@ textarea:focus-visible,
   .webhook-endpoint-actions button { flex: 1 1 100px; }
   .webhook-edit-form { grid-template-columns: 1fr; }
 }
+
+/* Scheduled tasks styles */
+.schedule-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.schedule-status-msg { font-size: 11px; color: var(--fg-muted); margin-right: 4px; }
+.schedule-btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--line); background: var(--bg-surface); color: var(--fg-body); transition: all 0.15s ease; }
+.schedule-btn:hover { background: var(--bg-hover); }
+.schedule-btn.toggle.enabled { border-color: #844eee33; background: #844eee10; color: #6e3ad8; }
+.schedule-btn.toggle.disabled { border-color: var(--line); color: var(--fg-muted); }
+.schedule-btn.run-now { border-color: #10b98133; background: #10b98110; color: #059669; }
+.schedule-btn.run-now:hover { background: #10b98120; }
+.schedule-btn.delete { color: #ef4444; border-color: #ef444433; padding: 4px 8px; }
+.schedule-btn.delete:hover { background: #ef444410; }
+.badge-target { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; background: #e0e7ff; color: #3730a3; margin-right: 6px; }
+.badge-kind { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 500; background: var(--bg-hover); color: var(--fg-body); }
+.status-tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.status-tag.dispatched { background: #dcfce7; color: #15803d; }
+.status-tag.skipped, .status-tag.misfire_skipped { background: #fef3c7; color: #b45309; }
+.status-tag.pending { background: #f1f5f9; color: #475569; }
+
+.schedule-modal-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.schedule-modal { width: 100%; max-width: 540px; background: white; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.schedule-modal header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.schedule-modal header h2 { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 600; }
+.schedule-modal .close-btn { background: none; border: none; font-size: 24px; color: var(--fg-muted); cursor: pointer; }
+.schedule-modal form { display: flex; flex-direction: column; gap: 14px; }
+.schedule-modal form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; }
+.schedule-modal form input, .schedule-modal form select, .schedule-modal form textarea { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); font-size: 13px; font-family: inherit; }
+.schedule-modal form input:focus, .schedule-modal form select:focus, .schedule-modal form textarea:focus { border-color: #844eee; outline: none; }
+.schedule-modal .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.schedule-modal footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 10px; border-top: 1px solid var(--line); padding-top: 14px; }
+.schedule-error-banner { padding: 10px 14px; border-radius: 6px; background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; font-size: 12px; }
+

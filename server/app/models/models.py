@@ -111,6 +111,22 @@ class CommandStatus(str, enum.Enum):
     expired = "expired"
 
 
+class ScheduleTargetType(str, enum.Enum):
+    agent = "agent"
+    site = "site"
+
+
+class ScheduleConcurrencyPolicy(str, enum.Enum):
+    skip = "skip"
+    queue = "queue"
+    allow = "allow"
+
+
+class ScheduleMisfirePolicy(str, enum.Enum):
+    run_once = "run_once"
+    skip = "skip"
+
+
 class MonitoringScope(str, enum.Enum):
     """Where a monitoring policy or maintenance window applies (issue #41).
 
@@ -1500,3 +1516,69 @@ class AlertObservation(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
+
+
+class ScheduledTask(Base):
+    """Recurring task schedule targeting an agent or site (issue #49)."""
+
+    __tablename__ = "scheduled_tasks"
+    __table_args__ = (
+        Index("ix_scheduled_tasks_due", "enabled", "next_run_at"),
+        Index("ix_scheduled_tasks_target", "target_type", "target_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    target_type: Mapped[ScheduleTargetType] = mapped_column(
+        Enum(
+            ScheduleTargetType,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    cron_expression: Mapped[str] = mapped_column(String(100), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(100), nullable=False, default="UTC")
+    kind: Mapped[CommandKind] = mapped_column(
+        Enum(
+            CommandKind,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    script_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("script_versions.id", ondelete="SET NULL")
+    )
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    concurrency_policy: Mapped[ScheduleConcurrencyPolicy] = mapped_column(
+        Enum(
+            ScheduleConcurrencyPolicy,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+        default=ScheduleConcurrencyPolicy.skip,
+    )
+    misfire_policy: Mapped[ScheduleMisfirePolicy] = mapped_column(
+        Enum(
+            ScheduleMisfirePolicy,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+        default=ScheduleMisfirePolicy.run_once,
+    )
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_status: Mapped[str | None] = mapped_column(String(50))
+    created_by_operator_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL")
+    )
+    created_by_email: Mapped[str | None] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
