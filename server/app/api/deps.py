@@ -5,12 +5,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import Depends, Header, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import decode_access_token, hash_token
 from app.models.models import Agent, AgentTrustState, Operator, OperatorRole
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Read a stored timestamp as timezone-aware UTC (SQLite returns naive)."""
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 async def get_current_agent(
@@ -20,7 +27,12 @@ async def get_current_agent(
     """Resolve the agent from its bearer token.
 
     We look the agent up by the *hash* of the presented token — the plaintext
-    never touches the database.
+    never touches the database. A credential is accepted on either of two slots
+    (issue #125): the current token until ``credential_expires_at``, or the
+    just-superseded token during its bounded rotation overlap
+    (``previous_token_expires_at``). The overlap slot is what makes renewal
+    loss-safe — a dropped renewal response leaves the agent still authenticated
+    on the old credential so it can simply retry.
     """
     if not authorization:
         raise HTTPException(
@@ -34,27 +46,39 @@ async def get_current_agent(
             detail="Missing or malformed Authorization header",
         )
 
+    presented = hash_token(token)
     result = await db.execute(
-        select(Agent).where(Agent.token_hash == hash_token(token))
+        select(Agent).where(
+            or_(
+                Agent.token_hash == presented,
+                Agent.previous_token_hash == presented,
+            )
+        )
     )
     agent = result.scalar_one_or_none()
-    # A revoked agent's credentials fail authentication outright, with the same
-    # response as an unknown token — no oracle for a stolen credential to learn
-    # it was specifically revoked rather than never valid.
-    credential_expired = False
-    if agent is not None and agent.credential_expires_at is not None:
-        expires_at = agent.credential_expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        credential_expired = expires_at <= datetime.now(timezone.utc)
-    if (
-        agent is None
-        or agent.trust_state == AgentTrustState.revoked
-        or credential_expired
-    ):
+
+    # Decide validity in a single constant-shaped path: an unknown token, a
+    # revoked identity, an expired current credential, and a lapsed overlap
+    # credential all yield the same 401 — no oracle for a stolen credential to
+    # learn *why* it was refused. ``credential_matched`` is a transient marker
+    # (never persisted) the renewal handler reads to keep the overlap loss-safe.
+    now = datetime.now(timezone.utc)
+    matched: str | None = None
+    if agent is not None and agent.trust_state != AgentTrustState.revoked:
+        if agent.token_hash == presented:
+            expires_at = _as_utc(agent.credential_expires_at)
+            if expires_at is None or expires_at > now:
+                matched = "current"
+        elif agent.previous_token_hash == presented:
+            overlap_until = _as_utc(agent.previous_token_expires_at)
+            if overlap_until is not None and overlap_until > now:
+                matched = "overlap"
+
+    if agent is None or matched is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token"
         )
+    agent.credential_matched = matched
     return agent
 
 

@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     enrollment_token_max_expiry_days: int = 30
     enrollment_token_max_uses: int = 100
 
+    # Agent credential lifetime and loss-safe renewal (issue #125). An enrolled
+    # agent holds a bearer credential with a finite lifetime and renews it before
+    # expiry. On renewal the just-superseded credential stays valid for a bounded
+    # overlap window so a lost renewal response cannot strand a healthy endpoint:
+    # the agent keeps working on the old credential and simply retries. Keep the
+    # overlap well below the lifetime — it only needs to cover a renewal retry.
+    agent_credential_lifetime_seconds: int = 86_400  # 24h
+    agent_credential_overlap_seconds: int = 600  # 10 min
+
     # Ed25519 private key (PEM) used to SIGN commands sent to agents.
     # Agents hold the matching public key and verify every command before executing.
     # Generate a keypair with the helper in scripts/gen_command_keys.py

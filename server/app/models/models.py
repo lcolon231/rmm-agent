@@ -400,6 +400,22 @@ class Agent(Base):
     credential_fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
     credential_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     credential_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Loss-safe rotation overlap (issue #125). On renewal the just-superseded
+    # bearer moves here and stays valid until previous_token_expires_at, a
+    # bounded window, so a dropped renewal response never strands the agent —
+    # it keeps authenticating on the old credential and retries.
+    previous_token_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    previous_token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    # Monotonic rotation counter (lineage/audit) and the last rotation nonce, so
+    # a verbatim renewal replay (same nonce) is rejected while a genuine retry
+    # with a fresh nonce is not.
+    credential_generation: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
+    )
+    last_rotation_nonce: Mapped[str | None] = mapped_column(String(64))
+    last_renewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     hostname: Mapped[str] = mapped_column(String(255), default="")

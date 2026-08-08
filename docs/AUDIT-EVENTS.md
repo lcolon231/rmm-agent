@@ -30,7 +30,8 @@ and SHA-256/Merkle roots—remains readable.
 |---|---|---|
 | `agent.enrolled` | `api/agents.py` enrollment | `hostname_sha256`, `hostname_bytes`, `agent_name_sha256`, `agent_name_bytes`, `os_sha256`, `os_bytes`, `architecture`, `site_id`, `environment`, `command_envelope_version`, `supported_command_envelope_versions`, `public_key_supplied` |
 | `agent.enrollment_failed` | `api/agents.py` rejected enrollment | `reason`, `hostname_sha256`, `hostname_bytes`, `agent_name_sha256`, `agent_name_bytes` |
-| `agent.credential_renewed` | `api/agents.py` credential renewal | `credential_fingerprint` |
+| `agent.credential_renewed` | `api/agents.py` credential renewal | `credential_fingerprint`, `credential_generation` |
+| `agent.credential_renewal_rejected` | `api/agents.py` credential renewal | `reason` |
 | `agent.command_envelope_capabilities_changed` | `api/agents.py` heartbeat | `previous`, `current` |
 | `agent.offline` | `core/tasks.py` offline sweep | `last_seen_at` |
 | `agent.quarantined` | `api/management.py` trust transition | `previous_trust_state`, `trust_state`, `reason_sha256`, `reason_bytes` |

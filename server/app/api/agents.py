@@ -6,6 +6,7 @@ management.py.
 """
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -55,6 +56,7 @@ from app.schemas.monitoring import (
     AgentCheckResultBatchIn,
 )
 from app.schemas.schemas import (
+    AgentCredentialRenewRequest,
     AgentCredentialRenewResponse,
     InventoryAck,
     CommandOut,
@@ -208,28 +210,81 @@ async def enroll(
     response_model=AgentCredentialRenewResponse,
 )
 async def renew_agent_credential(
+    body: AgentCredentialRenewRequest,
     agent: Agent = Depends(get_current_agent),
     db: AsyncSession = Depends(get_db),
 ):
-    """Rotate the current per-agent bearer credential atomically."""
+    """Rotate the per-agent bearer credential with a loss-safe overlap (#125).
+
+    Proof of possession is the presented credential itself (``get_current_agent``
+    already fails closed on an unknown, expired, overlapped-out, or revoked
+    identity). Rotation is atomic: the just-superseded token moves into the
+    bounded overlap slot and stays valid until ``previous_token_expires_at``, so
+    a dropped response never strands the agent — it keeps working on the old
+    credential and retries with a fresh nonce. A verbatim replay (same nonce) is
+    rejected. When the agent authenticated on its overlap credential (i.e. this
+    *is* such a retry) the overlap slot is preserved rather than overwritten, so
+    even repeated lost responses cannot orphan the credential it still holds.
+    """
+    now = _now()
+    site = await db.get(Site, agent.site_id)
+    organization_id = site.client_id if site else None
+
+    # Replay: a verbatim retry of an already-processed rotation reuses the nonce.
+    if agent.last_rotation_nonce is not None and secrets.compare_digest(
+        agent.last_rotation_nonce, body.rotation_nonce
+    ):
+        await audit.record(
+            db,
+            action="agent.credential_renewal_rejected",
+            actor=f"agent:{agent.id}",
+            agent_id=agent.id,
+            organization_id=organization_id,
+            detail={"reason": "rotation_nonce_reused"},
+        )
+        metrics.increment("agent_credential_renewal_rejected_total")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "rotation_nonce_reused"},
+        )
+
+    overlap_until = now + timedelta(seconds=settings.agent_credential_overlap_seconds)
+    # Preserve the overlap slot on a retry that came in on the overlap credential
+    # so the token the agent still holds keeps working; otherwise demote the
+    # current token into the overlap slot.
+    if getattr(agent, "credential_matched", "current") != "overlap":
+        agent.previous_token_hash = agent.token_hash
+    agent.previous_token_expires_at = overlap_until
+
     plaintext = generate_token()
     agent.token_hash = hash_token(plaintext)
     agent.credential_fingerprint = credential_fingerprint(plaintext)
-    agent.credential_issued_at = _now()
-    site = await db.get(Site, agent.site_id)
+    agent.credential_issued_at = now
+    agent.credential_expires_at = now + timedelta(
+        seconds=settings.agent_credential_lifetime_seconds
+    )
+    agent.credential_generation += 1
+    agent.last_rotation_nonce = body.rotation_nonce
+    agent.last_renewed_at = now
+
     await audit.record(
         db,
         action="agent.credential_renewed",
         actor=f"agent:{agent.id}",
         agent_id=agent.id,
-        organization_id=site.client_id if site else None,
-        detail={"credential_fingerprint": agent.credential_fingerprint},
+        organization_id=organization_id,
+        detail={
+            "credential_fingerprint": agent.credential_fingerprint,
+            "credential_generation": agent.credential_generation,
+        },
     )
     metrics.increment("agent_credential_renewed_total")
     return AgentCredentialRenewResponse(
         agent_id=agent.id,
         agent_token=plaintext,
         credential_expires_at=agent.credential_expires_at,
+        overlap_expires_at=overlap_until,
+        credential_generation=agent.credential_generation,
     )
 
 

@@ -288,10 +288,26 @@ class EnrollResponse(BaseModel):
     configuration_metadata: dict = Field(default_factory=dict)
 
 
+class AgentCredentialRenewRequest(BaseModel):
+    """Versioned renewal request (issue #125).
+
+    ``rotation_nonce`` is a fresh, agent-chosen value per attempt. The server
+    records the last accepted nonce and rejects a verbatim replay (same nonce),
+    while a genuine retry after a lost response uses a new nonce and rotates
+    normally against the still-valid overlap credential.
+    """
+
+    rotation_nonce: str = Field(min_length=16, max_length=64)
+
+
 class AgentCredentialRenewResponse(BaseModel):
     agent_id: str
     agent_token: str
     credential_expires_at: datetime | None = None
+    # Overlap end for the just-superseded credential, so the agent knows how
+    # long its previous token keeps working while it adopts the new one.
+    overlap_expires_at: datetime | None = None
+    credential_generation: int = 1
 
 
 # --------------------------------------------------------------------------- #

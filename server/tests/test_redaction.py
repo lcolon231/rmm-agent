@@ -258,7 +258,11 @@ PRODUCER_DETAILS = {
         "hostname": SENTINEL,
         "agent_name": SENTINEL,
     },
-    "agent.credential_renewed": {"credential_fingerprint": "a" * 64},
+    "agent.credential_renewed": {
+        "credential_fingerprint": "a" * 64,
+        "credential_generation": 2,
+    },
+    "agent.credential_renewal_rejected": {"reason": "rotation_nonce_reused"},
     "agent.command_envelope_capabilities_changed": {
         "previous": ["command-v2"],
         "current": ["command-v3"],
