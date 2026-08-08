@@ -79,32 +79,84 @@ already lives in `server/tests/test_installer_downloads.py` and
 
 ## 3. Obtain a personalized package
 
-> The one-click **dashboard "Download installer" button is a follow-up**. Until
-> it ships, drive the same authenticated endpoint directly. The token lands only
-> inside the ZIP body — do not paste it anywhere.
+The installer reads the token from a **sidecar file next to it** — the website
+download's only job is to assemble `Setup.exe` + `nodelink-enroll.token` into a
+ZIP. That means you do **not** need the website (or any deployment) to test the
+installer on a VM: you can assemble the same folder by hand.
 
-Run from an admin PowerShell **on a trusted workstation** (not committed, not
-emailed). Replace the origin, credentials, and `site_id`.
+Two methods, either produces the same folder to run in Section 4:
+
+### Method A — Manual assembly (works today, no website/deploy needed)
+
+Use this to validate the installer now, before the download endpoint (#163) and
+dashboard button (#164) are deployed and a server-side artifact is configured.
+
+**1. Build the installer from *this branch*** (its `.iss` has the sidecar +
+skip-prompt logic). On a Windows box with Go and
+[Inno Setup 6](https://jrsoftware.org/isinfo.php), from the repo root:
+
+```powershell
+# Build the agent binary the installer wraps (Git Bash / WSL), then compile:
+cd agent; ./build.sh 0.1.2          # -> agent\bin\rmm-agent-windows-amd64.exe
+cd ..\installer
+$env:NODELINK_VERSION = '0.1.2'
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" NodeLinkAgent.iss
+# -> installer\Output\NodeLinkAgentSetup-0.1.2.exe
+```
+
+> ⚠️ The `installer\Output\*.exe` already committed in the repo was built
+> **before** the sidecar change and only supports the interactive prompt and
+> `/TOKEN=`. Rebuild from this branch to get sidecar (zero-touch) support.
+
+**2. Mint an enrollment token on the live dashboard** (this already works today,
+no PRs required): **Enrollment → Enrollment tokens → Create token**, pick the
+target site, set **single use** and a short expiry, and copy the `nlenr_…`
+value. (Equivalently, `POST /api/v1/enrollment-tokens` — see Method B for the
+auth call.)
+
+**3. Assemble the run folder** on a trusted workstation:
+
+```powershell
+$dir = "$env:USERPROFILE\Downloads\nodelink-install"
+New-Item -ItemType Directory -Force $dir | Out-Null
+Copy-Item "installer\Output\NodeLinkAgentSetup-0.1.2.exe" $dir
+# Write the token as the sidecar. Only the first line is used; no trailing junk.
+Set-Content -Path "$dir\nodelink-enroll.token" -Value "nlenr_PASTE_TOKEN_HERE" -NoNewline -Encoding ascii
+```
+
+Copy the whole `nodelink-install` folder to the VM. It is now identical to an
+extracted website ZIP — proceed to Section 4.
+
+### Method B — Personalized download (once #163/#164 are deployed)
+
+Requires the server running the download endpoint with `installer_artifact_path`
+(and optional `installer_artifact_sha256` / `installer_artifact_version`) set to
+a built, signed installer the server can read.
+
+- **Dashboard:** sign in as an operator → **Enrollment → Enrollment tokens →
+  Download installer** (or the **Download installer** button on the
+  create-token result) → pick the site → the ZIP downloads.
+- **API** (from an admin PowerShell on a trusted workstation; keep the token out
+  of history with `-OutFile`):
 
 ```powershell
 $Server = "https://nodelink-backend-733e.onrender.com"
 $SiteId = "<target-site-id>"
 
-# 1. Authenticate as the operator -> bearer token (kept in memory only).
+# Authenticate as the operator -> bearer token (kept in memory only).
 $login = Invoke-RestMethod -Method Post -Uri "$Server/api/v1/auth/login" `
   -ContentType "application/json" `
   -Body (@{ email = "tech@example.com"; password = "<password>" } | ConvertTo-Json)
 $auth = @{ Authorization = "Bearer $($login.access_token)" }
 
-# 2. Download the personalized ZIP (binary; -OutFile keeps it out of history).
+# Download the personalized ZIP (binary).
 Invoke-WebRequest -Method Post -Uri "$Server/api/v1/sites/$SiteId/installer-package" `
   -Headers $auth -OutFile "$env:USERPROFILE\Downloads\NodeLink-personalized.zip"
 ```
 
-Confirm the response was `200`, `Content-Type: application/zip`, and
-`Cache-Control: no-store`. Copy the ZIP to the VM (shared folder / RDP clipboard
-file copy), then **extract it into its own folder** so `Setup.exe` sits beside
-`nodelink-enroll.token`.
+Confirm `200`, `Content-Type: application/zip`, and `Cache-Control: no-store`.
+Copy the ZIP to the VM and **extract it into its own folder** so `Setup.exe`
+sits beside `nodelink-enroll.token`.
 
 ---
 
@@ -142,8 +194,10 @@ Select-String -Path "$env:ProgramData\NodeLink\logs\rmm-agent.log" -Pattern "nle
 
 - The new endpoint appears **under the intended site** (matching `site_id`).
 - It heartbeats (last-seen updates within one interval).
-- Audit log contains `installer_package.created` (from the download) and
-  `agent.enrolled` (from this machine), and neither stores the token secret.
+- Audit log contains `agent.enrolled` (from this machine) with no token secret.
+  If the package came from the website (Method B) there is also an
+  `installer_package.created` event; with a hand-assembled package (Method A)
+  the token instead shows an `enrollment_token.created` from when you minted it.
 
 ✅ **Pass A** when the install showed no token/URL prompt, the service is
 running, the endpoint is enrolled under the correct site, and no `nlenr_` token
