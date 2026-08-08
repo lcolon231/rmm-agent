@@ -62,12 +62,14 @@ already lives in `server/tests/test_installer_downloads.py` and
 - Outbound HTTPS to the server origin allowed.
 - **A clean snapshot taken now**, before any install. Roll back to it between
   cases.
-- No prior NodeLink install (verify: no `NodeLink RMM Agent` service, no
+- No prior NodeLink install (verify: no `NodeLinkAgent` service, no
   `C:\Program Files\NodeLink\Agent`).
 
 **Reference facts used below:**
 
-- Service name: `NodeLink RMM Agent`
+- Service name: `NodeLinkAgent` (Windows *display* name is "NodeLink RMM Agent").
+  `Get-Service` matches the short name, so use `Get-Service NodeLinkAgent`
+  (or `Get-Service -DisplayName "NodeLink RMM Agent"`).
 - Install dir: `C:\Program Files\NodeLink\Agent` (`rmm-agent.exe`)
 - Runtime files: `config.json`, `identity.json`, `seen_commands.json`,
   `monitoring_state.json` (in the install dir)
@@ -177,7 +179,7 @@ Roll back to the clean snapshot before **each** case.
 **Verify (admin PowerShell on the VM):**
 
 ```powershell
-Get-Service "NodeLink RMM Agent"        # Status = Running, StartType = Automatic
+Get-Service NodeLinkAgent               # Status = Running, StartType = Automatic
 Test-Path "C:\Program Files\NodeLink\Agent\rmm-agent.exe"    # True
 Test-Path "C:\Program Files\NodeLink\Agent\identity.json"    # True (enrolled)
 
@@ -304,7 +306,7 @@ confirm:
 2. **Verify:**
 
 ```powershell
-Get-Service "NodeLink RMM Agent" -ErrorAction SilentlyContinue   # gone
+Get-Service NodeLinkAgent -ErrorAction SilentlyContinue          # gone
 Test-Path "C:\Program Files\NodeLink\Agent"                       # False (or empty)
 ```
 
