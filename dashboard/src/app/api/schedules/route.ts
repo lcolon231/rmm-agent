@@ -25,10 +25,11 @@ export async function POST(request: Request) {
       body: JSON.stringify(body),
     });
     return NextResponse.json(data, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error as { message?: string; status?: number };
     return NextResponse.json(
-      { error: error?.message || "Failed to create scheduled task." },
-      { status: error?.status || 500 },
+      { error: err?.message || "Failed to create scheduled task." },
+      { status: err?.status || 500 },
     );
   }
 }
