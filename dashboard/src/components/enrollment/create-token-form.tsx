@@ -2,11 +2,12 @@
 
 "use client";
 
-import { Check, Clipboard, KeyRound, ShieldCheck, X } from "lucide-react";
+import { Check, Clipboard, Download, KeyRound, PackageCheck, ShieldCheck, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { createTokenInputFromForm } from "@/lib/enrollment-core";
+import { downloadInstallerPackage } from "@/lib/installer-download-client";
 import type { EnrollmentTokenMetadata } from "@/lib/enrollment";
 
 type CreatedToken = EnrollmentTokenMetadata & { token: string };
@@ -23,6 +24,12 @@ export function CreateTokenForm({
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  // The site the just-created token belongs to, so the same page can also
+  // package a ready-to-run installer for it (issue #9).
+  const [installerSiteId, setInstallerSiteId] = useState("");
+  const [installerPending, setInstallerPending] = useState(false);
+  const [installerError, setInstallerError] = useState("");
+  const [installerDone, setInstallerDone] = useState(false);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,10 +52,30 @@ export function CreateTokenForm({
         return;
       }
       setCreated(body);
+      setInstallerSiteId(input.site_id);
+      setInstallerError("");
+      setInstallerDone(false);
     } catch {
       setError("The token could not be created. Check the management service.");
     } finally {
       setPending(false);
+    }
+  }
+
+  async function downloadInstaller() {
+    if (!installerSiteId) return;
+    setInstallerError("");
+    setInstallerDone(false);
+    setInstallerPending(true);
+    try {
+      const message = await downloadInstallerPackage(installerSiteId);
+      if (message) {
+        setInstallerError(message);
+        return;
+      }
+      setInstallerDone(true);
+    } finally {
+      setInstallerPending(false);
     }
   }
 
@@ -63,6 +90,7 @@ export function CreateTokenForm({
   }
 
   if (created) {
+    const installerSiteLabel = sites.find((site) => site.id === installerSiteId)?.label ?? "this site";
     return (
       <section className="token-reveal" aria-labelledby="token-created-title">
         <div className="token-reveal-seal"><ShieldCheck size={28} /></div>
@@ -80,6 +108,13 @@ export function CreateTokenForm({
           <span>History-safe enrollment command</span>
           <code>rmm-agent enroll --server &quot;https://management.example.com&quot; --token-env &quot;AGENT_ENROLLMENT_TOKEN&quot;</code>
           <small>Set the environment variable through your secret manager or a protected prompt. The token is not inserted into the command.</small>
+        </div>
+        <div className="token-installer">
+          <span><PackageCheck size={15} /> Zero-touch installer for {installerSiteLabel}</span>
+          <p>Prefer not to hand over a token at all? Download a ready-to-run installer for this site. It bundles its own short-lived, single-use token, so the technician just extracts the ZIP and runs it — nothing to type. This is separate from the token above.</p>
+          {installerError ? <p className="enrollment-form-error" role="alert">{installerError}</p> : null}
+          {installerDone ? <p className="enrollment-form-success" role="status"><PackageCheck size={15} /> Installer downloading — extract the ZIP and run the installer from the extracted folder.</p> : null}
+          <button onClick={downloadInstaller} disabled={installerPending || !installerSiteId} type="button"><Download size={16} /> {installerPending ? "Preparing…" : "Download installer"}</button>
         </div>
         <div className="token-reveal-actions">
           <button onClick={() => { setCreated(null); setCopied(false); }} type="button"><KeyRound size={16} /> Create another</button>

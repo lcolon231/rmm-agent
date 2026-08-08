@@ -2514,7 +2514,13 @@ textarea:focus-visible,
 .token-reveal-copy > span { color: #a273f2; font-size: 8px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .token-reveal h2 { margin: 5px 0; color: white; font-size: 23px; letter-spacing: -.03em; }
 .token-reveal p { margin: 0; color: #8f87ab; font-size: 11px; }
-.token-secret, .token-command, .token-reveal-actions { z-index: 1; grid-column: 1 / -1; }
+.token-secret, .token-command, .token-installer, .token-reveal-actions { z-index: 1; grid-column: 1 / -1; }
+.token-installer { display: grid; gap: 8px; padding: 14px; background: rgb(255 255 255 / 4%); border-left: 3px solid var(--teal); }
+.token-installer > span { display: inline-flex; align-items: center; gap: 6px; color: var(--teal); font-size: 9px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+.token-installer > p { color: #a79fc0; font-size: 10px; line-height: 1.6; }
+.token-installer .enrollment-form-success { color: #cdeeda; background: rgb(46 160 92 / 14%); border-color: rgb(46 160 92 / 35%); }
+.token-installer > button { display: inline-flex; justify-self: start; align-items: center; gap: 7px; padding: 9px 13px; color: var(--ink-deep); font-size: 9px; font-weight: 800; background: var(--teal); border: 0; border-radius: 4px; }
+.token-installer > button:disabled { opacity: .6; }
 .token-reveal > .enrollment-form-error { z-index: 1; grid-column: 1 / -1; margin: 0; }
 .token-secret { display: flex; align-items: center; gap: 12px; margin-top: 7px; padding: 16px; background: #17132a; border: 1px solid #3a3357; border-radius: 5px; }
 .token-secret code { flex: 1; color: #e9def9; font-family: var(--font-data); font-size: 13px; overflow-wrap: anywhere; user-select: all; }

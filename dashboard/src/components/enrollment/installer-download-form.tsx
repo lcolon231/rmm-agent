@@ -5,7 +5,7 @@
 import { Download, PackageCheck, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 
-import { installerDownloadFilename } from "@/lib/installer-download-core";
+import { downloadInstallerPackage } from "@/lib/installer-download-client";
 
 export function InstallerDownloadForm({
   initialSiteId,
@@ -29,33 +29,12 @@ export function InstallerDownloadForm({
     }
     setPending(true);
     try {
-      const response = await fetch(
-        `/api/sites/${encodeURIComponent(siteId)}/installer-package`,
-        { method: "POST" },
-      );
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? "The installer download is unavailable right now.");
+      const message = await downloadInstallerPackage(siteId);
+      if (message) {
+        setError(message);
         return;
       }
-      // Stream the ZIP to a browser download. The token lives only inside the
-      // blob; no secret is placed in the URL or the browser history.
-      const blob = await response.blob();
-      const filename = installerDownloadFilename(
-        response.headers.get("content-disposition"),
-        siteId,
-      );
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
       setDone(true);
-    } catch {
-      setError("The installer download could not be reached. Check the management service.");
     } finally {
       setPending(false);
     }
