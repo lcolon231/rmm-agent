@@ -53,6 +53,8 @@ func main() {
 		runForeground(args)
 	case "enroll":
 		runEnroll(args)
+	case "validate-upgrade":
+		runValidateUpgrade(args)
 	case "install", "uninstall", "start", "stop":
 		runControl(sub, args)
 	case "help", "-h", "--help":
@@ -62,6 +64,21 @@ func main() {
 		usage(os.Stderr)
 		os.Exit(2)
 	}
+}
+
+// runValidateUpgrade is a read-only installer preflight. It never prints file
+// contents and never decrypts identity data; the latter belongs to the Windows
+// service account when the upgraded service starts.
+func runValidateUpgrade(args []string) {
+	fs := flag.NewFlagSet("validate-upgrade", flag.ExitOnError)
+	configPath := fs.String("config", "config.json", "path to the existing token-free config")
+	_ = fs.Parse(args)
+
+	if err := config.ValidateTokenFreeUpgradeState(*configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "validate-upgrade: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("validate-upgrade: ok")
 }
 
 func runEnroll(args []string) {
@@ -227,6 +244,7 @@ func usage(w *os.File) {
 Usage:
   rmm-agent [run] [-config FILE] [-once]   Run in the foreground (default)
   rmm-agent enroll --server URL [--token-env NAME | --token-file FILE | --token-stdin]
+  rmm-agent validate-upgrade [-config FILE] Read-only installer upgrade preflight
   rmm-agent install   [-config FILE]       Install as a Windows service (auto-start)
   rmm-agent uninstall                      Remove the Windows service (idempotent)
   rmm-agent start                          Start the installed Windows service

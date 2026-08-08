@@ -101,6 +101,66 @@ func TestDecodeRejectsCorruptEnvelope(t *testing.T) {
 	}
 }
 
+func TestValidateIdentityEnvelopeWithoutDecrypting(t *testing.T) {
+	data, err := encodeIdentity(sampleIdentity(), xorProtector{})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if err := validateIdentityEnvelope(data, "test-xor"); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+
+	var env identityEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*identityEnvelope){
+		"wrong format":     func(e *identityEnvelope) { e.Format = "other" },
+		"wrong version":    func(e *identityEnvelope) { e.Version = 99 },
+		"wrong protection": func(e *identityEnvelope) { e.Protection = "other" },
+		"empty data":       func(e *identityEnvelope) { e.Data = "" },
+		"invalid base64":   func(e *identityEnvelope) { e.Data = "not-base64!!" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := env
+			mutate(&candidate)
+			raw, err := json.Marshal(candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := validateIdentityEnvelope(raw, "test-xor"); err == nil {
+				t.Fatalf("%s unexpectedly accepted", name)
+			}
+		})
+	}
+	if err := validateIdentityEnvelope([]byte(`{"not":"json"`), "test-xor"); err == nil {
+		t.Fatal("malformed JSON unexpectedly accepted")
+	}
+}
+
+func TestValidateTokenFreeUpgradeState(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	if err := SaveInstallConfig(configPath, "https://rmm.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sampleIdentity().Save(IdentityPath(configPath)); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateTokenFreeUpgradeState(configPath); err != nil {
+		t.Fatalf("valid upgrade state rejected: %v", err)
+	}
+
+	tokenConfig := []byte(`{"server_url":"https://rmm.example","enrollment_token":""}`)
+	if err := os.WriteFile(configPath, tokenConfig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateTokenFreeUpgradeState(configPath); err == nil ||
+		!strings.Contains(err.Error(), "enrollment_token") {
+		t.Fatalf("token-bearing config was not rejected: %v", err)
+	}
+}
+
 func TestDecodeLegacyPlaintext(t *testing.T) {
 	raw, _ := json.Marshal(sampleIdentity())
 	id, legacy, err := decodeIdentity(raw, xorProtector{})
