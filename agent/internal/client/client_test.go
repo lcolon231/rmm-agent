@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 )
 
@@ -257,6 +258,63 @@ func TestEnrollKeepsTokenInRequestBody(t *testing.T) {
 	}))
 	defer server.Close()
 	if _, err := New(server.URL, "").Enroll(context.Background(), token, telemetry.HostInfo{Hostname: "test"}, "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func bodyHasCapability(body map[string]any, want string) bool {
+	caps, ok := body["supported_capabilities"].([]any)
+	if !ok {
+		return false
+	}
+	for _, c := range caps {
+		if s, ok := c.(string); ok && s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestEnrollAdvertisesShellSessionCapability(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if !bodyHasCapability(body, protocol.ShellSessionCapabilityV1) {
+			t.Fatalf("enroll body must advertise %q; got %v", protocol.ShellSessionCapabilityV1, body["supported_capabilities"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"agent_id":"agent-1",
+			"agent_token":"agent-secret",
+			"heartbeat_interval_seconds":60,
+			"command_public_key":"pem",
+			"command_public_keys":{},
+			"command_signing_key_id":"default",
+			"command_envelope_version":"command-v3"
+		}`))
+	}))
+	defer server.Close()
+	if _, err := New(server.URL, "").Enroll(context.Background(), "tok", telemetry.HostInfo{Hostname: "test"}, "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHeartbeatAdvertisesShellSessionCapability(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if !bodyHasCapability(body, protocol.ShellSessionCapabilityV1) {
+			t.Fatalf("heartbeat body must advertise %q; got %v", protocol.ShellSessionCapabilityV1, body["supported_capabilities"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"pending_commands":[],"command_public_keys":{},"trust_state":"active"}`))
+	}))
+	defer server.Close()
+	if _, err := New(server.URL, "agent-secret").Heartbeat(context.Background(), telemetry.Sample{}, nil); err != nil {
 		t.Fatal(err)
 	}
 }

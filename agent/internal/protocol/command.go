@@ -8,10 +8,24 @@ const (
 	CommandEnvelopeV2 = "command-v2"
 	CommandEnvelopeV3 = "command-v3"
 	CommandSchemaV1   = 1
+
+	// ShellSessionCapabilityV1 names interactive shell session support (issue
+	// #61). The agent advertises it so the server can offer the feature; an
+	// agent that does not advertise it makes the server fail closed as
+	// "unsupported". Phase 1 advertises the capability only — the streaming
+	// loop is added in a later phase.
+	ShellSessionCapabilityV1 = "shell-session-v1"
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
 // mutate process-global negotiation state.
 func SupportedCommandEnvelopeVersions() []string {
 	return []string{CommandEnvelopeV3, CommandEnvelopeV2}
+}
+
+// SupportedCapabilities returns the optional feature capabilities this agent
+// advertises. A fresh slice is returned so callers cannot mutate process-global
+// negotiation state.
+func SupportedCapabilities() []string {
+	return []string{ShellSessionCapabilityV1}
 }

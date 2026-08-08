@@ -219,6 +219,31 @@ rewriting the original outcome.
 - Enrollment tokens are one-time (configurable `max_uses`), can expire, and can
   be revoked. They are shown in plaintext only once, at creation.
 
+### (5) Operator → Agent (interactive shell, issue #61)
+
+The interactive shell (`docs/SHELL-SESSIONS.md`) introduces a new live
+operator→agent channel and therefore a new trust boundary. Because a shell is at
+least as powerful as arbitrary script execution, it inherits boundary (4)'s
+concern: anyone who can open one has effective admin on the endpoint. Phase 1
+lands the fail-closed controls around it, in this order at open time: the operator
+must hold role ≥ `operator` **and** the explicit arbitrary-script scope; the agent
+must be `trust_state == active`; the agent must advertise the `shell-session-v1`
+capability (an agent that does not is refused as unsupported, not silently
+degraded); and at most one live session is admitted per agent. Every refusal is
+audited (`shell_session.denied`) before the response, so denials are as
+accountable as grants.
+
+The session is bounded by design: a server-authoritative idle deadline and
+absolute lifetime cap (a stalled agent or operator cannot hold the channel open),
+and a per-session output-byte cap enforced fail-closed. Streamed input and output
+are classified sensitive exactly like command output — they are never written to
+an audit detail, a log line, or an error message; only lifecycle metadata is
+recorded. The transport is capability-negotiated and additive, so a mixed-version
+fleet stays safe: older agents simply never offer the capability and the feature
+remains unavailable for them. The live frame relay, the agent's shell I/O loop,
+and the terminal UI are deferred to later phases and are not yet a reachable
+attack surface.
+
 ## Audit log: tamper-evidence
 
 Every meaningful action appends an `AuditEvent` to a **hash chain**: each event

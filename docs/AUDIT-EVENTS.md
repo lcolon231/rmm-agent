@@ -38,6 +38,11 @@ and SHA-256/Merkle roots—remains readable.
 | `agent.restored` | `api/management.py` trust transition | `previous_trust_state`, `trust_state`, `reason_sha256`, `reason_bytes` |
 | `agent.revoked` | `api/management.py` trust transition | `previous_trust_state`, `trust_state`, `reason_sha256`, `reason_bytes` |
 | `agent.commands_expired_on_revoke` | `api/management.py` revoke cleanup | `command_ids` |
+| `shell_session.opened` | `api/shell_sessions.py` session open (issue #61) | `session_id`, `capability_version`, `output_bytes_limit`, `absolute_deadline`, `idle_deadline` |
+| `shell_session.viewed` | `api/shell_sessions.py` session status read | `session_id`, `status` |
+| `shell_session.denied` | `api/shell_sessions.py` fail-closed open refusal | `session_id`, `reason`, `policy`, `trust_state` |
+| `shell_session.closed` | `api/shell_sessions.py` operator close | `session_id`, `status`, `reason`, `output_bytes_total`, `frames_in`, `frames_out` |
+| `shell_session.timed_out` | `core/tasks.py` shell session sweep | `session_id`, `reason`, `output_bytes_total`, `frames_in`, `frames_out` |
 | `audit.anchored` | `api/management.py` local anchor creation | `anchor_id`, `merkle_root`, `event_count` |
 | `audit_timeline.viewed` | `api/management.py` audit timeline list | `event_type`, `actor_filter`, `agent_id`, `organization_id`, `date_from`, `date_to`, `before_seq`, `page`, `page_size`, `result_count`, `total` |
 | `audit_event.viewed` | `api/management.py` audit event detail | `event_id`, `action`, `seq` |

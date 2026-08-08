@@ -111,6 +111,27 @@ class CommandStatus(str, enum.Enum):
     expired = "expired"
 
 
+class ShellSessionStatus(str, enum.Enum):
+    """Lifecycle of an interactive shell session (issue #61).
+
+    pending    -> authorized and created; the agent has not yet attached
+    active     -> the agent attached; streaming I/O may flow
+    closed     -> ended normally by the operator or agent
+    denied     -> refused at open time (kept only when a row is persisted)
+    timed_out  -> ended by the server on idle or absolute-lifetime expiry
+    failed     -> ended on a transport/limit fault (fail closed)
+
+    Terminal states are closed, denied, timed_out, and failed.
+    """
+
+    pending = "pending"
+    active = "active"
+    closed = "closed"
+    denied = "denied"
+    timed_out = "timed_out"
+    failed = "failed"
+
+
 class ScheduleTargetType(str, enum.Enum):
     agent = "agent"
     site = "site"
@@ -485,6 +506,11 @@ class Agent(Base):
     command_envelope_versions: Mapped[list[str]] = mapped_column(
         JSON, default=list, nullable=False
     )
+    # Optional feature capabilities this agent most recently advertised (issue
+    # #61), e.g. "shell-session-v1". NULL/empty means the agent predates or does
+    # not support the capability, so features that require it fail closed as
+    # "unsupported" rather than being offered.
+    supported_capabilities: Mapped[list[str] | None] = mapped_column(JSON)
 
     status: Mapped[AgentStatus] = mapped_column(
         Enum(AgentStatus), default=AgentStatus.pending
@@ -627,6 +653,79 @@ class Command(Base):
     )
 
     agent: Mapped["Agent"] = relationship(back_populates="commands")
+
+
+class ShellSession(Base):
+    """An authorized, bounded, audited interactive shell session (issue #61).
+
+    Phase 1 persists only the session lifecycle and its bounds/evidence — never
+    the streamed input or output bytes, which are sensitive exactly like
+    ``Command.stdout``/``stderr`` and are relayed through a bounded in-memory
+    channel in a later phase. The row is the durable record an operator and the
+    audit log point at: who opened it, against which agent, under what limits,
+    and how it ended.
+    """
+
+    __tablename__ = "shell_sessions"
+    __table_args__ = (
+        Index("ix_shell_sessions_agent_status", "agent_id", "status"),
+        Index("ix_shell_sessions_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The operator who opened the session. actor_email is denormalized for
+    # display; operator_id is the durable link (SET NULL if the operator is
+    # later removed, so the session record survives).
+    operator_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    actor_email: Mapped[str | None] = mapped_column(String(320))
+
+    status: Mapped[ShellSessionStatus] = mapped_column(
+        Enum(ShellSessionStatus),
+        default=ShellSessionStatus.pending,
+        nullable=False,
+        index=True,
+    )
+    # The negotiated agent capability that authorized this session, e.g.
+    # "shell-session-v1"; recorded so a later protocol revision stays auditable.
+    capability_version: Mapped[str | None] = mapped_column(String(64))
+    close_reason: Mapped[str | None] = mapped_column(String(64))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Server-authoritative deadlines. absolute_deadline caps total lifetime;
+    # idle_deadline is pushed forward on each I/O frame and caps inactivity.
+    absolute_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    idle_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Bounds and running evidence (byte/frame counters, sequence high-water
+    # marks). No I/O payloads are ever stored here.
+    output_bytes_limit: Mapped[int | None] = mapped_column(BigInteger)
+    output_bytes_total: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default="0", nullable=False
+    )
+    frames_out: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default="0", nullable=False
+    )
+    frames_in: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default="0", nullable=False
+    )
+    client_last_seq: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default="0", nullable=False
+    )
+    agent_last_seq: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default="0", nullable=False
+    )
+
+    agent: Mapped["Agent"] = relationship()
 
 
 class AuditEvent(Base):

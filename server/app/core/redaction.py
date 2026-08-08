@@ -136,6 +136,38 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         digest_fields=("reason",),
     ),
     "agent.commands_expired_on_revoke": _schema("command_ids"),
+    # Interactive shell session lifecycle (issue #61). Metadata only — the
+    # streamed input and output bytes are sensitive like command output and are
+    # never recorded in an audit detail, a log line, or an error message.
+    "shell_session.opened": _schema(
+        "session_id",
+        "capability_version",
+        "output_bytes_limit",
+        "absolute_deadline",
+        "idle_deadline",
+    ),
+    "shell_session.viewed": _schema("session_id", "status"),
+    "shell_session.denied": _schema(
+        "session_id",
+        "reason",
+        "policy",
+        "trust_state",
+    ),
+    "shell_session.closed": _schema(
+        "session_id",
+        "status",
+        "reason",
+        "output_bytes_total",
+        "frames_in",
+        "frames_out",
+    ),
+    "shell_session.timed_out": _schema(
+        "session_id",
+        "reason",
+        "output_bytes_total",
+        "frames_in",
+        "frames_out",
+    ),
     "audit.anchored": _schema("anchor_id", "merkle_root", "event_count"),
     # Reading the evidence is itself an auditable act, so the timeline and
     # single-event views record who looked and what they scoped the view to.

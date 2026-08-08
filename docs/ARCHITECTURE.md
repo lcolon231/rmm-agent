@@ -738,7 +738,24 @@ records, tenant-scoped queries, tenant-aware roles, isolation tests, per-tenant
 retention, and administrative break-glass rules. Any schema transition needs a
 migration and a documented strategy for existing rows.
 
-## 9. Remote desktop boundary
+## 9. Remote access boundary
+
+### Interactive shell sessions (issue #61)
+
+The interactive remote shell is a NodeLink-native capability distinct from remote
+desktop. It streams a running command's output to an operator and accepts input
+lines over the existing HTTP transport (chunked long-poll), so the agent stays
+stdlib-only and the current Caddy/Render proxy needs no change; polling remains
+the fallback. A session is a first-class, authorized, audited, bounded entity:
+operator role plus explicit arbitrary-script scope, a trusted agent, an advertised
+`shell-session-v1` capability, at most one live session per agent, server-authored
+idle and absolute deadlines, and a per-session output-byte cap. Streamed I/O is
+sensitive like command output and never enters the audit chain. Phase 1 implements
+the session lifecycle, authorization, capability negotiation, timeouts, and audit;
+the frame relay, the agent shell loop, and the terminal UI are deferred. See
+`docs/SHELL-SESSIONS.md`.
+
+### Remote desktop
 
 NodeLink will not invent a proprietary remote desktop protocol. Milestone 2
 plans a narrowly scoped MeshCentral integration. MeshCentral remains a separate
@@ -764,7 +781,12 @@ moved merely to match an aspirational tree.
 ## 11. Known limitations and documentation corrections
 
 - Polling is the only command transport; output is buffered, not streamed, and
-  a dispatched command cannot be cancelled — expiry is the only bound.
+  a dispatched command cannot be cancelled — expiry is the only bound. The
+  interactive-shell foundation (issue #61, Phase 1) adds an authorized, audited,
+  capability-negotiated, time- and byte-bounded session lifecycle
+  (`docs/SHELL-SESSIONS.md`), but the live streaming frame relay, the agent's
+  shell I/O loop, and the terminal UI are deferred, so no command yet streams or
+  cancels.
 - The dashboard requires an authenticated operator but its overview remains
   fixture-backed; beyond the endpoint telemetry and command console views,
   live audit UI, complete inventory, monitoring alerts, scheduling, patching,

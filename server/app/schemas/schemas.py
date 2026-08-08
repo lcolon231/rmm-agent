@@ -168,9 +168,20 @@ EnvelopeVersion = Annotated[
 ]
 
 
+CapabilityName = Annotated[
+    str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z0-9-]+$")
+]
+
+
 class CommandEnvelopeCapabilities(BaseModel):
     supported_command_envelope_versions: list[EnvelopeVersion] = Field(
         default_factory=list, max_length=8
+    )
+    # Optional feature capabilities the agent advertises (issue #61), e.g.
+    # "shell-session-v1". Absent means the agent supports none, so features that
+    # require one fail closed as "unsupported".
+    supported_capabilities: list[CapabilityName] = Field(
+        default_factory=list, max_length=16
     )
 
     @field_validator("supported_command_envelope_versions")
@@ -178,6 +189,13 @@ class CommandEnvelopeCapabilities(BaseModel):
     def versions_must_be_unique(cls, value: list[str]) -> list[str]:
         if len(value) != len(set(value)):
             raise ValueError("command envelope versions must be unique")
+        return value
+
+    @field_validator("supported_capabilities")
+    @classmethod
+    def capabilities_must_be_unique(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("capabilities must be unique")
         return value
 
 

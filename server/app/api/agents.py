@@ -330,6 +330,9 @@ async def heartbeat(
     agent.status = AgentStatus.online
     previous_versions = list(agent.command_envelope_versions or [])
     agent.command_envelope_versions = body.supported_command_envelope_versions
+    # Advertised feature capabilities (issue #61) drive capability-gated features
+    # such as interactive shell sessions; refresh them on every beat.
+    agent.supported_capabilities = body.supported_capabilities
     # Inventory refresh negotiation. Only hashes travel on the beat; the server
     # decides what is worth resending and the agent POSTs those sections to the
     # bounded inventory endpoint. A steady-state endpoint transfers nothing.

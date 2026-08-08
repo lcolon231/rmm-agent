@@ -10,7 +10,13 @@ from sqlalchemy import select
 from app.core import audit, metrics, monitoring
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models.models import Agent, AgentStatus, AgentTrustState
+from app.models.models import (
+    Agent,
+    AgentStatus,
+    AgentTrustState,
+    ShellSession,
+    ShellSessionStatus,
+)
 
 
 async def _sweep_once() -> None:
@@ -58,6 +64,75 @@ async def offline_sweeper(stop: asyncio.Event) -> None:
             await _sweep_once()
         except Exception as exc:  # keep the loop alive on transient DB errors
             print(f"[offline_sweeper] error: {exc}")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+
+
+async def _shell_session_sweep_once() -> None:
+    """End interactive shell sessions (issue #61) that have passed their idle or
+    absolute deadline, transitioning them to ``timed_out`` with an audit event.
+
+    The server is authoritative for both deadlines, so a stalled agent or
+    operator cannot keep a live channel open past its bound.
+    """
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as db:
+        live = (
+            await db.execute(
+                select(ShellSession).where(
+                    ShellSession.status.in_(
+                        (ShellSessionStatus.pending, ShellSessionStatus.active)
+                    )
+                )
+            )
+        ).scalars().all()
+        for session_row in live:
+            reason = None
+            if (
+                session_row.absolute_deadline is not None
+                and _as_utc(session_row.absolute_deadline) <= now
+            ):
+                reason = "absolute_deadline"
+            elif (
+                session_row.idle_deadline is not None
+                and _as_utc(session_row.idle_deadline) <= now
+            ):
+                reason = "idle_timeout"
+            if reason is None:
+                continue
+            session_row.status = ShellSessionStatus.timed_out
+            session_row.close_reason = reason
+            session_row.closed_at = now
+            await audit.record(
+                db,
+                action="shell_session.timed_out",
+                actor="system",
+                agent_id=session_row.agent_id,
+                detail={
+                    "session_id": session_row.id,
+                    "reason": reason,
+                    "output_bytes_total": session_row.output_bytes_total,
+                    "frames_in": session_row.frames_in,
+                    "frames_out": session_row.frames_out,
+                },
+            )
+        await db.commit()
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+async def shell_session_sweeper(stop: asyncio.Event) -> None:
+    """Expire idle/over-lifetime shell sessions until told to stop."""
+    interval = max(5, settings.shell_session_poll_timeout_seconds)
+    while not stop.is_set():
+        try:
+            await _shell_session_sweep_once()
+        except Exception as exc:  # keep the loop alive on transient DB errors
+            print(f"[shell_session_sweeper] error: {exc}")
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval)
         except asyncio.TimeoutError:
