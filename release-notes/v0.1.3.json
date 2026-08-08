@@ -1,0 +1,141 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "v0.1.3",
+    "title": "NodeLink v0.1.3 inventory, monitoring, and renewable-credential pilot",
+    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after the sole repository owner reviewed and accepted the release evidence; this release adds endpoint inventory, monitoring/alerting, a versioned script library, scheduled tasks, and loss-safe agent credential renewal, and is not approved for multi-tenant or high-availability claims."
+  },
+  "server": {
+    "tag": "v0.1.3",
+    "deployment": "Deploy source from the exact commit bound to v0.1.3 by the release workflow."
+  },
+  "agent": {
+    "version": "0.1.3",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "0.1.3",
+    "filename": "NodeLinkAgentSetup-0.1.3.exe"
+  },
+  "database": {
+    "alembic_revision": "0026",
+    "compatible_from": [
+      "0001",
+      "0012",
+      "0026"
+    ],
+    "migration_policy": "Migrations are forward-only across the 0013-0026 chain. Public v0.1.1 databases must pass guarded schema adoption at 0001 before upgrading; v0.1.2 databases upgrade in place from 0012; never edit a revision or perform an in-place downgrade."
+  },
+  "protocols": {
+    "command_envelopes": [
+      "command-v3"
+    ],
+    "mixed_version_behavior": "Agents advertise command-v3 and command-v2 during a staged rollout, but new deployments require command-v3; missing, unknown, and legacy-unversioned capabilities fail closed."
+  },
+  "known_limitations": [
+    "#24: Windows agent and installer artifacts are not Authenticode signed, so SmartScreen or antivirus warnings remain possible.",
+    "#66: Roles are global and clients or sites are not authorization tenants; do not market or operate this release as multi-tenant.",
+    "#84: Enrollment rate limits, counters, and metrics are process-local; no multi-worker or high-availability protection claim is made.",
+    "#126: Empty deployments must bootstrap the first client and site through the existing administrative API before using enrollment.",
+    "#76: The local release drill verifies the internal audit chain but has no external immutable audit-anchor receipt to cross-check.",
+    "Endpoint inventory, monitoring checks, and alerting are Windows-first; Linux and macOS remain development-only builds with reduced or absent collectors.",
+    "Alert email and signed webhook delivery are best-effort with process-local state; there is no multi-worker delivery deduplication or high-availability guarantee.",
+    "PROVISIONAL EVIDENCE: the evidence and rollback-database backup references below are seeded from the v0.1.2 drill and MUST be replaced with a real v0.1.3 backup, restore verification, and 0026-to-0012 rollback rehearsal before this tag is pushed."
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "Pause enrollment, command dispatch, scheduled-task execution, server promotion, and external agent rollout automation.",
+      "Verify the current 0012 backup, a fresh pre-upgrade 0026-target backup, manifests, and retained restore evidence against their immutable SHA-256 digests.",
+      "Confirm Python 3.12, PostgreSQL, command signing keys, production secrets, trusted-proxy settings, HTTPS public URL, and server-only dashboard API URL are configured.",
+      "Verify every release artifact checksum and GitHub build-provenance attestation before execution."
+    ],
+    "steps": [
+      "For a v0.1.2 database at 0012, take a verified backup, then run Alembic upgrade through the 0013-0026 chain and confirm the startup revision guard reports 0026 before serving traffic.",
+      "For an unversioned public v0.1.1 database, run guarded adoption to 0001 first, then upgrade forward to 0026.",
+      "Deploy the server and dashboard together from the workflow-bound v0.1.3 source commit.",
+      "Deploy the checksum-verified Windows agent or installer to one owned canary endpoint before expanding the rollout.",
+      "Keep v0.1.2 and any failed-state backup unavailable to automatic rollout channels."
+    ],
+    "verification": [
+      "Confirm Alembic current reports 0026 and health, readiness, metrics, login, and production configuration checks pass over verified HTTPS.",
+      "Confirm a canary endpoint enrolls, renews its agent credential before expiry without losing connectivity, and that a revoked or expired credential fails authentication.",
+      "Confirm inventory snapshots, monitoring checks, alert state transitions, email/webhook delivery, script-library execution, and scheduled-task runs behave as expected on the Windows canary.",
+      "Confirm heartbeat, audit sequence, expected metric deltas, token revocation, agent revocation, and post-revocation authentication rejection.",
+      "Confirm NodeLinkAgent service and installer install, start, stop, restart, and uninstall behavior on Windows, with DPAPI-protected identity and restricted ACLs."
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "Prefer a forward fix while the live database remains at 0026; v0.1.2 is not an in-place server/database rollback target for that schema.",
+      "Redeploy v0.1.2 components only when their required 0012 schema and retained artifact digests exactly match a restored deployment.",
+      "Before any schema restore, pause rollout and writers, preserve an encrypted failed-state backup, and name the decision maker and exact accepted data-loss window.",
+      "Restore the verified 0012 recovery-point backup only after explicit data-loss approval, validate it in isolation, and deploy the exact v0.1.2 server, agent, and installer together.",
+      "If the matching backup, artifact, audit, or startup verification fails, keep promotion blocked and continue with a reviewed forward fix."
+    ],
+    "target": {
+      "server": {
+        "tag": "v0.1.2",
+        "commit": "077c932491b781a22f5d91ce6548919399b5ff7e"
+      },
+      "agent": {
+        "version": "0.1.2",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "6aadbf49d5b1fcdaed8a37221650c37df053a871548c76a22d44868688bdb1ce",
+          "rmm-agent-linux-amd64": "5071b730082f3716b0fd4b9f79ca8ade90de6c84a1e05f5f14b4c1bca50cf2a7",
+          "rmm-agent-darwin-arm64": "fe61af8a4fda072c1b577641b1f51b760236acc567edf41cda334af7d825ccd4"
+        }
+      },
+      "installer": {
+        "filename": "NodeLinkAgentSetup-0.1.2.exe",
+        "sha256": "40a8ae758a5fa0648cffc248280e6aa707d37dc62a91ce2c6dd6f3d6d67503ec"
+      },
+      "database": {
+        "alembic_revision": "0012",
+        "backup_manifest": {
+          "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/nodelink-backup-20260728T050127Z.manifest.json",
+          "sha256": "c5e6696430f0685f3715605321b718512276bcbd760a14b5db4bbcb4e21c6c82"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "command-v3"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "v0.1.3 adds loss-safe agent credential renewal with automatic expiry, endpoint security inventory (Defender, BitLocker, Secure Boot, TPM, local administrators), and monitoring/alerting while preserving fail-closed command verification, production configuration checks, and explicit pilot-only operating limits.",
+    "fixed_vulnerabilities": [
+      "#125: Per-agent bearer credentials now carry server-enforced expiry (migration 0024) and the agent proactively performs loss-safe renewal before expiry, closing the long-lived static-credential limitation from v0.1.2.",
+      "Agent-collected security posture (Defender status, BitLocker, Secure Boot, TPM, local Administrators membership) gives operators visibility to detect at-risk endpoints during the pilot.",
+      "Dashboard dependency audit is clean: the v0.1.2 development-only lint findings were reassessed and remediated by patch-level lockfile updates (nanoid 3.3.18, postcss 8.5.26, js-yaml 4.3.1, brace-expansion 1.1.18/5.0.9), clearing the transient nanoid advisory that had reached the production tree; npm audit now reports zero production and development vulnerabilities."
+    ],
+    "new_risks": [
+      "#24 remains open because Windows artifacts are unsigned and require checksum and provenance verification.",
+      "#66 remains open because authorization roles are global rather than tenant scoped.",
+      "#84 remains open because enrollment limiting and counters are process local.",
+      "Alert email and signed webhook delivery introduce outbound integrations whose secrets and endpoints must be protected and whose delivery state is process local.",
+      "Scheduled and recurring task execution broadens the agent's autonomous action surface and must be constrained to reviewed, signed scripts."
+    ],
+    "operator_actions": [
+      "Regenerate this release's backup verification, restore verification, and a real 0026-to-0012 rollback rehearsal, then replace the provisional evidence references in this manifest.",
+      "Because independent second-operator review is not available, the sole release operator must personally verify the complete v0.1.3 evidence index, retained digests, preflight result, and green release checks before tagging.",
+      "Protect alert email and webhook secrets, keep enrollment tokens single-use and short-lived, and restrict script-library and scheduled-task content to reviewed, signed scripts.",
+      "Use a forward fix by default; do not restore the 0012 recovery point without preserving failed state and explicitly accepting all post-backup data loss."
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/restore-verification-0012.json",
+      "sha256": "ac4649b5c58bbc6e579164ea2710b126d848009e203db3f28b7c82394346a66a"
+    },
+    "rollback_rehearsal": {
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.2-evidence/phase5-timed-rollback-evidence.json",
+      "sha256": "078e9c0b655e5fb62a72aa6141d8660792dda4df3988551942e30b196a7f25f6"
+    }
+  }
+}
