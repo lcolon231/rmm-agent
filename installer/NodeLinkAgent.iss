@@ -378,14 +378,12 @@ begin
   begin
     if DetectedInstallMode = InstallModeUpgrade then
       WizardForm.FinishedLabel.Caption :=
-        'Setup has finished updating NodeLink RMM Agent on your computer.' +
-        #13#10 + #13#10 +
+        'Setup has finished updating NodeLink RMM Agent on your computer.' + #13#10 + #13#10 +
         'The existing enrollment and configuration were preserved. The ' +
         'updated agent is running as the Windows service "NodeLink RMM Agent".'
     else
       WizardForm.FinishedLabel.Caption :=
-        'Setup has finished installing NodeLink RMM Agent on your computer.' +
-        #13#10 + #13#10 +
+        'Setup has finished installing NodeLink RMM Agent on your computer.' + #13#10 + #13#10 +
         'The agent is enrolled with your NodeLink server and running as the ' +
         'Windows service "NodeLink RMM Agent".';
   end;
