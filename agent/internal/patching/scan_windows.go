@@ -21,20 +21,31 @@ const scanTimeout = 10 * time.Minute
 // rawScan is the shape the PowerShell collector emits: already-flattened rows so
 // the pure normalizer in scan.go does the bounding and allowlisting.
 type rawScan struct {
-	RebootRequired *bool            `json:"reboot_required"`
-	ErrorCode      string           `json:"error_code"`
-	Missing        []map[string]any `json:"missing"`
-	Installed      []map[string]any `json:"installed"`
+	RebootRequired   *bool            `json:"reboot_required"`
+	ErrorCode        string           `json:"error_code"`
+	HistoryErrorCode string           `json:"history_error_code"`
+	Missing          []map[string]any `json:"missing"`
+	Installed        []map[string]any `json:"installed"`
 }
 
-// psScript shapes both missing (Windows Update Agent COM) and installed
-// (Get-HotFix) updates into flat objects with exactly the keys scan.go expects.
-// A search failure (for example an offline update service) is caught and
-// reported as error_code with an empty missing list rather than failing the
-// whole command, so the operator still learns the installed state and the error.
+// psScript shapes both missing updates and successful Windows Update Agent
+// installation-history entries into flat objects with exactly the keys scan.go
+// expects. Get-HotFix is deliberately not used: it omits drivers, firmware,
+// Defender intelligence, and other updates that were not supplied by CBS.
 const psScript = `
 $ErrorActionPreference = 'Stop'
-$result = [ordered]@{ reboot_required = $null; error_code = ''; missing = @(); installed = @() }
+$result = [ordered]@{
+  reboot_required = $null
+  error_code = ''
+  history_error_code = ''
+  missing = @()
+  installed = @()
+}
+
+function Format-HResult([int]$Code) {
+  $unsigned = [BitConverter]::ToUInt32([BitConverter]::GetBytes($Code), 0)
+  return ('0x{0:X8}' -f $unsigned)
+}
 
 try {
   $si = New-Object -ComObject Microsoft.Update.SystemInfo
@@ -73,23 +84,47 @@ try {
   }
   $result.missing = $missing
 } catch {
-  $result.error_code = $_.Exception.HResult.ToString()
+  $result.error_code = Format-HResult $_.Exception.HResult
 }
 
 try {
   $installed = @()
-  foreach ($h in Get-HotFix) {
-    $on = $null
-    try { if ($h.InstalledOn) { $on = ([datetime]$h.InstalledOn).ToUniversalTime().ToString('o') } } catch { }
-    $installed += [ordered]@{
-      kb_id        = [string]$h.HotFixID
-      title        = [string]$h.Description
-      installed_on = $on
-      installed_by = [string]$h.InstalledBy
+  if (-not $session) { $session = New-Object -ComObject Microsoft.Update.Session }
+  if (-not $searcher) { $searcher = $session.CreateUpdateSearcher() }
+  $historyCount = $searcher.GetTotalHistoryCount()
+  $historyLimit = [Math]::Min($historyCount, 4096)
+  $seen = @{}
+  if ($historyLimit -gt 0) {
+    foreach ($h in $searcher.QueryHistory(0, $historyLimit)) {
+      $updateID = [string]$h.UpdateIdentity.UpdateID
+      if (-not $updateID -or $seen.ContainsKey($updateID)) { continue }
+      # History is newest-first. Remember the newest operation for each update,
+      # so an update whose latest operation was removal is not reported installed.
+      $seen[$updateID] = $true
+      if ($h.Operation -ne 1 -or ($h.ResultCode -ne 2 -and $h.ResultCode -ne 3)) { continue }
+      $kb = $null
+      $match = [regex]::Match([string]$h.Title, '(?i)\bKB\d{4,10}\b')
+      if ($match.Success) { $kb = $match.Value.ToUpperInvariant() }
+      $on = $null
+      try { if ($h.Date) { $on = ([datetime]$h.Date).ToUniversalTime().ToString('o') } } catch { }
+      $installed += [ordered]@{
+        kb_id                = $kb
+        update_id            = $updateID
+        revision_number      = [int]$h.UpdateIdentity.RevisionNumber
+        title                = [string]$h.Title
+        description          = [string]$h.Description
+        installed_on         = $on
+        client_application_id = [string]$h.ClientApplicationID
+        support_url          = [string]$h.SupportUrl
+        result_code          = [int]$h.ResultCode
+        hresult              = Format-HResult $h.HResult
+      }
     }
   }
   $result.installed = $installed
-} catch { }
+} catch {
+  $result.history_error_code = Format-HResult $_.Exception.HResult
+}
 
 $result | ConvertTo-Json -Depth 4 -Compress
 `
@@ -114,7 +149,8 @@ func Scan(ctx context.Context) (inventory.Section, Summary, error) {
 		return inventory.Section{}, Summary{}, err
 	}
 	section, summary := BuildSection(
-		raw.Missing, raw.Installed, time.Now().UTC(), raw.RebootRequired, raw.ErrorCode,
+		raw.Missing, raw.Installed, time.Now().UTC(), raw.RebootRequired,
+		raw.ErrorCode, raw.HistoryErrorCode,
 	)
 	return section, summary, nil
 }

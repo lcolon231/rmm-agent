@@ -37,6 +37,8 @@ export function CommandDispatchForm({
     canExecuteScripts ? "powershell" : "collect_inventory",
   );
   const [script, setScript] = useState("");
+  const [updateTargets, setUpdateTargets] = useState("");
+  const [installAll, setInstallAll] = useState(false);
   const [ttlSeconds, setTtlSeconds] = useState(300);
   const [step, setStep] = useState<Step>({ name: "compose" });
   const [error, setError] = useState("");
@@ -48,12 +50,20 @@ export function CommandDispatchForm({
 
   function handleReview() {
     setError("");
-    const input = validateDispatchInput({ kind, script, ttl_seconds: ttlSeconds });
+    const input = validateDispatchInput({
+      kind,
+      script,
+      update_targets: updateTargets,
+      install_all: installAll,
+      ttl_seconds: ttlSeconds,
+    });
     if (!input) {
       setError(
-        definition.requiresScript
+        definition.input === "script"
           ? "Enter a script within the size limit before dispatching."
-          : "Inventory collection does not take a script.",
+          : definition.input === "update_targets"
+            ? "Enter valid KB or Windows Update IDs, or explicitly choose Install all applicable updates."
+            : "This typed operation does not accept additional input.",
       );
       return;
     }
@@ -75,6 +85,8 @@ export function CommandDispatchForm({
       if (response.ok && body?.command?.id) {
         setStep({ name: "dispatched", commandId: body.command.id });
         setScript("");
+        setUpdateTargets("");
+        setInstallAll(false);
         router.refresh();
       } else {
         setError(body?.error ?? "The command could not be dispatched. Try again.");
@@ -116,7 +128,15 @@ export function CommandDispatchForm({
           command for <strong>{hostname}</strong>, valid for <strong>{ttlLabel}</strong>. Dispatched
           commands cannot be cancelled — an unpicked command dies at its signed expiry.
         </p>
-        {step.input.script ? <pre>{step.input.script}</pre> : <p className="dispatch-noscript">No script payload — the agent refreshes its inventory.</p>}
+        {step.input.script ? <pre>{step.input.script}</pre> : step.input.kind === "install_updates" ? (
+          <pre>
+            {step.input.install_all
+              ? "All applicable non-hidden updates"
+              : step.input.update_targets.join("\n")}
+          </pre>
+        ) : (
+          <p className="dispatch-noscript">No script payload — this is a bounded typed operation.</p>
+        )}
         <div className="dispatch-review-actions">
           <button disabled={isSubmitting} onClick={() => setStep({ name: "compose" })} type="button">
             <ArrowLeft size={15} /> Edit
@@ -142,7 +162,12 @@ export function CommandDispatchForm({
         <label htmlFor="command-kind">Command kind</label>
         <select
           id="command-kind"
-          onChange={(event) => setKind(event.target.value as CommandKind)}
+          onChange={(event) => {
+            setKind(event.target.value as CommandKind);
+            setScript("");
+            setUpdateTargets("");
+            setInstallAll(false);
+          }}
           value={kind}
         >
           {availableDefinitions.map((d) => (
@@ -161,7 +186,7 @@ export function CommandDispatchForm({
         </select>
       </div>
       <p className="dispatch-kind-note">{definition.description}</p>
-      {definition.requiresScript ? (
+      {definition.input === "script" ? (
         <>
           <label htmlFor="command-script">Script</label>
           <textarea
@@ -172,6 +197,34 @@ export function CommandDispatchForm({
             spellCheck={false}
             value={script}
           />
+        </>
+      ) : definition.input === "update_targets" ? (
+        <>
+          <label htmlFor="update-targets">KB or Windows Update IDs</label>
+          <textarea
+            disabled={installAll}
+            id="update-targets"
+            onChange={(event) => setUpdateTargets(event.target.value)}
+            placeholder={"KB5101650\n12345678-1234-1234-1234-1234567890ab"}
+            rows={5}
+            spellCheck={false}
+            value={updateTargets}
+          />
+          <label className="dispatch-checkbox" htmlFor="install-all-updates">
+            <input
+              checked={installAll}
+              id="install-all-updates"
+              onChange={(event) => {
+                setInstallAll(event.target.checked);
+                if (event.target.checked) setUpdateTargets("");
+              }}
+              type="checkbox"
+            />
+            Install all applicable non-hidden updates
+          </label>
+          <p className="dispatch-kind-note">
+            Use the Update ID shown in Windows Updates inventory for drivers or firmware that do not have a KB number.
+          </p>
         </>
       ) : null}
       {error ? <p className="dispatch-error" role="alert">{error}</p> : null}

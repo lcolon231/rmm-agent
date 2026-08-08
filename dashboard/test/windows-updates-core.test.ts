@@ -14,6 +14,7 @@ test("allowlists payload and drops secret-adjacent and titleless rows", () => {
     scanned_at: "2026-08-08T00:00:00Z",
     reboot_required: true,
     error_code: null,
+    history_error_code: null,
     missing: [
       {
         title: "2026-08 Cumulative Update (KB5034123)",
@@ -55,6 +56,7 @@ test("summary headline reflects missing count, error, and reboot", () => {
       scanned_at: null,
       reboot_required: false,
       error_code: null,
+      history_error_code: null,
       missing: [],
       installed: [],
     }).headline,
@@ -65,6 +67,7 @@ test("summary headline reflects missing count, error, and reboot", () => {
       scanned_at: null,
       reboot_required: true,
       error_code: null,
+      history_error_code: null,
       missing: [{ title: "x", kb_id: null, classification: null, product: null, severity: null, reboot_required: null, support_url: null }],
       installed: [],
     }).headline,
@@ -75,9 +78,21 @@ test("summary headline reflects missing count, error, and reboot", () => {
       scanned_at: null,
       reboot_required: false,
       error_code: "0x8024402c",
+      history_error_code: null,
       missing: [],
       installed: [],
     }).headline,
     /error/,
+  );
+  assert.match(
+    summarizeWindowsUpdates({
+      scanned_at: null,
+      reboot_required: false,
+      error_code: null,
+      history_error_code: "0x8024000c",
+      missing: [],
+      installed: [],
+    }).headline,
+    /history unavailable/,
   );
 });

@@ -18,15 +18,20 @@ export interface MissingUpdateView {
 
 export interface InstalledUpdateView {
   kb_id: string | null;
+  update_id: string | null;
   title: string | null;
   installed_on: string | null;
   installed_by: string | null;
+  client_application_id: string | null;
+  result_code: number | null;
+  hresult: string | null;
 }
 
 export interface WindowsUpdatesView {
   scanned_at: string | null;
   reboot_required: boolean | null;
   error_code: string | null;
+  history_error_code: string | null;
   missing: MissingUpdateView[];
   installed: InstalledUpdateView[];
 }
@@ -42,6 +47,10 @@ function str(value: unknown): string | null {
 
 function bool(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function integer(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -67,9 +76,13 @@ function installedFromUnknown(value: unknown): InstalledUpdateView | null {
   if (!isRecord(value)) return null;
   return {
     kb_id: str(value.kb_id),
+    update_id: str(value.update_id),
     title: str(value.title),
     installed_on: str(value.installed_on),
     installed_by: str(value.installed_by),
+    client_application_id: str(value.client_application_id),
+    result_code: integer(value.result_code),
+    hresult: str(value.hresult),
   };
 }
 
@@ -90,6 +103,7 @@ export function windowsUpdatesFromUnknown(value: unknown): WindowsUpdatesView | 
     scanned_at: str(value.scanned_at),
     reboot_required: bool(value.reboot_required),
     error_code: str(value.error_code),
+    history_error_code: str(value.history_error_code),
     missing,
     installed,
   };
@@ -110,6 +124,8 @@ export function summarizeWindowsUpdates(view: WindowsUpdatesView): WindowsUpdate
   let headline: string;
   if (view.error_code) {
     headline = "Scan reported an error";
+  } else if (view.history_error_code) {
+    headline = `${missingCount} missing update${missingCount === 1 ? "" : "s"} · history unavailable`;
   } else if (missingCount === 0) {
     headline = "No missing updates";
   } else {

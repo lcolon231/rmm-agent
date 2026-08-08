@@ -23,6 +23,7 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/client"
 	"github.com/lcolon231/rmm/agent/internal/config"
 	"github.com/lcolon231/rmm/agent/internal/executor"
+	"github.com/lcolon231/rmm/agent/internal/patching"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 )
@@ -676,5 +677,29 @@ func TestMaybeRenewCredentialRevokedIsSurfaced(t *testing.T) {
 	}
 	if s.identity.AgentToken != "revoked-tok" {
 		t.Fatalf("token must not change on a rejected renewal, got %q", s.identity.AgentToken)
+	}
+}
+
+func TestUpdateScanCommandResultFailsOnSearchError(t *testing.T) {
+	result := updateScanCommandResult(patching.Summary{
+		Status:    "unavailable",
+		ErrorCode: "0x8024402C",
+	}, "")
+	if result.ExitCode == 0 || !strings.Contains(result.Stderr, "0x8024402C") {
+		t.Fatalf("scan API error was not surfaced as command failure: %+v", result)
+	}
+}
+
+func TestUpdateScanCommandResultFailsOnHistoryError(t *testing.T) {
+	result := updateScanCommandResult(patching.Summary{
+		Status:           "partial",
+		MissingCount:     3,
+		HistoryErrorCode: "0x8024000C",
+	}, "inventory submission failed")
+	if result.ExitCode == 0 {
+		t.Fatalf("history error was presented as success: %+v", result)
+	}
+	if !strings.Contains(result.Stderr, "inventory submission failed; windows update collection reported 0x8024000C") {
+		t.Fatalf("existing and collection errors were not preserved: %q", result.Stderr)
 	}
 }

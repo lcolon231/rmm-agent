@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 
 from typing import Annotated, Literal
@@ -437,6 +438,69 @@ class CommandCreate(BaseModel):
                 f"command payload exceeds {MAX_COMMAND_PAYLOAD_BYTES} bytes"
             )
         return value
+
+    @model_validator(mode="after")
+    def typed_windows_update_payload(self) -> "CommandCreate":
+        if self.kind != CommandKind.install_updates:
+            return self
+
+        # target_kbs is accepted as the pre-typed-payload compatibility alias;
+        # stored/signed commands are normalized to kb_ids.
+        allowed = {"install_all", "kb_ids", "target_kbs", "update_ids"}
+        if set(self.payload) - allowed:
+            raise ValueError("install_updates payload contains unsupported fields")
+
+        install_all = self.payload.get("install_all", False)
+        if not isinstance(install_all, bool):
+            raise ValueError("install_all must be a boolean")
+        kb_values = self.payload.get("kb_ids", [])
+        legacy_kb_values = self.payload.get("target_kbs", [])
+        update_values = self.payload.get("update_ids", [])
+        if (
+            not isinstance(kb_values, list)
+            or not isinstance(legacy_kb_values, list)
+            or not isinstance(update_values, list)
+        ):
+            raise ValueError("kb_ids and update_ids must be arrays")
+        kb_values = [*kb_values, *legacy_kb_values]
+        if len(kb_values) + len(update_values) > 100:
+            raise ValueError("at most 100 update targets are allowed")
+        if install_all and (kb_values or update_values):
+            raise ValueError("install_all cannot be combined with update identifiers")
+        if not install_all and not kb_values and not update_values:
+            raise ValueError("choose update identifiers or explicitly set install_all")
+
+        normalized_kbs: list[str] = []
+        for value in kb_values:
+            if not isinstance(value, str):
+                raise ValueError("every KB target must be a string")
+            kb = value.strip().upper()
+            if kb and not kb.startswith("KB"):
+                kb = f"KB{kb}"
+            if not re.fullmatch(r"KB[0-9]{4,10}", kb):
+                raise ValueError(f"invalid KB target: {value!r}")
+            if kb not in normalized_kbs:
+                normalized_kbs.append(kb)
+
+        normalized_update_ids: list[str] = []
+        for value in update_values:
+            if not isinstance(value, str):
+                raise ValueError("every Windows Update ID must be a string")
+            update_id = value.strip().lower()
+            if not re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                update_id,
+            ):
+                raise ValueError(f"invalid Windows Update ID: {value!r}")
+            if update_id not in normalized_update_ids:
+                normalized_update_ids.append(update_id)
+
+        self.payload = (
+            {"install_all": True}
+            if install_all
+            else {"kb_ids": normalized_kbs, "update_ids": normalized_update_ids}
+        )
+        return self
 
 
 class CommandOut(BaseModel):

@@ -791,26 +791,53 @@ func (a *Agent) runUpdateScan(ctx context.Context, s *session) executor.Result {
 		stderr = "inventory submission failed (result retained on endpoint): " + subErr.Error()
 	}
 
+	return updateScanCommandResult(summary, stderr)
+}
+
+// updateScanCommandResult keeps a Windows Update API failure from being
+// presented as a successful command merely because a partial inventory payload
+// could still be submitted.
+func updateScanCommandResult(summary patching.Summary, stderr string) executor.Result {
 	out, err := json.Marshal(summary)
 	if err != nil {
 		out = []byte(`{"status":"ok"}`)
 	}
-	return executor.Result{ExitCode: 0, Stdout: string(out), Stderr: stderr}
+	exitCode := 0
+	collectionError := summary.ErrorCode
+	if collectionError == "" {
+		collectionError = summary.HistoryErrorCode
+	}
+	if collectionError != "" {
+		exitCode = 1
+		if stderr != "" {
+			stderr += "; "
+		}
+		stderr += "windows update collection reported " + collectionError
+	}
+	return executor.Result{ExitCode: exitCode, Stdout: string(out), Stderr: stderr}
 }
 
 // runUpdateInstall handles the install_updates typed command: it executes
-// selective downloading and installation of targeted Windows update KBs.
+// selective downloading and installation by KB or Windows Update identity.
 func (a *Agent) runUpdateInstall(ctx context.Context, rawPayload json.RawMessage) executor.Result {
 	var payload struct {
-		KBIDs     []string `json:"kb_ids"`
-		TargetKBs []string `json:"target_kbs"`
+		InstallAll bool     `json:"install_all"`
+		KBIDs      []string `json:"kb_ids"`
+		TargetKBs  []string `json:"target_kbs"`
+		UpdateIDs  []string `json:"update_ids"`
 	}
 	if len(rawPayload) > 0 {
-		_ = json.Unmarshal(rawPayload, &payload)
+		if err := json.Unmarshal(rawPayload, &payload); err != nil {
+			return executor.Result{ExitCode: 1, Stderr: "windows update install payload is malformed"}
+		}
 	}
-	targetKBs := append(payload.KBIDs, payload.TargetKBs...)
+	targetKBs := append(append([]string{}, payload.KBIDs...), payload.TargetKBs...)
 
-	installRes, err := patching.Install(ctx, targetKBs)
+	installRes, err := patching.Install(ctx, patching.InstallTargets{
+		All:       payload.InstallAll,
+		KBIDs:     targetKBs,
+		UpdateIDs: payload.UpdateIDs,
+	})
 	outBytes, _ := json.Marshal(installRes)
 	if err != nil {
 		return executor.Result{

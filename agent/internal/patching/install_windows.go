@@ -59,9 +59,11 @@ try {
   $toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
   foreach ($u in $search.Updates) {
     $match = $false
-    if (-not $TargetKBs -or $TargetKBs.Count -eq 0) {
+    if ($InstallAll) {
       $match = $true
     } else {
+      $updateID = [string]$u.Identity.UpdateID
+      if ($TargetUpdateIDs -contains $updateID) { $match = $true }
       foreach ($kb in $u.KBArticleIDs) {
         $formatted = 'KB' + $kb
         if ($TargetKBs -contains $formatted -or $TargetKBs -contains $kb.ToString()) {
@@ -76,9 +78,14 @@ try {
   }
 
   if ($toInstall.Count -eq 0) {
-    $result.message = 'None of the requested KB IDs were found among applicable missing updates.'
+    $result.status = 'failed'
+    $result.message = 'None of the requested KB or Windows Update IDs were found among applicable missing updates.'
     $result | ConvertTo-Json -Depth 3 -Compress
     exit 0
+  }
+
+  foreach ($u in $toInstall) {
+    if (-not $u.EulaAccepted) { $u.AcceptEula() }
   }
 
   # Download phase
@@ -121,32 +128,35 @@ try {
 $result | ConvertTo-Json -Depth 3 -Compress
 `
 
-// Install downloads and installs specified target KBs (or all missing updates if targetKBs is empty).
-func Install(ctx context.Context, targetKBs []string) (InstallResult, error) {
+// Install downloads and installs the explicitly selected targets. Installing all
+// applicable updates requires targets.All; an empty request is rejected.
+func Install(ctx context.Context, targets InstallTargets) (InstallResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, installTimeout)
 	defer cancel()
 
-	formattedKBs := make([]string, 0, len(targetKBs))
-	for _, kb := range targetKBs {
-		trimmed := strings.TrimSpace(kb)
-		if trimmed != "" {
-			if !strings.HasPrefix(strings.ToUpper(trimmed), "KB") && !strings.Contains(trimmed, "-") {
-				trimmed = "KB" + trimmed
-			}
-			formattedKBs = append(formattedKBs, trimmed)
-		}
+	normalized, err := NormalizeInstallTargets(targets)
+	if err != nil {
+		return InstallResult{Status: "failed", Message: err.Error()}, err
 	}
 
-	kbPrefix := "$TargetKBs = @();"
-	if len(formattedKBs) > 0 {
-		quoted := make([]string, len(formattedKBs))
-		for i, k := range formattedKBs {
-			quoted[i] = fmt.Sprintf("'%s'", k)
+	arrayLiteral := func(values []string) string {
+		if len(values) == 0 {
+			return "@()"
 		}
-		kbPrefix = fmt.Sprintf("$TargetKBs = @(%s);", strings.Join(quoted, ","))
+		quoted := make([]string, len(values))
+		for i, value := range values {
+			quoted[i] = fmt.Sprintf("'%s'", value)
+		}
+		return "@(" + strings.Join(quoted, ",") + ")"
 	}
+	prefix := fmt.Sprintf(
+		"$InstallAll = $%t; $TargetKBs = %s; $TargetUpdateIDs = %s;",
+		normalized.All,
+		arrayLiteral(normalized.KBIDs),
+		arrayLiteral(normalized.UpdateIDs),
+	)
 
-	fullScript := fmt.Sprintf("%s\n%s", kbPrefix, psInstallScript)
+	fullScript := fmt.Sprintf("%s\n%s", prefix, psInstallScript)
 	encoded := encodeUTF16LE(fullScript)
 
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)

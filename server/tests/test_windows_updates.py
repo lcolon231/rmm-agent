@@ -159,6 +159,73 @@ async def test_operator_dispatches_signed_install_updates(client):
     assert body["signature"]
 
 
+@pytest.mark.asyncio
+async def test_install_updates_accepts_update_ids_for_drivers(client):
+    op = await _auth(client, "wu-op@nodelink.test", "op-pass")
+    agent_id = await _enroll(client, op)
+    update_id = "12345678-1234-ABCD-9876-1234567890AB"
+    r = await _dispatch(
+        client,
+        op,
+        agent_id,
+        "install_updates",
+        payload={"update_ids": [update_id]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["payload"] == {
+        "kb_ids": [],
+        "update_ids": [update_id.lower()],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"update_ids": ["not-a-guid"]},
+        {"install_all": True, "kb_ids": ["KB5034123"]},
+        {"install_all": "yes"},
+        {"install_all": True, "unexpected": True},
+    ],
+)
+async def test_install_updates_rejects_ambiguous_or_invalid_scope(client, payload):
+    op = await _auth(client, "wu-op@nodelink.test", "op-pass")
+    agent_id = await _enroll(client, op)
+    r = await _dispatch(client, op, agent_id, "install_updates", payload=payload)
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
+async def test_install_updates_accepts_explicit_install_all(client):
+    op = await _auth(client, "wu-op@nodelink.test", "op-pass")
+    agent_id = await _enroll(client, op)
+    r = await _dispatch(
+        client,
+        op,
+        agent_id,
+        "install_updates",
+        payload={"install_all": True},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["payload"] == {"install_all": True}
+
+
+@pytest.mark.asyncio
+async def test_install_updates_normalizes_legacy_target_kbs(client):
+    op = await _auth(client, "wu-op@nodelink.test", "op-pass")
+    agent_id = await _enroll(client, op)
+    r = await _dispatch(
+        client,
+        op,
+        agent_id,
+        "install_updates",
+        payload={"target_kbs": ["5101650"]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["payload"] == {"kb_ids": ["KB5101650"], "update_ids": []}
+
+
 # --------------------------------------------------------------------------- #
 # windows_updates inventory section
 # --------------------------------------------------------------------------- #
@@ -186,7 +253,16 @@ def test_windows_updates_section_validates_well_formed_payload():
                     "priority_grade": "P1 - Critical",
                 }
             ],
-            "installed": [{"kb_id": "KB5030211", "installed_on": "2026-07-01T00:00:00Z"}],
+            "installed": [
+                {
+                    "kb_id": "KB5030211",
+                    "update_id": "12345678-1234-1234-1234-1234567890ab",
+                    "revision_number": 7,
+                    "installed_on": "2026-07-01T00:00:00Z",
+                    "result_code": 2,
+                    "hresult": "0x00000000",
+                }
+            ],
         }
     )
     model = section.typed_payload()
