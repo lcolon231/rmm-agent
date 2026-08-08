@@ -22,7 +22,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("name", sa.String(200), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("target_type", sa.String(20), nullable=False),  # "agent" or "site"
         sa.Column("target_id", sa.String(36), nullable=False),
         sa.Column("cron_expression", sa.String(100), nullable=False),
