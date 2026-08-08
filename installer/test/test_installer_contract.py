@@ -27,6 +27,21 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("{param:Token|}", source)
         self.assertIn("No enrollment token provided (pass /TOKEN= for silent install)", source)
 
+    def test_personalized_sidecar_token_is_supported_and_prompt_is_skipped(self) -> None:
+        """A dashboard-personalized download supplies the token via a sidecar
+        file so no token is ever typed (issue #9). The token page is skipped
+        when the sidecar (or /TOKEN=) provides the value, and the sidecar is
+        read from {src} — the folder Setup.exe runs from — not a fixed path."""
+        source = INSTALLER.read_text(encoding="utf-8")
+
+        self.assertIn('#define SidecarTokenFile "nodelink-enroll.token"', source)
+        self.assertIn("function SidecarToken: String;", source)
+        self.assertIn("{src}\\{#SidecarTokenFile}", source)
+        # The prompt is skipped when a token is already available.
+        self.assertIn("function ShouldSkipPage(PageID: Integer): Boolean;", source)
+        # Precedence remains arg -> sidecar -> interactive input.
+        self.assertIn("Result := SidecarToken;", source)
+
 
 if __name__ == "__main__":
     unittest.main()

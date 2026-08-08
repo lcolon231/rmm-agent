@@ -383,6 +383,20 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "reason",
         digest_fields=("reason",),
     ),
+    # Personalized installer download (issue #9). Records who packaged what for
+    # which site and the verified artifact digest. The minted token's secret is
+    # never here — only its id, whose hash lives on the enrollment_tokens row.
+    "installer_package.created": _schema(
+        "site_id",
+        "download_id",
+        "enrollment_token_id",
+        "artifact_version",
+        "artifact_sha256",
+        "token_expires_at",
+    ),
+    # Fail-closed refusal to ship a package (feature disabled, artifact missing,
+    # or a digest mismatch). ``reason`` is a coded, non-secret string.
+    "installer_package.rejected": _schema("site_id", "reason"),
     "operator.script_permission_changed": _schema(
         "operator_id",
         "operator_role",

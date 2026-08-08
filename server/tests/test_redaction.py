@@ -544,6 +544,18 @@ PRODUCER_DETAILS = {
         "site_id": ID1,
         "reason": SENTINEL,
     },
+    "installer_package.created": {
+        "site_id": ID1,
+        "download_id": ID2,
+        "enrollment_token_id": ID3,
+        "artifact_version": "0.1.2",
+        "artifact_sha256": "a" * 64,
+        "token_expires_at": "2026-07-29T00:00:00+00:00",
+    },
+    "installer_package.rejected": {
+        "site_id": ID1,
+        "reason": "installer_artifact_integrity",
+    },
     "command.authorization_allowed": {
         "operator_id": ID1,
         "operator_role": "operator",

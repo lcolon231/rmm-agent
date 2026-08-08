@@ -16,12 +16,44 @@ which own service registration, SCM auto-recovery, and idempotent removal. The
 agent stays a standard-library-only Go binary; the GUI lives entirely in this
 separate artifact.
 
+## Zero-touch: personalized download from the dashboard
+
+An authorized technician can download a **personalized, site-scoped package**
+from the dashboard so the person at the endpoint never sees or types a token.
+The download is a ZIP containing the stock installer (shipped byte-for-byte,
+never re-signed) plus a small sidecar file `nodelink-enroll.token` holding a
+**short-lived, single-use** enrollment token.
+
+Extract the ZIP and run the installer **from the extracted folder** (so it sits
+beside the sidecar). The installer reads the token automatically and **skips the
+token prompt entirely** — the user just clicks through to "Setup Completed". The
+token never appears in a URL, filename, window, or log.
+
+Token precedence is `/TOKEN=<token>` argument → sidecar file → interactive
+prompt, so:
+
+- **Personalized download:** double-click, zero questions about enrollment.
+- **Silent/mass deployment:** `NodeLinkAgentSetup-<v>.exe /VERYSILENT /TOKEN=<token>`,
+  or drop the sidecar beside a silent run.
+- **Plain stock installer** (no sidecar, no argument): the interactive token
+  prompt still appears, unchanged.
+
+> Security: treat a personalized package like a credential until installed — the
+> bundled token is single-use and expires quickly, but anyone with the ZIP can
+> enroll one machine to that site before it lapses. Do not email it or commit
+> it; the dashboard records each download for audit.
+
+The clean-VM validation runbook for this flow is
+[`docs/INSTALLER-E2E-WINDOWS.md`](../docs/INSTALLER-E2E-WINDOWS.md).
+
 ## What the setup does
 
 1. Requires Administrator (UAC) — registering a Windows service needs elevation.
 2. Installs `rmm-agent.exe` to `C:\Program Files\NodeLink\Agent`.
-3. Prompts only for the one-time **enrollment token**; it is required before
-   you can continue.
+3. Obtains the one-time **enrollment token** from (in order) a `/TOKEN=`
+   argument, a bundled `nodelink-enroll.token` sidecar, or an interactive
+   prompt. The token page is shown only when neither of the first two supplies
+   it, and a token is required before enrollment proceeds.
 4. Writes `config.json` next to the binary with the fixed production origin
    `https://nodelink-backend-733e.onrender.com` and the supplied token.
 5. Runs `rmm-agent.exe install -config ...` then `rmm-agent.exe start`, showing
