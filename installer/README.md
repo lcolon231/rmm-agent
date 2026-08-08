@@ -43,6 +43,9 @@ prompt, so:
 > enroll one machine to that site before it lapses. Do not email it or commit
 > it; the dashboard records each download for audit.
 
+The clean-VM validation runbook for this flow is
+[`docs/INSTALLER-E2E-WINDOWS.md`](../docs/INSTALLER-E2E-WINDOWS.md).
+
 ## What the setup does
 
 1. Requires Administrator (UAC) — registering a Windows service needs elevation.
