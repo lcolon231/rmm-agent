@@ -56,10 +56,10 @@ func (dpapiProtector) Unprotect(blob []byte) ([]byte, error) {
 
 var platformProtector protector = dpapiProtector{}
 
-// identityACLSDDL restricts the identity file to SYSTEM and Administrators,
+// identityACLSDDL restricts the identity file to SYSTEM, Administrators, and Owner,
 // with inheritance blocked (D:P) so a permissive parent directory cannot widen
 // access to the credential blob.
-const identityACLSDDL = "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
+const identityACLSDDL = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)"
 
 // applyIdentityACL replaces the file's DACL with the restricted one above.
 func applyIdentityACL(path string) error {

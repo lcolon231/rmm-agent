@@ -732,9 +732,12 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 
 	a.log.Printf("executing command %s (kind=%s)", cmd.ID, cmd.Kind)
 	var res executor.Result
-	if cmd.Kind == executor.KindScanUpdates {
+	switch cmd.Kind {
+	case executor.KindScanUpdates:
 		res = a.runUpdateScan(ctx, s)
-	} else {
+	case executor.KindInstallUpdates:
+		res = a.runUpdateInstall(ctx, cmd.Payload)
+	default:
 		script := extractScript(cmd.Payload)
 		res = a.run(ctx, cmd.Kind, script)
 	}
@@ -793,6 +796,37 @@ func (a *Agent) runUpdateScan(ctx context.Context, s *session) executor.Result {
 		out = []byte(`{"status":"ok"}`)
 	}
 	return executor.Result{ExitCode: 0, Stdout: string(out), Stderr: stderr}
+}
+
+// runUpdateInstall handles the install_updates typed command: it executes
+// selective downloading and installation of targeted Windows update KBs.
+func (a *Agent) runUpdateInstall(ctx context.Context, rawPayload json.RawMessage) executor.Result {
+	var payload struct {
+		KBIDs     []string `json:"kb_ids"`
+		TargetKBs []string `json:"target_kbs"`
+	}
+	if len(rawPayload) > 0 {
+		_ = json.Unmarshal(rawPayload, &payload)
+	}
+	targetKBs := append(payload.KBIDs, payload.TargetKBs...)
+
+	installRes, err := patching.Install(ctx, targetKBs)
+	outBytes, _ := json.Marshal(installRes)
+	if err != nil {
+		return executor.Result{
+			ExitCode: -1,
+			Stdout:   string(outBytes),
+			Stderr:   "windows update install failed: " + err.Error(),
+		}
+	}
+	exitCode := 0
+	if installRes.Status == "failed" {
+		exitCode = 1
+	}
+	return executor.Result{
+		ExitCode: exitCode,
+		Stdout:   string(outBytes),
+	}
 }
 
 func pendingResultNotices(store *SeenStore, limit int) []client.PendingResultNotice {

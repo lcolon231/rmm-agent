@@ -50,11 +50,39 @@ func TestBuildSectionNormalizesAndAllowlists(t *testing.T) {
 	if missing[0]["kb_id"] != "KB5034123" || missing[0]["severity"] != "Critical" {
 		t.Fatalf("allowlisted fields lost: %+v", missing[0])
 	}
+	if missing[0]["priority_grade"] != "P1 - Critical" {
+		t.Fatalf("priority_grade want 'P1 - Critical', got: %+v", missing[0]["priority_grade"])
+	}
 	if section.Payload["reboot_required"] != true {
 		t.Fatalf("system reboot_required not carried: %+v", section.Payload["reboot_required"])
 	}
 	if summary.MissingCount != 1 || summary.InstalledCount != 1 || summary.Status != inventory.StatusOK {
 		t.Fatalf("unexpected summary: %+v", summary)
+	}
+}
+
+func TestCalculatePriorityGrade(t *testing.T) {
+	tests := []struct {
+		severity       string
+		classification string
+		reboot         bool
+		want           string
+	}{
+		{"Critical", "Security Updates", true, "P1 - Critical"},
+		{"Critical", "Updates", false, "P1 - Critical"},
+		{"Important", "Security Updates", false, "P2 - High"},
+		{"", "Security Updates", false, "P2 - High"},
+		{"Moderate", "Updates", false, "P3 - Medium"},
+		{"Low", "Service Packs", false, "P3 - Medium"},
+		{"", "Feature Packs", false, "P4 - Low"},
+		{"", "Definition Updates", false, "P4 - Low"},
+	}
+	for _, tt := range tests {
+		got := CalculatePriorityGrade(tt.severity, tt.classification, tt.reboot)
+		if got != tt.want {
+			t.Errorf("CalculatePriorityGrade(%q, %q, %v) = %q, want %q",
+				tt.severity, tt.classification, tt.reboot, got, tt.want)
+		}
 	}
 }
 

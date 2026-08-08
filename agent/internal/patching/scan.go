@@ -32,7 +32,22 @@ const (
 var missingFields = []string{
 	"title", "kb_id", "update_id", "classification", "product",
 	"severity", "reboot_required", "is_downloaded", "support_url",
-	"last_deployment_change",
+	"last_deployment_change", "priority_grade",
+}
+
+// CalculatePriorityGrade determines the priority level of a missing update based on
+// MSRC severity, classification, and reboot requirements.
+func CalculatePriorityGrade(severity, classification string, rebootRequired bool) string {
+	switch {
+	case severity == "Critical" || (classification == "Security Updates" && rebootRequired):
+		return "P1 - Critical"
+	case severity == "Important" || classification == "Security Updates" || classification == "Critical Updates":
+		return "P2 - High"
+	case severity == "Moderate" || severity == "Low" || classification == "Updates" || classification == "Service Packs":
+		return "P3 - Medium"
+	default:
+		return "P4 - Low"
+	}
 }
 
 var installedFields = []string{
@@ -89,6 +104,12 @@ func BuildSection(
 	for _, row := range missing {
 		if !nonEmptyString(row["title"]) {
 			continue
+		}
+		if _, exists := row["priority_grade"]; !exists {
+			sev, _ := row["severity"].(string)
+			cls, _ := row["classification"].(string)
+			reb, _ := row["reboot_required"].(bool)
+			row["priority_grade"] = CalculatePriorityGrade(sev, cls, reb)
 		}
 		normMissing = append(normMissing, allowlist(row, missingFields))
 	}
