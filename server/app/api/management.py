@@ -92,6 +92,8 @@ from app.models.models import (
     MonitoringScope,
     Operator,
     OperatorRole,
+    ScriptParameterValueSet,
+    ScriptVersion,
     Site,
     WebhookDeliveryStatus,
     WebhookEndpoint,
@@ -124,6 +126,8 @@ from app.schemas.schemas import (
     NavigationSiteOut,
     SiteCreate,
     SiteOut,
+    TaskRunHistoryOut,
+    TaskRunItemOut,
     TrustStateChange,
 )
 from app.schemas.monitoring import (
@@ -1049,6 +1053,42 @@ async def list_signing_keys(db: AsyncSession = Depends(get_db)):
     }
 
 
+async def _resolve_script_provenance(
+    db: AsyncSession,
+    script_version_id: str | None,
+    value_set_id: str | None,
+) -> None:
+    """Fail closed unless the optional script provenance is coherent (issue #50).
+
+    A parameter value set must name the version it belongs to; a value set
+    without a version, an unknown version/value set, or a value set that points
+    at a different version are all rejected so a run can never claim a
+    provenance that does not exist.
+    """
+    if value_set_id is not None and script_version_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "script_parameter_value_set_requires_version"},
+        )
+    if script_version_id is not None:
+        if await db.get(ScriptVersion, script_version_id) is None:
+            raise HTTPException(
+                status_code=400, detail={"code": "script_version_not_found"}
+            )
+    if value_set_id is not None:
+        value_set = await db.get(ScriptParameterValueSet, value_set_id)
+        if value_set is None:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "script_parameter_value_set_not_found"},
+            )
+        if value_set.script_version_id != script_version_id:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "script_parameter_value_set_mismatch"},
+            )
+
+
 @router.post("/agents/{agent_id}/commands", response_model=CommandOut)
 async def dispatch_command(
     agent_id: str,
@@ -1145,6 +1185,10 @@ async def dispatch_command(
             },
         )
 
+    await _resolve_script_provenance(
+        db, body.script_version_id, body.script_parameter_value_set_id
+    )
+
     await audit.record(
         db,
         action="command.authorization_allowed",
@@ -1167,6 +1211,12 @@ async def dispatch_command(
         status=CommandStatus.queued,
         created_at=now,
         expires_at=now + timedelta(seconds=body.ttl_seconds),
+        # Run provenance (issue #50): who dispatched and the script-library
+        # origin, recorded on the run row itself.
+        actor_email=operator.email,
+        actor_operator_id=operator.id,
+        script_version_id=body.script_version_id,
+        script_parameter_value_set_id=body.script_parameter_value_set_id,
     )
     db.add(cmd)
     await db.flush()  # persist before signing
@@ -1198,7 +1248,7 @@ async def dispatch_command(
         )
     ).hexdigest()
 
-    await audit.record(
+    dispatch_event = await audit.record(
         db,
         action="command.dispatched",
         actor=operator.email,
@@ -1214,8 +1264,14 @@ async def dispatch_command(
             "nonce": cmd.nonce,
             "signing_key_id": cmd.signing_key_id,
             "envelope_sha256": envelope_sha256,
+            "script_version_id": cmd.script_version_id,
+            "script_parameter_value_set_id": cmd.script_parameter_value_set_id,
         },
     )
+    # Link the run to its place in the audit hash chain, then flush so the
+    # audit-event insert precedes the command update the FK depends on.
+    cmd.dispatch_audit_event_id = dispatch_event.id
+    await db.flush()
     return cmd
 
 
@@ -1326,6 +1382,70 @@ async def get_command(
         detail={"command_id": cmd.id, "status": detail.status.value},
     )
     return detail
+
+
+@router.get("/task-runs", response_model=TaskRunHistoryOut)
+async def list_task_runs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    agent_id: str | None = Query(None),
+    status: CommandStatus | None = Query(None),
+    kind: CommandKind | None = Query(None),
+    actor_operator_id: str | None = Query(None),
+    script_version_id: str | None = Query(None),
+    created_from: datetime | None = Query(None, alias="from"),
+    created_to: datetime | None = Query(None, alias="to"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Complete cross-endpoint task-run history, newest first (issue #50).
+
+    Unlike the per-endpoint history this spans every agent and carries the run
+    provenance (actor, script-library origin, audit link, lineage) plus the
+    endpoint hostname. It is a metadata view only — captured output stays behind
+    the audited command-detail read — so, like the per-endpoint list, the read
+    itself is not audited.
+
+    ``status`` filters on the stored value; a queued/dispatched row past its
+    expiry still reports as expired in the response via
+    :func:`_effective_command_status`, matching what operators see elsewhere.
+    """
+    filters = []
+    if agent_id is not None:
+        filters.append(Command.agent_id == agent_id)
+    if status is not None:
+        filters.append(Command.status == status)
+    if kind is not None:
+        filters.append(Command.kind == kind)
+    if actor_operator_id is not None:
+        filters.append(Command.actor_operator_id == actor_operator_id)
+    if script_version_id is not None:
+        filters.append(Command.script_version_id == script_version_id)
+    if created_from is not None:
+        filters.append(Command.created_at >= created_from)
+    if created_to is not None:
+        filters.append(Command.created_at <= created_to)
+
+    total = (
+        await db.execute(select(func.count()).select_from(Command).where(*filters))
+    ).scalar_one()
+    result = await db.execute(
+        select(Command, Agent.hostname)
+        .join(Agent, Command.agent_id == Agent.id)
+        .where(*filters)
+        .order_by(Command.created_at.desc(), Command.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    now = _now()
+    items = []
+    for cmd, hostname in result.all():
+        item = TaskRunItemOut.model_validate(cmd)
+        item.status = _effective_command_status(cmd, now)
+        item.hostname = hostname
+        items.append(item)
+    return TaskRunHistoryOut(
+        items=items, page=page, page_size=page_size, total=total
+    )
 
 
 # --------------------------------------------------------------------------- #

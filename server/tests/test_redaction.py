@@ -582,6 +582,8 @@ PRODUCER_DETAILS = {
         "nonce": "Zx9_ab-CD012345",
         "signing_key_id": "key-1",
         "envelope_sha256": "b" * 64,
+        "script_version_id": None,
+        "script_parameter_value_set_id": None,
     },
     "command.result_pending": {
         "command_id": ID3,

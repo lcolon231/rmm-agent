@@ -76,7 +76,7 @@ and SHA-256/Merkle roots—remains readable.
 | `command.authorization_allowed` | `api/management.py` dispatch policy | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |
 | `command.authorization_denied` | `api/management.py` dispatch policy | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |
 | `command.completed` | `api/agents.py` result acceptance | `command_id`, `kind`, `exit_code`, `status`, `agent_completed_at`, `stdout_truncated`, `stderr_truncated`, `stdout_total_bytes`, `stderr_total_bytes` |
-| `command.dispatched` | `api/management.py` signed dispatch | `command_id`, `kind`, `payload_keys`, `envelope_version`, `schema_version`, `issued_at`, `expires_at`, `nonce`, `signing_key_id`, `envelope_sha256` |
+| `command.dispatched` | `api/management.py` signed dispatch | `command_id`, `kind`, `payload_keys`, `envelope_version`, `schema_version`, `issued_at`, `expires_at`, `nonce`, `signing_key_id`, `envelope_sha256`, `script_version_id`, `script_parameter_value_set_id` |
 | `command.result_pending` | `api/agents.py` durable-result notice | `command_id`, `kind`, `agent_completed_at` |
 | `command_detail.viewed` | `api/management.py` sensitive result view | `command_id`, `status` |
 | `endpoint_detail.viewed` | `api/management.py` endpoint detail | `history_hours`, `history_limit`, `history_count`, `history_truncated`, `script_execution_allowed` |

@@ -334,6 +334,10 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "nonce",
         "signing_key_id",
         "envelope_sha256",
+        # Run provenance (issue #50): script-library origin of the run, or NULL
+        # for an ad-hoc command. Plain ids, never secret-bearing values.
+        "script_version_id",
+        "script_parameter_value_set_id",
     ),
     "command.result_pending": _schema(
         "command_id",
