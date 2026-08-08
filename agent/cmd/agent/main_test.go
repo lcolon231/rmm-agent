@@ -2,9 +2,11 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -59,5 +61,51 @@ func TestNonInteractiveRequiresSecretSource(t *testing.T) {
 	t.Setenv("NODELINK_MISSING_TOKEN", "")
 	if _, err := enrollmentToken("NODELINK_MISSING_TOKEN", "", false, true); err == nil {
 		t.Fatal("missing noninteractive token unexpectedly accepted")
+	}
+}
+
+// The release build and the installer compile both assert the embedded version
+// through `rmm-agent version -expect <release version>`, so an unstamped or
+// mismatched binary can never be published (issue #179).
+func TestVersionSubcommandPrintsAndAssertsEmbeddedVersion(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := runVersion("0.1.4", nil, &out, &errOut); code != 0 {
+		t.Fatalf("version exit code = %d, stderr %q", code, errOut.String())
+	}
+	if strings.TrimSpace(out.String()) != "0.1.4" {
+		t.Fatalf("version stdout = %q", out.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runVersion("0.1.4", []string{"-expect", "0.1.4"}, &out, &errOut); code != 0 {
+		t.Fatalf("matching -expect exit code = %d, stderr %q", code, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runVersion("0.1.3", []string{"-expect", "0.1.4"}, &out, &errOut); code == 0 {
+		t.Fatal("mismatched -expect unexpectedly succeeded")
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runVersion(unstampedVersion, []string{"-expect", "0.1.4"}, &out, &errOut); code == 0 {
+		t.Fatal("unstamped binary unexpectedly passed -expect")
+	}
+	if !strings.Contains(errOut.String(), "unstamped") {
+		t.Fatalf("unstamped rejection must say why; got %q", errOut.String())
+	}
+}
+
+// An unstamped build still reports its fallback so a technician can tell a
+// local build apart from a release artifact.
+func TestVersionSubcommandReportsUnstampedBuildsWithoutExpect(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := runVersion(unstampedVersion, nil, &out, &errOut); code != 0 {
+		t.Fatalf("version exit code = %d", code)
+	}
+	if strings.TrimSpace(out.String()) != unstampedVersion {
+		t.Fatalf("version stdout = %q", out.String())
 	}
 }

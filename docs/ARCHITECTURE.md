@@ -43,8 +43,13 @@ and response polling:
 
 1. An unenrolled agent calls `POST /api/v1/enroll`.
 2. The enrolled agent calls `POST /api/v1/heartbeat` on its configured cadence.
-3. The heartbeat advertises durable pending-result notices and the response
-   carries queued or lease-expired dispatched commands.
+3. The heartbeat reports the running agent version and durable pending-result
+   notices; the response carries queued or lease-expired dispatched commands.
+   Because the version rides on the beat, an in-place upgrade refreshes the
+   recorded version on the next successful check-in, with the same identity and
+   credentials and without an inventory upload. Only a change is written, and
+   only a change is audited (`agent.version_changed`, with the previous and
+   current values so a rollback stays visible).
 4. The agent executes accepted commands sequentially, protects the bounded
    result in its local journal, and retries
    `POST /api/v1/commands/{id}/result` until idempotently acknowledged.
@@ -377,7 +382,7 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/auth/revoke-tokens` | Revoke caller sessions | Readonly+ |
 | POST | `/auth/operators/{id}/revoke-tokens` | Revoke operator sessions | Admin |
 | POST | `/enroll` | Enroll with site token | Enrollment token |
-| POST | `/heartbeat` | Store telemetry, advertise inventory hashes, poll commands | Agent token |
+| POST | `/heartbeat` | Store telemetry, report the running agent version, advertise inventory hashes, poll commands | Agent token |
 | POST | `/agents/me/inventory` | Submit requested inventory sections | Agent token |
 | POST | `/agents/me/monitoring/results` | Submit revision-pinned idempotent check results | Agent token |
 | POST | `/commands/{id}/result` | Submit buffered result | Agent token |

@@ -5,6 +5,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { RevokeAction } from "@/components/enrollment/revoke-action";
 import { getDashboardSession } from "@/lib/dashboard-session";
+import { formatAgentVersion } from "@/lib/endpoint-detail-core";
 import { getAuditEvents, getEnrollmentAgent } from "@/lib/enrollment";
 import { formatEnrollmentDateTime } from "@/lib/enrollment-core";
 import { NodelinkApiError } from "@/lib/nodelink-api";
@@ -37,7 +38,7 @@ export default async function EnrollmentAgentDetailPage({ params }: { params: Pr
         <dl>
           <div><dt>Agent ID</dt><dd><code>{agent.id}</code></dd></div><div><dt>Site ID</dt><dd><code>{agent.site_id}</code></dd></div>
           <div><dt>Enrollment token ID</dt><dd><code>{agent.enrolled_by_token_id ?? "Legacy"}</code></dd></div><div><dt>Owner user ID</dt><dd>{agent.owner_user_id ?? "Unassigned"}</dd></div>
-          <div><dt>Environment</dt><dd>{agent.environment ?? "Unassigned"}</dd></div><div><dt>Version</dt><dd>{agent.agent_version || "Unknown"}</dd></div>
+          <div><dt>Environment</dt><dd>{agent.environment ?? "Unassigned"}</dd></div><div><dt>Version</dt><dd>{formatAgentVersion(agent.agent_version, "Unknown")}</dd></div>
           <div><dt>Operating system</dt><dd>{agent.os} {agent.os_version}</dd></div><div><dt>Architecture</dt><dd>{agent.architecture || "Unknown"}</dd></div>
           <div className="wide"><dt>Labels</dt><dd>{agent.labels.length ? agent.labels.join(", ") : "No labels"}</dd></div>
         </dl>

@@ -32,7 +32,18 @@ way to write a Windows service; it is only compiled into the Windows build
 cd agent
 ./build.sh 0.1.0          # produces bin/rmm-agent-{windows-amd64.exe,linux-amd64,darwin-arm64}
 # or a single target:
-GOOS=windows GOARCH=amd64 go build -o rmm-agent.exe ./cmd/agent
+GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=0.1.0" -o rmm-agent.exe ./cmd/agent
+```
+
+The version is compiled in with `-ldflags "-X main.version=..."`; a plain
+`go build` leaves the `0.1.0-dev` fallback, which every endpoint would then
+report as its running version. `build.sh` verifies its own stamp, and the
+release workflow and the Windows installer refuse an unstamped binary outright
+(issue #179). Check any binary with:
+
+```bash
+./rmm-agent version                 # prints the compiled-in version
+./rmm-agent version -expect 0.1.4   # exits non-zero unless it matches exactly
 ```
 
 ## Configure & run
@@ -73,6 +84,9 @@ cp config.example.json config.json
 - `-once` runs a single check-in and exits (useful for testing / cron-style use).
 - `run` is the default subcommand, so `./rmm-agent -config config.json` and
   `./rmm-agent run -config config.json` are equivalent.
+- The running version is reported on every heartbeat, so an in-place upgrade
+  refreshes what the dashboard shows on the next successful check-in — no
+  re-enrollment and no inventory change needed.
 
 ### Optional TLS SPKI pinning
 

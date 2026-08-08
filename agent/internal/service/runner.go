@@ -310,6 +310,10 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, fatal(fmt.Errorf("agent HTTP client: %w", err))
 	}
+	// Report the running build on every beat (issue #179). An in-place upgrade
+	// keeps the same identity and credentials, so the heartbeat is the only
+	// signal that tells the server the stored enrollment-time version is stale.
+	api.SetAgentVersion(a.version)
 	monitoringStore, err := monitoring.LoadStore(monitoring.StatePath(a.configPath))
 	if err != nil {
 		return nil, fatal(err)

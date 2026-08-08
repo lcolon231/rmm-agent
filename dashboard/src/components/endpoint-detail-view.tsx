@@ -21,6 +21,7 @@ import type { DashboardOperator } from "@/lib/dashboard-auth-core";
 import type { EndpointDetailData, EndpointTelemetrySample } from "@/lib/endpoint-detail";
 import {
   buildMetricPath,
+  formatAgentVersion,
   formatEndpointDateTime,
   formatEndpointMetric,
   formatEndpointUptime,
@@ -148,7 +149,7 @@ export function EndpointDetailView({ endpoint, operator }: { endpoint: EndpointD
           <div className="detail-title">
             <span className="eyebrow">Managed endpoint</span>
             <h1 id="endpoint-title">{endpoint.hostname}</h1>
-            <p>{[endpoint.os, endpoint.os_version].filter(Boolean).join(" ")} · Agent {endpoint.agent_version || "version unavailable"}</p>
+            <p>{[endpoint.os, endpoint.os_version].filter(Boolean).join(" ")} · Agent {formatAgentVersion(endpoint.agent_version)}</p>
           </div>
           <div className="detail-state-stack">
             <span className={`detail-status ${endpoint.status}`}>

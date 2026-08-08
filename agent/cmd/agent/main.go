@@ -13,6 +13,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/url"
@@ -55,6 +56,8 @@ func main() {
 		runEnroll(args)
 	case "validate-upgrade":
 		runValidateUpgrade(args)
+	case "version":
+		os.Exit(runVersion(version, args, os.Stdout, os.Stderr))
 	case "install", "uninstall", "start", "stop":
 		runControl(sub, args)
 	case "help", "-h", "--help":
@@ -64,6 +67,39 @@ func main() {
 		usage(os.Stderr)
 		os.Exit(2)
 	}
+}
+
+// unstampedVersion is the value `version` carries when a build did not pass
+// -ldflags "-X main.version=...". A release artifact must never report it, so
+// the release build and the installer compile both refuse it (issue #179).
+const unstampedVersion = "0.1.0-dev"
+
+// runVersion prints the version stamped into this binary and, with -expect,
+// asserts it matches a caller-supplied value. Release builds and the installer
+// compile use the assertion so an unstamped or mismatched binary can never be
+// published or wrapped in an installer. Returns the process exit code.
+func runVersion(reported string, args []string, out, errOut io.Writer) int {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	fs.SetOutput(errOut)
+	expect := fs.String("expect", "", "fail unless the embedded version equals this value")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	fmt.Fprintln(out, reported)
+	if *expect == "" {
+		return 0
+	}
+	if reported == unstampedVersion {
+		fmt.Fprintf(errOut,
+			"version: binary is unstamped (%s); rebuild with -ldflags \"-X main.version=%s\"\n",
+			reported, *expect)
+		return 1
+	}
+	if reported != *expect {
+		fmt.Fprintf(errOut, "version: embedded version %q does not match expected %q\n", reported, *expect)
+		return 1
+	}
+	return 0
 }
 
 // runValidateUpgrade is a read-only installer preflight. It never prints file
@@ -245,6 +281,7 @@ Usage:
   rmm-agent [run] [-config FILE] [-once]   Run in the foreground (default)
   rmm-agent enroll --server URL [--token-env NAME | --token-file FILE | --token-stdin]
   rmm-agent validate-upgrade [-config FILE] Read-only installer upgrade preflight
+  rmm-agent version [-expect VERSION]      Print (and optionally assert) the build version
   rmm-agent install   [-config FILE]       Install as a Windows service (auto-start)
   rmm-agent uninstall                      Remove the Windows service (idempotent)
   rmm-agent start                          Start the installed Windows service

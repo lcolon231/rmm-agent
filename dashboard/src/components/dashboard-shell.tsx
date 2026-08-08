@@ -44,6 +44,7 @@ import { useMemo, useState } from "react";
 import type { DashboardOperator } from "@/lib/dashboard-auth-core";
 import type { NavigationData } from "@/lib/client-navigation";
 import type { EndpointListData } from "@/lib/endpoint-list";
+import { formatAgentVersion } from "@/lib/endpoint-detail-core";
 import { operatorRoleLabel } from "@/lib/operator-management-core";
 import {
   attentionItems,
@@ -464,7 +465,7 @@ export function DashboardShell({
     os: [endpoint.os, endpoint.os_version].filter(Boolean).join(" "),
     client: endpoint.client_name,
     site: endpoint.site_name,
-    group: endpoint.agent_version || "Agent",
+    group: formatAgentVersion(endpoint.agent_version, "Agent"),
     status: endpoint.status === "online" ? "online" : endpoint.status === "offline" ? "offline" : "warning",
     lastSeen: endpoint.last_seen_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(endpoint.last_seen_at)) : "Never",
     user: endpoint.logged_in_user ?? "—",

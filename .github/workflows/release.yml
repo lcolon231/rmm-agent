@@ -73,6 +73,15 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: ./build.sh "$VERSION"
 
+      # An unstamped binary reports the 0.1.0-dev fallback forever, which makes
+      # every upgraded endpoint look stale on the dashboard. Refuse to publish
+      # one (issue #179). build.sh already verifies the host-native artifact;
+      # this repeats the assertion as an explicit, named release gate.
+      - name: Verify the embedded agent version matches the release tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./bin/rmm-agent-linux-amd64 version -expect "$VERSION"
+
       # SPDX SBOM over the whole repo captures the Go agent and Python server.
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
@@ -149,6 +158,13 @@ jobs:
           $env:GOOS = 'windows'
           $env:GOARCH = 'amd64'
           go build -ldflags "-s -w -X main.version=$env:VERSION" -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
+
+      # The exact binary the installer is about to embed must report the
+      # release version (issue #179). The installer compile asserts this again
+      # through ISPP, so an unstamped binary can never reach an installer.
+      - name: Verify the embedded agent version matches the release tag
+        working-directory: agent
+        run: .\bin\rmm-agent-windows-amd64.exe version -expect ${{ steps.version.outputs.version }}
 
       # Pinned to the 6.x line to match installer/NodeLinkAgent.iss.
       - name: Install Inno Setup

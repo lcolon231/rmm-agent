@@ -293,20 +293,31 @@ confirm:
 
 ### Case H — Tokenless in-place upgrade with identity preservation
 
-1. Install and enroll the v0.1.3 release on the VM. Wait for a successful
-   heartbeat, record the agent ID shown by the dashboard/API, then record the
-   runtime-file hashes:
+Run this case twice — **v0.1.2 → v0.1.3** and **v0.1.3 → v0.1.4** — each from
+the matching clean snapshot. Both hops must preserve identity and both must
+refresh the reported version (issue #179).
+
+1. Install and enroll the starting release (v0.1.2, then v0.1.3) on the VM.
+   Wait for a successful heartbeat, record the agent ID shown by the
+   dashboard/API, the version the dashboard/API reports, the version the
+   installed executable reports, then record the runtime-file hashes:
 
 ```powershell
 $AgentDir = 'C:\Program Files\NodeLink\Agent'
 $BeforeAgentId = '<agent ID from the dashboard/API>'
+$BeforeExeVersion = & "$AgentDir\rmm-agent.exe" version    # e.g. 0.1.2
+$BeforeApiVersion = '<agent_version from GET /api/v1/endpoints/{id}>'
 $BeforeIdentityHash = (Get-FileHash "$AgentDir\identity.json" -Algorithm SHA256).Hash
 $BeforeConfigHash = (Get-FileHash "$AgentDir\config.json" -Algorithm SHA256).Hash
 sc.exe qc NodeLinkAgent
 ```
 
-2. Run the v0.1.4 installer **without** `/TOKEN=`, without a sidecar, and without
-   minting a new enrollment token.
+The executable and the dashboard/API must already agree before the upgrade. A
+binary that prints `0.1.0-dev` is an unstamped build, not a release — stop and
+reinstall from a real release artifact.
+
+2. Run the next release's installer (v0.1.3, then v0.1.4) **without** `/TOKEN=`,
+   without a sidecar, and without minting a new enrollment token.
 3. Expected wizard behavior: no enrollment-token page; progress and completion
    text explicitly say this is an upgrade and the existing enrollment is being
    preserved.
@@ -318,11 +329,21 @@ $AfterConfigHash = (Get-FileHash "$AgentDir\config.json" -Algorithm SHA256).Hash
 $BeforeIdentityHash -eq $AfterIdentityHash  # True unless post-start credential rotation occurred
 $BeforeConfigHash -eq $AfterConfigHash      # True
 Get-Service NodeLinkAgent                   # Running / Automatic
-go version -m "$AgentDir\rmm-agent.exe"    # ldflags include main.version=0.1.4
+$AfterExeVersion = & "$AgentDir\rmm-agent.exe" version   # the upgraded version
+& "$AgentDir\rmm-agent.exe" version -expect 0.1.4        # exits 0 only on an exact match
 ```
 
-5. On the dashboard/API, confirm the same agent ID reports a new heartbeat. If
-   credential rotation changed `identity.json` after service startup, confirm
+5. On the dashboard/API, confirm the same agent ID reports a new heartbeat and
+   that `agent_version` now shows the upgraded version — no re-enrollment and no
+   inventory change required. Record it next to the executable version:
+
+```powershell
+$AfterApiVersion = '<agent_version from GET /api/v1/endpoints/{id}>'
+$AfterExeVersion -eq $AfterApiVersion   # True after the first post-upgrade heartbeat
+```
+
+   The endpoint list and the endpoint detail view must both show the new value.
+   If credential rotation changed `identity.json` after service startup, confirm
    the agent ID is unchanged and retain the before/after hashes as evidence.
 6. Negative checks, each from a v0.1.3 snapshot:
    - rename/remove `identity.json` and run v0.1.4 without a token: setup follows
@@ -333,9 +354,11 @@ go version -m "$AgentDir\rmm-agent.exe"    # ldflags include main.version=0.1.4
    - cancel or force a setup failure before restart: the original
      `identity.json` and `config.json` hashes remain unchanged.
 
-✅ **Pass H** when v0.1.3 → v0.1.4 completes with no enrollment token, retains
-the same identity/configuration, runs the v0.1.4 binary, and heartbeats as the
-same endpoint; every incomplete/corrupt-state case fails closed.
+✅ **Pass H** when both v0.1.2 → v0.1.3 and v0.1.3 → v0.1.4 complete with no
+enrollment token, retain the same identity/configuration, run the upgraded
+binary, heartbeat as the same endpoint, and show the upgraded `agent_version` in
+the dashboard list and detail views; every incomplete/corrupt-state case fails
+closed.
 
 ### Case I — Uninstall
 
@@ -365,7 +388,7 @@ history).
 - [ ] E — Silent `/TOKEN=` (and sidecar `/VERYSILENT`) enrolls with no input
 - [ ] F — Read-only `403`, unauthenticated `401`, unknown site `404`
 - [ ] G — Audit events present and secret-redacted; no `nlenr_` in any detail or log
-- [ ] H — Tokenless v0.1.3 → v0.1.4 upgrade preserves identity/config and fails closed on inconsistent state
+- [ ] H — Tokenless v0.1.2 → v0.1.3 and v0.1.3 → v0.1.4 upgrades preserve identity/config, refresh the reported version, and fail closed on inconsistent state
 - [ ] I — Uninstall removes the service and runtime files
 
 ---
@@ -376,8 +399,12 @@ history).
 - `Get-Service` output showing Running (A/E/H) and absent (I).
 - The redacted `config.json` after enrollment.
 - Before/after SHA-256 hashes for `identity.json` and `config.json`, the stable
-  agent ID, `sc.exe qc`/`Get-Service` output, embedded executable version, and
-  the first successful post-upgrade heartbeat (Case H).
+  agent ID, `sc.exe qc`/`Get-Service` output, and the first successful
+  post-upgrade heartbeat (Case H).
+- For each upgrade hop in Case H, the `rmm-agent.exe version` output and the
+  `agent_version` the dashboard/API reports, both before and after the upgrade —
+  the pair is the evidence that the running build and the recorded build agree
+  and that neither is the unstamped `0.1.0-dev` fallback.
 - Audit export (or screenshots) for `installer_package.created`,
   `agent.enrolled`, and the rejection cases.
 - The `503` response bodies for Case C.

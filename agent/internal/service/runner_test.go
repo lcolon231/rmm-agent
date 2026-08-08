@@ -703,3 +703,43 @@ func TestUpdateScanCommandResultFailsOnHistoryError(t *testing.T) {
 		t.Fatalf("existing and collection errors were not preserved: %q", result.Stderr)
 	}
 }
+
+// TestCheckInReportsRunningAgentVersion: the session the runner builds from a
+// persisted identity must report the running build on every beat, so an
+// in-place upgrade refreshes the server's stored version on the next check-in
+// without a re-enrollment (issue #179).
+func TestCheckInReportsRunningAgentVersion(t *testing.T) {
+	reported := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		version, _ := body["agent_version"].(string)
+		reported <- version
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "trust_state": "active"})
+	}))
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(cfg, []byte(`{"server_url":"`+srv.URL+`","heartbeat_seconds":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeIdentity(t, filepath.Join(dir, "identity.json"), srv.URL)
+
+	a := NewAgent(cfg, "0.1.4", log.New(&bytes.Buffer{}, "", 0))
+	if err := a.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	select {
+	case got := <-reported:
+		if got != "0.1.4" {
+			t.Fatalf("heartbeat agent_version = %q, want %q", got, "0.1.4")
+		}
+	default:
+		t.Fatal("no heartbeat reached the test server")
+	}
+}

@@ -188,6 +188,40 @@ returns the new plaintext once. The previous value immediately fails.
 
 Automatic agent use is deferred until response-loss-safe renewal is designed.
 
+### `POST /api/v1/heartbeat` — reported agent version
+
+Authentication: current agent credential. Every beat may carry the running
+build so an in-place upgrade refreshes the stored version on the next
+successful check-in — no re-enrollment, no new token, and no inventory upload.
+
+```json
+{
+  "agent_version": "0.1.4",
+  "cpu_percent": 4.5,
+  "supported_command_envelope_versions": ["command-v3"]
+}
+```
+
+The server updates `Agent.agent_version` only when the reported value differs
+from the stored one, and records a single `agent.version_changed` audit event
+carrying `previous` and `current`. A lower version is recorded exactly like a
+higher one: a rollback is fleet state an operator needs to see, not an anomaly
+to hide. Steady-state beats that repeat the same version write nothing.
+
+Compatibility policy for the field:
+
+| Reported value | Behavior |
+|---|---|
+| Absent | Accepted; the stored version is left untouched (agents built before the field existed keep beating normally) |
+| Present and well formed | Stored when changed; ignored when identical |
+| Empty or whitespace | `422` — a build that reports nothing is a defect, not a silent no-op |
+| Longer than 50 characters | `422` — the value is bounded to the stored column width |
+| Malformed (anything outside `^[0-9A-Za-z][0-9A-Za-z.+_-]*$`) | `422` |
+
+A rejected beat changes no stored state. Quarantined agents perform a minimal
+check-in only, so they cannot move the recorded version; a revoked credential
+fails authentication with `401` before the body is considered.
+
 ## Agents
 
 ### `GET /api/v1/agents`

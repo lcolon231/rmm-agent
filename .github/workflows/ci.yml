@@ -72,11 +72,18 @@ jobs:
           go-version: '1.22'
           cache-dependency-path: agent/go.sum
 
+      # Stamped like a release build: the installer compile below refuses any
+      # binary whose embedded version differs from NODELINK_VERSION (issue
+      # #179), so CI exercises that guard on every run.
       - name: Build the Windows agent
         working-directory: agent
         run: |
           $env:GOOS = 'windows'; $env:GOARCH = 'amd64'
-          go build -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
+          go build -ldflags "-X main.version=0.0.0-ci" -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
+
+      - name: Verify the embedded agent version
+        working-directory: agent
+        run: .\bin\rmm-agent-windows-amd64.exe version -expect 0.0.0-ci
 
       # GitHub windows-latest runners run elevated, so the SCM operations the
       # agent performs (register/start/stop/delete a service) are permitted.

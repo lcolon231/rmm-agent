@@ -29,6 +29,21 @@ export function formatEndpointMetric(value: number | null): string {
   return value === null ? "Not reported" : `${Math.round(value)}%`;
 }
 
+/**
+ * Render the agent build the server currently holds for an endpoint (issue
+ * #179). The value is refreshed by the agent's heartbeat after an in-place
+ * upgrade, so whatever the API returns is what an operator sees — this only
+ * decides what to show when an endpoint has never reported one, and never
+ * substitutes a remembered or inferred version.
+ */
+export function formatAgentVersion(
+  value: string | null | undefined,
+  fallback = "version unavailable",
+): string {
+  const trimmed = (value ?? "").trim();
+  return trimmed === "" ? fallback : trimmed;
+}
+
 export function buildMetricPath(
   samples: EndpointTelemetrySample[],
   key: MetricKey,

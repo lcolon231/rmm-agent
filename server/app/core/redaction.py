@@ -116,6 +116,10 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "previous",
         "current",
     ),
+    # Running agent build changed between beats (issue #179). Both values are
+    # bounded, non-secret build identifiers, so they stay readable — that is
+    # what makes an unexpected downgrade auditable.
+    "agent.version_changed": _schema("previous", "current"),
     "agent.offline": _schema("last_seen_at"),
     "agent.quarantined": _schema(
         "previous_trust_state",
