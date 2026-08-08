@@ -69,6 +69,8 @@ const SECTION_LABELS: Record<string, string> = {
   security_bitlocker: "BitLocker",
   security_secure_boot: "Secure Boot",
   security_tpm: "TPM",
+  local_administrators: "Local administrators",
+  windows_updates: "Windows Updates",
 };
 
 export function sectionLabel(section: string): string {

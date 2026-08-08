@@ -29,6 +29,9 @@ const (
 	KindPowerShell = "powershell"
 	KindShell      = "shell"
 	KindInventory  = "collect_inventory"
+	// KindScanUpdates is a typed operation handled by the runner, not this
+	// script executor: it triggers a bounded Windows Update scan (issue #51).
+	KindScanUpdates = "scan_updates"
 )
 
 // defaultTimeout bounds how long any single command may run.

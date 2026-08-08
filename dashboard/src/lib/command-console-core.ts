@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-export type CommandKind = "powershell" | "shell" | "collect_inventory";
+export type CommandKind =
+  | "powershell"
+  | "shell"
+  | "collect_inventory"
+  | "scan_updates";
 
 export type CommandStatus =
   | "queued"
@@ -73,6 +77,13 @@ export const commandKindDefinitions: CommandKindDefinition[] = [
     kind: "collect_inventory",
     label: "Collect inventory",
     description: "Ask the agent to refresh its hardware and software inventory.",
+    requiresScript: false,
+  },
+  {
+    kind: "scan_updates",
+    label: "Scan for updates",
+    description:
+      "Run a Windows Update scan; results appear in the endpoint's Windows Updates inventory.",
     requiresScript: false,
   },
 ];

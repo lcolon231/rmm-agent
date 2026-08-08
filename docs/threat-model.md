@@ -179,7 +179,13 @@ least-privilege service account is still future work.
 
 The server reduces this exposure by separating typed operations from arbitrary
 scripts. Roles alone cannot dispatch `powershell` or `shell`; an admin must
-grant the operator one matching global, site, or agent scope with a reason.
+grant the operator one matching global, site, or agent scope with a reason. The
+typed operations `collect_inventory` and `scan_updates` (issue #51) are
+read-only, bounded, and need only the operator role — `scan_updates` runs a
+Windows Update *scan*, never an installation, and its normalized result is
+bounded and carries no secrets. An agent that does not recognize a command kind
+rejects it at signature/kind validation, so introducing a new typed operation is
+fail-closed for a mixed-version fleet.
 Scope changes and every allowed/denied authorization decision are audited, and
 denial occurs before command construction, signing, or queueing. This is not a
 replacement for approval workflows, expiring grants, or a least-privilege agent

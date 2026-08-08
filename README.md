@@ -92,6 +92,15 @@ The code in this repository currently provides:
   non-Windows host `unsupported`, so an empty membership is never mistaken for
   "no administrators". Membership is never expanded beyond the group itself — a
   nested group is one `group` member, not its transitive users.
+- On-demand Windows Update scan (issue #51) via the typed `scan_updates`
+  command: a normalized `windows_updates` inventory section of missing/applicable
+  and installed updates (KB, product, classification, severity, reboot state,
+  timestamps), bounded and fail-closed, reported through the inventory pipeline so
+  it inherits history and diffs. The scan runs on the command path, not the
+  heartbeat, so a minutes-long search never stalls check-in. Update
+  **installation/deployment is not implemented** — this is scan and inventory
+  only. The live on-hardware Windows Update COM scan is exercised in Windows CI /
+  an operator step; the agent's normalization is covered by fixture tests.
 - Inventory history and deterministic diffs, with per-endpoint dashboard views.
   Snapshots are written only when a section's content changes, so history is a
   change log rather than a sample. Diffs are identity-keyed rather than
