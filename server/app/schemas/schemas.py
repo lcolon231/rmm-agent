@@ -385,6 +385,13 @@ class CommandCreate(BaseModel):
     kind: CommandKind
     payload: dict = Field(default_factory=dict)
     ttl_seconds: int = Field(default=300, ge=1, le=86_400)
+    # Optional script-library provenance (issue #50). When a run originates from
+    # a reviewed script version — and optionally a captured parameter value set —
+    # the caller passes the ids so the run row records where it came from. The
+    # dispatch handler validates existence and that the value set belongs to the
+    # version, failing closed on any mismatch.
+    script_version_id: str | None = Field(default=None, max_length=36)
+    script_parameter_value_set_id: str | None = Field(default=None, max_length=36)
 
     @field_validator("payload")
     @classmethod
@@ -481,6 +488,34 @@ class CommandDetailOut(CommandHistoryItemOut):
     stderr: str | None
     stdout_total_bytes: int | None
     stderr_total_bytes: int | None
+
+
+class TaskRunItemOut(CommandHistoryItemOut):
+    """One row of the complete, cross-endpoint task-run history (issue #50).
+
+    Adds the run provenance stored on the command row — who dispatched it, the
+    script-library origin, its link into the audit chain, and forward-compat
+    scheduling/retry lineage — plus the endpoint hostname for display. Like the
+    per-endpoint history, this metadata view never carries captured output; the
+    sensitive stdout/stderr stay behind the audited command-detail read.
+    """
+
+    hostname: str | None = None
+    actor_email: str | None = None
+    actor_operator_id: str | None = None
+    script_version_id: str | None = None
+    script_parameter_value_set_id: str | None = None
+    dispatch_audit_event_id: str | None = None
+    planned_at: datetime | None = None
+    attempt: int = 1
+    parent_command_id: str | None = None
+
+
+class TaskRunHistoryOut(BaseModel):
+    items: list[TaskRunItemOut] = Field(default_factory=list)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total: int = Field(ge=0)
 
 
 # Server-side acceptance caps for reported command output. They mirror the

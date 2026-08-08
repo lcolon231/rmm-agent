@@ -473,6 +473,11 @@ class Heartbeat(Base):
 
 class Command(Base):
     __tablename__ = "commands"
+    __table_args__ = (
+        # Global task-run history (issue #50) orders newest-first across every
+        # endpoint and filters by created_at range; index the sort/range key.
+        Index("ix_commands_created_at", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     agent_id: Mapped[str] = mapped_column(
@@ -516,6 +521,46 @@ class Command(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Run provenance (issue #50). Answers "who ran what, from where" on the run
+    # row itself, not just in the tamper-evident audit log. All nullable so the
+    # column set is backfill-free: NULL means "not recorded" (e.g. historic rows
+    # or ad-hoc commands with no library origin), never a positive claim.
+    #
+    # The operator who dispatched the run. actor_email is denormalized for
+    # display; actor_operator_id is the durable link (SET NULL if the operator is
+    # later removed, so the run record survives).
+    actor_email: Mapped[str | None] = mapped_column(String(320))
+    actor_operator_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    # Script-library origin, when the run came from a reviewed script version and
+    # (optionally) a captured parameter value set. RESTRICT would block deleting
+    # referenced versions; the library keeps versions immutable, so a plain FK is
+    # enough and SET NULL preserves the run if a value set is ever purged.
+    script_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("script_versions.id", ondelete="SET NULL"), index=True
+    )
+    script_parameter_value_set_id: Mapped[str | None] = mapped_column(
+        ForeignKey("script_parameter_value_sets.id", ondelete="SET NULL")
+    )
+    # Link to the command.dispatched audit event so a run points back at its
+    # place in the hash chain. SET NULL keeps the run if audit is ever pruned.
+    dispatch_audit_event_id: Mapped[str | None] = mapped_column(
+        ForeignKey("audit_events.id", ondelete="SET NULL")
+    )
+    # Forward-compat lifecycle/lineage for recurring scheduling (#49) and retries.
+    # No producer populates these yet; they land now so scheduling/retry work
+    # needs no second migration. planned_at is the scheduled fire time; attempt
+    # numbers a run within its retry lineage; parent_command_id chains a retry to
+    # the run it superseded.
+    planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempt: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
+    )
+    parent_command_id: Mapped[str | None] = mapped_column(
+        ForeignKey("commands.id", ondelete="SET NULL")
+    )
 
     agent: Mapped["Agent"] = relationship(back_populates="commands")
 
