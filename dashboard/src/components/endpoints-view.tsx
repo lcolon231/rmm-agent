@@ -13,6 +13,7 @@ import {
   Monitor,
   RefreshCw,
   Search,
+  Trash2,
 } from "lucide-react";
 
 import Link from "next/link";
@@ -30,6 +31,51 @@ function Meter({ value }: { value: number | null }) {
       <i>
         <b className={tone} style={{ width: `${value}%` }} />
       </i>
+    </div>
+  );
+}
+
+function EndpointRowActions({ id, name }: { id: string; name: string }) {
+  const router = useRouter();
+  const [deleting, setDeleting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    if (!confirm(`Are you sure you want to delete endpoint "${name}"? This permanently revokes its credentials.`)) return;
+    setDeleting(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/enrollment-agents/${encodeURIComponent(id)}/revoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "Deleted from dedicated endpoints inventory page" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete endpoint");
+      router.refresh();
+    } catch (err: unknown) {
+      const error = err as Error;
+      setMessage(error.message || "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="schedule-row-actions" style={{ justifyContent: "flex-end", gap: "6px" }}>
+      {message ? <small className="schedule-status-msg" style={{ color: "#ef4444" }}>{message}</small> : null}
+      <Link className="schedule-btn run-now" href={`/endpoints/${encodeURIComponent(id)}`}>
+        Open
+      </Link>
+      <button
+        type="button"
+        className="schedule-btn delete"
+        disabled={deleting}
+        onClick={handleDelete}
+        title={`Delete endpoint ${name}`}
+      >
+        <Trash2 size={14} />
+      </button>
     </div>
   );
 }
@@ -215,7 +261,7 @@ export function EndpointsView({
                   <th>CPU</th>
                   <th>Memory</th>
                   <th>Disk</th>
-                  <th className="text-right">Action</th>
+                  <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -257,9 +303,7 @@ export function EndpointsView({
                       <Meter value={item.disk} />
                     </td>
                     <td className="text-right">
-                      <Link className="schedule-btn run-now" href={`/endpoints/${encodeURIComponent(item.id)}`}>
-                        Open endpoint
-                      </Link>
+                      <EndpointRowActions id={item.id} name={item.name} />
                     </td>
                   </tr>
                 ))}
