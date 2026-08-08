@@ -8,6 +8,8 @@ package service
 import (
 	"context"
 	"crypto/ed25519"
+	crand "crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,14 +109,15 @@ func EnrollIdentity(
 		return nil, err
 	}
 	id := &config.Identity{
-		AgentID:             resp.AgentID,
-		AgentToken:          resp.AgentToken,
-		CommandPublicKey:    resp.CommandPublicKey,
-		CommandPublicKeys:   resp.CommandPublicKeys,
-		CommandSigningKeyID: resp.CommandSigningKeyID,
-		HeartbeatSeconds:    resp.HeartbeatSeconds,
-		ServerURL:           serverURL,
-		CredentialExpiresAt: resp.CredentialExpiresAt,
+		AgentID:              resp.AgentID,
+		AgentToken:           resp.AgentToken,
+		CommandPublicKey:     resp.CommandPublicKey,
+		CommandPublicKeys:    resp.CommandPublicKeys,
+		CommandSigningKeyID:  resp.CommandSigningKeyID,
+		HeartbeatSeconds:     resp.HeartbeatSeconds,
+		ServerURL:            serverURL,
+		CredentialExpiresAt:  resp.CredentialExpiresAt,
+		CredentialObtainedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if err := id.Save(idPath); err != nil {
 		return nil, fmt.Errorf("persist enrolled identity: %w", err)
@@ -351,14 +354,15 @@ func (a *Agent) ensureEnrolled(ctx context.Context, cfg *config.Config, idPath s
 	}
 
 	id := &config.Identity{
-		AgentID:             resp.AgentID,
-		AgentToken:          resp.AgentToken,
-		CommandPublicKey:    resp.CommandPublicKey,
-		CommandPublicKeys:   resp.CommandPublicKeys,
-		CommandSigningKeyID: resp.CommandSigningKeyID,
-		HeartbeatSeconds:    resp.HeartbeatSeconds,
-		ServerURL:           cfg.ServerURL,
-		CredentialExpiresAt: resp.CredentialExpiresAt,
+		AgentID:              resp.AgentID,
+		AgentToken:           resp.AgentToken,
+		CommandPublicKey:     resp.CommandPublicKey,
+		CommandPublicKeys:    resp.CommandPublicKeys,
+		CommandSigningKeyID:  resp.CommandSigningKeyID,
+		HeartbeatSeconds:     resp.HeartbeatSeconds,
+		ServerURL:            cfg.ServerURL,
+		CredentialExpiresAt:  resp.CredentialExpiresAt,
+		CredentialObtainedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if err := id.Save(idPath); err != nil {
 		return nil, fatal(err)
@@ -402,6 +406,14 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	// so make cancellation visible to the collector instead of starting work
 	// after shutdown has already been requested.
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Proactively renew the bearer credential before it expires (issue #125).
+	// This runs before the beat so the heartbeat uses the freshest token. A
+	// definitive rejection (revoked/expired) is returned so the loop surfaces
+	// the re-enrollment condition; transient failures are swallowed because the
+	// current credential is still valid until its expiry.
+	if err := a.maybeRenewCredential(ctx, s); err != nil {
 		return err
 	}
 	if s.seen.Prune(time.Now().UTC()) {
@@ -524,6 +536,88 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 		}
 	}
 	return firstReportErr
+}
+
+// maybeRenewCredential rotates the agent bearer before it expires (issue #125).
+// It renews at the midpoint between receipt and expiry, well ahead of the
+// deadline, so an occasional failed attempt has many beats to recover before the
+// credential lapses. Rotation is loss-safe: the server keeps the previous token
+// valid for a bounded overlap, so a lost response or a failed local persist just
+// means the agent keeps using the still-valid old token and retries with a fresh
+// nonce next beat. The new token is adopted only after it is durably saved.
+func (a *Agent) maybeRenewCredential(ctx context.Context, s *session) error {
+	now := time.Now().UTC()
+	if s.identity == nil || !credentialRenewDue(s.identity, now) {
+		return nil
+	}
+	nonce, err := newRotationNonce()
+	if err != nil {
+		a.log.Printf("credential renewal skipped: %v", err)
+		return nil
+	}
+	resp, err := s.api.RenewCredential(ctx, nonce)
+	if err != nil {
+		if client.IsUnauthorized(err) {
+			// The credential was rejected outright: the agent is revoked or its
+			// credential already expired past the overlap. Surface it so the loop
+			// logs the revocation/re-enrollment condition instead of silently
+			// spinning; the identity is kept on disk for operator investigation.
+			a.log.Printf("credential renewal rejected by server; this agent may be revoked or its credential expired — re-enrollment is required")
+			return err
+		}
+		a.log.Printf("credential renewal failed (%v); current credential still valid, will retry", err)
+		return nil
+	}
+
+	// Persist before adopting. If the save fails, the server has already rotated
+	// but the previous token stays valid through its overlap window, so we keep
+	// the old token in memory and retry with a fresh nonce next beat rather than
+	// switch to a token we could not durably record.
+	prev := *s.identity
+	s.identity.AgentToken = resp.AgentToken
+	s.identity.CredentialExpiresAt = resp.CredentialExpiresAt
+	s.identity.CredentialObtainedAt = now.Format(time.RFC3339Nano)
+	if err := s.identity.Save(s.identityPath); err != nil {
+		*s.identity = prev
+		a.log.Printf("failed to persist renewed credential (%v); keeping current credential and retrying", err)
+		return nil
+	}
+	s.api.SetToken(resp.AgentToken)
+	a.log.Printf("renewed agent credential (generation %d)", resp.CredentialGeneration)
+	return nil
+}
+
+// credentialRenewDue reports whether the credential should be renewed now. It is
+// due once the clock passes the midpoint between when the credential was
+// obtained and when it expires. A credential with no expiry (an older server
+// that never issued one) is never due. Unparseable or missing receipt time falls
+// back to "renew while still valid" so a one-time upgrade establishes the
+// baseline; an already-expired credential is left for the heartbeat to surface.
+func credentialRenewDue(id *config.Identity, now time.Time) bool {
+	if id.CredentialExpiresAt == "" {
+		return false
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, id.CredentialExpiresAt)
+	if err != nil {
+		return false
+	}
+	obtained, err := time.Parse(time.RFC3339Nano, id.CredentialObtainedAt)
+	if err != nil || !obtained.Before(expiresAt) {
+		return now.Before(expiresAt)
+	}
+	renewAt := obtained.Add(expiresAt.Sub(obtained) / 2)
+	return !now.Before(renewAt)
+}
+
+// newRotationNonce returns a fresh high-entropy nonce for one renewal attempt.
+// 24 random bytes encode to 32 URL-safe characters, within the server's
+// 16..64 bound.
+func newRotationNonce() (string, error) {
+	var b [24]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generate rotation nonce: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
 func (a *Agent) flushMonitoringResults(ctx context.Context, s *session) error {

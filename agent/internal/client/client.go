@@ -199,6 +199,34 @@ func (c *Client) EnrollWithName(ctx context.Context, token, agentName string, ho
 	return &out, nil
 }
 
+// SetToken switches the bearer credential used for authenticated requests. The
+// client is driven by the single check-in goroutine, so this needs no locking.
+// Used after a successful credential renewal to adopt the rotated token.
+func (c *Client) SetToken(token string) { c.agentToken = token }
+
+// AgentCredentialRenewResponse mirrors the server schema (issue #125).
+type AgentCredentialRenewResponse struct {
+	AgentID              string `json:"agent_id"`
+	AgentToken           string `json:"agent_token"`
+	CredentialExpiresAt  string `json:"credential_expires_at"`
+	OverlapExpiresAt     string `json:"overlap_expires_at"`
+	CredentialGeneration int    `json:"credential_generation"`
+}
+
+// RenewCredential rotates the agent's bearer credential. The nonce is a fresh,
+// per-attempt value the server records to reject a verbatim replay; a genuine
+// retry after a lost response uses a new nonce and rotates against the still-
+// valid overlap credential. Proof of possession is the current bearer, so this
+// is an authenticated call.
+func (c *Client) RenewCredential(ctx context.Context, rotationNonce string) (*AgentCredentialRenewResponse, error) {
+	var out AgentCredentialRenewResponse
+	body := map[string]any{"rotation_nonce": rotationNonce}
+	if err := c.do(ctx, "POST", "/api/v1/agents/credentials/renew", body, &out, true); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // Command mirrors the server's CommandOut schema.
 type Command struct {
 	ID              string          `json:"id"`
