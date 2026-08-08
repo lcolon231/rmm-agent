@@ -92,6 +92,14 @@ and SHA-256/Merkle roots—remains readable.
 | `operator.role_changed` | `api/auth.py` global-role change | `operator_id`, `previous_role`, `new_role`, `script_permission_revoked`, `reason_sha256`, `reason_bytes` |
 | `operator.status_changed` | `api/auth.py` disable/re-enable | `operator_id`, `previous_disabled`, `new_disabled`, `reason_sha256`, `reason_bytes` |
 | `operator.tokens_revoked` | `api/auth.py` token-generation bump | `operator_id`, `by` |
+| `scheduled_task.created` | `api/scheduled_tasks.py` task schedule creation | `scheduled_task_id`, `name_sha256`, `name_bytes`, `target_type`, `target_id`, `cron_expression`, `timezone`, `next_run_at`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
+| `scheduled_task.updated` | `api/scheduled_tasks.py` task schedule update | `scheduled_task_id`, `name_sha256`, `name_bytes`, `enabled`, `next_run_at`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
+| `scheduled_task.deleted` | `api/scheduled_tasks.py` task schedule deletion | `scheduled_task_id`, `name_sha256`, `name_bytes`, `target_type`, `target_id`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
+| `scheduled_task.toggled` | `api/scheduled_tasks.py` task schedule enable/disable | `scheduled_task_id`, `name_sha256`, `name_bytes`, `enabled`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
+| `scheduled_task.manually_triggered` | `api/scheduled_tasks.py` manual run-now trigger | `scheduled_task_id`, `name_sha256`, `name_bytes`, `dispatched_count`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
+| `scheduled_task.dispatched` | `core/scheduler.py` cron dispatch tick | `scheduled_task_id`, `scheduled_task_name_sha256`, `scheduled_task_name_bytes`, `command_id`, `kind`, `target_type`, `target_id` |
+| `scheduled_task.misfire_skipped` | `core/scheduler.py` misfire handling | `scheduled_task_id`, `scheduled_task_name_sha256`, `scheduled_task_name_bytes`, `scheduled_for`, `detected_at` |
+
 
 `server/tests/test_redaction.py` parses the production source and compares every
 literal producer (plus the typed trust-transition helper) with

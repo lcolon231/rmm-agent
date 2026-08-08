@@ -193,3 +193,21 @@ async def anchor_publisher(stop: asyncio.Event) -> None:
             await asyncio.wait_for(stop.wait(), timeout=interval)
         except asyncio.TimeoutError:
             pass
+
+
+async def scheduled_task_dispatcher(stop: asyncio.Event) -> None:
+    """Inspect due scheduled tasks and dispatch corresponding commands (issue #49)."""
+    from app.core import scheduler
+
+    interval = 15  # check every 15 seconds
+    while not stop.is_set():
+        try:
+            async with AsyncSessionLocal() as db:
+                await scheduler.dispatch_scheduled_tasks_once(db)
+        except Exception as exc:
+            print(f"[scheduled_task_dispatcher] error: {exc}")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+
