@@ -13,7 +13,7 @@ HIPAA-supporting controls and defensible compliance evidence.
 
 | Area | Current state |
 | --- | --- |
-| Latest tagged release | `v0.1.2` |
+| Latest tagged release | `v0.1.3` |
 | Primary support target | Windows agent and Windows service |
 | Server | FastAPI management and agent APIs with PostgreSQL; SQLite is limited to development and tests |
 | Dashboard | Authenticated Next.js interface with live enrollment, endpoint, command, inventory, monitoring-policy, audit-evidence, and administrator workflows; the aggregate operations overview remains fixture-backed |
@@ -241,7 +241,9 @@ The `v0.1.2` release consolidated the secure enrollment work: limited-use
 tokens, agent identity and revocation workflows, the live enrollment dashboard,
 PostgreSQL migration/rollback evidence, and release verification.
 
-After `v0.1.2`, `main` has:
+The `v0.1.3` release (schema `0028`, cut from `main`) then delivered the
+Milestone-1 body of work below on top of `v0.1.2`, as a pilot-only release with
+regenerated backup and rollback evidence. Building on `v0.1.2`, it has:
 
 - shipped administrator-only operator identity management and explicit
   arbitrary-script permission controls in the dashboard, then completed
@@ -291,12 +293,25 @@ After `v0.1.2`, `main` has:
   role-gated API/dashboard workflows, and recovery documentation;
 - added typed script parameters (#48): version-bound definitions, encrypted
   expiring value preparation, strict validation/default/choice behavior,
-  cross-platform quoting, and secret-redacted evidence; and
+  cross-platform quoting, and secret-redacted evidence;
+- added recurring task scheduling (#49): cron-based schedules with concurrency
+  and misfire policies dispatched through the signed command pipeline;
+- added loss-safe agent credential renewal (#125): server-enforced credential
+  expiry with a bounded rotation overlap, so a dropped renewal never strands an
+  endpoint;
+- landed the Phase-1 interactive shell session foundation (#61): an authorized,
+  audited, capability-negotiated, and time- and byte-bounded session lifecycle,
+  with the live streaming transport, agent shell I/O loop, and terminal UI
+  deferred, so no shell session is usable end to end yet;
+- landed the Phase-1 Windows Update scan (#51): a typed `scan_updates` command
+  and a normalized missing/installed update inventory section, with update
+  installation/deployment explicitly out of scope; and
 - kept the merged branch green across license, Go, Windows, Python, dashboard,
   migration, installer, and release-target checks.
 
-The current Milestone 1 work remains focused on recurring tasks and
-tenant-aware authorization design.
+With `v0.1.3` cut from `main`, current work focuses on the Phase-2 follow-ons —
+the live shell streaming transport (#61) and Windows Update installation
+(#51) — and tenant-aware authorization design.
 
 ## Planned
 
@@ -398,7 +413,7 @@ See [server/README.md](server/README.md) to run the backend,
 [installer/README.md](installer/README.md) for the Windows installer. See
 [dashboard/README.md](dashboard/README.md) to run the dashboard foundation.
 The complete enrollment runbooks, API reference, security model, decisions,
-known issues, and v0.1.2 candidate notes are under
+known issues, and release candidate notes are under
 [`docs/agent-enrollment/`](docs/agent-enrollment/).
 
 Before any pilot, review the [threat model](docs/threat-model.md),
