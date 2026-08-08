@@ -329,11 +329,18 @@ async def test_credential_renewal_and_agent_revocation(clients):
         await admin.post("/agents/enroll", json=enroll_payload(token["token"]))
     ).json()
     old_auth = {"Authorization": f"Bearer {enrolled['agent_token']}"}
-    renewed = await admin.post("/agents/credentials/renew", headers=old_auth)
+    renewed = await admin.post(
+        "/agents/credentials/renew",
+        json={"rotation_nonce": "renew-nonce-000001"},
+        headers=old_auth,
+    )
     assert renewed.status_code == 200
     new_auth = {"Authorization": f"Bearer {renewed.json()['agent_token']}"}
     heartbeat = {"supported_command_envelope_versions": ["command-v3"]}
-    assert (await admin.post("/heartbeat", json=heartbeat, headers=old_auth)).status_code == 401
+    # The superseded credential keeps working during the bounded overlap window
+    # (issue #125), so a dropped renewal response cannot strand the endpoint;
+    # the new credential is valid immediately.
+    assert (await admin.post("/heartbeat", json=heartbeat, headers=old_auth)).status_code == 200
     assert (await admin.post("/heartbeat", json=heartbeat, headers=new_auth)).status_code == 200
 
     revoked = await admin.post(

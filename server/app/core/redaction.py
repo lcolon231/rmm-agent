@@ -106,7 +106,12 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "agent_name",
         digest_fields=("hostname", "agent_name"),
     ),
-    "agent.credential_renewed": _schema("credential_fingerprint"),
+    "agent.credential_renewed": _schema(
+        "credential_fingerprint", "credential_generation"
+    ),
+    # Non-secret reason a renewal was refused (e.g. rotation_nonce_reused),
+    # issue #125. Never carries a token or nonce value, only the coded reason.
+    "agent.credential_renewal_rejected": _schema("reason"),
     "agent.command_envelope_capabilities_changed": _schema(
         "previous",
         "current",

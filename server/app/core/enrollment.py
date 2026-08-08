@@ -7,11 +7,12 @@ legacy and resource-oriented HTTP routes cannot drift apart.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.security import credential_fingerprint, generate_token, hash_token
 from app.core.timeutil import ensure_utc
 from app.models.models import (
@@ -119,6 +120,11 @@ async def redeem_enrollment_token(
         token_hash=hash_token(agent_token),
         credential_fingerprint=credential_fingerprint(agent_token),
         credential_issued_at=now,
+        # Issue the credential with an enforced finite lifetime (issue #125); the
+        # agent renews before this passes and the server rotates with a bounded
+        # overlap so renewal is loss-safe.
+        credential_expires_at=now
+        + timedelta(seconds=settings.agent_credential_lifetime_seconds),
         name=resolved_name,
         hostname=body.hostname.strip(),
         os=(body.operating_system or body.os).strip(),
