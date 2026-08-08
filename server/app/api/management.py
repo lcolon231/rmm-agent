@@ -880,7 +880,8 @@ async def list_endpoints(
         .limit(1)
         .scalar_subquery()
     )
-    filters = []
+    filters = [Agent.trust_state != AgentTrustState.revoked]
+
     if client_id:
         filters.append(Client.id == client_id)
     if site_id:
