@@ -13,7 +13,7 @@
     "lint": "eslint",
     "smoke:production": "node scripts/production-smoke.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test test/runtime-config.test.ts test/dashboard-auth-core.test.ts test/endpoint-detail-core.test.ts test/command-console-core.test.ts test/enrollment-core.test.ts test/client-site-management-core.test.ts test/operator-management-core.test.ts test/operator-management-route-core.test.ts test/audit-core.test.ts test/inventory-core.test.ts test/monitoring-core.test.ts test/alert-action-route-core.test.ts test/email-delivery-route-core.test.ts test/webhook-route-core.test.ts test/script-library.test.ts test/task-runs-core.test.ts test/installer-download-core.test.ts test/scheduled-tasks-core.test.ts",
+    "test": "node --experimental-strip-types --test test/runtime-config.test.ts test/dashboard-auth-core.test.ts test/endpoint-detail-core.test.ts test/command-console-core.test.ts test/enrollment-core.test.ts test/client-site-management-core.test.ts test/operator-management-core.test.ts test/operator-management-route-core.test.ts test/audit-core.test.ts test/inventory-core.test.ts test/monitoring-core.test.ts test/alert-action-route-core.test.ts test/email-delivery-route-core.test.ts test/webhook-route-core.test.ts test/script-library.test.ts test/task-runs-core.test.ts test/installer-download-core.test.ts test/scheduled-tasks-core.test.ts test/shell-session-core.test.ts",
 
     "validate:env": "node --experimental-strip-types scripts/validate-environment.ts"
   },

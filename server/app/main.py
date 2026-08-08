@@ -13,7 +13,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select, text
 
-from app.api import agents, auth, management, scheduled_tasks, script_library
+from app.api import (
+    agents,
+    auth,
+    management,
+    scheduled_tasks,
+    script_library,
+    shell_sessions,
+)
 from app.core import metrics
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, Base, engine
@@ -26,6 +33,7 @@ from app.core.tasks import (
     offline_sweeper,
     retention_sweeper,
     scheduled_task_dispatcher,
+    shell_session_sweeper,
     webhook_sender,
 )
 from app.models.models import Agent
@@ -58,12 +66,19 @@ async def lifespan(app: FastAPI):
     email_sender = asyncio.create_task(email_alert_sender(stop))
     webhook_delivery_sender = asyncio.create_task(webhook_sender(stop))
     task_scheduler = asyncio.create_task(scheduled_task_dispatcher(stop))
+    shell_expirer = asyncio.create_task(shell_session_sweeper(stop))
     try:
         yield
     finally:
         stop.set()
         await asyncio.gather(
-            sweeper, publisher, pruner, email_sender, webhook_delivery_sender, task_scheduler
+            sweeper,
+            publisher,
+            pruner,
+            email_sender,
+            webhook_delivery_sender,
+            task_scheduler,
+            shell_expirer,
         )
 
 
@@ -78,6 +93,7 @@ app.include_router(agents.router, prefix="/api/v1")
 app.include_router(management.router, prefix="/api/v1")
 app.include_router(script_library.router, prefix="/api/v1")
 app.include_router(scheduled_tasks.router, prefix="/api/v1")
+app.include_router(shell_sessions.router, prefix="/api/v1")
 
 
 

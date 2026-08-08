@@ -185,6 +185,7 @@ func (c *Client) EnrollWithName(ctx context.Context, token, agentName string, ho
 		"agent_version":                       agentVersion,
 		"architecture":                        runtime.GOARCH,
 		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
+		"supported_capabilities":              protocol.SupportedCapabilities(),
 	}
 	var out EnrollResponse
 	if err := c.do(ctx, "POST", "/api/v1/enroll", body, &out, false); err != nil {
@@ -302,6 +303,7 @@ func (c *Client) HeartbeatWithPendingResults(
 		"uptime_seconds":                      s.UptimeSeconds,
 		"logged_in_user":                      s.LoggedInUser,
 		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
+		"supported_capabilities":              protocol.SupportedCapabilities(),
 		"pending_results":                     pendingResults,
 	}
 	// Only digests ride on the beat. Full snapshots go to SubmitInventory when

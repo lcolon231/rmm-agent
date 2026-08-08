@@ -315,10 +315,15 @@ The repository does **not** currently contain:
   console, enrollment administration/audit, and operator administration use
   live API data; aggregate overview and general audit panels remain
   fixture-backed.
-- WebSocket or other live agent transport, interactive remote shell, streaming
-  command output, technician-to-end-user chat, or command cancellation. Polling
-  remains the only transport and a dispatched command is bounded only by its
-  signed expiry.
+- A working interactive remote shell, live streaming command output,
+  technician-to-end-user chat, or command cancellation. Polling remains the only
+  command transport and a dispatched command is bounded only by its signed
+  expiry. The interactive shell **foundation** has landed (issue #61, Phase 1):
+  the authorized/audited/bounded session lifecycle, agent capability
+  negotiation, server-side idle/absolute timeouts, and output-limit contract,
+  with fail-closed defaults (`docs/SHELL-SESSIONS.md`). The live streaming
+  transport, the agent's shell I/O loop, and the dashboard terminal UI are not
+  built yet, so the capability is not usable end to end.
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, or TPM
   inventory beyond the read-only sections described above.
 - Additional notification providers beyond email and signed generic webhooks.

@@ -135,6 +135,18 @@ class Settings(BaseSettings):
     # lost heartbeat response or stop-before-start without duplicate execution.
     command_redelivery_seconds: int = 120
 
+    # --- Interactive shell sessions (issue #61) ---
+    # Server-authoritative bounds for a live shell session. The absolute
+    # lifetime caps total duration; the idle timeout ends a session with no I/O.
+    # The output cap bounds total streamed bytes (fail closed on exceed). At most
+    # one active session per agent is admitted. The poll timeout bounds how long
+    # a long-poll waits for a frame before returning empty.
+    shell_session_max_lifetime_seconds: int = 1800
+    shell_session_idle_timeout_seconds: int = 300
+    shell_session_output_byte_limit: int = 1024 * 1024
+    shell_session_max_concurrent_per_agent: int = 1
+    shell_session_poll_timeout_seconds: int = 25
+
     @property
     def offline_threshold_seconds(self) -> int:
         return self.heartbeat_interval_seconds * self.offline_after_missed
