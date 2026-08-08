@@ -73,3 +73,33 @@ export async function requestNodelinkApi<T>(
 
   return response.json() as Promise<T>;
 }
+
+/**
+ * Like {@link requestNodelinkApi} but returns the raw {@link Response} without
+ * parsing the body, for endpoints that stream a non-JSON payload (e.g. the
+ * personalized installer ZIP, issue #9). The caller inspects `response.ok` and
+ * reads the body as bytes on success or JSON on error. Accept is left broad so
+ * the server can return a binary success or a JSON error.
+ */
+export async function requestNodelinkApiRaw(
+  path: string,
+  { headers, sessionToken, signal, ...options }: NodelinkRequestOptions,
+  { fetchImpl, runtimeConfig }: RequestDependencies,
+): Promise<Response> {
+  if (!path.startsWith("/")) {
+    throw new Error("NodeLink API paths must start with '/'.");
+  }
+  if (!sessionToken.trim()) {
+    throw new Error("A server-managed operator session is required for NodeLink API access.");
+  }
+
+  const requestHeaders = new Headers(headers);
+  requestHeaders.set("Authorization", `Bearer ${sessionToken}`);
+
+  return fetchImpl(new URL(path, runtimeConfig.apiBaseUrl), {
+    ...options,
+    cache: "no-store",
+    headers: requestHeaders,
+    signal: signal ?? AbortSignal.timeout(runtimeConfig.apiTimeoutMs),
+  });
+}
