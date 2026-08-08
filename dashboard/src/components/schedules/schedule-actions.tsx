@@ -22,8 +22,9 @@ export function ScheduleRowActions({ task }: { task: ScheduledTaskItem }) {
       const res = await fetch(`/api/schedules/${task.id}/toggle`, { method: "POST" });
       if (!res.ok) throw new Error("Failed to toggle schedule");
       router.refresh();
-    } catch (err: any) {
-      setMessage(err.message || "Toggle failed");
+    } catch (err: unknown) {
+      const error = err as Error;
+      setMessage(error.message || "Toggle failed");
     } finally {
       setToggling(false);
     }
@@ -38,8 +39,9 @@ export function ScheduleRowActions({ task }: { task: ScheduledTaskItem }) {
       if (!res.ok) throw new Error(data.error || "Failed to trigger schedule");
       setMessage(`Dispatched to ${data.dispatched} agent(s)`);
       router.refresh();
-    } catch (err: any) {
-      setMessage(err.message || "Run failed");
+    } catch (err: unknown) {
+      const error = err as Error;
+      setMessage(error.message || "Run failed");
     } finally {
       setRunning(false);
     }
@@ -53,8 +55,9 @@ export function ScheduleRowActions({ task }: { task: ScheduledTaskItem }) {
       const res = await fetch(`/api/schedules/${task.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete schedule");
       router.refresh();
-    } catch (err: any) {
-      setMessage(err.message || "Delete failed");
+    } catch (err: unknown) {
+      const error = err as Error;
+      setMessage(error.message || "Delete failed");
     } finally {
       setDeleting(false);
     }
@@ -146,8 +149,9 @@ export function CreateScheduleButton() {
       setTargetId("");
       setCommandText("");
       router.refresh();
-    } catch (err: any) {
-      setError(err.message || "Create failed");
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(error.message || "Create failed");
     } finally {
       setLoading(false);
     }

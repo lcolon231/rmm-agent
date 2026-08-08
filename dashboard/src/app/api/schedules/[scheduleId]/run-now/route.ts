@@ -21,10 +21,11 @@ export async function POST(
       sessionToken: session.sessionToken,
     });
     return NextResponse.json(data);
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error as { message?: string; status?: number };
     return NextResponse.json(
-      { error: error?.message || "Failed to run scheduled task." },
-      { status: error?.status || 500 },
+      { error: err?.message || "Failed to run scheduled task." },
+      { status: err?.status || 500 },
     );
   }
 }
