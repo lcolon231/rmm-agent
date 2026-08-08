@@ -337,9 +337,10 @@ function EndpointDrawer({ endpoint, onClose }: { endpoint: Endpoint | null; onCl
               </div>
             ) : null}
             <div className="drawer-actions">
-              <button className="primary-action"><Command size={17} /> Review action</button>
+              <Link className="primary-action" href={`/endpoints/${encodeURIComponent(endpoint.id)}/commands`}><Command size={17} /> Review action</Link>
               <Link className="secondary-action" href={`/endpoints/${encodeURIComponent(endpoint.id)}`}>Open endpoint</Link>
             </div>
+
           </>
         ) : null}
       </aside>
