@@ -51,6 +51,12 @@ MAX_ADDRESSES_PER_ADAPTER = 32
 #: and would silently never report software at all.
 MAX_SOFTWARE_ENTRIES = 1024
 
+#: Bounds on the Windows Update section (issue #51). As with software, the byte
+#: budget is the binding constraint at full field lengths; these counts stop a
+#: pathological endpoint from enumerating an unbounded update backlog.
+MAX_MISSING_UPDATES = 512
+MAX_INSTALLED_UPDATES = 1024
+
 ShortText = Annotated[str, StringConstraints(max_length=255)]
 Identifier = Annotated[str, StringConstraints(max_length=128)]
 
@@ -75,6 +81,11 @@ class InventorySection(str, Enum):
     #: administrative rights on the endpoint, resolved by the built-in group's
     #: well-known SID so the reading is identical on non-English Windows.
     local_administrators = "local_administrators"
+    #: Windows Update scan result (issue #51): missing/applicable and installed
+    #: updates. Populated on demand by the scan_updates typed command, not on the
+    #: heartbeat inventory path, because a live scan takes far longer than the
+    #: per-section heartbeat budget.
+    windows_updates = "windows_updates"
 
 
 class InventorySectionStatus(str, Enum):
@@ -428,6 +439,72 @@ class LocalAdministratorsInventory(BaseModel):
     )
 
 
+class MissingUpdate(BaseModel):
+    """One applicable-but-not-installed update the scan found (issue #51).
+
+    ``title`` is the only field a row cannot be reported without; everything
+    else is ``None`` when Windows Update did not supply it, never guessed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    title: ShortText
+    #: e.g. "KB5034123"; some updates (drivers, definition updates) have none.
+    kb_id: Identifier | None = None
+    #: Windows Update's UpdateID GUID, for correlating across snapshots.
+    update_id: Identifier | None = None
+    #: Update category / classification, e.g. "Security Updates".
+    classification: ShortText | None = None
+    #: Category product/title, e.g. "Windows 11".
+    product: ShortText | None = None
+    #: MSRC severity, e.g. "Critical" / "Important"; unset when not rated.
+    severity: ShortText | None = None
+    reboot_required: bool | None = None
+    is_downloaded: bool | None = None
+    support_url: ShortText | None = None
+    last_deployment_change: datetime | None = None
+
+
+class InstalledUpdate(BaseModel):
+    """One update already installed on the endpoint (issue #51)."""
+
+    model_config = ConfigDict(extra="forbid")
+    #: KB identifier (Get-Hotfix HotFixID) or the update's KB, when known.
+    kb_id: Identifier | None = None
+    title: ShortText | None = None
+    description: ShortText | None = None
+    installed_on: datetime | None = None
+    installed_by: ShortText | None = None
+    #: Windows Update history client-application id, when sourced from history.
+    client_application_id: ShortText | None = None
+    support_url: ShortText | None = None
+
+
+class WindowsUpdatesInventory(BaseModel):
+    """Normalized Windows Update scan result (issue #51).
+
+    Populated on demand by the ``scan_updates`` typed command, not on the
+    heartbeat inventory path. ``missing`` and ``installed`` are bounded lists;
+    an empty ``missing`` with ``status == ok`` means "fully patched", which a
+    non-``ok`` section status must not be confused with.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    #: When the endpoint completed the scan.
+    scanned_at: datetime | None = None
+    #: System-level pending-reboot state independent of any single update.
+    reboot_required: bool | None = None
+    #: Where the data came from, e.g. "windows_update_agent".
+    source: ShortText | None = None
+    #: Non-secret scan error string/HRESULT when the scan itself failed.
+    error_code: ShortText | None = None
+    missing: list[MissingUpdate] = Field(
+        default_factory=list, max_length=MAX_MISSING_UPDATES
+    )
+    installed: list[InstalledUpdate] = Field(
+        default_factory=list, max_length=MAX_INSTALLED_UPDATES
+    )
+
+
 #: Section name -> payload model. The submission validator uses this to pick the
 #: right model, so an unknown section is rejected rather than stored unparsed.
 SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
@@ -442,6 +519,7 @@ SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
     InventorySection.security_secure_boot: SecureBootInventory,
     InventorySection.security_tpm: TpmInventory,
     InventorySection.local_administrators: LocalAdministratorsInventory,
+    InventorySection.windows_updates: WindowsUpdatesInventory,
 }
 
 

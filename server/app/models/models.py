@@ -99,6 +99,11 @@ class CommandKind(str, enum.Enum):
     powershell = "powershell"
     shell = "shell"
     collect_inventory = "collect_inventory"
+    # Typed Windows Update scan (issue #51). Like collect_inventory it is a
+    # read-only, bounded typed operation, not arbitrary script execution: it
+    # triggers an on-demand scan whose normalized result lands in the
+    # windows_updates inventory section.
+    scan_updates = "scan_updates"
 
 
 class CommandStatus(str, enum.Enum):

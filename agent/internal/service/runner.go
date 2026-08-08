@@ -27,6 +27,7 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/executor"
 	"github.com/lcolon231/rmm/agent/internal/inventory"
 	"github.com/lcolon231/rmm/agent/internal/monitoring"
+	"github.com/lcolon231/rmm/agent/internal/patching"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 	"github.com/lcolon231/rmm/agent/internal/verify"
@@ -729,9 +730,14 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		return nil
 	}
 
-	script := extractScript(cmd.Payload)
 	a.log.Printf("executing command %s (kind=%s)", cmd.ID, cmd.Kind)
-	res := a.run(ctx, cmd.Kind, script)
+	var res executor.Result
+	if cmd.Kind == executor.KindScanUpdates {
+		res = a.runUpdateScan(ctx, s)
+	} else {
+		script := extractScript(cmd.Payload)
+		res = a.run(ctx, cmd.Kind, script)
+	}
 
 	result := client.CommandResult{
 		ExitCode:         res.ExitCode,
@@ -753,6 +759,40 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		return err
 	}
 	return nil
+}
+
+// runUpdateScan handles the scan_updates typed command (issue #51): it runs a
+// bounded Windows Update scan, submits the normalized result through the ordinary
+// inventory pipeline (so history/diff/views come for free), and returns a small
+// JSON summary as the command output. The scan running here rather than on the
+// heartbeat keeps the beat fast, and reuses the command path's one-at-a-time
+// execution and 5-minute-plus bound.
+func (a *Agent) runUpdateScan(ctx context.Context, s *session) executor.Result {
+	section, summary, err := patching.Scan(ctx)
+	if err != nil {
+		return executor.Result{
+			ExitCode: -1,
+			Stderr:   "windows update scan failed: " + err.Error(),
+		}
+	}
+
+	// Push the normalized section. A submission failure does not undo the scan;
+	// it is surfaced on stderr so the operator knows the inventory view may lag.
+	var stderr string
+	if _, subErr := s.api.SubmitInventory(ctx, inventory.Submission{
+		InventorySchemaVersion: inventory.SchemaVersion,
+		AgentVersion:           a.version,
+		Sections:               []inventory.Section{section},
+	}); subErr != nil {
+		a.log.Printf("scan_updates: inventory submission failed: %v", subErr)
+		stderr = "inventory submission failed (result retained on endpoint): " + subErr.Error()
+	}
+
+	out, err := json.Marshal(summary)
+	if err != nil {
+		out = []byte(`{"status":"ok"}`)
+	}
+	return executor.Result{ExitCode: 0, Stdout: string(out), Stderr: stderr}
 }
 
 func pendingResultNotices(store *SeenStore, limit int) []client.PendingResultNotice {

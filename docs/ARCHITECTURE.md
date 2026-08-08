@@ -104,8 +104,24 @@ The operations plane delivers endpoint state and actions. It currently contains
 enrollment, heartbeat telemetry, polling command pickup, three command kinds,
 buffered result submission, command history, and offline status transitions.
 
-The current command kinds are `powershell`, `shell`, and `collect_inventory`.
-`collect_inventory` is a typed operation authorized by the operator role.
+The current command kinds are `powershell`, `shell`, `collect_inventory`, and
+`scan_updates`. `collect_inventory` and `scan_updates` are typed operations
+authorized by the operator role.
+
+`scan_updates` (issue #51) runs a bounded, on-demand Windows Update scan on the
+endpoint and reports a normalized result — missing/applicable and installed
+updates with KB, product, classification, severity, reboot state, and timestamps
+— through the `windows_updates` inventory section (so it inherits the section
+history and diff machinery of §6.2). It is deliberately *not* on the heartbeat
+inventory path: a live update search takes minutes, far more than the per-section
+heartbeat budget, so it runs through the command executor's longer bound instead.
+The command result carries only a small summary (missing/installed counts, reboot
+state, error code); the full data travels in the inventory section. Update
+*installation/deployment* is not part of this and remains unimplemented. An agent
+that predates the kind rejects the command at signature/kind validation, so a
+mixed-version fleet is safe.
+
+
 `powershell` and `shell` are arbitrary-script escape hatches and require a
 separate scope matching the target. Authorization is evaluated and audited
 before an envelope is created, signed, or queued. See

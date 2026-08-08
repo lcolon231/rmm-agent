@@ -40,7 +40,7 @@ def authorize_command(
             reason="operator_role_insufficient",
         )
 
-    if kind == CommandKind.collect_inventory:
+    if kind in (CommandKind.collect_inventory, CommandKind.scan_updates):
         return CommandAuthorizationDecision(
             allowed=True,
             policy="typed_operation",
