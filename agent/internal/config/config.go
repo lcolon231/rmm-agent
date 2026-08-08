@@ -91,6 +91,43 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
+// ValidateTokenFreeUpgradeState performs the read-only checks an installer
+// needs before replacing an already-enrolled agent. It deliberately validates
+// only the protected envelope metadata: Windows DPAPI user-scope payloads can
+// be decrypted only by the service identity, not by the interactive elevated
+// installer. The service performs that final decryption when it starts.
+func ValidateTokenFreeUpgradeState(configPath string) error {
+	cfg, err := Load(configPath)
+	if err != nil {
+		return fmt.Errorf("upgrade config is not usable: %w", err)
+	}
+	if cfg.EnrollmentToken != "" {
+		return fmt.Errorf("upgrade config still contains an enrollment token")
+	}
+
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("read upgrade config: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(configData, &fields); err != nil {
+		return fmt.Errorf("parse upgrade config: %w", err)
+	}
+	if _, present := fields["enrollment_token"]; present {
+		return fmt.Errorf("upgrade config contains an enrollment_token member")
+	}
+
+	identityPath := IdentityPath(configPath)
+	identityData, err := os.ReadFile(identityPath)
+	if err != nil {
+		return fmt.Errorf("read upgrade identity %s: %w", identityPath, err)
+	}
+	if err := validateIdentityEnvelope(identityData, platformProtector.Scheme()); err != nil {
+		return fmt.Errorf("upgrade identity is not usable: %w", err)
+	}
+	return nil
+}
+
 // IdentityPath returns where the enrolled identity is stored, alongside the
 // config file by convention.
 func IdentityPath(configPath string) string {

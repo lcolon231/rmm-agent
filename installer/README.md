@@ -1,9 +1,11 @@
 # NodeLink RMM Agent — Windows installer
 
 A graphical Inno Setup installer that wraps the existing agent binary so a
-non-technical person can install the agent on an endpoint: run the setup,
-enter the enrollment token, watch the progress page, and get a clear "Setup
-Completed" screen. The production server URL is configured automatically; no
+non-technical person can install the agent on an endpoint: run the setup, enter
+the enrollment token, watch the progress page, and get a clear "Setup
+Completed" screen. On an already-enrolled endpoint, setup instead performs a
+tokenless in-place upgrade and preserves the existing identity and
+configuration. The production server URL is configured automatically; no
 terminal or server-address entry is required.
 
 The installer targets **x64 Windows** (`ArchitecturesAllowed=x64compatible`).
@@ -50,18 +52,27 @@ The clean-VM validation runbook for this flow is
 
 1. Requires Administrator (UAC) — registering a Windows service needs elevation.
 2. Installs `rmm-agent.exe` to `C:\Program Files\NodeLink\Agent`.
-3. Obtains the one-time **enrollment token** from (in order) a `/TOKEN=`
-   argument, a bundled `nodelink-enroll.token` sidecar, or an interactive
-   prompt. The token page is shown only when neither of the first two supplies
-   it, and a token is required before enrollment proceeds.
-4. Writes `config.json` next to the binary with the fixed production origin
-   `https://nodelink-backend-733e.onrender.com` and the supplied token.
+3. Detects whether the selected install directory has a supported protected
+   `identity.json` and a usable token-free `config.json`. If so, setup enters
+   **upgrade mode**, skips all token handling, and preserves both files. An
+   inconsistent existing identity/config pair is blocked before setup changes
+   the service or binary.
+4. On a fresh install, obtains the one-time **enrollment token** from (in order)
+   a `/TOKEN=` argument, a bundled `nodelink-enroll.token` sidecar, or an
+   interactive prompt, then writes `config.json` with the fixed production
+   origin `https://nodelink-backend-733e.onrender.com` and supplied token.
 5. Runs `rmm-agent.exe install -config ...` then `rmm-agent.exe start`, showing
    a status line for each step on the progress page.
 6. On uninstall, runs `rmm-agent.exe uninstall` (stops + removes the service)
    before deleting files, and cleans up the runtime files the agent created
    (`config.json`, `identity.json`, `seen_commands.json`,
    `monitoring_state.json`).
+
+Upgrade mode never consumes a supplied sidecar or `/TOKEN=` value and never
+rewrites `config.json` or `identity.json`. It deregisters the old service,
+replaces the binary, validates the preserved config while registering the new
+service, and starts it with the same enrolled identity. A deliberate uninstall
+through Apps & Features remains the clean-slate path and removes runtime state.
 
 After successful service-context enrollment, the agent atomically rewrites
 `config.json` without the consumed plaintext token. Scripted deployments should

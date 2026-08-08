@@ -2,9 +2,10 @@
 ; SPDX-License-Identifier: AGPL-3.0-only
 ;
 ; Wraps the existing Go agent binary in an Inno Setup installer so a
-; non-technical person can install the agent without touching a terminal:
-; pick nothing, enter the enrollment token, watch progress, done. The
-; production management-server origin is compiled into this installer.
+; non-technical person can install the agent without touching a terminal.
+; Fresh installs enroll with a one-time token; upgrades preserve the existing
+; protected identity and token-free configuration. The production
+; management-server origin is compiled into this installer.
 ;
 ; The installer does NOT reimplement any service logic. It shells out to the
 ; agent's own CLI verbs (install/start/uninstall — see
@@ -37,6 +38,7 @@
 ; token. Read from {src} (the folder Setup.exe runs from); absent for a plain
 ; stock installer, which falls back to the interactive token prompt.
 #define SidecarTokenFile "nodelink-enroll.token"
+#define UpgradeValidatorExe "rmm-agent-upgrade-check.exe"
 
 [Setup]
 ; Fixed GUID so upgrades/uninstalls always target the same installed app.
@@ -70,6 +72,9 @@ FinishedLabel=Setup has finished installing [name] on your computer.%n%nThe agen
 
 [Files]
 Source: "{#AgentExe}"; DestDir: "{app}"; DestName: "rmm-agent.exe"; Flags: ignoreversion
+; The same release binary is extracted to {tmp} only for the read-only upgrade
+; preflight that runs before ssInstall changes the service or install dir.
+Source: "{#AgentExe}"; DestDir: "{tmp}"; DestName: "{#UpgradeValidatorExe}"; Flags: dontcopy
 
 [UninstallRun]
 ; Stop + deregister the service while rmm-agent.exe still exists on disk.
@@ -89,8 +94,80 @@ Type: files; Name: "{app}\monitoring_state.json"
 Type: dirifempty; Name: "{app}"
 
 [Code]
+const
+  InstallModeFresh = 0;
+  InstallModeUpgrade = 1;
+  InstallModeBlocked = 2;
+
 var
   ConfigPage: TInputQueryWizardPage;
+  DetectedInstallMode: Integer;
+  InstallModeReason: String;
+
+{ Classify the selected install directory immediately before setup changes
+  anything. No identity means the normal enrollment path (and a new token) is
+  required. An identity is upgraded only with its matching usable, token-free
+  config; inconsistent state is blocked and left untouched. }
+procedure DetectInstallMode;
+var
+  ConfigPath, IdentityPath: String;
+begin
+  ConfigPath := ExpandConstant('{app}\config.json');
+  IdentityPath := ExpandConstant('{app}\identity.json');
+  InstallModeReason := '';
+
+  if not FileExists(IdentityPath) then
+  begin
+    DetectedInstallMode := InstallModeFresh;
+    Log('NodeLink installer mode: enrollment (no existing identity)');
+    exit;
+  end;
+
+  if not FileExists(ConfigPath) then
+  begin
+    DetectedInstallMode := InstallModeBlocked;
+    InstallModeReason :=
+      'An existing identity.json was found, but config.json is missing. ' +
+      'Setup will not modify this installation. Restore the matching ' +
+      'token-free config or deliberately ' +
+      'uninstall the existing agent before enrolling again.';
+    Log('NodeLink installer mode: blocked (existing config is missing)');
+    exit;
+  end;
+
+  DetectedInstallMode := InstallModeUpgrade;
+  Log('NodeLink installer mode: upgrade (existing enrollment will be preserved)');
+end;
+
+{ Use the new release binary to parse the existing config and protected
+  identity envelope before ssInstall touches the service or application files.
+  The check is read-only and never logs their contents. DPAPI payload decryption
+  remains the service identity's responsibility at startup. }
+function ValidateExistingEnrollment: Boolean;
+var
+  Exe, Params: String;
+  ResultCode: Integer;
+begin
+  Result := False;
+  ExtractTemporaryFile('{#UpgradeValidatorExe}');
+  Exe := ExpandConstant('{tmp}\{#UpgradeValidatorExe}');
+  Params := 'validate-upgrade -config "' +
+    ExpandConstant('{app}\config.json') + '"';
+  if not Exec(Exe, Params, ExpandConstant('{tmp}'), SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) then
+  begin
+    Log('Upgrade preflight failed: could not run the release agent validator');
+    exit;
+  end;
+  if ResultCode <> 0 then
+  begin
+    Log('Upgrade preflight rejected the existing enrollment state (exit code ' +
+      IntToStr(ResultCode) + ')');
+    exit;
+  end;
+  Log('Upgrade preflight accepted the existing token-free config and protected identity');
+  Result := True;
+end;
 
 procedure InitializeWizard;
 begin
@@ -141,7 +218,14 @@ function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
   if PageID = ConfigPage.ID then
-    Result := (Trim(ExpandConstant('{param:Token|}')) <> '') or (SidecarToken <> '');
+  begin
+    DetectInstallMode;
+    if DetectedInstallMode <> InstallModeFresh then
+      Result := True
+    else
+      Result := (Trim(ExpandConstant('{param:Token|}')) <> '') or
+        (SidecarToken <> '');
+  end;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -162,6 +246,29 @@ begin
   end;
 end;
 
+{ This is the last fail-closed gate before ssInstall removes the old service
+  and [Files] replaces the binary. Returning a message keeps all existing
+  runtime files and service registration untouched. It also covers silent
+  installs, where wizard-page validation is not invoked. }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  DetectInstallMode;
+  if (DetectedInstallMode = InstallModeUpgrade) and
+      (not ValidateExistingEnrollment) then
+  begin
+    DetectedInstallMode := InstallModeBlocked;
+    InstallModeReason :=
+      'The existing NodeLink enrollment could not be validated for a safe ' +
+      'upgrade. Setup will not remove the service or modify any installed ' +
+      'files. Review the installer log, restore the valid protected identity ' +
+      'and token-free config, or deliberately uninstall before enrolling again.';
+  end;
+  if DetectedInstallMode = InstallModeBlocked then
+    Result := InstallModeReason
+  else
+    Result := '';
+end;
+
 { JsonEscape escapes the characters that would break a JSON string literal.
   Backslash must be replaced first so escaped quotes are not double-escaped. }
 function JsonEscape(const S: String): String;
@@ -179,6 +286,12 @@ procedure WriteConfig;
 var
   Path, Json, Token: String;
 begin
+  if DetectedInstallMode = InstallModeUpgrade then
+  begin
+    Log('Preserving existing token-free config.json during upgrade');
+    exit;
+  end;
+
   Token := EnrollToken;
   { In a silent/unattended install the wizard validation never runs, so guard
     the token here too rather than write a config the agent will reject. }
@@ -234,9 +347,19 @@ begin
 
   if CurStep = ssPostInstall then
   begin
-    WizardForm.StatusLabel.Caption := 'Writing agent configuration...';
-    WizardForm.StatusLabel.Update;
-    WriteConfig;
+    if DetectedInstallMode = InstallModeUpgrade then
+    begin
+      WizardForm.StatusLabel.Caption :=
+        'Preserving the existing NodeLink enrollment...';
+      WizardForm.StatusLabel.Update;
+      Log('Upgrade: identity.json and config.json are being preserved');
+    end
+    else
+    begin
+      WizardForm.StatusLabel.Caption := 'Writing agent configuration...';
+      WizardForm.StatusLabel.Update;
+      WriteConfig;
+    end;
     { The agent's `install` refuses to run when a NodeLinkAgent service already
       exists — e.g. one registered earlier via the CLI path from a different
       directory, which the ssInstall check above cannot see. `uninstall` is
@@ -246,5 +369,22 @@ begin
     RunAgent('install -config "' + ExpandConstant('{app}\config.json') + '"',
       'Registering the NodeLink Agent service');
     RunAgent('start', 'Starting the NodeLink Agent service');
+  end;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpFinished then
+  begin
+    if DetectedInstallMode = InstallModeUpgrade then
+      WizardForm.FinishedLabel.Caption :=
+        'Setup has finished updating NodeLink RMM Agent on your computer.' + #13#10 + #13#10 +
+        'The existing enrollment and configuration were preserved. The ' +
+        'updated agent is running as the Windows service "NodeLink RMM Agent".'
+    else
+      WizardForm.FinishedLabel.Caption :=
+        'Setup has finished installing NodeLink RMM Agent on your computer.' + #13#10 + #13#10 +
+        'The agent is enrolled with your NodeLink server and running as the ' +
+        'Windows service "NodeLink RMM Agent".';
   end;
 end;

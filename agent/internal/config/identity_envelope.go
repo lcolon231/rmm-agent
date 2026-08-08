@@ -111,6 +111,38 @@ func decodeIdentity(data []byte, p protector) (id *Identity, legacy bool, err er
 	return &out, true, nil
 }
 
+// validateIdentityEnvelope checks the versioned wrapper without decrypting its
+// payload. This is used by an elevated installer, which can read the file but
+// cannot decrypt DPAPI data written in the LocalSystem service account's user
+// scope. Legacy plaintext is intentionally rejected for upgrade preflight.
+func validateIdentityEnvelope(data []byte, requiredProtection string) error {
+	var env identityEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return fmt.Errorf("parse protected identity envelope: %w", err)
+	}
+	if env.Format != identityFormat {
+		return fmt.Errorf("identity format %q is not supported", env.Format)
+	}
+	if env.Version != identityFormatVersion {
+		return fmt.Errorf("identity envelope version %d is not supported", env.Version)
+	}
+	if env.Protection != requiredProtection {
+		return fmt.Errorf(
+			"identity protection %q does not match required %q",
+			env.Protection,
+			requiredProtection,
+		)
+	}
+	blob, err := base64.StdEncoding.DecodeString(env.Data)
+	if err != nil {
+		return fmt.Errorf("identity envelope data is corrupt: %w", err)
+	}
+	if len(blob) == 0 {
+		return fmt.Errorf("identity envelope data is empty")
+	}
+	return nil
+}
+
 // ProtectLocalData encodes sensitive local state with the platform-required
 // protection scheme (DPAPI on Windows, explicit 0600-backed "none" elsewhere).
 func ProtectLocalData(format string, version int, plaintext []byte) ([]byte, error) {

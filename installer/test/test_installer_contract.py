@@ -42,6 +42,48 @@ class InstallerContractTests(unittest.TestCase):
         # Precedence remains arg -> sidecar -> interactive input.
         self.assertIn("Result := SidecarToken;", source)
 
+    def test_existing_enrollment_enters_tokenless_upgrade_mode(self) -> None:
+        source = INSTALLER.read_text(encoding="utf-8")
+
+        self.assertIn("procedure DetectInstallMode;", source)
+        self.assertIn("function ValidateExistingEnrollment: Boolean;", source)
+        self.assertIn("validate-upgrade -config", source)
+        self.assertIn("DetectedInstallMode := InstallModeUpgrade;", source)
+        self.assertIn("DetectedInstallMode <> InstallModeFresh", source)
+        self.assertIn("existing enrollment will be preserved", source)
+
+    def test_inconsistent_existing_identity_is_blocked_before_install(self) -> None:
+        source = INSTALLER.read_text(encoding="utf-8")
+
+        self.assertIn("function PrepareToInstall(var NeedsRestart: Boolean): String;", source)
+        self.assertIn("if DetectedInstallMode = InstallModeBlocked then", source)
+        self.assertIn("Setup will not modify this installation", source)
+        self.assertIn("config.json is missing", source)
+        self.assertIn("not ValidateExistingEnrollment", source)
+        self.assertIn("could not be validated for a safe", source)
+
+    def test_upgrade_preserves_runtime_state_and_reuses_existing_config(self) -> None:
+        source = INSTALLER.read_text(encoding="utf-8")
+
+        self.assertIn("Preserving existing token-free config.json during upgrade", source)
+        self.assertIn("identity.json and config.json are being preserved", source)
+        self.assertIn(
+            "RunAgent('install -config \"' + ExpandConstant('{app}\\config.json') + '\"'",
+            source,
+        )
+        # Runtime state is removed only by a deliberate registered uninstall,
+        # never by the in-place upgrade code.
+        self.assertEqual(source.count('Type: files; Name: "{app}\\identity.json"'), 1)
+        self.assertEqual(source.count('Type: files; Name: "{app}\\config.json"'), 1)
+
+    def test_upgrade_ui_is_distinct_from_fresh_enrollment(self) -> None:
+        source = INSTALLER.read_text(encoding="utf-8")
+
+        self.assertIn("procedure CurPageChanged(CurPageID: Integer);", source)
+        self.assertIn("existing enrollment and configuration were preserved", source)
+        self.assertIn("NodeLink installer mode: enrollment", source)
+        self.assertIn("NodeLink installer mode: upgrade", source)
+
 
 if __name__ == "__main__":
     unittest.main()

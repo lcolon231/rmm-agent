@@ -291,14 +291,51 @@ confirm:
 
 ✅ **Pass G** when all expected events exist and no secret is present.
 
-### Case H — Reinstall / upgrade
+### Case H — Tokenless in-place upgrade with identity preservation
 
-1. From an already-installed VM (Case A state), run a personalized install again
-   (fresh token) — or a newer `<version>` build.
-2. Expected: the installer stops/deregisters the previous service, overwrites the
-   binary, re-enrolls, and starts cleanly. Service Running afterward.
+1. Install and enroll the v0.1.3 release on the VM. Wait for a successful
+   heartbeat, record the agent ID shown by the dashboard/API, then record the
+   runtime-file hashes:
 
-✅ **Pass H** when the upgrade/reinstall completes without manual cleanup.
+```powershell
+$AgentDir = 'C:\Program Files\NodeLink\Agent'
+$BeforeAgentId = '<agent ID from the dashboard/API>'
+$BeforeIdentityHash = (Get-FileHash "$AgentDir\identity.json" -Algorithm SHA256).Hash
+$BeforeConfigHash = (Get-FileHash "$AgentDir\config.json" -Algorithm SHA256).Hash
+sc.exe qc NodeLinkAgent
+```
+
+2. Run the v0.1.4 installer **without** `/TOKEN=`, without a sidecar, and without
+   minting a new enrollment token.
+3. Expected wizard behavior: no enrollment-token page; progress and completion
+   text explicitly say this is an upgrade and the existing enrollment is being
+   preserved.
+4. Verify the files, service, executable version, and heartbeat:
+
+```powershell
+$AfterIdentityHash = (Get-FileHash "$AgentDir\identity.json" -Algorithm SHA256).Hash
+$AfterConfigHash = (Get-FileHash "$AgentDir\config.json" -Algorithm SHA256).Hash
+$BeforeIdentityHash -eq $AfterIdentityHash  # True unless post-start credential rotation occurred
+$BeforeConfigHash -eq $AfterConfigHash      # True
+Get-Service NodeLinkAgent                   # Running / Automatic
+go version -m "$AgentDir\rmm-agent.exe"    # ldflags include main.version=0.1.4
+```
+
+5. On the dashboard/API, confirm the same agent ID reports a new heartbeat. If
+   credential rotation changed `identity.json` after service startup, confirm
+   the agent ID is unchanged and retain the before/after hashes as evidence.
+6. Negative checks, each from a v0.1.3 snapshot:
+   - rename/remove `identity.json` and run v0.1.4 without a token: setup follows
+     the fresh-install path and fails closed because no token was supplied;
+   - corrupt the protected identity envelope, or leave an identity with a
+     missing/invalid/token-bearing config: setup blocks before removing the
+     service or replacing files;
+   - cancel or force a setup failure before restart: the original
+     `identity.json` and `config.json` hashes remain unchanged.
+
+✅ **Pass H** when v0.1.3 → v0.1.4 completes with no enrollment token, retains
+the same identity/configuration, runs the v0.1.4 binary, and heartbeats as the
+same endpoint; every incomplete/corrupt-state case fails closed.
 
 ### Case I — Uninstall
 
@@ -328,7 +365,7 @@ history).
 - [ ] E — Silent `/TOKEN=` (and sidecar `/VERYSILENT`) enrolls with no input
 - [ ] F — Read-only `403`, unauthenticated `401`, unknown site `404`
 - [ ] G — Audit events present and secret-redacted; no `nlenr_` in any detail or log
-- [ ] H — Reinstall/upgrade is clean
+- [ ] H — Tokenless v0.1.3 → v0.1.4 upgrade preserves identity/config and fails closed on inconsistent state
 - [ ] I — Uninstall removes the service and runtime files
 
 ---
@@ -338,6 +375,9 @@ history).
 - Screenshot of the wizard **without** a token page (Case A).
 - `Get-Service` output showing Running (A/E/H) and absent (I).
 - The redacted `config.json` after enrollment.
+- Before/after SHA-256 hashes for `identity.json` and `config.json`, the stable
+  agent ID, `sc.exe qc`/`Get-Service` output, embedded executable version, and
+  the first successful post-upgrade heartbeat (Case H).
 - Audit export (or screenshots) for `installer_package.created`,
   `agent.enrolled`, and the rejection cases.
 - The `503` response bodies for Case C.
