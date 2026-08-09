@@ -96,7 +96,7 @@ class InstallerContractTests(unittest.TestCase):
 
         self.assertIn('#if VersionEnv != ""', source)
         self.assertIn(
-            '#define AgentVersionCheck Exec(AgentExeToVerify, "version -expect " + MyVersion',
+            '#define AgentVersionCheck Exec(AgentExeToVerify, "version -expect " + MyVersion, SourcePath)',
             source,
         )
         self.assertIn("#if AgentVersionCheck != 0", source)

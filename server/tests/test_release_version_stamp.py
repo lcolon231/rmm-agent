@@ -70,7 +70,7 @@ def test_ci_compiles_the_installer_from_a_stamped_binary():
 def test_installer_refuses_a_binary_that_disagrees_with_the_release_version():
     source = INSTALLER.read_text(encoding="utf-8")
 
-    assert '#define AgentVersionCheck Exec(AgentExeToVerify, "version -expect " + MyVersion' in source
+    assert '#define AgentVersionCheck Exec(AgentExeToVerify, "version -expect " + MyVersion, SourcePath)' in source
     assert "#if AgentVersionCheck != 0" in source
     assert "#error The agent binary does not report NODELINK_VERSION" in source
     # The guard is keyed to the same environment variable that names the
