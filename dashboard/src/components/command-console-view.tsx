@@ -16,6 +16,7 @@ import { CommandDispatchForm } from "@/components/command-dispatch-form";
 import type { DashboardOperator } from "@/lib/dashboard-auth-core";
 import type { EndpointDetailData } from "@/lib/endpoint-detail";
 import {
+  commandDetailRequiresAdmin,
   commandKindDefinitions,
   commandPageCount,
   describeCommandStatus,
@@ -44,14 +45,28 @@ function StatusChip({ item }: { item: CommandHistoryItem }) {
   return <span className={`command-status ${presentation.tone}`}>{presentation.label}</span>;
 }
 
-function HistoryRow({ endpointId, item }: { endpointId: string; item: CommandHistoryItem }) {
+function HistoryRow({
+  endpointId,
+  item,
+  isAdmin,
+}: {
+  endpointId: string;
+  item: CommandHistoryItem;
+  isAdmin: boolean;
+}) {
   const truncated = item.stdout_truncated === true || item.stderr_truncated === true;
   return (
     <tr>
       <td>
-        <Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands/${encodeURIComponent(item.id)}`}>
-          {kindLabel(item)}
-        </Link>
+        {commandDetailRequiresAdmin(item.kind) && !isAdmin ? (
+          <span title="Administrator access is required for remediation payloads and results.">
+            {kindLabel(item)}
+          </span>
+        ) : (
+          <Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands/${encodeURIComponent(item.id)}`}>
+            {kindLabel(item)}
+          </Link>
+        )}
       </td>
       <td><StatusChip item={item} /></td>
       <td>{item.exit_code === null ? "—" : item.exit_code}</td>
@@ -139,6 +154,7 @@ export function CommandConsoleView({
               canExecuteScripts={canExecuteScripts}
               endpointId={endpoint.id}
               hostname={endpoint.hostname}
+              isAdmin={operator.role === "admin"}
             />
           </section>
         ) : null}
@@ -165,7 +181,14 @@ export function CommandConsoleView({
                   <tr><th>Command</th><th>Status</th><th>Exit code</th><th>Capture</th><th>Created</th><th>Completed</th><th>Envelope</th></tr>
                 </thead>
                 <tbody>
-                  {history.items.map((item) => <HistoryRow endpointId={endpoint.id} item={item} key={item.id} />)}
+                  {history.items.map((item) => (
+                    <HistoryRow
+                      endpointId={endpoint.id}
+                      isAdmin={operator.role === "admin"}
+                      item={item}
+                      key={item.id}
+                    />
+                  ))}
                 </tbody>
               </table>
             </div>

@@ -14,7 +14,9 @@ const (
 	// agent that does not advertise it makes the server fail closed as
 	// "unsupported". Phase 1 advertises the capability only — the streaming
 	// loop is added in a later phase.
-	ShellSessionCapabilityV1 = "shell-session-v1"
+	ShellSessionCapabilityV1       = "shell-session-v1"
+	FileTransferCapabilityV1       = "file-transfer-v1"
+	RegistryOperationsCapabilityV1 = "registry-operations-v1"
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
@@ -27,5 +29,9 @@ func SupportedCommandEnvelopeVersions() []string {
 // advertises. A fresh slice is returned so callers cannot mutate process-global
 // negotiation state.
 func SupportedCapabilities() []string {
-	return []string{ShellSessionCapabilityV1}
+	return []string{
+		ShellSessionCapabilityV1,
+		FileTransferCapabilityV1,
+		RegistryOperationsCapabilityV1,
+	}
 }

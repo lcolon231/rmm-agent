@@ -33,7 +33,13 @@ const (
 	// script executor: it triggers a bounded Windows Update scan (issue #51).
 	KindScanUpdates = "scan_updates"
 	// KindInstallUpdates triggers selective installation of Windows updates.
-	KindInstallUpdates = "install_updates"
+	KindInstallUpdates      = "install_updates"
+	KindFileUpload          = "file_upload"
+	KindFileDownload        = "file_download"
+	KindRegistryRead        = "registry_read"
+	KindRegistryWrite       = "registry_write"
+	KindRegistryDelete      = "registry_delete"
+	KindRemediationRollback = "remediation_rollback"
 )
 
 // defaultTimeout bounds how long any single command may run.

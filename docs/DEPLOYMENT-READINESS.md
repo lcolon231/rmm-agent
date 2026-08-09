@@ -124,6 +124,13 @@ link to reproducible evidence in the release or pilot record.
 - [x] Payload and script-size limits exist at API and agent boundaries
       (64 KiB dispatch payload cap; server refuses over-cap results, and the
       agent's script arrives inside the signed, capped payload).
+- [x] Controlled file/registry remediation has independent endpoint policy and
+      recovery bounds (admin-only; 32 KiB upload/64 KiB download; SHA-256;
+      managed roots/subtree only; device/traversal/reparse denial; typed
+      registry views; compare-and-set; atomic file replacement; endpoint-local
+      rollback ID; capability-gated mixed-version refusal). See
+      [`CONTROLLED-REMEDIATION.md`](CONTROLLED-REMEDIATION.md). Production pilot
+      activation still requires the real-Windows qualification listed there.
 - [x] Reusable script source has an immutable custody workflow (revision
       `0021`; role-gated creation/review/deprecation, canonical SHA-256 digest,
       57,344-byte/5,000-line bounds, audited reads and mutations, terminal
@@ -319,6 +326,14 @@ the legacy command protocol is unchanged and must not receive plaintext secret
 values. A component rollback may retain `0022` only with library/preparation
 writes paused and the encryption key retained. A schema restore discards later
 definitions/value sets and requires explicit data-loss approval.
+
+Revision `0030` adds only PostgreSQL `commandkind` enum values for controlled
+file/registry remediation. Deploy the migration and server first, then canary
+agents, then the dashboard. Old agents remain safe but return
+`agent_capability_unsupported`; there is no script fallback. Before rolling a
+component back, pause remediation dispatch and preserve endpoint-local rollback
+journals plus command/audit IDs. Crossing back before `0030` requires an
+exact-revision restore or forward fix, never an in-place enum downgrade.
 
 ## Rollback procedure
 

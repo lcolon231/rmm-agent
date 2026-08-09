@@ -135,6 +135,8 @@ from app.schemas.schemas import (
     TaskRunItemOut,
     TrustStateChange,
 )
+
+
 from app.schemas.monitoring import (
     AlertDetailOut,
     AlertAcknowledge,
@@ -172,6 +174,21 @@ from app.schemas.monitoring import (
     WebhookSecretRotate,
     WebhookStatusOut,
 )
+
+
+_COMMAND_CAPABILITIES: dict[CommandKind, tuple[str, ...]] = {
+    CommandKind.file_upload: ("file-transfer-v1",),
+    CommandKind.file_download: ("file-transfer-v1",),
+    CommandKind.registry_read: ("registry-operations-v1",),
+    CommandKind.registry_write: ("registry-operations-v1",),
+    CommandKind.registry_delete: ("registry-operations-v1",),
+    # A rollback journal may describe either resource class. Agents advertising
+    # issue #59 support always advertise both, which keeps mixed-version
+    # behavior fail closed and unambiguous.
+    CommandKind.remediation_rollback: (
+        "file-transfer-v1", "registry-operations-v1"
+    ),
+}
 
 # Router-level dependency: every route here needs at least a readonly operator.
 router = APIRouter(
@@ -1287,7 +1304,11 @@ async def dispatch_command(
                 "code": (
                     "script_execution_not_authorized"
                     if body.kind in (CommandKind.powershell, CommandKind.shell)
-                    else "command_role_not_authorized"
+                    else (
+                        "privileged_remediation_not_authorized"
+                        if body.kind in _COMMAND_CAPABILITIES
+                        else "command_role_not_authorized"
+                    )
                 )
             },
         )
@@ -1340,6 +1361,38 @@ async def dispatch_command(
                 "code": "agent_command_envelope_version_unsupported",
                 "required": ACTIVE_COMMAND_ENVELOPE_VERSION,
                 "agent_supported": agent.command_envelope_versions or [],
+            },
+        )
+
+    required_capabilities = _COMMAND_CAPABILITIES.get(body.kind, ())
+    missing_capabilities = sorted(
+        set(required_capabilities) - set(agent.supported_capabilities or [])
+    )
+    if missing_capabilities:
+        await audit.record(
+            db,
+            action="command.authorization_denied",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail={
+                "operator_id": operator.id,
+                "operator_role": operator.role.value,
+                "kind": body.kind.value,
+                "site_id": agent.site_id,
+                "policy": "agent_capability",
+                "reason": "required_capability_missing",
+                "permission_scope": None,
+                "permission_scope_id": None,
+            },
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "agent_capability_unsupported",
+                "required": list(required_capabilities),
+                "missing": missing_capabilities,
+                "agent_supported": agent.supported_capabilities or [],
             },
         )
 
@@ -1530,6 +1583,24 @@ async def get_command(
     ).scalar_one_or_none()
     if cmd is None:
         raise HTTPException(status_code=404, detail="Command not found")
+    if cmd.kind in _COMMAND_CAPABILITIES and operator.role != OperatorRole.admin:
+        await audit.record(
+            db,
+            action="command_detail.access_denied",
+            actor=operator.email,
+            agent_id=agent_id,
+            detail={
+                "command_id": cmd.id,
+                "kind": cmd.kind.value,
+                "operator_role": operator.role.value,
+                "reason": "administrator_role_required",
+            },
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "privileged_command_detail_not_authorized"},
+        )
     detail = CommandDetailOut.model_validate(cmd)
     detail.status = _effective_command_status(cmd, _now())
     await audit.record(

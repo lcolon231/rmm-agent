@@ -5,7 +5,13 @@ export type CommandKind =
   | "shell"
   | "collect_inventory"
   | "scan_updates"
-  | "install_updates";
+  | "install_updates"
+  | "file_upload"
+  | "file_download"
+  | "registry_read"
+  | "registry_write"
+  | "registry_delete"
+  | "remediation_rollback";
 
 export type CommandStatus =
   | "queued"
@@ -58,7 +64,17 @@ export type CommandKindDefinition = {
   kind: CommandKind;
   label: string;
   description: string;
-  input: "script" | "none" | "update_targets";
+  input:
+    | "script"
+    | "none"
+    | "update_targets"
+    | "file_upload"
+    | "file_download"
+    | "registry_read"
+    | "registry_write"
+    | "registry_delete"
+    | "rollback";
+  adminOnly?: boolean;
 };
 
 export const commandKindDefinitions: CommandKindDefinition[] = [
@@ -94,14 +110,57 @@ export const commandKindDefinitions: CommandKindDefinition[] = [
       "Selectively download and install targeted Windows updates on the endpoint.",
     input: "update_targets",
   },
+  {
+    kind: "file_upload",
+    label: "Upload managed file",
+    description: "Atomically write a digest-verified file inside a managed transfer root.",
+    input: "file_upload",
+    adminOnly: true,
+  },
+  {
+    kind: "file_download",
+    label: "Download managed file",
+    description: "Read a bounded file from a managed transfer root with digest evidence.",
+    input: "file_download",
+    adminOnly: true,
+  },
+  {
+    kind: "registry_read",
+    label: "Read managed registry value",
+    description: "Read a typed value from the managed HKLM or HKCU subtree.",
+    input: "registry_read",
+    adminOnly: true,
+  },
+  {
+    kind: "registry_write",
+    label: "Write managed registry value",
+    description: "Write a typed registry value and create local rollback metadata.",
+    input: "registry_write",
+    adminOnly: true,
+  },
+  {
+    kind: "registry_delete",
+    label: "Delete managed registry value",
+    description: "Delete one managed registry value after explicit confirmation and backup.",
+    input: "registry_delete",
+    adminOnly: true,
+  },
+  {
+    kind: "remediation_rollback",
+    label: "Restore remediation backup",
+    description: "Restore a previous file or registry value from its endpoint-local backup ID.",
+    input: "rollback",
+    adminOnly: true,
+  },
 ];
 
 export function commandKindDefinitionsForPermission(
   canExecuteScripts: boolean,
+  isAdmin = false,
 ): CommandKindDefinition[] {
-  return canExecuteScripts
-    ? commandKindDefinitions
-    : commandKindDefinitions.filter((item) => item.input !== "script");
+  return commandKindDefinitions.filter(
+    (item) => (canExecuteScripts || item.input !== "script") && (isAdmin || !item.adminOnly),
+  );
 }
 
 // The signed payload is capped at 60 KiB canonical JSON server-side; leave
@@ -127,7 +186,78 @@ export type DispatchInput = {
   update_targets: string[];
   install_all: boolean;
   ttl_seconds: number;
+  operation_payload?: Record<string, unknown>;
 };
+
+const SHA256 = /^[0-9a-f]{64}$/;
+const BACKUP_ID = /^[0-9a-f]{32}$/;
+const MANAGED_PATH = /^(?:C:\\ProgramData\\NodeLink\\Managed|C:\\Windows\\Temp\\NodeLink)(?:\\[^\\:\r\n]+)*$/i;
+const REGISTRY_KEY = /^Software\\NodeLink\\Managed(?:\\[^\\\r\n]+)*$/i;
+const RESERVED_WINDOWS_NAMES = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
+
+function isManagedPath(value: unknown): value is string {
+  if (typeof value !== "string" || !MANAGED_PATH.test(value)) return false;
+  return value.slice(3).split("\\").every(
+    (segment) => segment !== "" && segment === segment.trimEnd() && !RESERVED_WINDOWS_NAMES.test(segment),
+  );
+}
+
+export function commandDetailRequiresAdmin(kind: CommandKind): boolean {
+  return commandKindDefinitions.find((item) => item.kind === kind)?.adminOnly === true;
+}
+
+function validateOperationPayload(
+  kind: CommandKind,
+  raw: unknown,
+): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const payload = raw as Record<string, unknown>;
+  const path = payload.path;
+  if (kind === "file_upload") {
+    if (!isManagedPath(path)) return null;
+    if (typeof payload.content_base64 !== "string" || payload.content_base64.length > 44_000) return null;
+    if (typeof payload.sha256 !== "string" || !SHA256.test(payload.sha256)) return null;
+    if (typeof payload.overwrite !== "boolean") return null;
+    if (Object.keys(payload).some((key) => !["path", "content_base64", "sha256", "overwrite"].includes(key))) return null;
+    return { path, content_base64: payload.content_base64, sha256: payload.sha256, overwrite: payload.overwrite };
+  }
+  if (kind === "file_download") {
+    if (!isManagedPath(path)) return null;
+    if (payload.expected_sha256 !== undefined && (typeof payload.expected_sha256 !== "string" || !SHA256.test(payload.expected_sha256))) return null;
+    if (Object.keys(payload).some((key) => !["path", "expected_sha256"].includes(key))) return null;
+    return { path, ...(payload.expected_sha256 ? { expected_sha256: payload.expected_sha256 } : {}) };
+  }
+  if (kind === "remediation_rollback") {
+    return Object.keys(payload).length === 1 && typeof payload.backup_id === "string" && BACKUP_ID.test(payload.backup_id)
+      ? { backup_id: payload.backup_id }
+      : null;
+  }
+  if (["registry_read", "registry_write", "registry_delete"].includes(kind)) {
+    const { hive, key, value_name: valueName, view } = payload;
+    if ((hive !== "HKLM" && hive !== "HKCU") || typeof key !== "string" || !REGISTRY_KEY.test(key)) return null;
+    if (typeof valueName !== "string" || valueName.length > 163 || /[\\\0]/.test(valueName)) return null;
+    if (view !== 32 && view !== 64) return null;
+    const base = { hive, key, value_name: valueName, view };
+    if (kind === "registry_read") {
+      return Object.keys(payload).every((name) => ["hive", "key", "value_name", "view"].includes(name)) ? base : null;
+    }
+    const expected = payload.expected_current_sha256;
+    if (expected !== undefined && (typeof expected !== "string" || !SHA256.test(expected))) return null;
+    if (kind === "registry_delete") {
+      if (payload.confirm !== true || Object.keys(payload).some((name) => !["hive", "key", "value_name", "view", "confirm", "expected_current_sha256"].includes(name))) return null;
+      return { ...base, confirm: true, ...(expected ? { expected_current_sha256: expected } : {}) };
+    }
+    if (!["string", "expand_string", "dword", "qword", "multi_string", "binary"].includes(String(payload.type))) return null;
+    if (payload.data === undefined || Object.keys(payload).some((name) => !["hive", "key", "value_name", "view", "type", "data", "expected_current_sha256"].includes(name))) return null;
+    if (["string", "expand_string"].includes(String(payload.type)) && (typeof payload.data !== "string" || new TextEncoder().encode(payload.data).length > 16 * 1024)) return null;
+    if (payload.type === "dword" && (typeof payload.data !== "number" || !Number.isInteger(payload.data) || payload.data < 0 || payload.data > 0xffff_ffff)) return null;
+    if (payload.type === "qword" && (typeof payload.data !== "number" || !Number.isSafeInteger(payload.data) || payload.data < 0)) return null;
+    if (payload.type === "multi_string" && (!Array.isArray(payload.data) || payload.data.length > 256 || payload.data.some((item) => typeof item !== "string" || item.includes("\0")))) return null;
+    if (payload.type === "binary" && (typeof payload.data !== "string" || payload.data.length > 22_000 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(payload.data))) return null;
+    return { ...base, type: payload.type, data: payload.data, ...(expected ? { expected_current_sha256: expected } : {}) };
+  }
+  return null;
+}
 
 function normalizeUpdateTargets(value: unknown): string[] | null {
   const raw = typeof value === "string"
@@ -157,6 +287,7 @@ export function validateDispatchInput(value: unknown): DispatchInput | null {
     update_targets: rawTargets,
     install_all: rawInstallAll,
     ttl_seconds: ttl,
+    operation_payload: rawOperationPayload,
   } = value as Record<string, unknown>;
   const definition = commandKindDefinitions.find((d) => d.kind === kind);
   if (!definition) return null;
@@ -187,12 +318,28 @@ export function validateDispatchInput(value: unknown): DispatchInput | null {
     const unusedTargets = normalizeUpdateTargets(rawTargets ?? []);
     if (unusedTargets === null || unusedTargets.length > 0) return null;
   }
+  const isOperation = !["script", "none", "update_targets"].includes(definition.input);
+  const operationPayload = isOperation
+    ? validateOperationPayload(definition.kind, rawOperationPayload)
+    : undefined;
+  if (isOperation && !operationPayload) return null;
+  if (
+    !isOperation
+    && rawOperationPayload !== undefined
+    && (
+      !rawOperationPayload
+      || typeof rawOperationPayload !== "object"
+      || Array.isArray(rawOperationPayload)
+      || Object.keys(rawOperationPayload as Record<string, unknown>).length > 0
+    )
+  ) return null;
   return {
     kind: definition.kind,
     script: trimmed,
     update_targets: updateTargets,
     install_all: installAll,
     ttl_seconds: ttl,
+    ...(operationPayload ? { operation_payload: operationPayload } : {}),
   };
 }
 
@@ -212,6 +359,7 @@ export function buildDispatchRequestBody(input: DispatchInput): {
       };
     }
   }
+  if (input.operation_payload) payload = input.operation_payload;
   return {
     kind: input.kind,
     payload,

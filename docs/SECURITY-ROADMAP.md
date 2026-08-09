@@ -252,8 +252,13 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   explicit signed inputs.
 - Verify downloaded packages and providers; record source, digest, signer, and
   install result.
-- Implement file, registry, service, process, event-log, reboot, and shutdown as
-  typed operations with narrow validation and least privilege where feasible.
+- [x] Implement controlled file upload/download and registry read/write/delete
+  as administrator-only typed operations with fixed path/hive policy, digest
+  and byte bounds, atomic file replacement, capability gating, redacted audit
+  evidence, and endpoint-local rollback (`CONTROLLED-REMEDIATION.md`). This does
+  not complete general software deployment or least-privilege execution.
+- Implement service, process, event-log, reboot, and shutdown as typed
+  operations with narrow validation and least privilege where feasible.
 - Apply stronger session authorization, idle/absolute timeouts, recording
   metadata, and rate limits to interactive shell and streaming transport.
 - Constrain technician-to-end-user chat as a message-only channel: the chat

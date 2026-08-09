@@ -134,6 +134,12 @@ The code in this repository currently provides:
   explicit admin-granted global, site, or agent scope even for admins, while
   typed inventory remains role-authorized. Grant changes and every allow/deny
   decision are audited without recording script contents.
+- Administrator-only controlled Windows remediation: capability-gated,
+  signed file upload/download inside fixed managed roots plus typed
+  HKLM/HKCU read/write/delete inside `Software\\NodeLink\\Managed`, with
+  digest/size checks, reparse/device/traversal denial, atomic file replacement,
+  compare-and-set registry changes, endpoint-local rollback journals, and live
+  dashboard controls. See `docs/CONTROLLED-REMEDIATION.md`.
 - An immutable versioned script library with canonical SHA-256 content
   evidence, bounded language/platform/tag metadata, append-only final reviews,
   terminal idempotent deprecation, role-gated API/dashboard workflows, and no
@@ -356,8 +362,9 @@ The repository does **not** currently contain:
   technician lifecycle actions, automatic recovery, maintenance-window
   suppression, email, and generic webhooks are implemented
   (`docs/ALERT-NOTIFICATIONS.md`, `docs/SIGNED-WEBHOOKS.md`).
-- Script library, scheduled tasks, patch management, remediation operations,
-  file transfer, or remote desktop.
+- General software deployment, unrestricted filesystem/registry access, or
+  remote desktop. Controlled bounded file and registry remediation is limited
+  to the policy described in `docs/CONTROLLED-REMEDIATION.md`.
 - A least-privilege agent service account.
 - Scheduled production backup and timed operator rollback-drill evidence
   (encrypted backup/restore tooling and the automated PostgreSQL rehearsal ship

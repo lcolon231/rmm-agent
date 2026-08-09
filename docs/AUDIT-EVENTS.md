@@ -86,6 +86,7 @@ and SHA-256/Merkle roots—remains readable.
 | `command.dispatched` | `api/management.py` signed dispatch | `command_id`, `kind`, `payload_keys`, `envelope_version`, `schema_version`, `issued_at`, `expires_at`, `nonce`, `signing_key_id`, `envelope_sha256`, `script_version_id`, `script_parameter_value_set_id` |
 | `command.result_pending` | `api/agents.py` durable-result notice | `command_id`, `kind`, `agent_completed_at` |
 | `command_detail.viewed` | `api/management.py` sensitive result view | `command_id`, `status` |
+| `command_detail.access_denied` | `api/management.py` privileged remediation detail denial | `command_id`, `kind`, `operator_role`, `reason` |
 | `endpoint_detail.viewed` | `api/management.py` endpoint detail | `history_hours`, `history_limit`, `history_count`, `history_truncated`, `script_execution_allowed` |
 | `endpoint_list.viewed` | `api/management.py` endpoint list | `client_id`, `site_id`, `status`, `search`, `sort`, `direction`, `page`, `page_size`, `result_count` |
 | `enrollment_token.created` | `api/management.py` token creation | `site_id`, `name_sha256`, `name_bytes`, `expires_at`, `max_uses`, `has_hostname_restriction`, `has_agent_name_restriction`, `labels` |

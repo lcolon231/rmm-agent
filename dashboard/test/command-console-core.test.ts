@@ -152,6 +152,68 @@ test("script command choices require explicit endpoint permission", () => {
     commandKindDefinitionsForPermission(true).map((item) => item.kind),
     ["powershell", "shell", "collect_inventory", "scan_updates", "install_updates"],
   );
+  assert.deepEqual(
+    commandKindDefinitionsForPermission(false, true).map((item) => item.kind),
+    [
+      "collect_inventory", "scan_updates", "install_updates", "file_upload",
+      "file_download", "registry_read", "registry_write", "registry_delete",
+      "remediation_rollback",
+    ],
+  );
+});
+
+test("builds controlled file and registry payloads without script fallback", () => {
+  const upload = validateDispatchInput({
+    kind: "file_upload",
+    script: "",
+    update_targets: [],
+    install_all: false,
+    ttl_seconds: 300,
+    operation_payload: {
+      path: "C:\\ProgramData\\NodeLink\\Managed\\patch.bin",
+      content_base64: "cGF0Y2g=",
+      sha256: "a".repeat(64),
+      overwrite: false,
+    },
+  });
+  assert.deepEqual(buildDispatchRequestBody(upload!).payload, upload!.operation_payload);
+
+  const registryDelete = validateDispatchInput({
+    kind: "registry_delete",
+    script: "",
+    update_targets: [],
+    install_all: false,
+    ttl_seconds: 300,
+    operation_payload: {
+      hive: "HKLM",
+      key: "Software\\NodeLink\\Managed\\Policy",
+      value_name: "Mode",
+      view: 64,
+      confirm: true,
+    },
+  });
+  assert.equal(registryDelete?.operation_payload?.confirm, true);
+});
+
+test("rejects unmanaged paths, unconfirmed deletes, and malformed rollback IDs", () => {
+  const base = { script: "", update_targets: [], install_all: false, ttl_seconds: 300 };
+  assert.equal(validateDispatchInput({
+    ...base,
+    kind: "file_download",
+    operation_payload: { path: "C:\\Windows\\System32\\config\\SAM" },
+  }), null);
+  assert.equal(validateDispatchInput({
+    ...base,
+    kind: "registry_delete",
+    operation_payload: {
+      hive: "HKLM", key: "Software\\NodeLink\\Managed", value_name: "Mode", view: 64, confirm: false,
+    },
+  }), null);
+  assert.equal(validateDispatchInput({
+    ...base,
+    kind: "remediation_rollback",
+    operation_payload: { backup_id: "../backup" },
+  }), null);
 });
 
 test("classifies statuses into terminal and active work", () => {
