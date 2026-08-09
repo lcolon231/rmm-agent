@@ -142,7 +142,7 @@
     },
     "rollback_rehearsal": {
       "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.4-evidence/rollback-rehearsal-0029-to-0028.json",
-      "sha256": "224b06eafbb945ae670a887fac4a2040d9f0f8c43ab7f380b192c6c5e304397a"
+      "sha256": "d77853b7c49b2a60209952631a3c175c8ca24b029077f6c47fe356982e7cdca0"
     }
   }
 }
