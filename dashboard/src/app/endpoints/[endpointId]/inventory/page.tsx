@@ -46,7 +46,7 @@ export default async function EndpointInventoryPage({
   try {
     [inventory, endpoint] = await Promise.all([
       getEndpointInventory(session.sessionToken, endpointId),
-      getEndpointDetail(session.sessionToken, endpointId, { historyHours: 1, historyLimit: 1 }),
+      getEndpointDetail(session.sessionToken, endpointId, { historyHours: 1, historyLimit: 10 }),
     ]);
   } catch (error) {
     if (error instanceof NodelinkApiError && error.status === 404) notFound();
