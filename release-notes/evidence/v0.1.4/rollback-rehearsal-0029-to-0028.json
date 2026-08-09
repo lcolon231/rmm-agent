@@ -1,0 +1,86 @@
+{
+  "format": "nodelink-rollback-rehearsal",
+  "version": 1,
+  "created_at_utc": "2026-08-09T02:26:15.164497+00:00",
+  "scenario": "Roll back live v0.1.4 (schema 0029) to v0.1.3 (schema 0028).",
+  "current_schema_revision": "0029",
+  "target": {
+    "server_version": "v0.1.3",
+    "agent_version": "0.1.3",
+    "installer_version": "0.1.3",
+    "schema_revision": "0028"
+  },
+  "decision": {
+    "status": "ready",
+    "action": "restore_backup_then_redeploy",
+    "restore_required": true,
+    "agent_rollout_paused": true,
+    "data_loss_accepted": true,
+    "reasons": [],
+    "note": "Computed by scripts/plan_release_rollback.py against the retained 0028 recovery point captured in this rehearsal."
+  },
+  "recovery_point": {
+    "manifest_file": "nodelink-backup-20260809T022514Z.manifest.json",
+    "manifest_sha256": "0208d2f58a911ac446bb8451edf3b4540afccf6e3b1ecf93fe738decd67d830a",
+    "schema_revision": "0028",
+    "encrypted_file": "nodelink-backup-20260809T022514Z.dump.enc",
+    "encrypted_sha256": "91791ba331e1ab03482e152794771a7d61a14a8123390bd933c7a1b39875348e",
+    "manifest_path": "release-notes/evidence/v0.1.4/nodelink-backup-20260809T022514Z.manifest.json"
+  },
+  "restore_verification_reference": {
+    "note": "Unlike the v0.1.3 rehearsal, this 0028 recovery point was decrypted, restored into an isolated database, and application-verified during this rehearsal rather than by reference to an earlier drill.",
+    "file": "restore-verification-0028.json",
+    "sha256": "d9373e201c5f0bf8f5baee28b22465f999b072c2ab840a9e55c0b14861e59524",
+    "status": "verified",
+    "schema_revision": "0028",
+    "audit_chain_intact": true,
+    "path": "release-notes/evidence/v0.1.4/restore-verification-0028.json"
+  },
+  "rpo_boundary": "Restoring the 0028 recovery point intentionally discards every write made after its capture, including all schema 0029 data. This is a restore-then-redeploy rollback, not an in-place downgrade; migration 0029 is additive (it only adds the install_updates value to the commandkind enum), but a v0.1.3 server running against an 0029 database is not a verified release configuration and the planner treats the revision mismatch as restore-required.",
+  "forward_release_backup_verification": {
+    "note": "Independent proof that the live v0.1.4 (0029) schema backs up and restores cleanly with representative seeded data.",
+    "file": "restore-verification-0029.json",
+    "sha256": "32e618f8a064e47701e661bcc3c534aff11061e183f3e12320ba6ae1241736aa",
+    "status": "verified",
+    "schema_revision": "0029",
+    "audit_chain_intact": true,
+    "counts": {
+      "operators": 1,
+      "agents": 1,
+      "commands": 1,
+      "enrollment_tokens": 0,
+      "heartbeats": 0,
+      "audit_events": 5,
+      "audit_anchors": 1
+    },
+    "path": "release-notes/evidence/v0.1.4/restore-verification-0029.json"
+  },
+  "fail_closed_checks": [
+    {
+      "case": "recovery point schema does not match the rollback target",
+      "input": "0029 recovery point offered for a 0028 target",
+      "result": "blocked",
+      "reason": "backup schema revision does not match the target server schema; in-place Alembic downgrade is unsupported"
+    },
+    {
+      "case": "post-backup data loss not explicitly accepted",
+      "input": "matching 0028 recovery point without --accept-data-loss",
+      "result": "blocked",
+      "reason": "schema rollback requires restore from backup and explicit acceptance of post-backup data loss"
+    }
+  ],
+  "environment": {
+    "note": "Rehearsal performed against a disposable PostgreSQL instance seeded with the representative dataset from server/tests/test_backup_restore.py, the same harness and dataset shape used for the v0.1.2 and v0.1.3 release evidence. These recovery points are drill artifacts that prove the backup, restore, verification, and rollback-decision procedure at 0028 and 0029; they are not a production recovery point and contain no production data. The rehearsal passphrase was generated for this drill and is held by the release operator outside the repository and outside the published evidence, so the encrypted artifact is not decryptable by a reader of this record. In a real rollback the operator restores their own retained pre-upgrade 0028 backup, not this artifact. The evidence bundle is committed to this repository under release-notes/evidence/v0.1.4/ and referenced by commit-pinned raw URLs, so each record is content-addressed by the commit that introduced it and cannot be replaced in place the way a release asset can.",
+    "postgres_server_version": "16.13(Ubuntu16.13-0ubuntu0.24.04.1)",
+    "seeded_counts": {
+      "operators": 1,
+      "agents": 1,
+      "commands": 1,
+      "enrollment_tokens": 0,
+      "heartbeats": 0,
+      "audit_events": 5,
+      "audit_anchors": 1
+    }
+  },
+  "status": "ready"
+}
