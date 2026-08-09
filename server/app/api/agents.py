@@ -288,6 +288,27 @@ async def renew_agent_credential(
     )
 
 
+def inventory_field_errors(exc: ValueError, limit: int = 10) -> list[dict]:
+    """Field paths and rules from a section validation failure — never values.
+
+    A rejected inventory payload can contain endpoint data, so only the location
+    and the rule that failed are echoed back. Bounded so a pathological payload
+    cannot turn one refusal into a large response.
+    """
+    errors = getattr(exc, "errors", None)
+    if not callable(errors):
+        return []
+    out: list[dict] = []
+    for item in errors()[:limit]:
+        out.append(
+            {
+                "field": ".".join(str(part) for part in item.get("loc", ())),
+                "rule": item.get("type", "invalid"),
+            }
+        )
+    return out
+
+
 @router.post("/heartbeat", response_model=HeartbeatAck)
 async def heartbeat(
     body: HeartbeatIn,
@@ -655,7 +676,12 @@ async def submit_inventory(
             action="inventory.rejected",
             actor=f"agent:{agent.id}",
             agent_id=agent.id,
-            detail={"reason": "agent_not_active", "section": None, "byte_size": None},
+            detail={
+                "reason": "agent_not_active",
+                "section": None,
+                "byte_size": None,
+                "fields": [],
+            },
         )
         # Commit explicitly: the refusal is the only mutation, and the raise
         # below would otherwise roll the evidence back with the request.
@@ -672,7 +698,12 @@ async def submit_inventory(
         byte_size = len(canonical_inventory_bytes(entry.payload))
         try:
             entry.typed_payload()
-        except ValueError:
+        except ValueError as exc:
+            # Name the offending field, never its value. A bare "section is
+            # invalid" forced an operator to read the schema source to work out
+            # which of ~20 fields a rejected scan tripped on; the field path plus
+            # the rule that failed is non-sensitive and turns that into a glance.
+            field_errors = inventory_field_errors(exc)
             await audit.record(
                 db,
                 action="inventory.rejected",
@@ -682,6 +713,7 @@ async def submit_inventory(
                     "reason": "section_schema_invalid",
                     "section": entry.section.value,
                     "byte_size": byte_size,
+                    "fields": [item["field"] for item in field_errors],
                 },
             )
             await db.commit()
@@ -690,6 +722,7 @@ async def submit_inventory(
                 detail={
                     "code": "inventory_section_invalid",
                     "section": entry.section.value,
+                    "fields": field_errors,
                 },
             )
         validated.append(

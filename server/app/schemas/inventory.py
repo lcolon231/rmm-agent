@@ -59,6 +59,12 @@ MAX_INSTALLED_UPDATES = 1024
 
 ShortText = Annotated[str, StringConstraints(max_length=255)]
 Identifier = Annotated[str, StringConstraints(max_length=128)]
+#: Free prose supplied by the operating system rather than by NodeLink, where
+#: 255 characters is simply the wrong bound: Windows Update's own stock history
+#: description is 262 characters, so a ShortText field silently made every real
+#: endpoint's update scan unstorable. Still bounded — the per-section byte
+#: budget remains the binding constraint — just bounded at prose scale.
+ProseText = Annotated[str, StringConstraints(max_length=2048)]
 
 
 class InventorySection(str, Enum):
@@ -447,7 +453,7 @@ class MissingUpdate(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    title: ShortText
+    title: ProseText
     #: e.g. "KB5034123"; some updates (drivers, definition updates) have none.
     kb_id: Identifier | None = None
     #: Windows Update's UpdateID GUID, for correlating across snapshots.
@@ -475,8 +481,8 @@ class InstalledUpdate(BaseModel):
     #: Windows Update identity; present even for drivers and firmware without KBs.
     update_id: Identifier | None = None
     revision_number: int | None = Field(default=None, ge=0)
-    title: ShortText | None = None
-    description: ShortText | None = None
+    title: ProseText | None = None
+    description: ProseText | None = None
     installed_on: datetime | None = None
     installed_by: ShortText | None = None
     #: Windows Update history client-application id, when sourced from history.

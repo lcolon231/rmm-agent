@@ -70,14 +70,66 @@ type Summary struct {
 	Truncated        bool   `json:"truncated,omitempty"`
 }
 
+// Field-length bounds mirroring the server's inventory models. Windows supplies
+// these strings, so their length is not ours to assume: Windows Update's stock
+// history description is 262 characters, which silently made every real scan
+// unstorable while this normalizer bounded only list lengths. The server rejects
+// a whole submission rather than truncating it, so the trimming has to happen
+// here — one over-long field must never cost an endpoint its entire scan.
+const (
+	maxIdentifierRunes = 128
+	maxShortTextRunes  = 255
+	maxProseRunes      = 2048
+)
+
+// fieldLimits maps each allowlisted string field to the server's bound. Fields
+// absent from this map are non-strings (bools, ints, timestamps) and pass
+// through untouched.
+var fieldLimits = map[string]int{
+	"title":                 maxProseRunes,
+	"description":           maxProseRunes,
+	"kb_id":                 maxIdentifierRunes,
+	"update_id":             maxIdentifierRunes,
+	"hresult":               maxIdentifierRunes,
+	"classification":        maxShortTextRunes,
+	"product":               maxShortTextRunes,
+	"severity":              maxShortTextRunes,
+	"support_url":           maxShortTextRunes,
+	"priority_grade":        maxShortTextRunes,
+	"installed_by":          maxShortTextRunes,
+	"client_application_id": maxShortTextRunes,
+}
+
+// truncateRunes trims to a rune count, not a byte count: the server counts
+// characters, so byte-slicing would both over-trim non-ASCII text and risk
+// splitting a multi-byte rune.
+func truncateRunes(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value // fast path: ASCII within bounds
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
+}
+
 // allowlist copies only the permitted keys whose values are non-nil, so the
-// server's extra="forbid" model accepts the row.
+// server's extra="forbid" model accepts the row, and bounds every string to the
+// server's limit so a long OS-supplied value cannot reject the submission.
 func allowlist(row map[string]any, fields []string) map[string]any {
 	out := make(map[string]any, len(fields))
 	for _, key := range fields {
-		if v, ok := row[key]; ok && v != nil {
-			out[key] = v
+		v, ok := row[key]
+		if !ok || v == nil {
+			continue
 		}
+		if s, isString := v.(string); isString {
+			if limit, bounded := fieldLimits[key]; bounded {
+				v = truncateRunes(s, limit)
+			}
+		}
+		out[key] = v
 	}
 	return out
 }
