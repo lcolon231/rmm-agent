@@ -106,12 +106,25 @@ MFA/federation, tenant-scoped authorization, and certificate pinning.
 ### 3.2 Operations plane
 
 The operations plane delivers endpoint state and actions. It currently contains
-enrollment, heartbeat telemetry, polling command pickup, five command kinds,
+enrollment, heartbeat telemetry, polling command pickup, eleven command kinds,
 buffered result submission, command history, and offline status transitions.
 
 The current command kinds are `powershell`, `shell`, `collect_inventory`,
-`scan_updates`, and `install_updates`. The latter three are typed operations
-authorized by the operator role.
+`scan_updates`, `install_updates`, `file_upload`, `file_download`,
+`registry_read`, `registry_write`, `registry_delete`, and
+`remediation_rollback`. Inventory/update operations are authorized by the
+operator role. File/registry remediation is administrator-only and separately
+capability-gated; see [`CONTROLLED-REMEDIATION.md`](CONTROLLED-REMEDIATION.md).
+
+Controlled remediation preserves polling and the signed command/result
+contract. Both server and agent validate fixed managed file roots and the
+`Software\\NodeLink\\Managed` HKLM/HKCU subtree. The endpoint rejects device,
+UNC, traversal, alternate-stream, and reparse paths, applies byte/digest/type/
+view bounds, performs atomic file replacement, and retains local backup records
+for an explicit typed rollback. Audit events record actor, decision, envelope,
+kind, payload keys, sizes, and outcome but exclude paths and operation content.
+Agents advertise `file-transfer-v1` and `registry-operations-v1`; dispatch to
+an older agent fails as unsupported without a script fallback.
 
 `scan_updates` (issue #51) runs a bounded, on-demand Windows Update scan on the
 endpoint and reports a normalized result — missing/applicable updates and
@@ -215,7 +228,11 @@ size 1-100, with outstanding-queue counts) and
 `GET /agents/{id}/commands/{command_id}` (full record: payload, envelope
 version, schema version, nonce, signing key id, signature, lifecycle
 timestamps, exit code, and the bounded stdout/stderr with truncation flags and
-true total byte counts). Both report an *effective* status: stored
+true total byte counts).
+Remediation command detail is administrator-only because its payload/result may
+contain file or registry content; lower-role denial is audited while history
+metadata remains visible under the ordinary command-history policy. Both APIs
+report an *effective* status: stored
 queued/dispatched work past `expires_at` is returned as `expired` without
 mutating the row, which the next heartbeat sweep persists. Because captured
 output can contain sensitive endpoint data, reading a command detail is

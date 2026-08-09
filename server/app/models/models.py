@@ -106,6 +106,14 @@ class CommandKind(str, enum.Enum):
     scan_updates = "scan_updates"
     # Selective Windows Update installation typed operation.
     install_updates = "install_updates"
+    # Capability-gated remediation operations (issue #59). These are typed,
+    # policy-bounded commands; they never accept script text.
+    file_upload = "file_upload"
+    file_download = "file_download"
+    registry_read = "registry_read"
+    registry_write = "registry_write"
+    registry_delete = "registry_delete"
+    remediation_rollback = "remediation_rollback"
 
 
 class CommandStatus(str, enum.Enum):

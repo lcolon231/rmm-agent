@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import base64
+import binascii
+import hashlib
 import re
 from datetime import datetime
 
@@ -440,6 +443,62 @@ class HeartbeatAck(BaseModel):
 # Dispatch-side cap on the canonical payload (scripts included). Bounds what
 # an operator can push toward an agent in one command.
 MAX_COMMAND_PAYLOAD_BYTES = 64 * 1024
+MAX_FILE_UPLOAD_BYTES = 32 * 1024
+MAX_REGISTRY_BINARY_BYTES = 16 * 1024
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_BACKUP_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_REGISTRY_TYPES = {
+    "string", "expand_string", "dword", "qword", "multi_string", "binary"
+}
+
+
+def _validate_managed_windows_path(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("path must be a string")
+    path = value.strip().replace("/", "\\")
+    if len(path) > 260 or not re.fullmatch(r"[A-Za-z]:\\[^\x00-\x1f]+", path):
+        raise ValueError("path must be an absolute Windows drive path")
+    if path.startswith(("\\\\", "\\?\\", "\\.\\")) or ".." in path.split("\\"):
+        raise ValueError("device, UNC, and traversal paths are not supported")
+    if ":" in path[2:]:
+        raise ValueError("alternate data streams are not supported")
+    reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+    for segment in path[3:].split("\\"):
+        if not segment or segment != segment.rstrip(" .") or segment.split(".", 1)[0].upper() in reserved:
+            raise ValueError("path contains an empty, ambiguous, or reserved device segment")
+    folded = path.casefold().rstrip("\\")
+    roots = (r"c:\programdata\nodelink\managed", r"c:\windows\temp\nodelink")
+    if not any(folded == root or folded.startswith(root + "\\") for root in roots):
+        raise ValueError("path is outside the managed transfer roots")
+    return path
+
+
+def _validate_registry_location(payload: dict) -> tuple[str, str, str, int]:
+    allowed = {"hive", "key", "value_name", "view"}
+    if set(payload) - allowed:
+        raise ValueError("registry payload contains unsupported fields")
+    hive = payload.get("hive")
+    key = payload.get("key")
+    value_name = payload.get("value_name")
+    view = payload.get("view", 64)
+    if hive not in {"HKLM", "HKCU"}:
+        raise ValueError("registry hive must be HKLM or HKCU")
+    if not isinstance(key, str):
+        raise ValueError("registry key must be a string")
+    key = key.strip().replace("/", "\\").strip("\\")
+    folded_key = key.casefold()
+    registry_root = "software\\nodelink\\managed"
+    if (
+        len(key) > 240
+        or ".." in key.split("\\")
+        or (folded_key != registry_root and not folded_key.startswith(registry_root + "\\"))
+    ):
+        raise ValueError("registry key is outside the managed subtree")
+    if not isinstance(value_name, str) or len(value_name) > 163 or "\\" in value_name or "\x00" in value_name:
+        raise ValueError("registry value_name is invalid")
+    if view not in {32, 64}:
+        raise ValueError("registry view must be 32 or 64")
+    return hive, key, value_name, view
 
 
 class CommandCreate(BaseModel):
@@ -466,7 +525,95 @@ class CommandCreate(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def typed_windows_update_payload(self) -> "CommandCreate":
+    def typed_operation_payload(self) -> "CommandCreate":
+        if self.kind == CommandKind.file_upload:
+            allowed = {"path", "content_base64", "sha256", "overwrite"}
+            if set(self.payload) - allowed or set(self.payload) != allowed:
+                raise ValueError("file_upload requires path, content_base64, sha256, and overwrite")
+            path = _validate_managed_windows_path(self.payload["path"])
+            digest = self.payload["sha256"]
+            overwrite = self.payload["overwrite"]
+            if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
+                raise ValueError("sha256 must be a lowercase SHA-256 digest")
+            if not isinstance(overwrite, bool):
+                raise ValueError("overwrite must be a boolean")
+            encoded = self.payload["content_base64"]
+            if not isinstance(encoded, str):
+                raise ValueError("content_base64 must be a string")
+            try:
+                decoded = base64.b64decode(encoded, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("content_base64 is not canonical base64") from exc
+            if len(decoded) > MAX_FILE_UPLOAD_BYTES:
+                raise ValueError(f"file upload exceeds {MAX_FILE_UPLOAD_BYTES} bytes")
+            if hashlib.sha256(decoded).hexdigest() != digest:
+                raise ValueError("file upload digest does not match content")
+            self.payload = {"path": path, "content_base64": encoded, "sha256": digest, "overwrite": overwrite}
+            return self
+
+        if self.kind == CommandKind.file_download:
+            if set(self.payload) - {"path", "expected_sha256"} or "path" not in self.payload:
+                raise ValueError("file_download payload contains unsupported fields")
+            path = _validate_managed_windows_path(self.payload["path"])
+            expected = self.payload.get("expected_sha256")
+            if expected is not None and (not isinstance(expected, str) or not _SHA256_RE.fullmatch(expected)):
+                raise ValueError("expected_sha256 must be a lowercase SHA-256 digest")
+            self.payload = {"path": path, **({"expected_sha256": expected} if expected else {})}
+            return self
+
+        if self.kind in {CommandKind.registry_read, CommandKind.registry_write, CommandKind.registry_delete}:
+            base_keys = {"hive", "key", "value_name", "view"}
+            extra = {
+                CommandKind.registry_read: set(),
+                CommandKind.registry_write: {"type", "data", "expected_current_sha256"},
+                CommandKind.registry_delete: {"confirm", "expected_current_sha256"},
+            }[self.kind]
+            if set(self.payload) - (base_keys | extra) or not {"hive", "key", "value_name"}.issubset(self.payload):
+                raise ValueError("registry payload contains unsupported or missing fields")
+            location = {name: self.payload[name] for name in base_keys if name in self.payload}
+            hive, key, value_name, view = _validate_registry_location(location)
+            normalized = {"hive": hive, "key": key, "value_name": value_name, "view": view}
+            if self.kind == CommandKind.registry_write:
+                value_type = self.payload.get("type")
+                if value_type not in _REGISTRY_TYPES:
+                    raise ValueError("registry type is unsupported")
+                data = self.payload.get("data")
+                if value_type in {"string", "expand_string"} and (not isinstance(data, str) or len(data.encode("utf-8")) > 16 * 1024):
+                    raise ValueError("registry string data is invalid or oversized")
+                if value_type == "multi_string" and (not isinstance(data, list) or len(data) > 256 or any(not isinstance(item, str) or "\x00" in item for item in data)):
+                    raise ValueError("registry multi_string data is invalid")
+                if value_type == "dword" and (not isinstance(data, int) or isinstance(data, bool) or not 0 <= data <= 0xFFFFFFFF):
+                    raise ValueError("registry dword data is invalid")
+                if value_type == "qword" and (not isinstance(data, int) or isinstance(data, bool) or not 0 <= data <= 0x7FFFFFFFFFFFFFFF):
+                    raise ValueError("registry qword data is invalid")
+                if value_type == "binary":
+                    if not isinstance(data, str):
+                        raise ValueError("registry binary data must be base64")
+                    try:
+                        binary = base64.b64decode(data, validate=True)
+                    except (binascii.Error, ValueError) as exc:
+                        raise ValueError("registry binary data is not canonical base64") from exc
+                    if len(binary) > MAX_REGISTRY_BINARY_BYTES:
+                        raise ValueError("registry binary data is oversized")
+                normalized.update({"type": value_type, "data": data})
+            else:
+                if self.kind == CommandKind.registry_delete and self.payload.get("confirm") is not True:
+                    raise ValueError("registry_delete requires confirm=true")
+                if self.kind == CommandKind.registry_delete:
+                    normalized["confirm"] = True
+            expected = self.payload.get("expected_current_sha256")
+            if expected is not None:
+                if not isinstance(expected, str) or not _SHA256_RE.fullmatch(expected):
+                    raise ValueError("expected_current_sha256 must be a lowercase SHA-256 digest")
+                normalized["expected_current_sha256"] = expected
+            self.payload = normalized
+            return self
+
+        if self.kind == CommandKind.remediation_rollback:
+            if set(self.payload) != {"backup_id"} or not isinstance(self.payload["backup_id"], str) or not _BACKUP_ID_RE.fullmatch(self.payload["backup_id"]):
+                raise ValueError("remediation_rollback requires a valid backup_id")
+            return self
+
         if self.kind != CommandKind.install_updates:
             return self
 

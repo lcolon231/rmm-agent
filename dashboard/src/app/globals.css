@@ -2185,6 +2185,7 @@ select:focus-visible {
 .dispatch-review p:first-child { color: var(--slate); font-size: 11px; font-weight: 700; }
 
 .dispatch-form select,
+.dispatch-form input:not([type="checkbox"]):not([type="file"]),
 .dispatch-form textarea {
   padding: 8px 10px;
   background: var(--paper);
@@ -2193,6 +2194,8 @@ select:focus-visible {
   font-size: 12px;
 }
 
+.dispatch-form input:not([type="checkbox"]):not([type="file"]) { width: 100%; margin-top: 6px; font-family: var(--font-data); }
+.dispatch-form input[type="file"] { display: block; width: 100%; margin-top: 6px; padding: 9px; color: var(--slate); background: var(--paper); border: 1px dashed var(--line-strong); border-radius: 4px; }
 .dispatch-form textarea { width: 100%; margin-top: 6px; font-family: var(--font-data); resize: vertical; }
 .dispatch-form textarea:disabled { opacity: 0.55; cursor: not-allowed; }
 .dispatch-form .dispatch-checkbox {
@@ -2204,6 +2207,10 @@ select:focus-visible {
 }
 .dispatch-form .dispatch-checkbox input { width: 15px; height: 15px; accent-color: var(--teal); }
 .dispatch-kind-note { margin: 10px 0 12px; color: var(--muted); font-size: 10px; }
+.remediation-policy-band { display: flex; align-items: flex-start; gap: 9px; margin: 2px 0 14px; padding: 10px 12px; color: var(--teal); background: color-mix(in srgb, var(--teal) 7%, var(--paper)); border-left: 3px solid var(--teal); }
+.remediation-policy-band div { display: grid; gap: 2px; }
+.remediation-policy-band strong { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.remediation-policy-band span { color: var(--slate); font-family: var(--font-data); font-size: 10px; line-height: 1.5; }
 
 .dispatch-form button[type="submit"],
 .dispatch-review-actions button {

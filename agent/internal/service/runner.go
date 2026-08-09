@@ -29,6 +29,7 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/monitoring"
 	"github.com/lcolon231/rmm/agent/internal/patching"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
+	"github.com/lcolon231/rmm/agent/internal/remediation"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 	"github.com/lcolon231/rmm/agent/internal/verify"
 )
@@ -741,6 +742,10 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		res = a.runUpdateScan(ctx, s)
 	case executor.KindInstallUpdates:
 		res = a.runUpdateInstall(ctx, cmd.Payload)
+	case executor.KindFileUpload, executor.KindFileDownload,
+		executor.KindRegistryRead, executor.KindRegistryWrite,
+		executor.KindRegistryDelete, executor.KindRemediationRollback:
+		res = remediation.Execute(ctx, cmd.ID, cmd.Kind, cmd.Payload)
 	default:
 		script := extractScript(cmd.Payload)
 		res = a.run(ctx, cmd.Kind, script)

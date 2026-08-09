@@ -47,6 +47,28 @@ def authorize_command(
             reason="typed_operation_role_allowed",
         )
 
+    # File mutation, registry mutation/readback, and rollback can expose or
+    # change privileged endpoint state. Keep them behind the administrator
+    # role even though they are typed operations; script permission is not an
+    # appropriate substitute for this distinct trust boundary.
+    if kind in (
+        CommandKind.file_upload,
+        CommandKind.file_download,
+        CommandKind.registry_read,
+        CommandKind.registry_write,
+        CommandKind.registry_delete,
+        CommandKind.remediation_rollback,
+    ):
+        return CommandAuthorizationDecision(
+            allowed=operator.role == OperatorRole.admin,
+            policy="privileged_remediation",
+            reason=(
+                "administrator_role_allowed"
+                if operator.role == OperatorRole.admin
+                else "administrator_role_required"
+            ),
+        )
+
     scope = operator.script_execution_scope
     scope_id = operator.script_execution_scope_id
     if scope is None:

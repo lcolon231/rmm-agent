@@ -15,6 +15,8 @@ function dispatchErrorMessage(error: NodelinkApiError): { message: string; statu
       message:
         error.code === "script_execution_not_authorized"
           ? "PowerShell and shell execution require an explicit administrator-granted scope for this endpoint."
+          : error.code === "privileged_remediation_not_authorized"
+            ? "Controlled file and registry remediation requires an administrator session."
           : "Your operator session is not allowed to dispatch commands.",
       status: 403,
     };
@@ -22,11 +24,16 @@ function dispatchErrorMessage(error: NodelinkApiError): { message: string; statu
   if (error.status === 404) {
     return { message: "This endpoint no longer exists.", status: 404 };
   }
+  if (error.status === 400 || error.status === 422) {
+    return { message: "The server rejected this typed operation. Review every path, digest, type, and confirmation field.", status: 400 };
+  }
   if (error.status === 409) {
     return {
       message:
         error.code === "agent_not_trusted"
           ? "This endpoint is quarantined or revoked, so no new commands may be queued."
+          : error.code === "agent_capability_unsupported"
+            ? "This endpoint must upgrade its agent before it can run controlled file or registry remediation."
           : "This endpoint's agent does not support a compatible signed command format.",
       status: 409,
     };
@@ -66,7 +73,7 @@ export async function POST(
   const input = validateDispatchInput(body);
   if (!input) {
     return NextResponse.json(
-      { error: "Provide a supported command kind, a script within limits, and a valid expiry." },
+      { error: "Provide a supported command kind, valid typed inputs, and a valid expiry." },
       { status: 400 },
     );
   }

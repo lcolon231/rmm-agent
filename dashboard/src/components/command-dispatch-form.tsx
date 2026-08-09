@@ -20,6 +20,7 @@ type DispatchFormProps = {
   endpointId: string;
   hostname: string;
   canExecuteScripts: boolean;
+  isAdmin: boolean;
 };
 
 type Step =
@@ -31,6 +32,7 @@ export function CommandDispatchForm({
   endpointId,
   hostname,
   canExecuteScripts,
+  isAdmin,
 }: DispatchFormProps) {
   const router = useRouter();
   const [kind, setKind] = useState<CommandKind>(
@@ -39,6 +41,20 @@ export function CommandDispatchForm({
   const [script, setScript] = useState("");
   const [updateTargets, setUpdateTargets] = useState("");
   const [installAll, setInstallAll] = useState(false);
+  const [targetPath, setTargetPath] = useState("");
+  const [expectedDigest, setExpectedDigest] = useState("");
+  const [uploadContent, setUploadContent] = useState("");
+  const [uploadDigest, setUploadDigest] = useState("");
+  const [uploadName, setUploadName] = useState("");
+  const [overwrite, setOverwrite] = useState(false);
+  const [registryHive, setRegistryHive] = useState<"HKLM" | "HKCU">("HKLM");
+  const [registryKey, setRegistryKey] = useState("Software\\NodeLink\\Managed");
+  const [registryValueName, setRegistryValueName] = useState("");
+  const [registryView, setRegistryView] = useState<32 | 64>(64);
+  const [registryType, setRegistryType] = useState("string");
+  const [registryData, setRegistryData] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [backupId, setBackupId] = useState("");
   const [ttlSeconds, setTtlSeconds] = useState(300);
   const [step, setStep] = useState<Step>({ name: "compose" });
   const [error, setError] = useState("");
@@ -46,7 +62,53 @@ export function CommandDispatchForm({
 
   const definition = commandKindDefinitions.find((d) => d.kind === kind)!;
   const availableDefinitions =
-    commandKindDefinitionsForPermission(canExecuteScripts);
+    commandKindDefinitionsForPermission(canExecuteScripts, isAdmin);
+
+  function operationPayload(): Record<string, unknown> | undefined {
+    if (kind === "file_upload") {
+      return { path: targetPath.trim(), content_base64: uploadContent, sha256: uploadDigest, overwrite };
+    }
+    if (kind === "file_download") {
+      return { path: targetPath.trim(), ...(expectedDigest.trim() ? { expected_sha256: expectedDigest.trim().toLowerCase() } : {}) };
+    }
+    if (kind === "remediation_rollback") return { backup_id: backupId.trim().toLowerCase() };
+    if (["registry_read", "registry_write", "registry_delete"].includes(kind)) {
+      const base: Record<string, unknown> = {
+        hive: registryHive,
+        key: registryKey.trim(),
+        value_name: registryValueName.trim(),
+        view: registryView,
+      };
+      if (kind === "registry_read") return base;
+      if (expectedDigest.trim()) base.expected_current_sha256 = expectedDigest.trim().toLowerCase();
+      if (kind === "registry_delete") return { ...base, confirm: confirmDelete };
+      let data: unknown = registryData;
+      if (registryType === "dword" || registryType === "qword") data = Number(registryData);
+      if (registryType === "multi_string") data = registryData.split(/\r?\n/).filter(Boolean);
+      return { ...base, type: registryType, data };
+    }
+    return undefined;
+  }
+
+  async function loadUpload(file: File | undefined) {
+    setError("");
+    setUploadContent("");
+    setUploadDigest("");
+    setUploadName(file?.name ?? "");
+    if (!file) return;
+    if (file.size > 32 * 1024) {
+      setError("Managed uploads are limited to 32 KiB.");
+      return;
+    }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      setUploadDigest(Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""));
+      setUploadContent(btoa(String.fromCharCode(...bytes)));
+    } catch {
+      setError("The selected file could not be read and hashed.");
+    }
+  }
 
   function handleReview() {
     setError("");
@@ -56,14 +118,17 @@ export function CommandDispatchForm({
       update_targets: updateTargets,
       install_all: installAll,
       ttl_seconds: ttlSeconds,
+      operation_payload: operationPayload(),
     });
     if (!input) {
       setError(
         definition.input === "script"
           ? "Enter a script within the size limit before dispatching."
-          : definition.input === "update_targets"
-            ? "Enter valid KB or Windows Update IDs, or explicitly choose Install all applicable updates."
-            : "This typed operation does not accept additional input.",
+            : definition.input === "update_targets"
+              ? "Enter valid KB or Windows Update IDs, or explicitly choose Install all applicable updates."
+            : definition.input === "none"
+              ? "This typed operation does not accept additional input."
+              : "Enter a valid managed path, registry location/value, digest, or backup ID for this operation.",
       );
       return;
     }
@@ -87,6 +152,10 @@ export function CommandDispatchForm({
         setScript("");
         setUpdateTargets("");
         setInstallAll(false);
+        setUploadContent("");
+        setUploadDigest("");
+        setUploadName("");
+        setRegistryData("");
         router.refresh();
       } else {
         setError(body?.error ?? "The command could not be dispatched. Try again.");
@@ -134,6 +203,12 @@ export function CommandDispatchForm({
               ? "All applicable non-hidden updates"
               : step.input.update_targets.join("\n")}
           </pre>
+        ) : step.input.operation_payload ? (
+          <pre>{JSON.stringify({
+            ...step.input.operation_payload,
+            ...(step.input.kind === "file_upload" ? { content_base64: `[${uploadName || "file"}; ${Math.floor(uploadContent.length * 0.75)} bytes]` } : {}),
+            ...(step.input.kind === "registry_write" ? { data: "[value withheld from confirmation transcript]" } : {}),
+          }, null, 2)}</pre>
         ) : (
           <p className="dispatch-noscript">No script payload — this is a bounded typed operation.</p>
         )}
@@ -167,6 +242,15 @@ export function CommandDispatchForm({
             setScript("");
             setUpdateTargets("");
             setInstallAll(false);
+            setTargetPath("");
+            setExpectedDigest("");
+            setUploadContent("");
+            setUploadDigest("");
+            setUploadName("");
+            setOverwrite(false);
+            setRegistryData("");
+            setConfirmDelete(false);
+            setBackupId("");
           }}
           value={kind}
         >
@@ -186,6 +270,21 @@ export function CommandDispatchForm({
         </select>
       </div>
       <p className="dispatch-kind-note">{definition.description}</p>
+      {definition.adminOnly ? (
+        <div className="remediation-policy-band" role="note">
+          <ShieldCheck size={16} />
+          <div>
+            <strong>Managed boundary</strong>
+            <span>
+              {definition.input.startsWith("file_")
+                ? "Only C:\\ProgramData\\NodeLink\\Managed and C:\\Windows\\Temp\\NodeLink."
+                : definition.input.startsWith("registry_")
+                  ? "Only HKLM/HKCU Software\\NodeLink\\Managed in the selected registry view."
+                  : "The backup must exist in this endpoint's local NodeLink rollback journal."}
+            </span>
+          </div>
+        </div>
+      ) : null}
       {definition.input === "script" ? (
         <>
           <label htmlFor="command-script">Script</label>
@@ -225,6 +324,62 @@ export function CommandDispatchForm({
           <p className="dispatch-kind-note">
             Use the Update ID shown in Windows Updates inventory for drivers or firmware that do not have a KB number.
           </p>
+        </>
+      ) : definition.input === "file_upload" ? (
+        <>
+          <label htmlFor="managed-upload-path">Managed destination path</label>
+          <input id="managed-upload-path" onChange={(event) => setTargetPath(event.target.value)} placeholder="C:\\ProgramData\\NodeLink\\Managed\\patch.bin" value={targetPath} />
+          <label htmlFor="managed-upload-file">File (32 KiB maximum)</label>
+          <input id="managed-upload-file" onChange={(event) => void loadUpload(event.target.files?.[0])} type="file" />
+          {uploadDigest ? <p className="dispatch-kind-note">SHA-256 <code>{uploadDigest}</code></p> : null}
+          <label className="dispatch-checkbox" htmlFor="managed-upload-overwrite">
+            <input checked={overwrite} id="managed-upload-overwrite" onChange={(event) => setOverwrite(event.target.checked)} type="checkbox" />
+            Replace an existing file after creating rollback metadata
+          </label>
+        </>
+      ) : definition.input === "file_download" ? (
+        <>
+          <label htmlFor="managed-download-path">Managed source path</label>
+          <input id="managed-download-path" onChange={(event) => setTargetPath(event.target.value)} placeholder="C:\\ProgramData\\NodeLink\\Managed\\diagnostic.txt" value={targetPath} />
+          <label htmlFor="managed-download-digest">Expected SHA-256 (optional)</label>
+          <input id="managed-download-digest" onChange={(event) => setExpectedDigest(event.target.value)} placeholder="64 lowercase hexadecimal characters" value={expectedDigest} />
+        </>
+      ) : ["registry_read", "registry_write", "registry_delete"].includes(definition.input) ? (
+        <>
+          <div className="dispatch-fields">
+            <label htmlFor="registry-hive">Hive</label>
+            <select id="registry-hive" onChange={(event) => setRegistryHive(event.target.value as "HKLM" | "HKCU")} value={registryHive}><option>HKLM</option><option>HKCU</option></select>
+            <label htmlFor="registry-view">Registry view</label>
+            <select id="registry-view" onChange={(event) => setRegistryView(Number(event.target.value) as 32 | 64)} value={registryView}><option value={64}>64-bit</option><option value={32}>32-bit</option></select>
+          </div>
+          <label htmlFor="registry-key">Managed key</label>
+          <input id="registry-key" onChange={(event) => setRegistryKey(event.target.value)} value={registryKey} />
+          <label htmlFor="registry-value-name">Value name</label>
+          <input id="registry-value-name" onChange={(event) => setRegistryValueName(event.target.value)} value={registryValueName} />
+          {definition.input === "registry_write" ? (
+            <>
+              <label htmlFor="registry-type">Value type</label>
+              <select id="registry-type" onChange={(event) => setRegistryType(event.target.value)} value={registryType}>
+                <option value="string">String</option><option value="expand_string">Expandable string</option><option value="dword">DWORD</option><option value="qword">QWORD</option><option value="multi_string">Multi-string (one per line)</option><option value="binary">Binary (base64)</option>
+              </select>
+              <label htmlFor="registry-data">Value data</label>
+              <textarea id="registry-data" onChange={(event) => setRegistryData(event.target.value)} rows={4} value={registryData} />
+            </>
+          ) : null}
+          {definition.input !== "registry_read" ? (
+            <>
+              <label htmlFor="registry-expected-digest">Current-value SHA-256 (optional compare-and-set)</label>
+              <input id="registry-expected-digest" onChange={(event) => setExpectedDigest(event.target.value)} value={expectedDigest} />
+            </>
+          ) : null}
+          {definition.input === "registry_delete" ? (
+            <label className="dispatch-checkbox" htmlFor="registry-delete-confirm"><input checked={confirmDelete} id="registry-delete-confirm" onChange={(event) => setConfirmDelete(event.target.checked)} type="checkbox" />Confirm deletion of exactly this value</label>
+          ) : null}
+        </>
+      ) : definition.input === "rollback" ? (
+        <>
+          <label htmlFor="remediation-backup-id">Endpoint-local backup ID</label>
+          <input id="remediation-backup-id" onChange={(event) => setBackupId(event.target.value)} placeholder="32 lowercase hexadecimal characters" value={backupId} />
         </>
       ) : null}
       {error ? <p className="dispatch-error" role="alert">{error}</p> : null}

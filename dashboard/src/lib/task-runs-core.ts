@@ -4,7 +4,18 @@
 // than imported: this module is loaded directly by the node:test runner, which
 // does not resolve the "@/" path alias. They are structurally identical to the
 // command-console definitions, so values flow between the two without casts.
-export type CommandKind = "powershell" | "shell" | "collect_inventory";
+export type CommandKind =
+  | "powershell"
+  | "shell"
+  | "collect_inventory"
+  | "scan_updates"
+  | "install_updates"
+  | "file_upload"
+  | "file_download"
+  | "registry_read"
+  | "registry_write"
+  | "registry_delete"
+  | "remediation_rollback";
 
 export type CommandStatus =
   | "queued"
@@ -66,6 +77,14 @@ const commandKinds = new Set<CommandKind>([
   "powershell",
   "shell",
   "collect_inventory",
+  "scan_updates",
+  "install_updates",
+  "file_upload",
+  "file_download",
+  "registry_read",
+  "registry_write",
+  "registry_delete",
+  "remediation_rollback",
 ]);
 
 const commandStatuses = new Set<CommandStatus>([

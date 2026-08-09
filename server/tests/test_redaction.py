@@ -638,6 +638,12 @@ PRODUCER_DETAILS = {
         "agent_completed_at": "2026-07-23T00:00:00+00:00",
     },
     "command_detail.viewed": {"command_id": ID3, "status": "succeeded"},
+    "command_detail.access_denied": {
+        "command_id": ID3,
+        "kind": "file_download",
+        "operator_role": "readonly",
+        "reason": "administrator_role_required",
+    },
     "endpoint_detail.viewed": {
         "history_hours": 24,
         "history_limit": 144,

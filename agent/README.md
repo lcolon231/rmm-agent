@@ -224,9 +224,14 @@ refuses unknown or retired keys. Operators rotate the server-side registry with
 and rollback — see `docs/KEY-ROTATION.md`); they must preserve the registry and audit records
 when retiring or rolling back a key.
 
-Supported command kinds: `powershell` (Windows / `pwsh` on Unix), `shell`
-(`cmd.exe` / `/bin/sh`), and `collect_inventory`. Commands run with a 5-minute
-timeout.
+Supported command kinds include `powershell` (Windows / `pwsh` on Unix),
+`shell` (`cmd.exe` / `/bin/sh`), `collect_inventory`, Windows Update scan and
+install, and the Windows-only controlled remediation kinds `file_upload`,
+`file_download`, `registry_read`, `registry_write`, `registry_delete`, and
+`remediation_rollback`. The latter advertise `file-transfer-v1` and
+`registry-operations-v1`, enforce fixed path/hive policies again at the
+endpoint, and never fall back to a shell. See
+[`docs/CONTROLLED-REMEDIATION.md`](../docs/CONTROLLED-REMEDIATION.md).
 
 ### Typed script parameters (dormant)
 

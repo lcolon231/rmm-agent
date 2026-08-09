@@ -191,6 +191,21 @@ denial occurs before command construction, signing, or queueing. This is not a
 replacement for approval workflows, expiring grants, or a least-privilege agent
 service identity.
 
+Issue #59 adds a narrower privileged-remediation boundary. File and registry
+operations require `admin` (not merely the typed-operation operator role), an
+active trusted agent, and advertised `file-transfer-v1` or
+`registry-operations-v1` capability. The server validates fixed managed roots,
+hives, views, types, byte bounds, digests, and explicit deletion before signing;
+the agent repeats those checks and additionally rejects reparse points and
+device/UNC/alternate-stream paths. Mutations capture endpoint-local rollback
+state, and file replacement is atomic. Paths and file/registry contents are
+excluded from permanent audit detail. Residual risks remain: LocalSystem can
+still alter the allowed resources, downloaded content and authorized command
+detail are sensitive, local rollback journals can be destroyed by an endpoint
+administrator, and policy checks cannot make a vendor payload trustworthy.
+Package provenance/signature policy, two-person approval, least-privilege
+service identity, and remote immutable rollback custody remain future work.
+
 Typed script parameters reduce injection and disclosure risk but do not make an
 approved script intrinsically safe. Definitions are immutable with the reviewed
 source. Values are validated without coercion, then the whole resolved document

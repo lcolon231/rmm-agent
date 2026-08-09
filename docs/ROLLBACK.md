@@ -22,6 +22,15 @@ automatic rollout must be paused first, database migrations are forward-only,
 and a schema rollback is a restore with an explicit data-loss decision. The
 compatibility planner records the decision but never changes a deployment.
 
+Controlled-remediation note: revision `0030` adds PostgreSQL enum values only.
+An older server cannot deserialize commands using those values. Pause new
+file/registry dispatch, allow or deliberately expire outstanding remediation
+commands, preserve endpoint-local `C:\ProgramData\NodeLink\Rollback` journals,
+and retain command/audit IDs before a component rollback. Prefer a forward fix.
+Crossing back before `0030` requires the exact-revision restore procedure; an
+Alembic downgrade is not supported. Resource rollback itself uses the typed
+`remediation_rollback` command documented in `CONTROLLED-REMEDIATION.md`.
+
 ## Release compatibility record
 
 Before every tag, copy

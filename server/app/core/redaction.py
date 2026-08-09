@@ -389,6 +389,9 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "agent_completed_at",
     ),
     "command_detail.viewed": _schema("command_id", "status"),
+    "command_detail.access_denied": _schema(
+        "command_id", "kind", "operator_role", "reason"
+    ),
     "endpoint_detail.viewed": _schema(
         "history_hours",
         "history_limit",
