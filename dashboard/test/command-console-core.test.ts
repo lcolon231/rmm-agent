@@ -12,6 +12,7 @@ import {
   describeStreamCapture,
   formatByteCount,
   hasActiveCommands,
+  powerOperationResultFromUnknown,
   validateDispatchInput,
   type CommandHistoryItem,
 } from "../src/lib/command-console-core.ts";
@@ -67,7 +68,7 @@ test("rejects invalid dispatch input instead of forwarding it", () => {
     null,
   );
   // Unknown kinds and out-of-range or fractional TTLs.
-  assert.equal(validateDispatchInput({ kind: "reboot", script: "x", ttl_seconds: 300 }), null);
+  assert.equal(validateDispatchInput({ kind: "erase_disk", script: "x", ttl_seconds: 300 }), null);
   assert.equal(validateDispatchInput({ kind: "shell", script: "x", ttl_seconds: 0 }), null);
   assert.equal(validateDispatchInput({ kind: "shell", script: "x", ttl_seconds: 86_401 }), null);
   assert.equal(validateDispatchInput({ kind: "shell", script: "x", ttl_seconds: 1.5 }), null);
@@ -157,9 +158,63 @@ test("script command choices require explicit endpoint permission", () => {
     [
       "collect_inventory", "scan_updates", "install_updates", "file_upload",
       "file_download", "registry_read", "registry_write", "registry_delete",
-      "remediation_rollback",
+      "remediation_rollback", "reboot", "shutdown", "cancel_power_action",
     ],
   );
+});
+
+test("builds strict power-operation and cancellation payloads", () => {
+  const base = { script: "", update_targets: [], install_all: false, ttl_seconds: 300 };
+  const reboot = validateDispatchInput({
+    ...base,
+    kind: "reboot",
+    operation_payload: {
+      confirm: true,
+      reason: "Approved maintenance restart",
+      delay_seconds: 60,
+      user_consent: "confirmed",
+    },
+  });
+  assert.deepEqual(buildDispatchRequestBody(reboot!).payload, {
+    confirm: true,
+    reason: "Approved maintenance restart",
+    delay_seconds: 60,
+    user_consent: "confirmed",
+  });
+  assert.equal(validateDispatchInput({
+    ...base,
+    kind: "shutdown",
+    operation_payload: { ...reboot!.operation_payload, confirm: false },
+  }), null);
+  assert.equal(validateDispatchInput({
+    ...base,
+    kind: "reboot",
+    operation_payload: { ...reboot!.operation_payload, delay_seconds: 10 },
+  }), null);
+
+  const cancel = validateDispatchInput({
+    ...base,
+    kind: "cancel_power_action",
+    operation_payload: { confirm: true, reason: "Cancel the maintenance restart" },
+  });
+  assert.equal(cancel?.operation_payload?.confirm, true);
+});
+
+test("parses structured power evidence without trusting arbitrary stdout", () => {
+  const parsed = powerOperationResultFromUnknown(JSON.stringify({
+    status: "scheduled",
+    action: "reboot",
+    delay_seconds: 60,
+    maintenance_window_id: "window-1",
+    maintenance_window_ends_at: "2026-08-09T15:00:00Z",
+    user_consent: "confirmed",
+    reason_sha256: "a".repeat(64),
+    message: "Windows accepted the delayed power action",
+  }));
+  assert.equal(parsed?.status, "scheduled");
+  assert.equal(parsed?.delaySeconds, 60);
+  assert.equal(powerOperationResultFromUnknown("not json"), null);
+  assert.equal(powerOperationResultFromUnknown(JSON.stringify({ ...parsed, reason_sha256: "bad" })), null);
 });
 
 test("builds controlled file and registry payloads without script fallback", () => {

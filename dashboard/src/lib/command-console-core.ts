@@ -11,7 +11,10 @@ export type CommandKind =
   | "registry_read"
   | "registry_write"
   | "registry_delete"
-  | "remediation_rollback";
+  | "remediation_rollback"
+  | "reboot"
+  | "shutdown"
+  | "cancel_power_action";
 
 export type CommandStatus =
   | "queued"
@@ -73,7 +76,9 @@ export type CommandKindDefinition = {
     | "registry_read"
     | "registry_write"
     | "registry_delete"
-    | "rollback";
+    | "rollback"
+    | "power_action"
+    | "power_cancel";
   adminOnly?: boolean;
 };
 
@@ -152,6 +157,27 @@ export const commandKindDefinitions: CommandKindDefinition[] = [
     input: "rollback",
     adminOnly: true,
   },
+  {
+    kind: "reboot",
+    label: "Restart endpoint",
+    description: "Schedule a delayed Windows restart inside an active maintenance window.",
+    input: "power_action",
+    adminOnly: true,
+  },
+  {
+    kind: "shutdown",
+    label: "Shut down endpoint",
+    description: "Schedule a delayed Windows shutdown inside an active maintenance window.",
+    input: "power_action",
+    adminOnly: true,
+  },
+  {
+    kind: "cancel_power_action",
+    label: "Cancel pending power action",
+    description: "Cancel a delayed Windows restart or shutdown, if one is pending.",
+    input: "power_cancel",
+    adminOnly: true,
+  },
 ];
 
 export function commandKindDefinitionsForPermission(
@@ -212,6 +238,23 @@ function validateOperationPayload(
 ): Record<string, unknown> | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const payload = raw as Record<string, unknown>;
+  if (kind === "reboot" || kind === "shutdown") {
+    const allowed = ["confirm", "reason", "delay_seconds", "user_consent"];
+    if (Object.keys(payload).length !== allowed.length || Object.keys(payload).some((key) => !allowed.includes(key))) return null;
+    const reason = typeof payload.reason === "string" ? payload.reason.trim() : "";
+    const reasonBytes = new TextEncoder().encode(reason).length;
+    if (payload.confirm !== true || reasonBytes < 10 || reasonBytes > 512 || /[\u0000-\u001f\u007f]/.test(reason)) return null;
+    if (typeof payload.delay_seconds !== "number" || !Number.isInteger(payload.delay_seconds) || payload.delay_seconds < 30 || payload.delay_seconds > 3600) return null;
+    if (payload.user_consent !== "confirmed" && payload.user_consent !== "no_user_session") return null;
+    return { confirm: true, reason, delay_seconds: payload.delay_seconds, user_consent: payload.user_consent };
+  }
+  if (kind === "cancel_power_action") {
+    if (Object.keys(payload).length !== 2 || payload.confirm !== true || typeof payload.reason !== "string") return null;
+    const reason = payload.reason.trim();
+    const reasonBytes = new TextEncoder().encode(reason).length;
+    if (reasonBytes < 10 || reasonBytes > 512 || /[\u0000-\u001f\u007f]/.test(reason) || !Object.keys(payload).every((key) => ["confirm", "reason"].includes(key))) return null;
+    return { confirm: true, reason };
+  }
   const path = payload.path;
   if (kind === "file_upload") {
     if (!isManagedPath(path)) return null;
@@ -364,6 +407,46 @@ export function buildDispatchRequestBody(input: DispatchInput): {
     kind: input.kind,
     payload,
     ttl_seconds: input.ttl_seconds,
+  };
+}
+
+export type PowerOperationResult = {
+  status: "scheduled" | "cancelled" | "none_pending" | "refused" | "invalid" | "unavailable" | "unsupported" | "failed";
+  action: "reboot" | "shutdown" | "cancel_power_action";
+  delaySeconds: number | null;
+  maintenanceWindowId: string | null;
+  maintenanceWindowEndsAt: string | null;
+  userConsent: "confirmed" | "no_user_session" | null;
+  reasonSHA256: string;
+  message: string | null;
+};
+
+export function powerOperationResultFromUnknown(value: unknown): PowerOperationResult | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const result = parsed as Record<string, unknown>;
+  if (!["scheduled", "cancelled", "none_pending", "refused", "invalid", "unavailable", "unsupported", "failed"].includes(String(result.status))) return null;
+  if (!["reboot", "shutdown", "cancel_power_action"].includes(String(result.action))) return null;
+  if (typeof result.reason_sha256 !== "string" || !SHA256.test(result.reason_sha256)) return null;
+  const delay = result.delay_seconds;
+  if (delay !== undefined && (typeof delay !== "number" || !Number.isInteger(delay) || delay < 30 || delay > 3600)) return null;
+  const consent = result.user_consent;
+  if (consent !== undefined && consent !== "confirmed" && consent !== "no_user_session") return null;
+  return {
+    status: result.status as PowerOperationResult["status"],
+    action: result.action as PowerOperationResult["action"],
+    delaySeconds: typeof delay === "number" ? delay : null,
+    maintenanceWindowId: typeof result.maintenance_window_id === "string" ? result.maintenance_window_id : null,
+    maintenanceWindowEndsAt: typeof result.maintenance_window_ends_at === "string" ? result.maintenance_window_ends_at : null,
+    userConsent: consent === "confirmed" || consent === "no_user_session" ? consent : null,
+    reasonSHA256: result.reason_sha256,
+    message: typeof result.message === "string" ? result.message : null,
   };
 }
 

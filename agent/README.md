@@ -122,6 +122,14 @@ If the server is unreachable, the agent does **not** crash or spin: the check-in
 loop retries with exponential backoff + jitter (capped), so a down server just
 means "keep trying quietly" until it comes back.
 
+Agents advertising `power-operations-v1` accept only the signed typed
+`reboot`, `shutdown`, and `cancel_power_action` contracts. Restart/shutdown
+repeat maintenance-window and user-session checks immediately before invoking
+Windows with a 30–3,600 second delay; cancellation uses the Windows abort path.
+The command journal is persisted before the OS action and the bounded result is
+retained across the disconnect/reboot. Non-Windows builds report unsupported.
+See [`docs/POWER-OPERATIONS.md`](../docs/POWER-OPERATIONS.md).
+
 ## Running as a Windows service
 
 ### GUI install (recommended for endpoints)

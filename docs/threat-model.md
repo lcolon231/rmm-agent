@@ -206,6 +206,19 @@ administrator, and policy checks cannot make a vendor payload trustworthy.
 Package provenance/signature policy, two-person approval, least-privilege
 service identity, and remote immutable rollback custody remain future work.
 
+Issue #60 adds a distinct disruptive power boundary. Restart, shutdown, and
+cancellation require `admin` plus `power-operations-v1`; restart/shutdown also
+require a current matching maintenance window, mandatory reason, bounded delay,
+and explicit signed user-session policy. The endpoint rechecks no-user-session
+claims and window end before invoking Windows, and a minimum delay permits
+durable result storage before disconnect. Cancellation is maintenance-window
+exempt because it removes disruption and is idempotent when nothing is pending.
+Residual risks remain: a compromised administrator can attest false consent,
+an already-compromised endpoint can falsify local user state/results, and
+Windows may power off before result upload (the local outbox recovers after
+boot). Two-person approval and independent endpoint-user confirmation remain
+future defenses. See [`POWER-OPERATIONS.md`](POWER-OPERATIONS.md).
+
 Typed script parameters reduce injection and disclosure risk but do not make an
 approved script intrinsically safe. Definitions are immutable with the reviewed
 source. Values are validated without coercion, then the whole resolved document

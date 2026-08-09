@@ -31,6 +31,14 @@ Crossing back before `0030` requires the exact-revision restore procedure; an
 Alembic downgrade is not supported. Resource rollback itself uses the typed
 `remediation_rollback` command documented in `CONTROLLED-REMEDIATION.md`.
 
+Power-operation note: revision `0031` adds PostgreSQL enum values only. Pause
+new restart/shutdown dispatch, issue typed cancellation for pending delayed
+actions where safe, allow or deliberately expire queued commands, and preserve
+their command/audit IDs. Old agents fail closed through capability negotiation.
+Crossing back before `0031` requires the exact-revision restore procedure; do
+not attempt to remove PostgreSQL enum values in place. See
+`POWER-OPERATIONS.md`.
+
 ## Release compatibility record
 
 Before every tag, copy

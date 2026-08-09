@@ -58,10 +58,21 @@ def authorize_command(
         CommandKind.registry_write,
         CommandKind.registry_delete,
         CommandKind.remediation_rollback,
+        CommandKind.reboot,
+        CommandKind.shutdown,
+        CommandKind.cancel_power_action,
     ):
         return CommandAuthorizationDecision(
             allowed=operator.role == OperatorRole.admin,
-            policy="privileged_remediation",
+            policy=(
+                "power_operation"
+                if kind in {
+                    CommandKind.reboot,
+                    CommandKind.shutdown,
+                    CommandKind.cancel_power_action,
+                }
+                else "privileged_remediation"
+            ),
             reason=(
                 "administrator_role_allowed"
                 if operator.role == OperatorRole.admin

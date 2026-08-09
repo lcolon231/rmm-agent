@@ -11,7 +11,9 @@ import {
   describeCommandStatus,
   describeStreamCapture,
   formatByteCount,
+  powerOperationResultFromUnknown,
   type CommandDetailData,
+  type PowerOperationResult,
   type StreamName,
 } from "@/lib/command-console-core";
 import { formatAgentVersion, formatEndpointDateTime } from "@/lib/endpoint-detail-core";
@@ -103,6 +105,28 @@ function UpdateInstallResult({
   );
 }
 
+function PowerResult({ result }: { result: PowerOperationResult }) {
+  const successful = ["scheduled", "cancelled", "none_pending"].includes(result.status);
+  return (
+    <div className={`power-command-result ${successful ? "succeeded" : "failed"}`}>
+      <header>
+        {successful ? <CheckCircle2 aria-hidden="true" size={21} /> : <AlertTriangle aria-hidden="true" size={21} />}
+        <div>
+          <strong>{result.message ?? result.status.replaceAll("_", " ")}</strong>
+          <span>Endpoint status: {result.status.replaceAll("_", " ")}</span>
+        </div>
+      </header>
+      <dl>
+        <div><dt>Action</dt><dd>{result.action.replaceAll("_", " ")}</dd></div>
+        <div><dt>Delay</dt><dd>{result.delaySeconds === null ? "Not applicable" : `${result.delaySeconds} seconds`}</dd></div>
+        <div><dt>Maintenance window</dt><dd><code>{result.maintenanceWindowId ?? "Not required"}</code></dd></div>
+        <div><dt>User policy</dt><dd>{result.userConsent?.replaceAll("_", " ") ?? "Not applicable"}</dd></div>
+        <div><dt>Reason evidence</dt><dd><code>{result.reasonSHA256}</code></dd></div>
+      </dl>
+    </div>
+  );
+}
+
 export function CommandDetailView({
   command,
   endpoint,
@@ -125,6 +149,8 @@ export function CommandDetailView({
         ...(Array.isArray(command.payload.update_ids) ? command.payload.update_ids : []),
       ].filter((value): value is string => typeof value === "string")
     : [];
+  const isPowerOperation = ["reboot", "shutdown", "cancel_power_action"].includes(command.kind);
+  const powerResult = isPowerOperation ? powerOperationResultFromUnknown(command.stdout) : null;
 
   return (
     <main className="endpoint-detail-page">
@@ -178,6 +204,18 @@ export function CommandDetailView({
                   : "No update targets were recorded."}
             </pre>
           </section>
+        ) : isPowerOperation ? (
+          <section className="command-payload power-command-payload" aria-labelledby="payload-title">
+            <header><div><span className="eyebrow">Signed safety policy</span><h2 id="payload-title">Power operation</h2></div></header>
+            <dl>
+              <div><dt>Action</dt><dd>{kindLabel}</dd></div>
+              <div><dt>Reason</dt><dd>{typeof command.payload.reason === "string" ? command.payload.reason : "—"}</dd></div>
+              <div><dt>Delay</dt><dd>{typeof command.payload.delay_seconds === "number" ? `${command.payload.delay_seconds} seconds` : "Not applicable"}</dd></div>
+              <div><dt>User policy</dt><dd>{typeof command.payload.user_consent === "string" ? command.payload.user_consent.replaceAll("_", " ") : "Not applicable"}</dd></div>
+              <div><dt>Maintenance window</dt><dd><code>{typeof command.payload.maintenance_window_id === "string" ? command.payload.maintenance_window_id : "Not required"}</code></dd></div>
+              <div><dt>Window closes</dt><dd>{typeof command.payload.maintenance_window_ends_at === "string" ? formatEndpointDateTime(command.payload.maintenance_window_ends_at) : "Not applicable"}</dd></div>
+            </dl>
+          </section>
         ) : null}
 
         <section className="command-result" aria-labelledby="result-title">
@@ -196,6 +234,11 @@ export function CommandDetailView({
               {updateInstallResult ? (
                 <>
                   <UpdateInstallResult endpointId={endpoint.id} result={updateInstallResult} />
+                  {command.stderr ? <OutputStream command={command} stream="stderr" /> : null}
+                </>
+              ) : powerResult ? (
+                <>
+                  <PowerResult result={powerResult} />
                   {command.stderr ? <OutputStream command={command} stream="stderr" /> : null}
                 </>
               ) : (

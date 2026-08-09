@@ -40,6 +40,9 @@ const (
 	KindRegistryWrite       = "registry_write"
 	KindRegistryDelete      = "registry_delete"
 	KindRemediationRollback = "remediation_rollback"
+	KindReboot              = "reboot"
+	KindShutdown            = "shutdown"
+	KindCancelPowerAction   = "cancel_power_action"
 )
 
 // defaultTimeout bounds how long any single command may run.

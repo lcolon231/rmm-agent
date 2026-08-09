@@ -140,6 +140,11 @@ The code in this repository currently provides:
   digest/size checks, reparse/device/traversal denial, atomic file replacement,
   compare-and-set registry changes, endpoint-local rollback journals, and live
   dashboard controls. See `docs/CONTROLLED-REMEDIATION.md`.
+- Administrator-only audited Windows restart/shutdown with exact-hostname UI
+  confirmation, mandatory reason and delay, active-maintenance-window and
+  user-session policy, offline expiry, Windows cancellation, capability-gated
+  mixed-version rollout, and durable intent/result evidence. See
+  `docs/POWER-OPERATIONS.md`.
 - An immutable versioned script library with canonical SHA-256 content
   evidence, bounded language/platform/tag metadata, append-only final reviews,
   terminal idempotent deprecation, role-gated API/dashboard workflows, and no
@@ -171,7 +176,7 @@ The code in this repository currently provides:
   anchors, plus a scheduled publisher that writes anchor roots to external
   immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
-- Forward-only Alembic migrations through revision `0021`, with exact revision
+- Forward-only Alembic migrations through revision `0031`, with exact revision
   enforcement on non-debug startup, legacy debug-schema repair, and a
   disposable PostgreSQL migration test in CI.
 - Encrypted PostgreSQL backup/isolated restore plus a fail-closed release

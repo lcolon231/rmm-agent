@@ -25,6 +25,7 @@ from app.models.models import (
     Agent,
     AgentTrustState,
     Command,
+    CommandKind,
     CommandStatus,
     ScheduleConcurrencyPolicy,
     ScheduleMisfirePolicy,
@@ -158,6 +159,21 @@ async def dispatch_scheduled_tasks_once(
     skipped_count = 0
 
     for task in due_tasks:
+        # Power operations require a live operator confirmation, current
+        # maintenance window, and user-session decision. Refuse even a legacy
+        # or directly inserted task so the scheduler cannot bypass dispatch
+        # policy merely because the public schema rejects new records.
+        if task.kind in {
+            CommandKind.reboot,
+            CommandKind.shutdown,
+            CommandKind.cancel_power_action,
+        }:
+            task.last_status = "power_operation_refused"
+            task.last_run_at = now
+            task.next_run_at = compute_next_run(task.cron_expression, task.timezone, now)
+            task.updated_at = now
+            skipped_count += 1
+            continue
         task_next_run = task.next_run_at if task.next_run_at.tzinfo is not None else task.next_run_at.replace(tzinfo=timezone.utc)
         is_misfire = (now - task_next_run) > timedelta(hours=24)
 

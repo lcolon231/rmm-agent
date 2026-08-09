@@ -103,6 +103,9 @@ export default async function TasksPage({
             <option value="powershell">PowerShell</option>
             <option value="shell">Shell</option>
             <option value="collect_inventory">Collect inventory</option>
+            <option value="reboot">Restart endpoint</option>
+            <option value="shutdown">Shut down endpoint</option>
+            <option value="cancel_power_action">Cancel power action</option>
           </select>
         </label>
         <label>

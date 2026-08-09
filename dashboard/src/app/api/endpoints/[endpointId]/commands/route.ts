@@ -17,6 +17,8 @@ function dispatchErrorMessage(error: NodelinkApiError): { message: string; statu
           ? "PowerShell and shell execution require an explicit administrator-granted scope for this endpoint."
           : error.code === "privileged_remediation_not_authorized"
             ? "Controlled file and registry remediation requires an administrator session."
+          : error.code === "power_operation_not_authorized"
+            ? "Restart, shutdown, and power-action cancellation require an administrator session."
           : "Your operator session is not allowed to dispatch commands.",
       status: 403,
     };
@@ -33,7 +35,13 @@ function dispatchErrorMessage(error: NodelinkApiError): { message: string; statu
         error.code === "agent_not_trusted"
           ? "This endpoint is quarantined or revoked, so no new commands may be queued."
           : error.code === "agent_capability_unsupported"
-            ? "This endpoint must upgrade its agent before it can run controlled file or registry remediation."
+            ? "This endpoint must upgrade its agent before it can run this capability-gated operation."
+          : error.code === "power_operation_maintenance_window_required"
+            ? "Start a maintenance window covering this endpoint before scheduling a restart or shutdown."
+          : error.code === "power_operation_delay_exceeds_maintenance_window"
+            ? "Choose a shorter delay or extend the active maintenance window."
+          : error.code === "power_operation_user_consent_required"
+            ? "A user is signed in. Confirm that user's consent or wait until the session ends."
           : "This endpoint's agent does not support a compatible signed command format.",
       status: 409,
     };

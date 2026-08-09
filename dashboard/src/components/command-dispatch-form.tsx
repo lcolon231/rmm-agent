@@ -55,6 +55,10 @@ export function CommandDispatchForm({
   const [registryData, setRegistryData] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [backupId, setBackupId] = useState("");
+  const [powerReason, setPowerReason] = useState("");
+  const [powerDelaySeconds, setPowerDelaySeconds] = useState(60);
+  const [userConsent, setUserConsent] = useState<"confirmed" | "no_user_session">("confirmed");
+  const [powerConfirmation, setPowerConfirmation] = useState("");
   const [ttlSeconds, setTtlSeconds] = useState(300);
   const [step, setStep] = useState<Step>({ name: "compose" });
   const [error, setError] = useState("");
@@ -66,6 +70,17 @@ export function CommandDispatchForm({
       .filter((item) => item.kind !== "install_updates");
 
   function operationPayload(): Record<string, unknown> | undefined {
+    if (kind === "reboot" || kind === "shutdown") {
+      return {
+        confirm: powerConfirmation === hostname,
+        reason: powerReason.trim(),
+        delay_seconds: powerDelaySeconds,
+        user_consent: userConsent,
+      };
+    }
+    if (kind === "cancel_power_action") {
+      return { confirm: powerConfirmation === hostname, reason: powerReason.trim() };
+    }
     if (kind === "file_upload") {
       return { path: targetPath.trim(), content_base64: uploadContent, sha256: uploadDigest, overwrite };
     }
@@ -129,6 +144,10 @@ export function CommandDispatchForm({
               ? "Enter valid KB or Windows Update IDs, or explicitly choose Install all applicable updates."
             : definition.input === "none"
               ? "This typed operation does not accept additional input."
+              : definition.input === "power_action"
+                ? `Enter a reason, delay and consent policy, then type ${hostname} exactly.`
+                : definition.input === "power_cancel"
+                  ? `Enter a cancellation reason and type ${hostname} exactly.`
               : "Enter a valid managed path, registry location/value, digest, or backup ID for this operation.",
       );
       return;
@@ -195,8 +214,10 @@ export function CommandDispatchForm({
         <p>
           Review before dispatch. This will sign and queue a{" "}
           <strong>{commandKindDefinitions.find((d) => d.kind === step.input.kind)?.label}</strong>{" "}
-          command for <strong>{hostname}</strong>, valid for <strong>{ttlLabel}</strong>. Dispatched
-          commands cannot be cancelled — an unpicked command dies at its signed expiry.
+          command for <strong>{hostname}</strong>, valid for <strong>{ttlLabel}</strong>.
+          {step.input.kind === "reboot" || step.input.kind === "shutdown"
+            ? " The delayed OS action can be cancelled with a separate Cancel pending power action command."
+            : " An unpicked command dies at its signed expiry."}
         </p>
         {step.input.script ? <pre>{step.input.script}</pre> : step.input.kind === "install_updates" ? (
           <pre>
@@ -252,6 +273,10 @@ export function CommandDispatchForm({
             setRegistryData("");
             setConfirmDelete(false);
             setBackupId("");
+            setPowerReason("");
+            setPowerDelaySeconds(60);
+            setUserConsent("confirmed");
+            setPowerConfirmation("");
           }}
           value={kind}
         >
@@ -281,6 +306,8 @@ export function CommandDispatchForm({
                 ? "Only C:\\ProgramData\\NodeLink\\Managed and C:\\Windows\\Temp\\NodeLink."
                 : definition.input.startsWith("registry_")
                   ? "Only HKLM/HKCU Software\\NodeLink\\Managed in the selected registry view."
+                  : definition.input.startsWith("power_")
+                    ? "Administrator only. Restart and shutdown also require an active maintenance window and an explicit user-session policy."
                   : "The backup must exist in this endpoint's local NodeLink rollback journal."}
             </span>
           </div>
@@ -381,6 +408,57 @@ export function CommandDispatchForm({
         <>
           <label htmlFor="remediation-backup-id">Endpoint-local backup ID</label>
           <input id="remediation-backup-id" onChange={(event) => setBackupId(event.target.value)} placeholder="32 lowercase hexadecimal characters" value={backupId} />
+        </>
+      ) : definition.input === "power_action" || definition.input === "power_cancel" ? (
+        <>
+          <div className="power-operation-band" role="note">
+            <ShieldCheck aria-hidden="true" size={18} />
+            <div>
+              <strong>{definition.input === "power_action" ? "Disruptive endpoint action" : "Safety-preserving cancellation"}</strong>
+              <span>
+                {definition.input === "power_action"
+                  ? "The server verifies the maintenance window and latest user-session evidence before signing."
+                  : "Cancellation is allowed without a maintenance window and is safe when no action is pending."}
+              </span>
+            </div>
+          </div>
+          <label htmlFor="power-reason">Operational reason</label>
+          <textarea
+            id="power-reason"
+            maxLength={512}
+            minLength={10}
+            onChange={(event) => setPowerReason(event.target.value)}
+            placeholder={definition.input === "power_action" ? "Approved maintenance ticket and expected impact" : "Why the pending action must be cancelled"}
+            required
+            rows={3}
+            value={powerReason}
+          />
+          {definition.input === "power_action" ? (
+            <div className="dispatch-fields">
+              <label htmlFor="power-delay">Delay before action</label>
+              <select id="power-delay" onChange={(event) => setPowerDelaySeconds(Number(event.target.value))} value={powerDelaySeconds}>
+                <option value={30}>30 seconds</option>
+                <option value={60}>1 minute</option>
+                <option value={300}>5 minutes</option>
+                <option value={900}>15 minutes</option>
+                <option value={1800}>30 minutes</option>
+                <option value={3600}>1 hour</option>
+              </select>
+              <label htmlFor="power-consent">User-session policy</label>
+              <select id="power-consent" onChange={(event) => setUserConsent(event.target.value as "confirmed" | "no_user_session")} value={userConsent}>
+                <option value="confirmed">User consent confirmed</option>
+                <option value="no_user_session">Proceed only with no signed-in user</option>
+              </select>
+            </div>
+          ) : null}
+          <label htmlFor="power-confirmation">Type <code>{hostname}</code> to confirm</label>
+          <input
+            autoComplete="off"
+            id="power-confirmation"
+            onChange={(event) => setPowerConfirmation(event.target.value)}
+            spellCheck={false}
+            value={powerConfirmation}
+          />
         </>
       ) : null}
       {error ? <p className="dispatch-error" role="alert">{error}</p> : null}

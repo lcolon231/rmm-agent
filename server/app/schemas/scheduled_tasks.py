@@ -37,6 +37,19 @@ class ScheduledTaskCreate(BaseModel):
             raise ValueError("Invalid 5-field cron expression")
         return v.strip()
 
+    @field_validator("kind")
+    @classmethod
+    def power_operations_cannot_be_recurring(cls, value: CommandKind) -> CommandKind:
+        if value in {
+            CommandKind.reboot,
+            CommandKind.shutdown,
+            CommandKind.cancel_power_action,
+        }:
+            raise ValueError(
+                "power operations require live confirmation and cannot be scheduled tasks"
+            )
+        return value
+
 
 class ScheduledTaskUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)

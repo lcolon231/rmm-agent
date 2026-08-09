@@ -19,6 +19,7 @@ SUPPORTED_COMMAND_KINDS = frozenset(
         "powershell", "shell", "collect_inventory", "scan_updates", "install_updates",
         "file_upload", "file_download", "registry_read", "registry_write",
         "registry_delete", "remediation_rollback",
+        "reboot", "shutdown", "cancel_power_action",
     }
 )
 
