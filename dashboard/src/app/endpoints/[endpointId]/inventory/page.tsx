@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, ChevronRight, HardDrive } from "lucide-react"
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { WindowsUpdateInstallation } from "@/components/windows-update-installation";
 import {
   collectionLagSeconds,
   formatBytes,
@@ -20,7 +21,12 @@ import {
 } from "@/lib/inventory-core";
 import { getEndpointInventory } from "@/lib/inventory";
 import { getDashboardSession } from "@/lib/dashboard-session";
+import { getEndpointDetail, type EndpointDetailData } from "@/lib/endpoint-detail";
 import { NodelinkApiError } from "@/lib/nodelink-api";
+import {
+  windowsUpdateScanIsStale,
+  windowsUpdatesFromUnknown,
+} from "@/lib/windows-updates-core";
 
 export const dynamic = "force-dynamic";
 
@@ -35,15 +41,19 @@ export default async function EndpointInventoryPage({
   const { endpointId } = await params;
 
   let inventory: InventoryRecord | null = null;
+  let endpoint: EndpointDetailData | null = null;
   let loadFailed = false;
   try {
-    inventory = await getEndpointInventory(session.sessionToken, endpointId);
+    [inventory, endpoint] = await Promise.all([
+      getEndpointInventory(session.sessionToken, endpointId),
+      getEndpointDetail(session.sessionToken, endpointId, { historyHours: 1, historyLimit: 1 }),
+    ]);
   } catch (error) {
     if (error instanceof NodelinkApiError && error.status === 404) notFound();
     loadFailed = true;
   }
 
-  if (loadFailed || inventory === null) {
+  if (loadFailed || inventory === null || endpoint === null) {
     return (
       <main className="detail-failure-page">
         <section role="alert">
@@ -64,6 +74,10 @@ export default async function EndpointInventoryPage({
   const attention = inventory.sections.filter(
     (section) => statusTone(section.status) === "failed",
   );
+  // This server-only request timestamp is serialized into the client component
+  // as a boolean, so hydration never recomputes or disagrees about freshness.
+  // eslint-disable-next-line react-hooks/purity
+  const renderedAt = Date.now();
 
   return (
     <main className="workspace section-workspace">
@@ -113,6 +127,23 @@ export default async function EndpointInventoryPage({
         ) : (
           <div className="inventory-grid">
             {inventory.sections.map((section) => {
+              if (section.section === "windows_updates") {
+                const view = windowsUpdatesFromUnknown(section.payload);
+                if (view) {
+                  return (
+                    <WindowsUpdateInstallation
+                      canDispatch={session.operator.role === "operator" || session.operator.role === "admin"}
+                      endpointId={endpointId}
+                      hostname={endpoint.hostname}
+                      isStale={windowsUpdateScanIsStale(view.scanned_at, renderedAt)}
+                      key={section.id}
+                      sectionStatus={section.status}
+                      trusted={endpoint.trust_state === "active"}
+                      view={view}
+                    />
+                  );
+                }
+              }
               const tone = statusTone(section.status);
               const lag = collectionLagSeconds(section);
               const rows = payloadRows(section.payload);

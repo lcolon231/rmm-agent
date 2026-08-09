@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { ArrowLeft, FileSignature, TerminalSquare } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, FileSignature, RefreshCw, TerminalSquare } from "lucide-react";
 import Link from "next/link";
 
 import { CommandAutoRefresh } from "@/components/command-auto-refresh";
@@ -15,6 +15,10 @@ import {
   type StreamName,
 } from "@/lib/command-console-core";
 import { formatAgentVersion, formatEndpointDateTime } from "@/lib/endpoint-detail-core";
+import {
+  installUpdatesResultFromUnknown,
+  type InstallUpdatesResultView,
+} from "@/lib/windows-updates-core";
 
 function NodeLinkMark() {
   return (
@@ -59,6 +63,46 @@ function EnvelopeRow({ label, value }: { label: string; value: string | null }) 
   );
 }
 
+function UpdateInstallResult({
+  endpointId,
+  result,
+}: {
+  endpointId: string;
+  result: InstallUpdatesResultView;
+}) {
+  const failed = result.status === "failed" || result.failedKBs.length > 0;
+  return (
+    <div className={`windows-update-command-result ${failed ? "failed" : "succeeded"}`}>
+      <header>
+        {failed ? <AlertTriangle aria-hidden="true" size={21} /> : <CheckCircle2 aria-hidden="true" size={21} />}
+        <div>
+          <strong>{result.message}</strong>
+          <span>{result.rebootRequired ? "The endpoint reports that a restart is required." : "No restart requirement was reported."}</span>
+        </div>
+      </header>
+      <div className="windows-update-result-columns">
+        <section>
+          <span>Installed · {result.installedKBs.length}</span>
+          {result.installedKBs.length ? (
+            <ul>{result.installedKBs.map((kbID) => <li key={kbID}><code>{kbID}</code></li>)}</ul>
+          ) : <p>None reported.</p>}
+        </section>
+        <section className={result.failedKBs.length ? "failed" : ""}>
+          <span>Failed · {result.failedKBs.length}</span>
+          {result.failedKBs.length ? (
+            <ul>{result.failedKBs.map((kbID) => <li key={kbID}><code>{kbID}</code></li>)}</ul>
+          ) : <p>None reported.</p>}
+        </section>
+      </div>
+      <p className="windows-update-rescan-prompt">
+        <RefreshCw aria-hidden="true" size={15} />
+        Installation results do not refresh inventory automatically. Run a new scan to verify the endpoint&apos;s remaining updates.
+        <Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands`}>Open command console</Link>
+      </p>
+    </div>
+  );
+}
+
 export function CommandDetailView({
   command,
   endpoint,
@@ -72,6 +116,15 @@ export function CommandDetailView({
   const kindLabel = commandKindDefinitions.find((d) => d.kind === command.kind)?.label ?? command.kind;
   const script = typeof command.payload.script === "string" ? command.payload.script : null;
   const hasResult = command.status === "succeeded" || command.status === "failed";
+  const updateInstallResult = command.kind === "install_updates"
+    ? installUpdatesResultFromUnknown(command.stdout)
+    : null;
+  const updateTargets = command.kind === "install_updates"
+    ? [
+        ...(Array.isArray(command.payload.kb_ids) ? command.payload.kb_ids : []),
+        ...(Array.isArray(command.payload.update_ids) ? command.payload.update_ids : []),
+      ].filter((value): value is string => typeof value === "string")
+    : [];
 
   return (
     <main className="endpoint-detail-page">
@@ -114,6 +167,17 @@ export function CommandDetailView({
             <header><div><span className="eyebrow">Signed payload</span><h2 id="payload-title">Script</h2></div></header>
             <pre tabIndex={0}>{script}</pre>
           </section>
+        ) : command.kind === "install_updates" ? (
+          <section className="command-payload" aria-labelledby="payload-title">
+            <header><div><span className="eyebrow">Signed payload</span><h2 id="payload-title">Update targets</h2></div></header>
+            <pre tabIndex={0}>
+              {command.payload.install_all === true
+                ? "All applicable non-hidden updates (explicit install_all)"
+                : updateTargets.length
+                  ? updateTargets.join("\n")
+                  : "No update targets were recorded."}
+            </pre>
+          </section>
         ) : null}
 
         <section className="command-result" aria-labelledby="result-title">
@@ -129,8 +193,17 @@ export function CommandDetailView({
                   {formatByteCount(command.stderr_total_bytes)} stderr); only the stored portion was kept.
                 </p>
               ) : null}
-              <OutputStream command={command} stream="stdout" />
-              <OutputStream command={command} stream="stderr" />
+              {updateInstallResult ? (
+                <>
+                  <UpdateInstallResult endpointId={endpoint.id} result={updateInstallResult} />
+                  {command.stderr ? <OutputStream command={command} stream="stderr" /> : null}
+                </>
+              ) : (
+                <>
+                  <OutputStream command={command} stream="stdout" />
+                  <OutputStream command={command} stream="stderr" />
+                </>
+              )}
             </>
           ) : (
             <div className="detail-empty">

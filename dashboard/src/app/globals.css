@@ -2886,6 +2886,110 @@ textarea:focus-visible,
 .inventory-list h3 span { padding: 1px 7px; color: var(--slate); font-size: 9px; background: #ebe8f3; border-radius: 999px; }
 .inventory-list ul { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .inventory-list li { color: var(--slate); font-family: var(--font-data); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.windows-update-workflow { grid-column: 1 / -1; overflow: hidden; }
+.windows-update-workflow > header { align-items: flex-start; }
+.windows-update-workflow > header > svg { color: var(--blue); }
+.windows-update-status-stack { display: flex; align-items: flex-end; flex-direction: column; gap: 6px; }
+.windows-update-freshness { display: inline-flex; min-height: 22px; align-items: center; padding: 0 9px; font-size: 8px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; border-radius: 999px; }
+.windows-update-freshness.current { color: var(--success-strong); background: var(--success-soft); }
+.windows-update-freshness.stale { color: #8a590f; background: var(--amber-soft); }
+.windows-update-alert { display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 16px; color: #89500b; font-size: 10px; line-height: 1.5; background: var(--amber-soft); border-top: 1px solid #efd2a8; }
+.windows-update-alert svg { flex: 0 0 auto; }
+.windows-update-summary-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: #f2f0f8; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.windows-update-summary-strip span { display: flex; align-items: baseline; gap: 5px; padding: 11px 16px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.windows-update-summary-strip span + span { border-left: 1px solid var(--line); }
+.windows-update-summary-strip strong { color: var(--ink); font: 750 16px var(--font-data); letter-spacing: -.03em; }
+.windows-update-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(180px, .45fr) auto; gap: 9px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+.windows-update-toolbar input[type="search"],
+.windows-update-toolbar select { width: 100%; min-height: 36px; padding: 0 10px; color: var(--ink); font-size: 11px; background: white; border: 1px solid var(--line-strong); border-radius: 4px; }
+.windows-update-search { position: relative; display: flex; align-items: center; }
+.windows-update-search svg { position: absolute; left: 10px; color: var(--muted); pointer-events: none; }
+.windows-update-search input[type="search"] { padding-left: 32px; }
+.windows-update-driver-filter { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; padding: 0 11px; color: var(--slate); font-size: 10px; font-weight: 750; border: 1px solid var(--line-strong); border-radius: 4px; white-space: nowrap; }
+.windows-update-driver-filter input,
+.windows-update-table input { width: 14px; height: 14px; accent-color: var(--blue); }
+.windows-update-selection-bar { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; min-height: 51px; padding: 8px 16px; background: linear-gradient(90deg, var(--primary-tint), white 72%); border-bottom: 1px solid var(--primary-border); }
+.windows-update-selection-bar span { color: var(--slate); font: 700 10px var(--font-data); }
+.windows-update-selection-bar button,
+.windows-update-confirm-actions button,
+.windows-update-pagination button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; color: var(--slate); font-size: 10px; font-weight: 750; background: white; border: 1px solid var(--line-strong); border-radius: 4px; }
+.windows-update-selection-bar button.primary { color: white; background: var(--blue); border-color: var(--blue); }
+.windows-update-selection-bar button:disabled,
+.windows-update-confirm-actions button:disabled,
+.windows-update-pagination button:disabled { opacity: .45; cursor: not-allowed; }
+.windows-update-readonly { margin: 0; padding: 10px 16px; color: var(--muted); font-size: 10px; background: #f2f0f8; border-bottom: 1px solid var(--line); }
+.windows-update-workflow > .dispatch-error { margin: 0; border-radius: 0; }
+.windows-update-table-scroll { overflow-x: auto; }
+.windows-update-table { width: 100%; min-width: 1050px; border-collapse: collapse; font-size: 10px; }
+.windows-update-table th { padding: 9px 11px; color: var(--muted); font-size: 8px; letter-spacing: .08em; text-align: left; text-transform: uppercase; background: #f8f7fb; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.windows-update-table th:first-child,
+.windows-update-table td:first-child { width: 38px; text-align: center; }
+.windows-update-table td { padding: 11px; color: var(--slate); vertical-align: top; border-bottom: 1px solid #ebe8f3; }
+.windows-update-table tbody tr:hover { background: #faf9fd; }
+.windows-update-table tr.not-selectable { background: #faf9fd; }
+.windows-update-table td:nth-child(2) { width: 34%; }
+.windows-update-table td strong,
+.windows-update-table td span { display: block; }
+.windows-update-table td strong { color: var(--ink); font-size: 10px; line-height: 1.45; }
+.windows-update-table td span { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.windows-update-table td span code { margin-right: 6px; color: var(--blue); font: 750 9px var(--font-data); }
+.windows-update-table td span em { margin-right: 6px; color: #8a590f; font-style: normal; font-weight: 750; }
+.windows-update-table td span b { display: inline-flex; margin: 2px 5px 0 0; padding: 2px 5px; color: #875005; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; background: var(--amber-soft); border-radius: 3px; }
+.windows-update-table td.warn { color: #9c2929; font-weight: 800; }
+.windows-update-empty { display: flex; align-items: center; flex-direction: column; gap: 4px; padding: 34px 16px; color: var(--muted); text-align: center; }
+.windows-update-empty strong { color: var(--ink); }
+.windows-update-empty span { font-size: 10px; }
+.windows-update-pagination { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 11px 16px; color: var(--muted); font-size: 9px; background: #faf9fd; }
+.windows-update-pagination nav { display: flex; align-items: center; gap: 9px; }
+.windows-update-pagination > a { display: inline-flex; align-items: center; justify-self: end; gap: 4px; color: var(--blue); font-size: 10px; font-weight: 750; text-decoration: none; }
+.windows-update-confirmation { padding: 18px; }
+.windows-update-risk-totals { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); }
+.windows-update-risk-totals article { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 14px 16px; }
+.windows-update-risk-totals article + article { border-left: 1px solid var(--line); }
+.windows-update-risk-totals article.warn { background: var(--amber-soft); }
+.windows-update-risk-totals span { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.windows-update-risk-totals strong { grid-row: 1 / span 2; grid-column: 2; color: var(--ink); font: 750 25px var(--font-data); }
+.windows-update-risk-totals small { color: var(--slate); font-size: 10px; }
+.windows-update-confirm-note,
+.windows-update-reboot-warning { margin: 12px 0; padding: 11px 13px; color: var(--slate); font-size: 10px; line-height: 1.55; background: #f2f0f8; border-left: 3px solid var(--blue); }
+.windows-update-reboot-warning { color: #7f3b3b; background: var(--red-soft); border-left-color: var(--red); }
+.windows-update-confirm-list { max-height: 260px; margin: 0; padding: 0; overflow: auto; list-style: none; border: 1px solid var(--line); }
+.windows-update-confirm-list li { display: grid; grid-template-columns: 105px 1fr auto auto; align-items: center; gap: 9px; padding: 9px 11px; border-bottom: 1px solid #ebe8f3; }
+.windows-update-confirm-list li:last-child { border-bottom: 0; }
+.windows-update-confirm-list code { color: var(--blue); font: 750 10px var(--font-data); }
+.windows-update-confirm-list span { color: var(--slate); font-size: 10px; }
+.windows-update-confirm-list b { padding: 3px 6px; color: #875005; font-size: 7px; text-transform: uppercase; background: var(--amber-soft); border-radius: 3px; }
+.windows-update-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; }
+.windows-update-confirm-actions button.danger { color: white; background: var(--red); border-color: var(--red); }
+.windows-update-dispatched { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; padding: 19px; color: var(--success-strong); }
+.windows-update-dispatched div { display: grid; gap: 4px; }
+.windows-update-dispatched span { color: var(--slate); font-size: 10px; line-height: 1.5; }
+.windows-update-dispatched a { display: inline-flex; align-items: center; gap: 4px; color: var(--blue); font-size: 10px; font-weight: 750; }
+.command-update-route-note { margin: 0 20px 14px; padding: 10px 12px; color: var(--slate); font-size: 10px; line-height: 1.5; background: var(--primary-tint); border: 1px solid var(--primary-border); }
+.command-update-route-note a { color: var(--blue); font-weight: 750; }
+.windows-update-command-result { margin: 14px 20px 20px; overflow: hidden; border: 1px solid var(--success-border); border-radius: 5px; }
+.windows-update-command-result.failed { border-color: #e5b8b8; }
+.windows-update-command-result > header { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; color: var(--success-strong); background: var(--success-soft); }
+.windows-update-command-result.failed > header { color: #9c2929; background: var(--red-soft); }
+.windows-update-command-result > header div { display: grid; gap: 3px; }
+.windows-update-command-result > header span { color: var(--slate); font-size: 10px; }
+.windows-update-result-columns { display: grid; grid-template-columns: 1fr 1fr; }
+.windows-update-result-columns section { padding: 13px 15px; }
+.windows-update-result-columns section + section { border-left: 1px solid var(--line); }
+.windows-update-result-columns section > span { color: var(--success-strong); font-size: 9px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+.windows-update-result-columns section.failed > span { color: var(--red); }
+.windows-update-result-columns ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 9px 0 0; padding: 0; list-style: none; }
+.windows-update-result-columns li { padding: 4px 7px; background: #f2f0f8; border-radius: 3px; }
+.windows-update-result-columns code { font: 10px var(--font-data); }
+.windows-update-result-columns p { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
+.windows-update-rescan-prompt { display: flex; align-items: center; gap: 7px; margin: 0; padding: 11px 15px; color: var(--slate); font-size: 10px; background: #f8f7fb; border-top: 1px solid var(--line); }
+.windows-update-rescan-prompt a { margin-left: auto; color: var(--blue); font-weight: 750; white-space: nowrap; }
+.windows-update-toolbar input:focus-visible,
+.windows-update-toolbar select:focus-visible,
+.windows-update-workflow button:focus-visible,
+.windows-update-workflow a:focus-visible,
+.command-update-route-note a:focus-visible,
+.windows-update-rescan-prompt a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .inventory-diff { padding: 4px 0 12px; }
 .inventory-diff-table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .inventory-diff-table th { padding: 8px 16px; color: var(--muted); font-size: 8px; letter-spacing: .09em; text-align: left; text-transform: uppercase; background: #f2f0f8; border-bottom: 1px solid var(--line); }
@@ -3084,6 +3188,12 @@ textarea:focus-visible,
   .audit-anchor > header { align-items: stretch; flex-direction: column; }
   .audit-root { align-items: stretch; flex-direction: column; gap: 4px; }
   .inventory-grid { grid-template-columns: 1fr; }
+  .windows-update-toolbar { grid-template-columns: 1fr 1fr; }
+  .windows-update-search { grid-column: 1 / -1; }
+  .windows-update-selection-bar { grid-template-columns: auto 1fr; }
+  .windows-update-selection-bar button.primary { grid-column: 1 / -1; }
+  .windows-update-pagination { grid-template-columns: 1fr auto; }
+  .windows-update-pagination > a { grid-column: 1 / -1; justify-self: start; }
   .monitoring-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -3101,6 +3211,28 @@ textarea:focus-visible,
   .operator-created footer a, .operator-created footer button { justify-content: center; }
   .operator-confirm { grid-template-columns: 1fr; }
   .operator-confirm dl div { grid-template-columns: 1fr; gap: 2px; }
+  .windows-update-status-stack { align-items: flex-start; }
+  .windows-update-summary-strip { grid-template-columns: 1fr 1fr; }
+  .windows-update-summary-strip span:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
+  .windows-update-summary-strip span:nth-child(4) { border-top: 1px solid var(--line); }
+  .windows-update-toolbar { grid-template-columns: 1fr; }
+  .windows-update-search { grid-column: auto; }
+  .windows-update-selection-bar { grid-template-columns: 1fr; align-items: stretch; }
+  .windows-update-selection-bar button.primary { grid-column: auto; }
+  .windows-update-pagination { grid-template-columns: 1fr; }
+  .windows-update-pagination nav { justify-content: space-between; }
+  .windows-update-pagination > a { grid-column: auto; }
+  .windows-update-risk-totals { grid-template-columns: 1fr; }
+  .windows-update-risk-totals article + article { border-top: 1px solid var(--line); border-left: 0; }
+  .windows-update-confirm-list li { grid-template-columns: 90px 1fr; }
+  .windows-update-confirm-list b { grid-column: 2; justify-self: start; }
+  .windows-update-confirm-actions { align-items: stretch; flex-direction: column; }
+  .windows-update-dispatched { grid-template-columns: auto 1fr; }
+  .windows-update-dispatched a { grid-column: 2; }
+  .windows-update-result-columns { grid-template-columns: 1fr; }
+  .windows-update-result-columns section + section { border-top: 1px solid var(--line); border-left: 0; }
+  .windows-update-rescan-prompt { align-items: flex-start; flex-wrap: wrap; }
+  .windows-update-rescan-prompt a { width: 100%; margin-left: 22px; }
   .monitoring-summary-grid { grid-template-columns: 1fr; }
   .monitoring-check-grid { grid-template-columns: 1fr; padding: 10px; }
   .alert-history article { grid-template-columns: 28px 1fr; }
