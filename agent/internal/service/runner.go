@@ -792,7 +792,14 @@ func (a *Agent) runUpdateScan(ctx context.Context, s *session) executor.Result {
 		Sections:               []inventory.Section{section},
 	}); subErr != nil {
 		a.log.Printf("scan_updates: inventory submission failed: %v", subErr)
-		stderr = "inventory submission failed (result retained on endpoint): " + subErr.Error()
+		// Say what actually happened: nothing here retains or retries the
+		// section, so this scan's data is gone and the inventory view will keep
+		// showing the previous scan until a new one succeeds. The old wording
+		// claimed the result was "retained on endpoint", which invited an
+		// operator to wait for a retry that never comes.
+		stderr = "inventory submission rejected; this scan's data was discarded and " +
+			"the Windows Updates inventory still shows the previous scan — " +
+			"re-run scan_updates once the cause is resolved: " + subErr.Error()
 	}
 
 	return updateScanCommandResult(summary, stderr)

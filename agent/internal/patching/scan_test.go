@@ -3,8 +3,10 @@
 package patching
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lcolon231/rmm/agent/internal/inventory"
 )
@@ -152,5 +154,63 @@ func TestUnsupportedSection(t *testing.T) {
 	}
 	if summary.Status != inventory.StatusUnsupported {
 		t.Fatalf("unexpected unsupported summary: %+v", summary)
+	}
+}
+
+// A Windows Update history description is Microsoft's prose, not ours: the
+// stock one is 262 characters. Before issue #183 this normalizer bounded list
+// lengths but not string lengths, so the server rejected the whole submission
+// and every real endpoint's scan was silently discarded.
+func TestBuildSectionBoundsOversizedOperatingSystemStrings(t *testing.T) {
+	const stockDescription = "Install this update to resolve issues in Windows. For a complete listing of the " +
+		"issues that are included in this update, see the associated Microsoft Knowledge " +
+		"Base article for more information. After you install this item, you may have to " +
+		"restart your computer."
+	if len(stockDescription) <= maxShortTextRunes {
+		t.Fatalf("fixture no longer exceeds the old 255 bound (%d)", len(stockDescription))
+	}
+
+	section, _ := BuildSection(
+		[]map[string]any{{
+			"title":          strings.Repeat("T", maxProseRunes+50),
+			"kb_id":          "KB5034123",
+			"classification": strings.Repeat("C", maxShortTextRunes+50),
+		}},
+		[]map[string]any{{
+			"kb_id":       "KB5034123",
+			"title":       "Security Update",
+			"description": stockDescription,
+			"hresult":     strings.Repeat("h", maxIdentifierRunes+50),
+		}},
+		time.Now(), nil, "", "",
+	)
+
+	payload := section.Payload
+	missing := payload["missing"].([]map[string]any)
+	installed := payload["installed"].([]map[string]any)
+
+	for field, limit := range map[string]int{"title": maxProseRunes, "classification": maxShortTextRunes} {
+		if got := len([]rune(missing[0][field].(string))); got != limit {
+			t.Errorf("missing.%s = %d runes, want bounded to %d", field, got, limit)
+		}
+	}
+	if got := len([]rune(installed[0]["hresult"].(string))); got != maxIdentifierRunes {
+		t.Errorf("installed.hresult = %d runes, want %d", got, maxIdentifierRunes)
+	}
+	// The stock description fits the prose bound and must survive intact.
+	if installed[0]["description"] != stockDescription {
+		t.Error("the stock Windows Update description must be reported unmodified")
+	}
+}
+
+// Truncation counts characters like the server does, and must not split a rune.
+func TestTruncateRunesIsCharacterSafe(t *testing.T) {
+	value := strings.Repeat("é", 300)
+	got := truncateRunes(value, maxShortTextRunes)
+	if len([]rune(got)) != maxShortTextRunes {
+		t.Fatalf("got %d runes, want %d", len([]rune(got)), maxShortTextRunes)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("truncation split a multi-byte rune")
 	}
 }

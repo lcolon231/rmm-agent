@@ -347,6 +347,7 @@ PRODUCER_DETAILS = {
         "reason": "section_schema_invalid",
         "section": "storage",
         "byte_size": 512,
+        "fields": ["installed.0.description"],
     },
     "inventory.viewed": {
         "sections": ["cpu", "system"],

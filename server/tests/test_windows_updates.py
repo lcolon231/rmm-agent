@@ -12,6 +12,7 @@ Run just this file:  pytest tests/test_windows_updates.py -q
 """
 from __future__ import annotations
 
+import json
 import os
 from uuid import uuid4
 
@@ -281,3 +282,69 @@ def test_windows_updates_section_rejects_over_cap_missing_list():
     over = {"missing": [{"title": "U"} for _ in range(MAX_MISSING_UPDATES + 1)]}
     with pytest.raises(ValidationError):
         _section(over).typed_payload()
+
+
+# --------------------------------------------------------------------------- #
+# Oversized OS-supplied prose (issue #183)
+# --------------------------------------------------------------------------- #
+#: Microsoft's stock Windows Update history description, verbatim. At 262
+#: characters it exceeded the old 255-character ShortText bound, so a real
+#: endpoint's scan was rejected in full and its update data never stored.
+STOCK_WU_DESCRIPTION = (
+    "Install this update to resolve issues in Windows. For a complete listing of "
+    "the issues that are included in this update, see the associated Microsoft "
+    "Knowledge Base article for more information. After you install this item, "
+    "you may have to restart your computer."
+)
+
+
+def test_stock_windows_update_description_is_accepted():
+    """The description Windows itself supplies must not reject a submission."""
+    from app.schemas.inventory import WindowsUpdatesInventory
+
+    assert len(STOCK_WU_DESCRIPTION) > 255, "fixture must exceed the old bound"
+    section = WindowsUpdatesInventory.model_validate(
+        {
+            "installed": [
+                {
+                    "kb_id": "KB5034123",
+                    "title": "2026-08 Cumulative Update",
+                    "description": STOCK_WU_DESCRIPTION,
+                }
+            ]
+        }
+    )
+    assert section.installed[0].description == STOCK_WU_DESCRIPTION
+
+
+def test_prose_fields_remain_bounded():
+    """Widened is not unbounded: prose still has a hard ceiling."""
+    from pydantic import ValidationError
+    from app.schemas.inventory import WindowsUpdatesInventory
+
+    with pytest.raises(ValidationError):
+        WindowsUpdatesInventory.model_validate(
+            {"installed": [{"description": "x" * 2049}]}
+        )
+
+
+def test_rejection_names_the_offending_field_but_never_its_value():
+    """A refusal has to be diagnosable without reading the schema source."""
+    from pydantic import ValidationError
+    from app.api.agents import inventory_field_errors
+    from app.schemas.inventory import WindowsUpdatesInventory
+
+    secret_ish = "SERIAL-1234567890"
+    try:
+        WindowsUpdatesInventory.model_validate(
+            {"installed": [{"description": secret_ish + "y" * 2049}]}
+        )
+        raise AssertionError("oversized description should be rejected")
+    except ValidationError as exc:
+        fields = inventory_field_errors(exc)
+
+    assert fields, "the refusal must name at least one field"
+    assert fields[0]["field"] == "installed.0.description"
+    assert fields[0]["rule"]
+    # The payload can carry endpoint data; only the location may be echoed back.
+    assert secret_ish not in json.dumps(fields)

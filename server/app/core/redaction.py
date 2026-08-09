@@ -200,7 +200,10 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "schema_version",
         "total_bytes",
     ),
-    "inventory.rejected": _schema("reason", "section", "byte_size"),
+    # "fields" carries only schema locations and rule names from the rejected
+    # payload (e.g. "installed.0.description"), never the offending values,
+    # which may contain endpoint data.
+    "inventory.rejected": _schema("reason", "section", "byte_size", "fields"),
     # Reading inventory is audited like reading the audit log itself: section
     # names only, never the collected values, which include serials, program
     # lists, and encryption state.
