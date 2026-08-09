@@ -1,0 +1,148 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "v0.1.5",
+    "title": "NodeLink v0.1.5 Windows Update scan storage fix",
+    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after the sole repository owner reviewed and accepted the release evidence. This is a corrective release: on v0.1.4 a scan_updates run succeeded on the endpoint and was then rejected in full by the server, so no endpoint could store its Windows Update scan. It carries no schema change and no new features, and is not approved for multi-tenant or high-availability claims."
+  },
+  "server": {
+    "tag": "v0.1.5",
+    "deployment": "Deploy source from the exact commit bound to v0.1.5 by the release workflow."
+  },
+  "agent": {
+    "version": "0.1.5",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "0.1.5",
+    "filename": "NodeLinkAgentSetup-0.1.5.exe"
+  },
+  "database": {
+    "alembic_revision": "0029",
+    "compatible_from": [
+      "0001",
+      "0012",
+      "0028",
+      "0029"
+    ],
+    "migration_policy": "Migrations are forward-only. v0.1.5 adds no migration: it deploys against the same 0029 schema v0.1.4 introduced, so a v0.1.4 database needs no Alembic step. Public v0.1.1 databases must pass guarded schema adoption at 0001 before upgrading, and v0.1.2 databases upgrade from 0012; never edit a revision or perform an in-place downgrade."
+  },
+  "protocols": {
+    "command_envelopes": [
+      "command-v3"
+    ],
+    "mixed_version_behavior": "Agents advertise command-v3 and command-v2 during a staged rollout, but new deployments require command-v3; missing, unknown, and legacy-unversioned capabilities fail closed. The inventory contract change is a widened bound, not a new field, so a v0.1.4 agent keeps submitting successfully against a v0.1.5 server and immediately benefits from the fix. A v0.1.5 agent against a v0.1.4 server still trims its own strings, so its submissions are accepted there too."
+  },
+  "known_limitations": [
+    "#24: Windows agent and installer artifacts are not Authenticode signed, so SmartScreen or antivirus warnings remain possible.",
+    "#66: Roles are global and clients or sites are not authorization tenants; do not market or operate this release as multi-tenant.",
+    "#84: Enrollment rate limits, counters, and metrics are process-local; no multi-worker or high-availability protection claim is made.",
+    "#126: Empty deployments must bootstrap the first client and site through the existing administrative API before using enrollment.",
+    "#76: The local release drill verifies the internal audit chain but has no external immutable audit-anchor receipt to cross-check.",
+    "Endpoint inventory, monitoring checks, alerting, and Windows Update scan/install are Windows-first; Linux and macOS remain development-only builds with reduced or absent collectors.",
+    "Alert email and signed webhook delivery are best-effort with process-local state; there is no multi-worker delivery deduplication or high-availability guarantee.",
+    "#61: the interactive shell remains a Phase-1 foundation only; the streaming transport, agent shell I/O loop, and terminal UI are deferred, so no shell session is usable end to end in this release.",
+    "#176: Windows Update installation is dispatched by explicit KB ID, Update GUID, or an install_all flag, and the operator types those identifiers; the dashboard does not yet offer a selectable update list.",
+    "#179: an agent's reported version refreshes only on a successful authenticated heartbeat, so an offline, quarantined, or unauthenticated endpoint keeps displaying its last recorded version.",
+    "A Windows Update scan whose submission is rejected is discarded rather than queued; the endpoint keeps its previous inventory and the scan must be re-run. The agent now reports that plainly instead of claiming the result was retained.",
+    "Over-long operating-system strings are trimmed by the agent to the server's field bounds, so an unusually long update title or description is stored truncated rather than costing the endpoint its entire scan.",
+    "This manifest's backup and rollback evidence is complete, but the full release drill's production HTTPS deployment and Windows canary phases are not part of these records and remain operator tasks before broad rollout."
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "Pause enrollment, command dispatch, scheduled-task execution, server promotion, and external agent rollout automation.",
+      "Verify the retained 0029 recovery point, manifests, and restore evidence against their immutable SHA-256 digests.",
+      "Confirm Python 3.12, PostgreSQL, command signing keys, production secrets, trusted-proxy settings, HTTPS public URL, and server-only dashboard API URL are configured.",
+      "Verify every release artifact checksum and GitHub build-provenance attestation, and confirm each agent binary reports 0.1.5 via `rmm-agent version -expect 0.1.5` rather than the unstamped 0.1.0-dev fallback."
+    ],
+    "steps": [
+      "No Alembic step is required from a v0.1.4 database: v0.1.5 runs against the same 0029 schema. Confirm the startup revision guard reports 0029 before serving traffic.",
+      "For a v0.1.3 database at 0028, upgrade to 0029 first; for v0.1.2 upgrade forward through the 0013-0029 chain; for an unversioned public v0.1.1 database, run guarded adoption to 0001 first.",
+      "Deploy the server and dashboard together from the workflow-bound v0.1.5 source commit. Deploying the server alone already unblocks Windows Update scan storage for existing v0.1.4 agents.",
+      "Deploy the checksum-verified Windows agent or installer to one owned canary endpoint before expanding the rollout; the installer upgrades an enrolled endpoint in place without an enrollment token.",
+      "Re-run scan_updates on any endpoint whose earlier scan was rejected: the rejected result was discarded, not queued, so it will not reappear on its own."
+    ],
+    "verification": [
+      "Confirm Alembic current reports 0029 and health, readiness, metrics, login, and production configuration checks pass over verified HTTPS.",
+      "Confirm a scan_updates run on a real endpoint now stores the windows_updates inventory section, and that the missing and installed update lists are visible in the dashboard.",
+      "Confirm the upgraded canary endpoint keeps its agent ID and credentials and reports agent version 0.1.5 after its first heartbeat.",
+      "Confirm an install_updates command still installs only the explicitly selected KB IDs or Update GUIDs, with empty or ambiguous selection failing closed.",
+      "Confirm a deliberately invalid inventory section is refused with the offending field path in the response and in the inventory.rejected audit event, and that no field value appears in either.",
+      "Confirm heartbeat, audit sequence, expected metric deltas, token revocation, agent revocation, and post-revocation authentication rejection."
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "Prefer a forward fix. v0.1.5 adds no migration, so v0.1.4 and v0.1.5 run against the same 0029 schema and a rollback needs no database restore.",
+      "Redeploy v0.1.4 components only when their retained artifact digests exactly match the deployment being restored.",
+      "Before rolling back, pause rollout and writers and name the decision maker; no post-backup data loss is involved, but a partially rolled-back fleet is still a state someone must own.",
+      "Rolling back reinstates the defect: v0.1.4 servers reject any Windows Update scan carrying an over-long field, so endpoint update data stops being stored again.",
+      "If artifact, audit, or startup verification fails, keep promotion blocked and continue with a reviewed forward fix."
+    ],
+    "target": {
+      "server": {
+        "tag": "v0.1.4",
+        "commit": "f3e2b3471e91433cc50186a0e0d7ade7e165fc29"
+      },
+      "agent": {
+        "version": "0.1.4",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "e8a398d85e05c88245b6c4770a6798c1cf10c3c65b83cd7d4ef6c5d120f386b2",
+          "rmm-agent-linux-amd64": "84504b9ec004963fa101c3f9d67911b977bcfd988ba1f1fb3f16ced71a3b5f29",
+          "rmm-agent-darwin-arm64": "b427efa2a25e8eb36fc0f90e1a41ff564a84472a2c0cdf2dc0b5da3e3c1ec491"
+        }
+      },
+      "installer": {
+        "filename": "NodeLinkAgentSetup-0.1.4.exe",
+        "sha256": "e83e1abbd2a6d75b88c9b7bb6c900c2598d692604f0469302b0b9fbc4096c5ed"
+      },
+      "database": {
+        "alembic_revision": "0029",
+        "backup_manifest": {
+          "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/84199b84a1a486f85f2c6ea0ed1c684490bd75b7/release-notes/evidence/v0.1.5/nodelink-backup-20260809T035157Z.manifest.json",
+          "sha256": "66604fd844b72fbed0efdf4c81300167bfeb8471acdc7439bc51c2534a094b52"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "command-v3"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "v0.1.5 is a corrective release. It restores the ability to store Windows Update scan results, which v0.1.4 rejected in full whenever any operating-system-supplied string exceeded a field bound, and it makes an inventory refusal diagnosable by naming the offending field without echoing its value. No authorization, signing, or trust behavior changes.",
+    "fixed_vulnerabilities": [
+      "Operators running v0.1.4 had no visibility into endpoint patch state: every scan_updates run was rejected in full, so missing security updates were never recorded server-side even though the endpoint had found them. This release restores that visibility.",
+      "The agent now bounds every string it reports to the server's field limits, so a single over-long operating-system value can no longer cost an endpoint its entire inventory submission.",
+      "An inventory rejection now identifies the offending field path and rule. Values are deliberately excluded from both the API response and the audit event, because a rejected payload can contain endpoint data."
+    ],
+    "new_risks": [
+      "#24 remains open because Windows artifacts are unsigned and require checksum and provenance verification.",
+      "#66 remains open because authorization roles are global rather than tenant scoped.",
+      "#84 remains open because enrollment limiting and counters are process local.",
+      "Widening the accepted length of operating-system prose increases the maximum size of a stored update row; the per-section byte budget is unchanged and remains the binding constraint.",
+      "Field paths in rejection responses and audit events disclose the shape of a refused payload to an authenticated agent and to audit readers. Only locations and rule names are exposed, never values."
+    ],
+    "operator_actions": [
+      "Deploy the server before or with the agent: the server change alone unblocks scan storage for endpoints already running v0.1.4.",
+      "Re-run scan_updates on every endpoint whose scan was rejected under v0.1.4; the discarded results do not return on their own.",
+      "Because independent second-operator review is not available, the sole release operator must personally verify the complete v0.1.5 evidence index, retained digests, preflight result, and green release checks before tagging.",
+      "Complete the production HTTPS deployment and Windows canary phases of the release drill and retain their evidence before broad rollout."
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/84199b84a1a486f85f2c6ea0ed1c684490bd75b7/release-notes/evidence/v0.1.5/restore-verification-0029.json",
+      "sha256": "06cc1fc7c8c9d75eeaf5b682a8301ce28d93292404c21636397774a61f7f4eca"
+    },
+    "rollback_rehearsal": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/84199b84a1a486f85f2c6ea0ed1c684490bd75b7/release-notes/evidence/v0.1.5/rollback-rehearsal-v015-to-v014.json",
+      "sha256": "6c5ee4b85c26e80332da170313fa7a7aab1e48bfee7a225c8c0b68903299a83b"
+    }
+  }
+}

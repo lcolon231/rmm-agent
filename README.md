@@ -13,7 +13,7 @@ HIPAA-supporting controls and defensible compliance evidence.
 
 | Area | Current state |
 | --- | --- |
-| Latest tagged release | `v0.1.3` |
+| Latest tagged release | `v0.1.5` |
 | Primary support target | Windows agent and Windows service |
 | Server | FastAPI management and agent APIs with PostgreSQL; SQLite is limited to development and tests |
 | Dashboard | Authenticated Next.js interface with live enrollment, endpoint, command, inventory, monitoring-policy, audit-evidence, and administrator workflows; the aggregate operations overview remains fixture-backed |
