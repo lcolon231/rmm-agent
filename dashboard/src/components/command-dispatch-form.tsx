@@ -62,7 +62,8 @@ export function CommandDispatchForm({
 
   const definition = commandKindDefinitions.find((d) => d.kind === kind)!;
   const availableDefinitions =
-    commandKindDefinitionsForPermission(canExecuteScripts, isAdmin);
+    commandKindDefinitionsForPermission(canExecuteScripts, isAdmin)
+      .filter((item) => item.kind !== "install_updates");
 
   function operationPayload(): Record<string, unknown> | undefined {
     if (kind === "file_upload") {

@@ -150,6 +150,13 @@ export function CommandConsoleView({
                 inventory collection remains available.
               </p>
             ) : null}
+            <p className="command-update-route-note">
+              Windows Update installs are selected from the endpoint&apos;s current scan inventory so
+              a normal install can never mean “install everything.”{" "}
+              <Link href={`/endpoints/${encodeURIComponent(endpoint.id)}/inventory#windows-updates`}>
+                Select Windows updates
+              </Link>
+            </p>
             <CommandDispatchForm
               canExecuteScripts={canExecuteScripts}
               endpointId={endpoint.id}
