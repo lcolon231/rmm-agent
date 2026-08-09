@@ -45,7 +45,7 @@
     "#76: The local release drill verifies the internal audit chain but has no external immutable audit-anchor receipt to cross-check.",
     "Endpoint inventory, monitoring checks, alerting, and Windows Update scan/install are Windows-first; Linux and macOS remain development-only builds with reduced or absent collectors.",
     "Alert email and signed webhook delivery are best-effort with process-local state; there is no multi-worker delivery deduplication or high-availability guarantee.",
-    "#61: the interactive shell remains a Phase-1 foundation only — the authorized, audited, capability-negotiated, time- and byte-bounded session lifecycle is implemented, but the live streaming transport, the agent shell I/O loop, and the terminal UI are deferred, so no shell session is usable end to end in this release.",
+    "#61: the interactive shell remains a Phase-1 foundation only \u2014 the authorized, audited, capability-negotiated, time- and byte-bounded session lifecycle is implemented, but the live streaming transport, the agent shell I/O loop, and the terminal UI are deferred, so no shell session is usable end to end in this release.",
     "#176: Windows Update installation is dispatched by explicit KB ID, Update GUID, or an install_all flag through the command pipeline; the dashboard does not yet offer a selectable update list, so operators select updates from the reported windows_updates inventory section themselves.",
     "#179: an agent's reported version refreshes only on a successful authenticated heartbeat, so an endpoint that is offline, quarantined, or failing authentication continues to display its last recorded version.",
     "This manifest's backup and rollback evidence is complete, but the full release drill's production HTTPS deployment and Windows canary phases are not part of these records and remain operator tasks before broad rollout."
@@ -78,7 +78,7 @@
       "Prefer a forward fix while the live database remains at 0029; 0029 is additive, so a v0.1.3 server generally runs against it, but that combination is not a verified release configuration.",
       "Redeploy v0.1.3 components only when their required 0028 schema and retained artifact digests exactly match a restored deployment.",
       "Before any schema restore, pause rollout and writers, preserve an encrypted failed-state backup, and name the decision maker and exact accepted data-loss window.",
-      "Restore the verified 0028 recovery-point backup only after explicit data-loss approval, validate it in isolation, and deploy the exact v0.1.3 server, agent, and installer together.",
+      "Restore the operator's own verified pre-upgrade 0028 recovery point only after explicit data-loss approval, validate it in isolation, and deploy the exact v0.1.3 server, agent, and installer together; the 0028 recovery point referenced below is the release drill's artifact, which proves the restore and decision procedure rather than standing in for that backup.",
       "If the matching backup, artifact, audit, or startup verification fails, keep promotion blocked and continue with a reviewed forward fix."
     ],
     "target": {
@@ -101,8 +101,8 @@
       "database": {
         "alembic_revision": "0028",
         "backup_manifest": {
-          "url": "OPERATOR-REQUIRED: immutable https/s3 URL of the verified 0028 recovery-point backup manifest",
-          "sha256": "OPERATOR-REQUIRED: SHA-256 of that backup manifest"
+          "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.4-evidence/nodelink-backup-20260809T022514Z.manifest.json",
+          "sha256": "0208d2f58a911ac446bb8451edf3b4540afccf6e3b1ecf93fe738decd67d830a"
         }
       },
       "protocols": {
@@ -137,12 +137,12 @@
   },
   "evidence": {
     "backup_verification": {
-      "url": "OPERATOR-REQUIRED: immutable URL of restore-verification-0029.json from a real 0029 restore drill",
-      "sha256": "OPERATOR-REQUIRED: SHA-256 of that record"
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.4-evidence/restore-verification-0029.json",
+      "sha256": "32e618f8a064e47701e661bcc3c534aff11061e183f3e12320ba6ae1241736aa"
     },
     "rollback_rehearsal": {
-      "url": "OPERATOR-REQUIRED: immutable URL of rollback-rehearsal-0029-to-0028.json from a real rehearsal",
-      "sha256": "OPERATOR-REQUIRED: SHA-256 of that record"
+      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.4-evidence/rollback-rehearsal-0029-to-0028.json",
+      "sha256": "224b06eafbb945ae670a887fac4a2040d9f0f8c43ab7f380b192c6c5e304397a"
     }
   }
 }
