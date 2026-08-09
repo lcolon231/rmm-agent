@@ -1,0 +1,87 @@
+{
+  "format": "nodelink-rollback-rehearsal",
+  "version": 1,
+  "created_at_utc": "2026-08-09T03:52:17.120827+00:00",
+  "scenario": "Roll back live v0.1.5 (schema 0029) to v0.1.4 (schema 0029).",
+  "current_schema_revision": "0029",
+  "target": {
+    "server_version": "v0.1.4",
+    "agent_version": "0.1.4",
+    "installer_version": "0.1.4",
+    "schema_revision": "0029"
+  },
+  "decision": {
+    "status": "ready",
+    "action": "redeploy_without_database_restore",
+    "restore_required": false,
+    "agent_rollout_paused": true,
+    "data_loss_accepted": false,
+    "reasons": [],
+    "note": "v0.1.5 ships no migration, so the rollback target runs the same 0029 schema and the planner resolves to redeploy_without_database_restore. No database restore and no post-backup data loss are involved \u2014 materially safer than the v0.1.4 rollback, which crossed 0029 to 0028 and required a restore."
+  },
+  "recovery_point": {
+    "manifest_file": "nodelink-backup-20260809T035157Z.manifest.json",
+    "manifest_path": "release-notes/evidence/v0.1.5/nodelink-backup-20260809T035157Z.manifest.json",
+    "manifest_sha256": "66604fd844b72fbed0efdf4c81300167bfeb8471acdc7439bc51c2534a094b52",
+    "schema_revision": "0029",
+    "encrypted_file": "nodelink-backup-20260809T035157Z.dump.enc",
+    "encrypted_sha256": "cbc9bfe9c075ca5950f5bd7309cbd8ba4b5d0494c2014ada0d60263cda623d44",
+    "note": "Captured as a precaution before promotion. Because the rollback needs no restore, this recovery point is not on the rollback path; it exists so a forward-fix decision has a verified point to fall back to if one is ever needed."
+  },
+  "restore_verification_reference": {
+    "note": "Decrypted, restored into an isolated database, and application-verified during this rehearsal.",
+    "file": "restore-verification-0029.json",
+    "path": "release-notes/evidence/v0.1.5/restore-verification-0029.json",
+    "sha256": "06cc1fc7c8c9d75eeaf5b682a8301ce28d93292404c21636397774a61f7f4eca",
+    "status": "verified",
+    "schema_revision": "0029",
+    "audit_chain_intact": true
+  },
+  "rpo_boundary": "None for this rollback: the target release runs the same 0029 schema, so redeploying v0.1.4 components discards no data. A restore would only enter the picture if an unrelated failure required returning to an earlier schema.",
+  "forward_release_backup_verification": {
+    "note": "Proof that the live v0.1.5 (0029) schema backs up and restores cleanly with representative seeded data.",
+    "file": "restore-verification-0029.json",
+    "path": "release-notes/evidence/v0.1.5/restore-verification-0029.json",
+    "sha256": "06cc1fc7c8c9d75eeaf5b682a8301ce28d93292404c21636397774a61f7f4eca",
+    "status": "verified",
+    "schema_revision": "0029",
+    "audit_chain_intact": true,
+    "counts": {
+      "operators": 1,
+      "agents": 1,
+      "commands": 1,
+      "enrollment_tokens": 0,
+      "heartbeats": 0,
+      "audit_events": 5,
+      "audit_anchors": 1
+    }
+  },
+  "fail_closed_checks": [
+    {
+      "case": "agent rollout not confirmed paused",
+      "input": "no --agent-rollout-paused",
+      "result": "blocked",
+      "reason": "automatic/external agent rollout is not confirmed paused; the bad version could be reapplied"
+    },
+    {
+      "case": "recovery point schema does not match the rollback target",
+      "input": "0029 recovery point offered for a 0028 target",
+      "result": "blocked",
+      "reason": "backup schema revision does not match the target server schema; in-place Alembic downgrade is unsupported"
+    }
+  ],
+  "environment": {
+    "note": "Rehearsal performed against a disposable PostgreSQL instance seeded with the representative dataset from server/tests/test_backup_restore.py, the same harness and dataset shape used for the v0.1.2, v0.1.3, and v0.1.4 release evidence. These are drill artifacts proving the procedure, not a production recovery point, and contain no production data. The rehearsal passphrase is operator-held and is not published with this evidence.",
+    "postgres_server_version": "16.13(Ubuntu16.13-0ubuntu0.24.04.1)",
+    "seeded_counts": {
+      "operators": 1,
+      "agents": 1,
+      "commands": 1,
+      "enrollment_tokens": 0,
+      "heartbeats": 0,
+      "audit_events": 5,
+      "audit_anchors": 1
+    }
+  },
+  "status": "ready"
+}
