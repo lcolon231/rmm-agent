@@ -526,6 +526,50 @@ class CommandCreate(BaseModel):
 
     @model_validator(mode="after")
     def typed_operation_payload(self) -> "CommandCreate":
+        if self.kind in {CommandKind.reboot, CommandKind.shutdown}:
+            allowed = {"confirm", "reason", "delay_seconds", "user_consent"}
+            if set(self.payload) != allowed:
+                raise ValueError(
+                    "reboot and shutdown require confirm, reason, delay_seconds, and user_consent"
+                )
+            if self.payload.get("confirm") is not True:
+                raise ValueError("power operation requires confirm=true")
+            reason = self.payload.get("reason")
+            if not isinstance(reason, str):
+                raise ValueError("power operation reason must be a string")
+            reason = reason.strip()
+            reason_bytes = len(reason.encode("utf-8"))
+            if not 10 <= reason_bytes <= 512 or any(ord(char) < 32 or ord(char) == 127 for char in reason):
+                raise ValueError("power operation reason must contain 10-512 printable UTF-8 bytes")
+            delay = self.payload.get("delay_seconds")
+            if not isinstance(delay, int) or isinstance(delay, bool) or not 30 <= delay <= 3600:
+                raise ValueError("power operation delay_seconds must be between 30 and 3600")
+            consent = self.payload.get("user_consent")
+            if consent not in {"confirmed", "no_user_session"}:
+                raise ValueError("user_consent must be confirmed or no_user_session")
+            self.payload = {
+                "confirm": True,
+                "reason": reason,
+                "delay_seconds": delay,
+                "user_consent": consent,
+            }
+            return self
+
+        if self.kind == CommandKind.cancel_power_action:
+            if set(self.payload) != {"confirm", "reason"}:
+                raise ValueError("cancel_power_action requires confirm and reason")
+            if self.payload.get("confirm") is not True:
+                raise ValueError("cancel_power_action requires confirm=true")
+            reason = self.payload.get("reason")
+            if not isinstance(reason, str):
+                raise ValueError("cancellation reason must be a string")
+            reason = reason.strip()
+            reason_bytes = len(reason.encode("utf-8"))
+            if not 10 <= reason_bytes <= 512 or any(ord(char) < 32 or ord(char) == 127 for char in reason):
+                raise ValueError("cancellation reason must contain 10-512 printable UTF-8 bytes")
+            self.payload = {"confirm": True, "reason": reason}
+            return self
+
         if self.kind == CommandKind.file_upload:
             allowed = {"path", "content_base64", "sha256", "overwrite"}
             if set(self.payload) - allowed or set(self.payload) != allowed:

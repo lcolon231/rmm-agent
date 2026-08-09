@@ -59,7 +59,7 @@ test("taskRunItemFromUnknown accepts a well-formed run and preserves provenance"
 test("taskRunItemFromUnknown rejects drift and bad types", () => {
   assert.equal(taskRunItemFromUnknown(null), null);
   assert.equal(taskRunItemFromUnknown(validRun({ id: 5 })), null);
-  assert.equal(taskRunItemFromUnknown(validRun({ kind: "reboot" })), null);
+  assert.equal(taskRunItemFromUnknown(validRun({ kind: "erase_disk" })), null);
   assert.equal(taskRunItemFromUnknown(validRun({ status: "cancelled" })), null);
   assert.equal(taskRunItemFromUnknown(validRun({ created_at: "" })), null);
   assert.equal(taskRunItemFromUnknown(validRun({ attempt: 0 })), null);
@@ -88,7 +88,8 @@ test("status and kind narrowing reject unknown values", () => {
   assert.equal(asCommandStatus("succeeded"), "succeeded");
   assert.equal(asCommandStatus("nope"), undefined);
   assert.equal(asCommandKind("powershell"), "powershell");
-  assert.equal(asCommandKind("reboot"), undefined);
+  assert.equal(asCommandKind("reboot"), "reboot");
+  assert.equal(asCommandKind("erase_disk"), undefined);
 });
 
 test("taskRunPageHref preserves filters and omits page 1", () => {

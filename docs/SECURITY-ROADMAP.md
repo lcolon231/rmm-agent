@@ -248,8 +248,9 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
 
 ## Milestone 2 — secure patching and remote operations
 
-- Model patch approval, maintenance window, reboot, and exception policy as
-  explicit signed inputs.
+- [x] Model restart/shutdown maintenance window, reason, delay, user-session
+  consent, and cancellation as explicit signed inputs (`POWER-OPERATIONS.md`).
+  Patch approval and general exception policy remain open.
 - Verify downloaded packages and providers; record source, digest, signer, and
   install result.
 - [x] Implement controlled file upload/download and registry read/write/delete
@@ -257,8 +258,9 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   and byte bounds, atomic file replacement, capability gating, redacted audit
   evidence, and endpoint-local rollback (`CONTROLLED-REMEDIATION.md`). This does
   not complete general software deployment or least-privilege execution.
-- Implement service, process, event-log, reboot, and shutdown as typed
-  operations with narrow validation and least privilege where feasible.
+- Implement service, process, and event-log operations as typed operations with
+  narrow validation and least privilege where feasible. Restart and shutdown
+  are implemented; least-privilege service execution remains open.
 - Apply stronger session authorization, idle/absolute timeouts, recording
   metadata, and rate limits to interactive shell and streaming transport.
 - Constrain technician-to-end-user chat as a message-only channel: the chat

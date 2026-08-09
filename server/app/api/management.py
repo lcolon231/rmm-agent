@@ -177,6 +177,9 @@ from app.schemas.monitoring import (
 
 
 _COMMAND_CAPABILITIES: dict[CommandKind, tuple[str, ...]] = {
+    CommandKind.reboot: ("power-operations-v1",),
+    CommandKind.shutdown: ("power-operations-v1",),
+    CommandKind.cancel_power_action: ("power-operations-v1",),
     CommandKind.file_upload: ("file-transfer-v1",),
     CommandKind.file_download: ("file-transfer-v1",),
     CommandKind.registry_read: ("registry-operations-v1",),
@@ -189,6 +192,70 @@ _COMMAND_CAPABILITIES: dict[CommandKind, tuple[str, ...]] = {
         "file-transfer-v1", "registry-operations-v1"
     ),
 }
+
+_POWER_ACTION_KINDS = frozenset({CommandKind.reboot, CommandKind.shutdown})
+
+
+async def _apply_power_operation_policy(
+    db: AsyncSession,
+    agent: Agent,
+    kind: CommandKind,
+    payload: dict,
+    now: datetime,
+) -> tuple[dict, datetime | None]:
+    """Validate live power policy and return the signed, evidence-rich payload.
+
+    Cancellation is deliberately permitted without a maintenance window: it
+    only removes a pending disruptive action. Reboot and shutdown fail closed
+    unless a matching window is active and the consent attestation agrees with
+    the latest endpoint user-session evidence.
+    """
+    if kind not in _POWER_ACTION_KINDS:
+        return payload, None
+
+    windows = await monitoring_core.active_maintenance_windows(db, agent, at=now)
+    if not windows:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "power_operation_maintenance_window_required"},
+        )
+    # Use the earliest-ending matching window so the signed authorization never
+    # outlives any window relied upon at dispatch. Include the id as evidence.
+    def as_utc(value: datetime) -> datetime:
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+    window = min(windows, key=lambda item: (as_utc(item.ends_at), item.id))
+    window_ends_at = as_utc(window.ends_at)
+    delay_seconds = payload["delay_seconds"]
+    if now + timedelta(seconds=delay_seconds) > window_ends_at:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "power_operation_delay_exceeds_maintenance_window"},
+        )
+
+    heartbeat = (
+        await db.execute(
+            select(Heartbeat)
+            .where(Heartbeat.agent_id == agent.id)
+            .order_by(Heartbeat.ts.desc(), Heartbeat.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    user_present = bool(
+        heartbeat is None or (heartbeat.logged_in_user or "").strip()
+    )
+    if payload["user_consent"] == "no_user_session" and user_present:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "power_operation_user_consent_required"},
+        )
+
+    return {
+        **payload,
+        "maintenance_window_id": window.id,
+        "maintenance_window_ends_at": format_command_time(window_ends_at),
+        "user_present_at_dispatch": user_present,
+    }, window_ends_at
 
 # Router-level dependency: every route here needs at least a readonly operator.
 router = APIRouter(
@@ -1305,9 +1372,17 @@ async def dispatch_command(
                     "script_execution_not_authorized"
                     if body.kind in (CommandKind.powershell, CommandKind.shell)
                     else (
-                        "privileged_remediation_not_authorized"
-                        if body.kind in _COMMAND_CAPABILITIES
-                        else "command_role_not_authorized"
+                        "power_operation_not_authorized"
+                        if body.kind in {
+                            CommandKind.reboot,
+                            CommandKind.shutdown,
+                            CommandKind.cancel_power_action,
+                        }
+                        else (
+                            "privileged_remediation_not_authorized"
+                            if body.kind in _COMMAND_CAPABILITIES
+                            else "command_role_not_authorized"
+                        )
                     )
                 )
             },
@@ -1400,6 +1475,28 @@ async def dispatch_command(
         db, body.script_version_id, body.script_parameter_value_set_id
     )
 
+    now = _now()
+    power_window_end: datetime | None = None
+    try:
+        body.payload, power_window_end = await _apply_power_operation_policy(
+            db, agent, body.kind, body.payload, now
+        )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        await audit.record(
+            db,
+            action="command.authorization_denied",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail={
+                **decision_detail,
+                "policy": "power_operation",
+                "reason": detail.get("code", "power_operation_policy_refused"),
+            },
+        )
+        await db.commit()
+        raise
+
     await audit.record(
         db,
         action="command.authorization_allowed",
@@ -1407,8 +1504,10 @@ async def dispatch_command(
         agent_id=agent.id,
         detail=decision_detail,
     )
-    now = _now()
     key_id = active_signing_key().key_id if envelope_version == COMMAND_ENVELOPE_V3 else None
+    expires_at = now + timedelta(seconds=body.ttl_seconds)
+    if power_window_end is not None:
+        expires_at = min(expires_at, power_window_end)
     cmd = Command(
         id=str(uuid.uuid4()),
         agent_id=agent_id,
@@ -1421,7 +1520,7 @@ async def dispatch_command(
         signing_key_id=key_id,
         status=CommandStatus.queued,
         created_at=now,
-        expires_at=now + timedelta(seconds=body.ttl_seconds),
+        expires_at=expires_at,
         # Run provenance (issue #50): who dispatched and the script-library
         # origin, recorded on the run row itself.
         actor_email=operator.email,

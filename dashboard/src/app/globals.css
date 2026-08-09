@@ -2211,6 +2211,10 @@ select:focus-visible {
 .remediation-policy-band div { display: grid; gap: 2px; }
 .remediation-policy-band strong { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
 .remediation-policy-band span { color: var(--slate); font-family: var(--font-data); font-size: 10px; line-height: 1.5; }
+.power-operation-band { display: flex; align-items: flex-start; gap: 10px; margin: 2px 0 14px; padding: 12px 13px; color: var(--red); background: var(--red-soft); border-left: 4px solid var(--red); }
+.power-operation-band div { display: grid; gap: 3px; }
+.power-operation-band strong { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.power-operation-band span { color: var(--slate); font-family: var(--font-data); font-size: 10px; line-height: 1.5; }
 
 .dispatch-form button[type="submit"],
 .dispatch-review-actions button {
@@ -2973,6 +2977,23 @@ textarea:focus-visible,
 .windows-update-command-result.failed > header { color: #9c2929; background: var(--red-soft); }
 .windows-update-command-result > header div { display: grid; gap: 3px; }
 .windows-update-command-result > header span { color: var(--slate); font-size: 10px; }
+.power-command-result { margin: 14px 20px 20px; overflow: hidden; border: 1px solid var(--success-border); border-radius: 5px; }
+.power-command-result.failed { border-color: #e5b8b8; }
+.power-command-result > header { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; color: var(--success-strong); background: var(--success-soft); }
+.power-command-result.failed > header { color: #9c2929; background: var(--red-soft); }
+.power-command-result > header div { display: grid; gap: 3px; }
+.power-command-result > header span { color: var(--slate); font-size: 10px; }
+.power-command-result dl,
+.power-command-payload dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; padding: 4px 15px 14px; }
+.power-command-payload dl { padding: 16px 20px 20px; }
+.power-command-result dl div,
+.power-command-payload dl div { min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.power-command-result dl div:nth-child(odd),
+.power-command-payload dl div:nth-child(odd) { padding-right: 14px; }
+.power-command-result dt,
+.power-command-payload dt { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.power-command-result dd,
+.power-command-payload dd { margin: 4px 0 0; color: var(--slate); font-size: 11px; overflow-wrap: anywhere; }
 .windows-update-result-columns { display: grid; grid-template-columns: 1fr 1fr; }
 .windows-update-result-columns section { padding: 13px 15px; }
 .windows-update-result-columns section + section { border-left: 1px solid var(--line); }

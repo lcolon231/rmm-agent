@@ -114,6 +114,10 @@ class CommandKind(str, enum.Enum):
     registry_write = "registry_write"
     registry_delete = "registry_delete"
     remediation_rollback = "remediation_rollback"
+    # Capability-gated, policy-bound endpoint power operations (issue #60).
+    reboot = "reboot"
+    shutdown = "shutdown"
+    cancel_power_action = "cancel_power_action"
 
 
 class CommandStatus(str, enum.Enum):

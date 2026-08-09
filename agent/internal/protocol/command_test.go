@@ -19,6 +19,16 @@ func TestSupportedCapabilitiesAdvertisesShellSession(t *testing.T) {
 	}
 }
 
+func TestSupportedCapabilitiesAdvertisesPowerOperations(t *testing.T) {
+	caps := SupportedCapabilities()
+	for _, capability := range caps {
+		if capability == PowerOperationsCapabilityV1 {
+			return
+		}
+	}
+	t.Fatalf("SupportedCapabilities() = %v, want it to include %q", caps, PowerOperationsCapabilityV1)
+}
+
 func TestSupportedCapabilitiesReturnsFreshSlice(t *testing.T) {
 	first := SupportedCapabilities()
 	if len(first) == 0 {

@@ -131,6 +131,12 @@ link to reproducible evidence in the release or pilot record.
       rollback ID; capability-gated mixed-version refusal). See
       [`CONTROLLED-REMEDIATION.md`](CONTROLLED-REMEDIATION.md). Production pilot
       activation still requires the real-Windows qualification listed there.
+- [x] Restart/shutdown/cancellation are administrator-only typed operations with
+      explicit confirmation/reason/delay, live maintenance-window and
+      user-session policy, endpoint recheck, capability-gated mixed-version
+      refusal, offline expiry, replay protection, and audit/result evidence.
+      Real-Windows qualification remains a pilot prerequisite; see
+      [`POWER-OPERATIONS.md`](POWER-OPERATIONS.md).
 - [x] Reusable script source has an immutable custody workflow (revision
       `0021`; role-gated creation/review/deprecation, canonical SHA-256 digest,
       57,344-byte/5,000-line bounds, audited reads and mutations, terminal
@@ -334,6 +340,13 @@ agents, then the dashboard. Old agents remain safe but return
 component back, pause remediation dispatch and preserve endpoint-local rollback
 journals plus command/audit IDs. Crossing back before `0030` requires an
 exact-revision restore or forward fix, never an in-place enum downgrade.
+
+Revision `0031` adds only PostgreSQL `commandkind` enum values for restart,
+shutdown, and cancellation. Deploy migration/server, then canary
+`power-operations-v1` agents, then dashboard. Before component rollback, pause
+power dispatch and cancel or expire pending actions. Crossing before `0031`
+requires an exact-revision restore or forward fix; do not remove enum values in
+place. See [`POWER-OPERATIONS.md`](POWER-OPERATIONS.md).
 
 ## Rollback procedure
 

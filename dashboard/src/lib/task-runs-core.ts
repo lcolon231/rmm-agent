@@ -15,7 +15,10 @@ export type CommandKind =
   | "registry_read"
   | "registry_write"
   | "registry_delete"
-  | "remediation_rollback";
+  | "remediation_rollback"
+  | "reboot"
+  | "shutdown"
+  | "cancel_power_action";
 
 export type CommandStatus =
   | "queued"
@@ -85,6 +88,9 @@ const commandKinds = new Set<CommandKind>([
   "registry_write",
   "registry_delete",
   "remediation_rollback",
+  "reboot",
+  "shutdown",
+  "cancel_power_action",
 ]);
 
 const commandStatuses = new Set<CommandStatus>([

@@ -28,6 +28,7 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/inventory"
 	"github.com/lcolon231/rmm/agent/internal/monitoring"
 	"github.com/lcolon231/rmm/agent/internal/patching"
+	"github.com/lcolon231/rmm/agent/internal/power"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/remediation"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
@@ -742,6 +743,8 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		res = a.runUpdateScan(ctx, s)
 	case executor.KindInstallUpdates:
 		res = a.runUpdateInstall(ctx, cmd.Payload)
+	case executor.KindReboot, executor.KindShutdown, executor.KindCancelPowerAction:
+		res = power.Execute(ctx, cmd.Kind, cmd.Payload)
 	case executor.KindFileUpload, executor.KindFileDownload,
 		executor.KindRegistryRead, executor.KindRegistryWrite,
 		executor.KindRegistryDelete, executor.KindRemediationRollback:
