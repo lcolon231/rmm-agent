@@ -1,0 +1,19 @@
+{
+  "format": "nodelink-release-rollback-plan",
+  "version": 1,
+  "created_at_utc": "2026-08-09T02:26:15.164497+00:00",
+  "status": "ready",
+  "action": "restore_backup_then_redeploy",
+  "current_schema_revision": "0029",
+  "backup_schema_revision": "0028",
+  "target": {
+    "server_version": "v0.1.3",
+    "agent_version": "0.1.3",
+    "installer_version": "0.1.3",
+    "schema_revision": "0028"
+  },
+  "agent_rollout_paused": true,
+  "restore_required": true,
+  "data_loss_accepted": true,
+  "reasons": []
+}
