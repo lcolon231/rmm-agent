@@ -33,6 +33,7 @@ and SHA-256/Merkle roots—remains readable.
 | `agent.credential_renewed` | `api/agents.py` credential renewal | `credential_fingerprint`, `credential_generation` |
 | `agent.credential_renewal_rejected` | `api/agents.py` credential renewal | `reason` |
 | `agent.command_envelope_capabilities_changed` | `api/agents.py` heartbeat | `previous`, `current` |
+| `agent.version_changed` | `api/agents.py` heartbeat | `previous`, `current` |
 | `agent.offline` | `core/tasks.py` offline sweep | `last_seen_at` |
 | `agent.quarantined` | `api/management.py` trust transition | `previous_trust_state`, `trust_state`, `reason_sha256`, `reason_bytes` |
 | `agent.restored` | `api/management.py` trust transition | `previous_trust_state`, `trust_state`, `reason_sha256`, `reason_bytes` |

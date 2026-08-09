@@ -84,6 +84,28 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("NodeLink installer mode: enrollment", source)
         self.assertIn("NodeLink installer mode: upgrade", source)
 
+    def test_installer_refuses_an_unstamped_or_mismatched_agent_binary(self) -> None:
+        """The wrapped binary must report NODELINK_VERSION (issue #179).
+
+        The agent asserts its own build stamp, so compiling an installer around
+        an unstamped (``0.1.0-dev``) or wrong-version binary fails at compile
+        time instead of producing a release that misreports its version on
+        every endpoint.
+        """
+        source = INSTALLER.read_text(encoding="utf-8")
+
+        self.assertIn('#if VersionEnv != ""', source)
+        self.assertIn(
+            '#define AgentVersionCheck Exec(AgentExeToVerify, "version -expect " + MyVersion, SourcePath)',
+            source,
+        )
+        self.assertIn("#if AgentVersionCheck != 0", source)
+        self.assertIn("#error The agent binary does not report NODELINK_VERSION", source)
+        # The verified path is the same one [Files] embeds, resolved against
+        # the script directory exactly like Inno resolves a relative Source.
+        self.assertIn("#define AgentExeToVerify AddBackslash(SourcePath) + AgentExe", source)
+        self.assertIn('Source: "{#AgentExe}"; DestDir: "{app}"', source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,7 +46,12 @@ func IsUnauthorized(err error) bool {
 type Client struct {
 	baseURL    string
 	agentToken string
-	http       *http.Client
+	// agentVersion is the running build's version, reported on every
+	// authenticated heartbeat so the server can refresh a stale stored value
+	// after an in-place upgrade without a re-enrollment (issue #179). Empty
+	// until SetAgentVersion is called; the field is then omitted from the beat.
+	agentVersion string
+	http         *http.Client
 }
 
 // New creates a client. agentToken may be empty for the enrollment call.
@@ -205,6 +210,11 @@ func (c *Client) EnrollWithName(ctx context.Context, token, agentName string, ho
 // Used after a successful credential renewal to adopt the rotated token.
 func (c *Client) SetToken(token string) { c.agentToken = token }
 
+// SetAgentVersion records the running build's version so every subsequent
+// heartbeat reports it. Called once when the check-in session is built; like
+// SetToken it needs no locking because a single goroutine drives the client.
+func (c *Client) SetAgentVersion(agentVersion string) { c.agentVersion = agentVersion }
+
 // AgentCredentialRenewResponse mirrors the server schema (issue #125).
 type AgentCredentialRenewResponse struct {
 	AgentID              string `json:"agent_id"`
@@ -305,6 +315,14 @@ func (c *Client) HeartbeatWithPendingResults(
 		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
 		"supported_capabilities":              protocol.SupportedCapabilities(),
 		"pending_results":                     pendingResults,
+	}
+	// The running build's version rides on every beat so an in-place upgrade
+	// refreshes the server's stored value on the next successful check-in
+	// rather than waiting for a re-enrollment or an inventory change. The
+	// server rejects an empty value, so an unset version is omitted instead of
+	// sent blank — that only happens in tests that build a bare client.
+	if c.agentVersion != "" {
+		body["agent_version"] = c.agentVersion
 	}
 	// Only digests ride on the beat. Full snapshots go to SubmitInventory when
 	// the server asks, so heartbeat size stays independent of how much hardware

@@ -328,6 +328,25 @@ async def heartbeat(
     )
     agent.last_seen_at = now
     agent.status = AgentStatus.online
+    # Refresh the running agent build (issue #179). An in-place upgrade keeps
+    # the same identity and credentials, so without this the dashboard would go
+    # on showing the enrollment-time version forever. Only a genuine change is
+    # written and audited, so a steady-state fleet produces no extra events. A
+    # lower version is recorded exactly like a higher one: a rollback is a real
+    # fleet state an operator needs to see, not an anomaly to suppress.
+    previous_agent_version = agent.agent_version or ""
+    if body.agent_version is not None and body.agent_version != previous_agent_version:
+        agent.agent_version = body.agent_version
+        await audit.record(
+            db,
+            action="agent.version_changed",
+            actor=f"agent:{agent.id}",
+            agent_id=agent.id,
+            detail={
+                "previous": previous_agent_version,
+                "current": body.agent_version,
+            },
+        )
     previous_versions = list(agent.command_envelope_versions or [])
     agent.command_envelope_versions = body.supported_command_envelope_versions
     # Advertised feature capabilities (issue #61) drive capability-gated features

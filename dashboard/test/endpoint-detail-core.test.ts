@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   buildMetricPath,
+  formatAgentVersion,
   formatEndpointDateTime,
   formatEndpointMetric,
   formatEndpointUptime,
@@ -48,4 +49,22 @@ test("telemetry paths break across unsupported samples and clamp values", () => 
   );
   assert.equal((path.match(/M/g) ?? []).length, 2);
   assert.doesNotMatch(path, /-/);
+});
+
+// The dashboard renders whatever agent version the API returns, so an endpoint
+// that heartbeats after an in-place upgrade shows the refreshed build rather
+// than its enrollment-time value (issue #179).
+test("renders the agent version the server currently reports", () => {
+  assert.equal(formatAgentVersion("0.1.2"), "0.1.2");
+  assert.equal(formatAgentVersion("0.1.4"), "0.1.4");
+  assert.equal(formatAgentVersion(" 0.1.4 "), "0.1.4");
+});
+
+test("labels an endpoint that has never reported a version", () => {
+  assert.equal(formatAgentVersion(""), "version unavailable");
+  assert.equal(formatAgentVersion(null), "version unavailable");
+  assert.equal(formatAgentVersion(undefined), "version unavailable");
+  assert.equal(formatAgentVersion("   "), "version unavailable");
+  assert.equal(formatAgentVersion("", "Agent"), "Agent");
+  assert.equal(formatAgentVersion(null, "Unknown"), "Unknown");
 });

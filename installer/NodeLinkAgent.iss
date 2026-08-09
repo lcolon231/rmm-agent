@@ -30,6 +30,32 @@
   #define AgentExe "..\agent\bin\rmm-agent-windows-amd64.exe"
 #endif
 
+; Refuse to wrap a binary that is not stamped with this installer's version
+; (issue #179). The agent asserts its own -ldflags version through
+; `rmm-agent version -expect <version>`, exiting non-zero when it is unstamped
+; (the 0.1.0-dev fallback) or built for a different version — so an installer
+; can never ship a binary that will report something other than what its name,
+; AppVersion, and release evidence claim. Enforced whenever NODELINK_VERSION is
+; set, which covers every release and CI compile; a bare local ISCC run with no
+; version in the environment is still allowed to produce a scratch installer.
+#if VersionEnv != ""
+  #if Pos(":", AgentExe) == 0
+    #define AgentExeToVerify AddBackslash(SourcePath) + AgentExe
+  #else
+    #define AgentExeToVerify AgentExe
+  #endif
+  ; Wait and ShowCmd are left at their defaults on purpose: ISPP's Exec returns
+  ; the child's exit code only when Wait is omitted or non-zero (note that ISPP
+  ; swaps those two parameters relative to Pascal Scripting's Exec). Passing an
+  ; explicit ShowCmd in the 4th position would mean "do not wait" and return
+  ; "launched successfully" instead of the verdict. Console programs are hidden
+  ; regardless, so there is nothing to gain by setting either one.
+  #define AgentVersionCheck Exec(AgentExeToVerify, "version -expect " + MyVersion, SourcePath)
+  #if AgentVersionCheck != 0
+    #error The agent binary does not report NODELINK_VERSION. Rebuild it with -ldflags "-X main.version=$NODELINK_VERSION" before compiling this installer.
+  #endif
+#endif
+
 #define ProductionServerURL "https://nodelink-backend-733e.onrender.com"
 
 ; Personalized-installer sidecar (issue #9). A dashboard-generated download

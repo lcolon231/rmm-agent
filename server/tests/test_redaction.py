@@ -267,6 +267,7 @@ PRODUCER_DETAILS = {
         "previous": ["command-v2"],
         "current": ["command-v3"],
     },
+    "agent.version_changed": {"previous": "0.1.3", "current": "0.1.4"},
     "agent.offline": {"last_seen_at": "2026-07-23T00:00:00+00:00"},
     "agent.quarantined": {
         "previous_trust_state": "active",

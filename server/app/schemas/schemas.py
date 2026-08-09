@@ -332,7 +332,33 @@ class AgentCredentialRenewResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 # Heartbeat
 # --------------------------------------------------------------------------- #
+# Bounded shape for a reported agent build version (issue #179). The width
+# matches the stored ``Agent.agent_version`` column so a value that validates
+# always persists, and the character class keeps a version to the printable
+# semver-ish alphabet an agent build stamps — never free-form prose that could
+# turn the field into an unbounded log sink.
+MAX_AGENT_VERSION_LENGTH = 50
+AGENT_VERSION_PATTERN = r"^[0-9A-Za-z][0-9A-Za-z.+_-]*$"
+AgentVersionStr = Annotated[
+    str,
+    StringConstraints(
+        min_length=1,
+        max_length=MAX_AGENT_VERSION_LENGTH,
+        pattern=AGENT_VERSION_PATTERN,
+    ),
+]
+
+
 class HeartbeatIn(CommandEnvelopeCapabilities):
+    # The running build, reported on every beat so an in-place upgrade refreshes
+    # the stored value on the next successful check-in — no re-enrollment and no
+    # inventory upload required (issue #179). Compatibility policy: absent is
+    # accepted and leaves the stored value untouched, because agents released
+    # before this field existed still beat normally. Anything present must be a
+    # well-formed, bounded version; empty, oversized, or malformed values are
+    # rejected with 422 rather than silently ignored, so a broken build is
+    # visible instead of quietly reporting nothing.
+    agent_version: AgentVersionStr | None = None
     cpu_percent: float = 0.0
     mem_percent: float = 0.0
     disk_percent: float = 0.0

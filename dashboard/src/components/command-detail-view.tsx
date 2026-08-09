@@ -14,7 +14,7 @@ import {
   type CommandDetailData,
   type StreamName,
 } from "@/lib/command-console-core";
-import { formatEndpointDateTime } from "@/lib/endpoint-detail-core";
+import { formatAgentVersion, formatEndpointDateTime } from "@/lib/endpoint-detail-core";
 
 function NodeLinkMark() {
   return (
@@ -170,7 +170,7 @@ export function CommandDetailView({
           <p>The dispatching operator and this command&apos;s full envelope hash are recorded in the audit log under command ID <code>{command.id}</code>.</p>
         </section>
 
-        <footer className="detail-footer"><span>Endpoint ID <code>{endpoint.id}</code></span><span>Agent {endpoint.agent_version || "version unavailable"}</span></footer>
+        <footer className="detail-footer"><span>Endpoint ID <code>{endpoint.id}</code></span><span>Agent {formatAgentVersion(endpoint.agent_version)}</span></footer>
       </div>
     </main>
   );

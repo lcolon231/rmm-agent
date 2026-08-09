@@ -354,3 +354,56 @@ func TestHeartbeatStopsWhenContextIsCancelled(t *testing.T) {
 		t.Fatal("Heartbeat did not return after context cancellation")
 	}
 }
+
+// The running build's version rides on every authenticated beat so the server
+// can refresh a stale enrollment-time value after an in-place upgrade without a
+// re-enrollment (issue #179).
+func TestHeartbeatReportsAgentVersion(t *testing.T) {
+	received := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		version, _ := body["agent_version"].(string)
+		received <- version
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"pending_commands":[],"command_public_keys":{},"trust_state":"active"}`))
+	}))
+	defer server.Close()
+
+	api := New(server.URL, "agent-secret")
+	api.SetAgentVersion("0.1.4")
+	if _, err := api.Heartbeat(context.Background(), telemetry.Sample{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-received; got != "0.1.4" {
+		t.Fatalf("heartbeat body agent_version = %q, want %q", got, "0.1.4")
+	}
+}
+
+// A client that was never told its version omits the field rather than sending
+// a blank one, which the server rejects as malformed.
+func TestHeartbeatOmitsUnsetAgentVersion(t *testing.T) {
+	received := make(chan bool, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		_, present := body["agent_version"]
+		received <- present
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"pending_commands":[],"command_public_keys":{},"trust_state":"active"}`))
+	}))
+	defer server.Close()
+
+	if _, err := New(server.URL, "agent-secret").Heartbeat(context.Background(), telemetry.Sample{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if <-received {
+		t.Fatal("heartbeat sent agent_version without one being set")
+	}
+}

@@ -69,8 +69,32 @@ drill is still required. Do not describe a tagged artifact as production-ready. 
      release body and machine-readable record bound to the tag commit and final
      artifact digests.
 
-`rmm-agent.exe -version`-style identification: the version is compiled in and
-printed in the startup log line (`NodeLink RMM agent <version> starting`).
+### Version-stamp gate (issue #179)
+
+The compiled-in version is what every endpoint reports on its heartbeat and what
+the dashboard shows, so an unstamped binary — one still carrying the `0.1.0-dev`
+fallback — must never be published or wrapped in an installer. Three checks
+enforce that, and any one of them fails the release:
+
+- `agent/build.sh` runs `rmm-agent version --expect <version>` against the
+  host-native artifact right after building.
+- The release workflow repeats the assertion as a named step in both the
+  cross-build job and the Windows installer job, before the installer is
+  compiled and before anything is published.
+- `installer/NodeLinkAgent.iss` runs the same assertion at compile time
+  whenever `NODELINK_VERSION` is set, so `ISCC` refuses a binary whose embedded
+  version differs from the installer's version — locally as well as in CI.
+
+Identify any binary directly:
+
+```bash
+rmm-agent version                 # prints the compiled-in version
+rmm-agent version --expect 0.1.4  # exits non-zero on a mismatch or unstamped build
+```
+
+The version is also printed in the startup log line
+(`NodeLink RMM agent <version> starting`), and reported to the server on every
+heartbeat so an in-place upgrade refreshes the dashboard without re-enrollment.
 
 ## Verifying a download
 

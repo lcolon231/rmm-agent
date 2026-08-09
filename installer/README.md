@@ -105,6 +105,13 @@ The output lands at `installer\Output\NodeLinkAgentSetup-<version>.exe`.
 
 - `NODELINK_VERSION` sets the installer's `AppVersion` and output filename; if
   unset it falls back to `0.0.0-dev` (fine for local experiments).
+- When `NODELINK_VERSION` **is** set, the compile asserts that the agent binary
+  reports exactly that version (`rmm-agent version -expect <version>`) and fails
+  otherwise (issue #179). Build the binary with the matching stamp —
+  `./build.sh <version>`, or
+  `go build -ldflags "-X main.version=<version>"` — because a plain `go build`
+  produces an unstamped `0.1.0-dev` binary that would misreport itself on every
+  endpoint it is installed on. A version-less local compile skips the check.
 - The agent binary is sourced from `..\agent\bin\rmm-agent-windows-amd64.exe`
   by default; point elsewhere with `/DAgentExe=<path>` on the `ISCC` command
   line (this is how CI could feed a differently-named build).
