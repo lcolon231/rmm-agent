@@ -101,7 +101,7 @@
       "database": {
         "alembic_revision": "0028",
         "backup_manifest": {
-          "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.4-evidence/nodelink-backup-20260809T022514Z.manifest.json",
+          "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/7a7c0abc425a5ff2618ac39c9c2ccae422604334/release-notes/evidence/v0.1.4/nodelink-backup-20260809T022514Z.manifest.json",
           "sha256": "0208d2f58a911ac446bb8451edf3b4540afccf6e3b1ecf93fe738decd67d830a"
         }
       },
@@ -137,12 +137,12 @@
   },
   "evidence": {
     "backup_verification": {
-      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.4-evidence/restore-verification-0029.json",
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/7a7c0abc425a5ff2618ac39c9c2ccae422604334/release-notes/evidence/v0.1.4/restore-verification-0029.json",
       "sha256": "32e618f8a064e47701e661bcc3c534aff11061e183f3e12320ba6ae1241736aa"
     },
     "rollback_rehearsal": {
-      "url": "https://github.com/lcolon231/rmm-agent/releases/download/v0.1.4-evidence/rollback-rehearsal-0029-to-0028.json",
-      "sha256": "d77853b7c49b2a60209952631a3c175c8ca24b029077f6c47fe356982e7cdca0"
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/7a7c0abc425a5ff2618ac39c9c2ccae422604334/release-notes/evidence/v0.1.4/rollback-rehearsal-0029-to-0028.json",
+      "sha256": "bcc853b5acc37339ba9e7686258474b25c4e3267dc081dd39429cf76e2220f36"
     }
   }
 }
