@@ -44,6 +44,12 @@ function dispatchErrorMessage(error: NodelinkApiError): { message: string; statu
             ? "Choose a shorter delay or extend the active maintenance window."
           : error.code === "power_operation_user_consent_required"
             ? "A user is signed in. Confirm that user's consent or wait until the session ends."
+          : error.code === "patch_install_denied"
+            ? "The patch approval policy denies or defers one or more selected updates. Choose approved updates only."
+          : error.code === "patch_install_no_approved_updates"
+            ? "The patch approval policy approves none of this endpoint's currently missing updates."
+          : error.code === "patch_install_maintenance_window_required"
+            ? "This endpoint's patch policy requires an active maintenance window before updates may install."
           : "This endpoint's agent does not support a compatible signed command format.",
       status: 409,
     };

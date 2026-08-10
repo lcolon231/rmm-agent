@@ -19,7 +19,9 @@ from datetime import datetime
 from enum import Enum
 import json
 import math
+import re
 from typing import Annotated
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
     BaseModel,
@@ -369,6 +371,52 @@ class AgentCheckResultAck(BaseModel):
 # --------------------------------------------------------------------------- #
 # Maintenance windows
 # --------------------------------------------------------------------------- #
+#: One week in minutes bounds a single recurring occurrence's duration.
+MAX_MAINTENANCE_DURATION_MINUTES = 7 * 24 * 60
+_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+class WeeklyRecurrence(BaseModel):
+    """A weekly recurring sub-span within a window's overall validity (#52).
+
+    ``days`` are ISO weekday numbers 0=Monday..6=Sunday. ``start`` is a local
+    "HH:MM" wall-clock time in the window's timezone; ``duration_minutes`` is how
+    long each occurrence stays open. Evaluation converts "now" into the window
+    timezone via ``zoneinfo`` so DST transitions are handled correctly.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    days: list[int] = Field(min_length=1, max_length=7)
+    start: str
+    duration_minutes: int = Field(ge=1, le=MAX_MAINTENANCE_DURATION_MINUTES)
+
+    @field_validator("days")
+    @classmethod
+    def _days_unique_in_range(cls, value: list[int]) -> list[int]:
+        if any(day < 0 or day > 6 for day in value):
+            raise ValueError("recurrence days must be 0 (Monday) through 6 (Sunday)")
+        if len(set(value)) != len(value):
+            raise ValueError("recurrence days must be unique")
+        return sorted(value)
+
+    @field_validator("start")
+    @classmethod
+    def _start_is_hhmm(cls, value: str) -> str:
+        if not _HHMM_RE.fullmatch(value):
+            raise ValueError("recurrence start must be a 24-hour HH:MM local time")
+        return value
+
+
+def _validate_timezone(value: str) -> str:
+    if value.strip().upper() in ("UTC", "Z", "GMT"):
+        return "UTC"
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError, KeyError) as exc:
+        raise ValueError("timezone must be a valid IANA name (e.g. America/New_York)") from exc
+    return value
+
+
 class MaintenanceWindowCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: ShortText
@@ -376,6 +424,8 @@ class MaintenanceWindowCreate(BaseModel):
     scope_id: Annotated[str, StringConstraints(max_length=36)] | None = None
     starts_at: datetime
     ends_at: datetime
+    timezone: str = "UTC"
+    recurrence: WeeklyRecurrence | None = None
 
     @field_validator("starts_at", "ends_at")
     @classmethod
@@ -383,6 +433,11 @@ class MaintenanceWindowCreate(BaseModel):
         if value.tzinfo is None:
             raise ValueError("maintenance window times must include a timezone offset")
         return value
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone_is_valid(cls, value: str) -> str:
+        return _validate_timezone(value)
 
     @model_validator(mode="after")
     def _validate(self) -> "MaintenanceWindowCreate":
@@ -400,6 +455,8 @@ class MaintenanceWindowOut(BaseModel):
     scope_id: str | None
     starts_at: datetime
     ends_at: datetime
+    timezone: str = "UTC"
+    recurrence: WeeklyRecurrence | None = None
     created_by: str | None
     created_at: datetime
 
