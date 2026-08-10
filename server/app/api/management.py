@@ -35,6 +35,7 @@ from app.core import (
     inventory_diff,
     metrics,
     monitoring as monitoring_core,
+    patch_policies as patch_core,
     retention,
     webhook_notifications,
 )
@@ -58,6 +59,15 @@ from app.schemas.inventory import (
     InventoryOut,
     InventorySection,
     InventorySectionOut,
+)
+from app.schemas.patch_policies import (
+    EffectivePatchPolicyOut,
+    PatchApprovalPolicyCreate,
+    PatchApprovalPolicyDetailOut,
+    PatchApprovalPolicyOut,
+    PatchApprovalPolicyRevisionOut,
+    PatchApprovalPolicyUpdate,
+    PatchUpdateDecisionOut,
 )
 from app.core.script_authorization import (
     authorize_command,
@@ -94,6 +104,8 @@ from app.models.models import (
     MaintenanceWindow,
     MonitoringPolicy,
     MonitoringPolicyRevision,
+    PatchApprovalPolicy,
+    PatchApprovalPolicyRevision,
     MonitoringScope,
     Operator,
     OperatorRole,
@@ -268,6 +280,143 @@ router = APIRouter(
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _latest_missing_updates(db: AsyncSession, agent_id: str) -> list[dict]:
+    """The agent's latest scanned missing Windows updates, or an empty list."""
+    sections = await inventory.latest_sections(db, agent_id)
+    snapshot = sections.get(InventorySection.windows_updates.value)
+    if snapshot is None:
+        return []
+    missing = (snapshot.payload or {}).get("missing")
+    return [item for item in missing if isinstance(item, dict)] if isinstance(missing, list) else []
+
+
+async def _apply_patch_approval_policy(
+    db: AsyncSession,
+    agent: Agent,
+    kind: CommandKind,
+    payload: dict,
+    now: datetime,
+) -> dict:
+    """Gate an install_updates dispatch on the agent's effective patch policy.
+
+    Opt-in: with no applicable policy the payload is returned unchanged. With a
+    policy, ``install_all`` is narrowed to the approved subset and an explicit
+    selection is fail-closed — any denied, deferred, or not-currently-scanned
+    target rejects the whole command. A ``patch_install.gated`` audit records the
+    outcome and counts, never update titles. On a block the audit is committed
+    before the HTTP error so the decision is durable.
+    """
+    if kind != CommandKind.install_updates:
+        return payload
+    effective = await patch_core.resolve_effective_patch_policy(db, agent)
+    if effective is None:
+        return payload
+
+    revision = effective.revision
+    rules = patch_core.parse_rules(revision.rules)
+    missing = await _latest_missing_updates(db, agent.id)
+    by_kb = {(item.get("kb_id") or "").upper(): item for item in missing if item.get("kb_id")}
+    by_id = {(item.get("update_id") or "").lower(): item for item in missing if item.get("update_id")}
+
+    window_required = bool(revision.require_maintenance_window)
+    window_present = True
+    if window_required:
+        windows = await monitoring_core.active_maintenance_windows(db, agent, at=now)
+        window_present = bool(windows)
+
+    install_all = payload.get("install_all") is True
+    approved = denied = deferred = 0
+    blocked: list[str] = []
+    approved_kbs: list[str] = []
+    approved_ids: list[str] = []
+
+    def classify(item: dict) -> bool:
+        nonlocal approved, denied, deferred
+        verdict = patch_core.evaluate_update(rules, revision.default_action, item, now)
+        if verdict.decision == "approve":
+            approved += 1
+            return True
+        if verdict.decision == "deny":
+            denied += 1
+        else:
+            deferred += 1
+        return False
+
+    if install_all:
+        requested = len(missing)
+        for item in missing:
+            if classify(item):
+                if item.get("kb_id"):
+                    approved_kbs.append(item["kb_id"].upper())
+                elif item.get("update_id"):
+                    approved_ids.append(item["update_id"].lower())
+        result_payload = {
+            "install_all": False,
+            "kb_ids": sorted(set(approved_kbs)),
+            "update_ids": sorted(set(approved_ids)),
+        }
+    else:
+        requested_kbs = [str(value).upper() for value in payload.get("kb_ids", [])]
+        requested_ids = [str(value).lower() for value in payload.get("update_ids", [])]
+        requested = len(requested_kbs) + len(requested_ids)
+        for kb in requested_kbs:
+            item = by_kb.get(kb)
+            if item is None:
+                denied += 1
+                blocked.append(kb)
+            elif not classify(item):
+                blocked.append(kb)
+        for uid in requested_ids:
+            item = by_id.get(uid)
+            if item is None:
+                denied += 1
+                blocked.append(uid)
+            elif not classify(item):
+                blocked.append(uid)
+        result_payload = payload
+
+    if window_required and not window_present:
+        outcome = "maintenance_window_required"
+    elif install_all and not approved_kbs and not approved_ids:
+        outcome = "no_approved_updates"
+    elif not install_all and blocked:
+        outcome = "denied"
+    else:
+        outcome = "allowed"
+
+    await audit.record(
+        db,
+        action="patch_install.gated",
+        actor=agent.id,
+        agent_id=agent.id,
+        detail={
+            "policy_id": effective.policy.id,
+            "outcome": outcome,
+            "install_all": install_all,
+            "requested": requested,
+            "approved": approved,
+            "denied": denied,
+            "deferred": deferred,
+            "window_required": window_required,
+            "window_present": window_present,
+        },
+    )
+
+    if outcome != "allowed":
+        await db.commit()
+        code = {
+            "maintenance_window_required": "patch_install_maintenance_window_required",
+            "no_approved_updates": "patch_install_no_approved_updates",
+            "denied": "patch_install_denied",
+        }[outcome]
+        detail: dict = {"code": code, "policy_id": effective.policy.id}
+        if outcome == "denied":
+            detail["blocked"] = blocked[:100]
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
+    return result_payload
 
 
 MAX_NAVIGATION_CLIENTS = 200
@@ -1503,6 +1652,11 @@ async def dispatch_command(
         await db.commit()
         raise
 
+    # Patch approval policy gate (issue #52): narrows install_all to the approved
+    # subset or fails closed on a denied/deferred selection. Opt-in — a no-op when
+    # no policy applies. Self-audits and commits its decision before any refusal.
+    body.payload = await _apply_patch_approval_policy(db, agent, body.kind, body.payload, now)
+
     await audit.record(
         db,
         action="command.authorization_allowed",
@@ -2088,6 +2242,8 @@ async def create_maintenance_window(
         scope_id=body.scope_id,
         starts_at=body.starts_at,
         ends_at=body.ends_at,
+        timezone=body.timezone,
+        recurrence=body.recurrence.model_dump(mode="json") if body.recurrence else None,
         created_by=operator.email,
     )
     db.add(window)
@@ -2152,6 +2308,304 @@ async def delete_maintenance_window(
     )
     await db.delete(window)
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Patch approval policies (issue #52)
+# --------------------------------------------------------------------------- #
+async def _patch_policy_revisions(
+    db: AsyncSession, policy_id: str
+) -> list[PatchApprovalPolicyRevision]:
+    result = await db.execute(
+        select(PatchApprovalPolicyRevision)
+        .where(PatchApprovalPolicyRevision.policy_id == policy_id)
+        .order_by(
+            PatchApprovalPolicyRevision.version.desc(),
+            PatchApprovalPolicyRevision.created_at.desc(),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def _patch_policy_out(
+    db: AsyncSession, policy: PatchApprovalPolicy
+) -> PatchApprovalPolicyOut:
+    revision = await patch_core.current_revision(db, policy.id)
+    return PatchApprovalPolicyOut(
+        id=policy.id,
+        name=policy.name,
+        scope=policy.scope,
+        scope_id=policy.scope_id,
+        enabled=policy.enabled,
+        created_at=policy.created_at,
+        current_version=revision.version if revision is not None else 0,
+        rule_count=len(revision.rules or []) if revision is not None else 0,
+        default_action=revision.default_action if revision is not None else "deny",
+        require_maintenance_window=(
+            revision.require_maintenance_window if revision is not None else False
+        ),
+    )
+
+
+async def _patch_policy_detail(
+    db: AsyncSession, policy: PatchApprovalPolicy
+) -> PatchApprovalPolicyDetailOut:
+    revisions = await _patch_policy_revisions(db, policy.id)
+    current = revisions[0] if revisions else None
+    summary = await _patch_policy_out(db, policy)
+    return PatchApprovalPolicyDetailOut(
+        **summary.model_dump(),
+        rules=current.rules if current is not None else [],
+        revisions=[
+            PatchApprovalPolicyRevisionOut.model_validate(revision)
+            for revision in revisions
+        ],
+    )
+
+
+@router.post(
+    "/patch-approval/policies",
+    response_model=PatchApprovalPolicyDetailOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_patch_policy(
+    body: PatchApprovalPolicyCreate,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_monitoring_scope_target(db, body.scope, body.scope_id)
+    duplicate = await db.scalar(
+        select(PatchApprovalPolicy.id).where(
+            PatchApprovalPolicy.scope == body.scope,
+            PatchApprovalPolicy.scope_id == body.scope_id,
+            func.lower(func.trim(PatchApprovalPolicy.name)) == body.name.casefold(),
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "patch_approval_policy_name_exists"},
+        )
+    policy = PatchApprovalPolicy(
+        name=body.name,
+        scope=body.scope,
+        scope_id=body.scope_id,
+        enabled=body.enabled,
+    )
+    db.add(policy)
+    await db.flush()
+    revision = PatchApprovalPolicyRevision(
+        policy_id=policy.id,
+        version=1,
+        rules=[rule.model_dump(mode="json") for rule in body.rules],
+        default_action=body.default_action.value,
+        require_maintenance_window=body.require_maintenance_window,
+        change_note=body.change_note,
+        created_by=operator.email,
+    )
+    db.add(revision)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "patch_approval_policy_name_exists"},
+        ) from exc
+    await audit.record(
+        db,
+        action="patch_approval_policy.created",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "policy_id": policy.id,
+            "scope": policy.scope.value,
+            "scope_id": policy.scope_id,
+            "enabled": policy.enabled,
+            "rule_count": len(body.rules),
+            "name": policy.name,
+            "change_note": body.change_note or "",
+        },
+    )
+    return await _patch_policy_detail(db, policy)
+
+
+@router.get("/patch-approval/policies", response_model=list[PatchApprovalPolicyOut])
+async def list_patch_policies(db: AsyncSession = Depends(get_db)):
+    policies = list(
+        (
+            await db.execute(
+                select(PatchApprovalPolicy).order_by(
+                    PatchApprovalPolicy.scope,
+                    PatchApprovalPolicy.name,
+                    PatchApprovalPolicy.id,
+                )
+            )
+        ).scalars().all()
+    )
+    return [await _patch_policy_out(db, policy) for policy in policies]
+
+
+@router.get(
+    "/patch-approval/policies/{policy_id}",
+    response_model=PatchApprovalPolicyDetailOut,
+)
+async def get_patch_policy(
+    policy_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    policy = await db.get(PatchApprovalPolicy, policy_id)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Patch approval policy not found")
+    return await _patch_policy_detail(db, policy)
+
+
+@router.put(
+    "/patch-approval/policies/{policy_id}",
+    response_model=PatchApprovalPolicyDetailOut,
+)
+async def revise_patch_policy(
+    policy_id: str,
+    body: PatchApprovalPolicyUpdate,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    policy = await db.get(PatchApprovalPolicy, policy_id)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Patch approval policy not found")
+    latest_version = await db.scalar(
+        select(func.max(PatchApprovalPolicyRevision.version)).where(
+            PatchApprovalPolicyRevision.policy_id == policy.id
+        )
+    )
+    revision = PatchApprovalPolicyRevision(
+        policy_id=policy.id,
+        version=(latest_version or 0) + 1,
+        rules=[rule.model_dump(mode="json") for rule in body.rules],
+        default_action=body.default_action.value,
+        require_maintenance_window=body.require_maintenance_window,
+        change_note=body.change_note,
+        created_by=operator.email,
+    )
+    if body.enabled is not None:
+        policy.enabled = body.enabled
+    db.add(revision)
+    await db.flush()
+    await audit.record(
+        db,
+        action="patch_approval_policy.revised",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "policy_id": policy.id,
+            "version": revision.version,
+            "enabled": policy.enabled,
+            "rule_count": len(body.rules),
+            "change_note": body.change_note or "",
+        },
+    )
+    return await _patch_policy_detail(db, policy)
+
+
+@router.delete(
+    "/patch-approval/policies/{policy_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_patch_policy(
+    policy_id: str,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    policy = await db.get(PatchApprovalPolicy, policy_id)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Patch approval policy not found")
+    await audit.record(
+        db,
+        action="patch_approval_policy.deleted",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "policy_id": policy.id,
+            "scope": policy.scope.value,
+            "scope_id": policy.scope_id,
+            "name": policy.name,
+        },
+    )
+    await db.delete(policy)
+    return None
+
+
+@router.get(
+    "/agents/{agent_id}/patch-approval/effective",
+    response_model=EffectivePatchPolicyOut,
+)
+async def get_agent_effective_patch_policy(
+    agent_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    effective = await patch_core.resolve_effective_patch_policy(db, agent)
+    missing = await _latest_missing_updates(db, agent_id)
+    if effective is None:
+        # Opt-in gating: with no policy, every missing update is installable.
+        return EffectivePatchPolicyOut(
+            policy_id=None,
+            policy_name=None,
+            scope=None,
+            default_action=None,
+            require_maintenance_window=False,
+            decisions=[
+                PatchUpdateDecisionOut(
+                    kb_id=item.get("kb_id"),
+                    update_id=item.get("update_id"),
+                    title=item.get("title") or "",
+                    classification=item.get("classification"),
+                    severity=item.get("severity"),
+                    decision="approve",
+                    reason="no_policy",
+                )
+                for item in missing
+            ],
+        )
+    rules = patch_core.parse_rules(effective.revision.rules)
+    now = _now()
+    decisions = []
+    for item in missing:
+        verdict = patch_core.evaluate_update(
+            rules, effective.revision.default_action, item, now
+        )
+        decisions.append(
+            PatchUpdateDecisionOut(
+                kb_id=item.get("kb_id"),
+                update_id=item.get("update_id"),
+                title=item.get("title") or "",
+                classification=item.get("classification"),
+                severity=item.get("severity"),
+                decision=verdict.decision,
+                reason=verdict.reason,
+                matched_rule_key=verdict.matched_rule_key,
+            )
+        )
+    return EffectivePatchPolicyOut(
+        policy_id=effective.policy.id,
+        policy_name=effective.policy.name,
+        scope=effective.policy.scope,
+        default_action=effective.revision.default_action,
+        require_maintenance_window=effective.revision.require_maintenance_window,
+        decisions=decisions,
+    )
 
 
 @router.get(

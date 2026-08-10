@@ -149,6 +149,16 @@ closed. Update GUID selection supports driver and firmware updates without KBs.
 An agent that predates either kind rejects it at signature/kind validation, so a
 mixed-version fleet is safe.
 
+Patch approval policies (issue #52) gate `install_updates` server-side. A scoped,
+versioned policy (global/client/site/agent; most-specific wins) holds ordered
+first-match approve/deny/defer rules matched on classification, MSRC severity, or
+KB, plus a default action and an optional maintenance-window requirement. The
+gate runs before signing: `install_all` is narrowed to the approved subset and an
+explicit selection is fail-closed. Policies are opt-in — with none, installs are
+unchanged. Maintenance windows additionally gained optional timezone/DST-aware
+weekly recurrence, which power operations reuse. See
+[`PATCH-APPROVAL.md`](PATCH-APPROVAL.md).
+
 
 `powershell` and `shell` are arbitrary-script escape hatches and require a
 separate scope matching the target. Authorization is evaluated and audited

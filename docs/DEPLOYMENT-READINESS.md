@@ -355,6 +355,15 @@ query is metadata-only, so no new ePHI store or retention clock is introduced.
 Crossing before `0032` requires an exact-revision restore or forward fix; do not
 remove enum values in place. See [`EVENT-LOG-ACCESS.md`](EVENT-LOG-ACCESS.md).
 
+Revision `0033` creates the two `patch_approval_policies*` tables and adds
+nullable `timezone`/`recurrence` columns to `maintenance_windows` (issue #52).
+It reuses the existing `monitoringscope` enum and adds `tzdata` as a server
+dependency for IANA timezone resolution. The feature is server-only and opt-in:
+deploy migration/server, then dashboard; existing absolute maintenance windows
+and existing installs are unaffected until a patch policy is authored. Crossing
+before `0033` requires an exact-revision restore or forward fix. See
+[`PATCH-APPROVAL.md`](PATCH-APPROVAL.md).
+
 ## Rollback procedure
 
 Every release needs an exact-tag source manifest under `release-notes/`; the

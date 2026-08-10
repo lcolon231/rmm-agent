@@ -251,6 +251,45 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     "monitoring_policy.viewed": _schema(
         "policy_id", "version", "check_count", "revision_count"
     ),
+    # Patch approval policies (issue #52). Names and change notes are operator
+    # prose and are digest-only; the install gate records only counts and an
+    # outcome code, never update titles.
+    "patch_approval_policy.created": _schema(
+        "policy_id",
+        "scope",
+        "scope_id",
+        "enabled",
+        "rule_count",
+        "name",
+        "change_note",
+        digest_fields=("name", "change_note"),
+    ),
+    "patch_approval_policy.revised": _schema(
+        "policy_id",
+        "version",
+        "enabled",
+        "rule_count",
+        "change_note",
+        digest_fields=("change_note",),
+    ),
+    "patch_approval_policy.deleted": _schema(
+        "policy_id",
+        "scope",
+        "scope_id",
+        "name",
+        digest_fields=("name",),
+    ),
+    "patch_install.gated": _schema(
+        "policy_id",
+        "outcome",
+        "install_all",
+        "requested",
+        "approved",
+        "denied",
+        "deferred",
+        "window_required",
+        "window_present",
+    ),
     "monitoring_alert.acknowledged": _schema(
         "alert_id", "generation", "request_id", "from_state", "to_state",
         "comment", "comment_redacted", digest_fields=("comment",),

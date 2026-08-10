@@ -25,7 +25,8 @@ import json
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -200,15 +201,50 @@ async def resolve_effective_policy(
     return [effective[key] for key in sorted(effective)]
 
 
+def _window_active_at(window: MaintenanceWindow, at: datetime) -> bool:
+    """Whether a window is open at ``at`` considering optional recurrence (#52).
+
+    Absolute windows (no ``recurrence``) are open whenever ``at`` is within their
+    ``[starts_at, ends_at)`` validity, which the SQL query already bounds.
+    Recurring windows are open when ``at``, converted to the window's timezone,
+    falls inside a weekly occurrence. Both the current and previous local day are
+    checked so an occurrence that began before local midnight — or spans a DST
+    transition — is still matched.
+    """
+    if not window.recurrence:
+        return True
+    try:
+        tz = ZoneInfo(window.timezone or "UTC")
+    except Exception:
+        tz = timezone.utc
+    local = _utc(at).astimezone(tz)
+    recurrence = window.recurrence
+    days = set(recurrence.get("days", []))
+    try:
+        hour, minute = (int(part) for part in str(recurrence["start"]).split(":"))
+        duration = timedelta(minutes=int(recurrence["duration_minutes"]))
+    except (KeyError, ValueError, TypeError):
+        return False
+    for offset in (0, 1):
+        day = (local - timedelta(days=offset)).date()
+        if day.weekday() not in days:
+            continue
+        occ_start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz)
+        if occ_start <= local < occ_start + duration:
+            return True
+    return False
+
+
 async def active_maintenance_windows(
     db: AsyncSession, agent: Agent, at: datetime | None = None
 ) -> list[MaintenanceWindow]:
     """Maintenance windows covering this agent that are open at ``at``.
 
     Provided as the seam #43/#44 will consult to suppress alerts; #41 does not
-    itself suppress anything.
+    itself suppress anything. Recurring windows (#52) are filtered in Python
+    because their active sub-spans are timezone/DST-dependent.
     """
-    at = at or _now()
+    at = _utc(at or _now())
     site = await db.get(Site, agent.site_id)
     client_id = site.client_id if site else None
 
@@ -235,7 +271,7 @@ async def active_maintenance_windows(
             or_(*scope_match),
         )
     )
-    return list(result.scalars().all())
+    return [window for window in result.scalars().all() if _window_active_at(window, at)]
 
 
 async def _resolve_superseded_alerts(

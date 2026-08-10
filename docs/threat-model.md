@@ -234,6 +234,19 @@ endpoint can falsify results. Message-body retrieval is deferred behind opt-in
 attestation, short retention, and legal/BAA review. See
 [`EVENT-LOG-ACCESS.md`](EVENT-LOG-ACCESS.md).
 
+Issue #52 adds a patch approval boundary in front of `install_updates`. A scoped,
+versioned policy (most-specific wins) approves, denies, or defers updates by
+classification, severity, or KB; the server evaluates the selection against the
+endpoint's scanned inventory before signing, narrowing `install_all` to the
+approved subset and refusing an explicit denied/deferred selection. The default
+action is deny (fail closed), and an optional maintenance-window requirement
+prevents out-of-window patching. The gate is server-side and opt-in, so it does
+not weaken any existing trust boundary; residual risks are that policies act on
+self-reported scan inventory (a compromised endpoint could misreport what is
+missing) and that a stale scan can misgate a selection — operators re-scan before
+installing, and every decision is audited via `patch_install.gated`. See
+[`PATCH-APPROVAL.md`](PATCH-APPROVAL.md).
+
 Typed script parameters reduce injection and disclosure risk but do not make an
 approved script intrinsically safe. Definitions are immutable with the reviewed
 source. Values are validated without coercion, then the whole resolved document

@@ -1001,6 +1001,89 @@ class MaintenanceWindow(Base):
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str | None] = mapped_column(String(320))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # Optional weekly recurrence (issue #52). When ``recurrence`` is NULL the
+    # window is a single absolute span from ``starts_at`` to ``ends_at`` (the
+    # original #41 behavior). When set, ``starts_at``/``ends_at`` bound the
+    # overall validity and ``recurrence`` = {"days": [0-6], "start": "HH:MM",
+    # "duration_minutes": int} selects the active sub-spans, evaluated in
+    # ``timezone`` so DST transitions are handled correctly.
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+    recurrence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class PatchApprovalPolicy(Base):
+    """A named set of Windows Update approval rules bound to a scope (issue #52).
+
+    Mirrors :class:`MonitoringPolicy`: the row is the stable identity (name,
+    scope, enabled) and its rule content lives in append-only
+    :class:`PatchApprovalPolicyRevision` rows so every edit is an auditable
+    version. ``scope_id`` is NULL only for the global scope and is not a hard FK
+    for the same polymorphic reason as monitoring policies.
+    """
+
+    __tablename__ = "patch_approval_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    scope: Mapped[MonitoringScope] = mapped_column(
+        Enum(MonitoringScope, values_callable=lambda enum_type: [item.value for item in enum_type]),
+        nullable=False,
+    )
+    scope_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    revisions: Mapped[list["PatchApprovalPolicyRevision"]] = relationship(
+        back_populates="policy", cascade="all, delete-orphan"
+    )
+
+
+# One patch policy name per scope target, case- and whitespace-insensitive.
+# Same defense-in-depth rationale as the monitoring policy index; the API
+# enforces duplicate-name rejection for every scope including global.
+Index(
+    "ux_patch_approval_policies_scope_name_normalized",
+    PatchApprovalPolicy.scope,
+    PatchApprovalPolicy.scope_id,
+    func.lower(func.trim(PatchApprovalPolicy.name)),
+    unique=True,
+)
+
+
+class PatchApprovalPolicyRevision(Base):
+    """One immutable version of a patch policy's rule set (issue #52).
+
+    ``rules`` is a bounded, schema-validated JSON list of ordered first-match
+    approve/deny/defer rules; ``default_action`` is applied to updates no rule
+    matches, and ``require_maintenance_window`` gates install dispatch on an
+    active maintenance window. All are validated by ``app/schemas/patch_policies``
+    before storage, so extending the rule vocabulary is a schema change.
+    """
+
+    __tablename__ = "patch_approval_policy_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "policy_id", "version", name="ux_patch_approval_policy_revision_version"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    policy_id: Mapped[str] = mapped_column(
+        ForeignKey("patch_approval_policies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    rules: Mapped[list] = mapped_column(JSON, nullable=False)
+    default_action: Mapped[str] = mapped_column(String(16), nullable=False, default="deny")
+    require_maintenance_window: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    change_note: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    policy: Mapped["PatchApprovalPolicy"] = relationship(back_populates="revisions")
 
 
 class CheckResult(Base):
