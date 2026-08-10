@@ -106,21 +106,23 @@ MFA/federation, tenant-scoped authorization, and certificate pinning.
 ### 3.2 Operations plane
 
 The operations plane delivers endpoint state and actions. It currently contains
-enrollment, heartbeat telemetry, polling command pickup, fourteen command kinds,
+enrollment, heartbeat telemetry, polling command pickup, fifteen command kinds,
 buffered result submission, command history, and offline status transitions.
 
 The current command kinds are `powershell`, `shell`, `collect_inventory`,
 `scan_updates`, `install_updates`, `file_upload`, `file_download`,
 `registry_read`, `registry_write`, `registry_delete`, and
-`remediation_rollback`, plus `reboot`, `shutdown`, and `cancel_power_action`.
-Inventory/update operations are authorized by the
+`remediation_rollback`, plus `reboot`, `shutdown`, `cancel_power_action`, and
+`query_event_log`. Inventory/update operations are authorized by the
 operator role. File/registry remediation is administrator-only and separately
 capability-gated; see [`CONTROLLED-REMEDIATION.md`](CONTROLLED-REMEDIATION.md).
 Power operations are administrator-only and capability-gated. Restart and
 shutdown additionally bind a live maintenance window, delay, reason, and
 user-session attestation into the signed payload; the agent rechecks policy and
 Windows supports a typed idempotent cancellation path. See
-[`POWER-OPERATIONS.md`](POWER-OPERATIONS.md).
+[`POWER-OPERATIONS.md`](POWER-OPERATIONS.md). Event log access is
+administrator-only and capability-gated, bounded to an allowlisted channel and
+returning metadata only; see [`EVENT-LOG-ACCESS.md`](EVENT-LOG-ACCESS.md).
 
 Controlled remediation preserves polling and the signed command/result
 contract. Both server and agent validate fixed managed file roots and the

@@ -118,6 +118,10 @@ class CommandKind(str, enum.Enum):
     reboot = "reboot"
     shutdown = "shutdown"
     cancel_power_action = "cancel_power_action"
+    # Capability-gated, bounded Windows event log query (issue #58). Metadata
+    # only: the agent returns structured <System> fields, never message text or
+    # EventData, so no PHI-bearing free text crosses the wire or is stored.
+    query_event_log = "query_event_log"
 
 
 class CommandStatus(str, enum.Enum):

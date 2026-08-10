@@ -33,6 +33,13 @@ audit log. Instead, past `command_output_retention_days` the heavy `stdout`/
 (exit code, truncation flags, total byte counts, timestamps). The
 `command.completed` audit event — which never held the output — is untouched.
 
+`query_event_log` results (issue #58) are metadata-only — structured `<System>`
+fields with no message text or `EventData` — and are stored in the same
+`commands.stdout` column, so they inherit `command_output_retention_days` with no
+separate retention clock. A future message-body feature would require a distinct,
+shorter retention clock for the sensitive body; that is out of scope for the
+metadata-only v1. See [`EVENT-LOG-ACCESS.md`](EVENT-LOG-ACCESS.md).
+
 ## Configuration
 
 All settings live in `server/app/core/config.py` (environment variables):

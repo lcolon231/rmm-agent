@@ -29,6 +29,19 @@ func TestSupportedCapabilitiesAdvertisesPowerOperations(t *testing.T) {
 	t.Fatalf("SupportedCapabilities() = %v, want it to include %q", caps, PowerOperationsCapabilityV1)
 }
 
+func TestSupportedCapabilitiesAdvertisesEventLogQuery(t *testing.T) {
+	caps := SupportedCapabilities()
+	for _, capability := range caps {
+		if capability == EventLogQueryCapabilityV1 {
+			if EventLogQueryCapabilityV1 != "event-log-query-v1" {
+				t.Fatalf("capability name drift: %q", EventLogQueryCapabilityV1)
+			}
+			return
+		}
+	}
+	t.Fatalf("SupportedCapabilities() = %v, want it to include %q", caps, EventLogQueryCapabilityV1)
+}
+
 func TestSupportedCapabilitiesReturnsFreshSlice(t *testing.T) {
 	first := SupportedCapabilities()
 	if len(first) == 0 {

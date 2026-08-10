@@ -10,6 +10,7 @@ import {
   commandKindDefinitionsForPermission,
   describeCommandStatus,
   describeStreamCapture,
+  eventLogQueryResultFromUnknown,
   formatByteCount,
   hasActiveCommands,
   powerOperationResultFromUnknown,
@@ -159,6 +160,7 @@ test("script command choices require explicit endpoint permission", () => {
       "collect_inventory", "scan_updates", "install_updates", "file_upload",
       "file_download", "registry_read", "registry_write", "registry_delete",
       "remediation_rollback", "reboot", "shutdown", "cancel_power_action",
+      "query_event_log",
     ],
   );
 });
@@ -303,6 +305,76 @@ test("computes history page counts with a floor of one page", () => {
   assert.equal(commandPageCount(0, 25), 1);
   assert.equal(commandPageCount(25, 25), 1);
   assert.equal(commandPageCount(26, 25), 2);
+});
+
+test("builds and rejects bounded event log query payloads", () => {
+  const standard = validateDispatchInput({
+    kind: "query_event_log",
+    script: "",
+    ttl_seconds: 300,
+    operation_payload: { channel: "System", time_window_seconds: 3600, max_events: 100, levels: [2, 3] },
+  });
+  assert.ok(standard);
+  assert.deepEqual(buildDispatchRequestBody(standard!).payload, {
+    channel: "System",
+    tier_ack: false,
+    time_window_seconds: 3600,
+    max_events: 100,
+    levels: [2, 3],
+  });
+
+  const elevated = validateDispatchInput({
+    kind: "query_event_log",
+    script: "",
+    ttl_seconds: 300,
+    operation_payload: { channel: "Security", tier_ack: true, time_window_seconds: 86400, max_events: 50, cursor: 42 },
+  });
+  assert.equal((elevated!.operation_payload as Record<string, unknown>).tier_ack, true);
+
+  // Off-allowlist channel, elevated channel without tier_ack, standard channel
+  // with tier_ack, and out-of-range bounds are all refused.
+  for (const payload of [
+    { channel: "Microsoft-Windows-PowerShell/Operational", time_window_seconds: 3600, max_events: 10 },
+    { channel: "Security", time_window_seconds: 3600, max_events: 10 },
+    { channel: "System", tier_ack: true, time_window_seconds: 3600, max_events: 10 },
+    { channel: "System", time_window_seconds: 3600, max_events: 0 },
+    { channel: "System", time_window_seconds: 10, max_events: 10 },
+    { channel: "System", time_window_seconds: 3600, max_events: 10, levels: [9] },
+    { channel: "System", time_window_seconds: 3600, max_events: 10, evil: 1 },
+  ]) {
+    assert.equal(
+      validateDispatchInput({ kind: "query_event_log", script: "", ttl_seconds: 300, operation_payload: payload }),
+      null,
+    );
+  }
+});
+
+test("query_event_log is an administrator-only command", () => {
+  assert.ok(
+    !commandKindDefinitionsForPermission(true, false).some((item) => item.kind === "query_event_log"),
+  );
+  assert.ok(
+    commandKindDefinitionsForPermission(false, true).some((item) => item.kind === "query_event_log"),
+  );
+});
+
+test("parses metadata-only event log results without trusting arbitrary stdout", () => {
+  const parsed = eventLogQueryResultFromUnknown(
+    JSON.stringify({
+      status: "ok",
+      channel: "System",
+      count: 1,
+      has_more: true,
+      next_cursor: 9002,
+      records: [{ record_id: 9002, time_created: "2026-08-09T12:00:00Z", provider: "X", event_id: 7036, level: 4, task: 0, channel: "System" }],
+    }),
+  );
+  assert.equal(parsed?.status, "ok");
+  assert.equal(parsed?.records[0].eventId, 7036);
+  assert.equal(parsed?.hasMore, true);
+  assert.equal(parsed?.nextCursor, 9002);
+  assert.equal(eventLogQueryResultFromUnknown("not json"), null);
+  assert.equal(eventLogQueryResultFromUnknown(JSON.stringify({ status: "bogus", channel: "System", records: [] })), null);
 });
 
 test("extracts stable error codes from structured API error bodies", () => {

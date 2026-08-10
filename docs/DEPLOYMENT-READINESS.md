@@ -348,6 +348,13 @@ power dispatch and cancel or expire pending actions. Crossing before `0031`
 requires an exact-revision restore or forward fix; do not remove enum values in
 place. See [`POWER-OPERATIONS.md`](POWER-OPERATIONS.md).
 
+Revision `0032` adds only the `query_event_log` PostgreSQL `commandkind` enum
+value. Deploy migration/server, then canary `event-log-query-v1` agents, then
+dashboard. Old agents fail closed with `agent_capability_unsupported`. The v1
+query is metadata-only, so no new ePHI store or retention clock is introduced.
+Crossing before `0032` requires an exact-revision restore or forward fix; do not
+remove enum values in place. See [`EVENT-LOG-ACCESS.md`](EVENT-LOG-ACCESS.md).
+
 ## Rollback procedure
 
 Every release needs an exact-tag source manifest under `release-notes/`; the

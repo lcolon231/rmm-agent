@@ -43,6 +43,9 @@ const (
 	KindReboot              = "reboot"
 	KindShutdown            = "shutdown"
 	KindCancelPowerAction   = "cancel_power_action"
+	// KindQueryEventLog runs a bounded, metadata-only Windows event log query
+	// (issue #58). It never returns message text or EventData.
+	KindQueryEventLog = "query_event_log"
 )
 
 // defaultTimeout bounds how long any single command may run.

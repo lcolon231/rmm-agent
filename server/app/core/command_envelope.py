@@ -20,6 +20,7 @@ SUPPORTED_COMMAND_KINDS = frozenset(
         "file_upload", "file_download", "registry_read", "registry_write",
         "registry_delete", "remediation_rollback",
         "reboot", "shutdown", "cancel_power_action",
+        "query_event_log",
     }
 )
 

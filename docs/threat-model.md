@@ -219,6 +219,21 @@ Windows may power off before result upload (the local outbox recovers after
 boot). Two-person approval and independent endpoint-user confirmation remain
 future defenses. See [`POWER-OPERATIONS.md`](POWER-OPERATIONS.md).
 
+Issue #58 adds a bounded event log read boundary. `query_event_log` requires
+`admin` plus `event-log-query-v1` and is restricted to a fixed channel allowlist
+with a standard tier and an elevated tier (`Security`, Defender) that a query
+must explicitly acknowledge and which is separately audited. Every query records
+its minimum-necessary scope (channel, tier, time window, event cap, filter
+presence) without event contents. The dominant risk is PHI exposure through
+event message bodies; v1 mitigates this structurally by returning metadata only
+— the agent parses the `<System>` element and never the rendered message,
+`<EventData>`, or `<UserData>` — because regex redaction of unpredictable free
+text is not a defensible PHI control. Residual risks: structured metadata
+(account names, file paths) can be indirectly identifying, and a compromised
+endpoint can falsify results. Message-body retrieval is deferred behind opt-in
+attestation, short retention, and legal/BAA review. See
+[`EVENT-LOG-ACCESS.md`](EVENT-LOG-ACCESS.md).
+
 Typed script parameters reduce injection and disclosure risk but do not make an
 approved script intrinsically safe. Definitions are immutable with the reviewed
 source. Values are validated without coercion, then the whole resolved document

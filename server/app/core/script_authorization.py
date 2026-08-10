@@ -61,6 +61,7 @@ def authorize_command(
         CommandKind.reboot,
         CommandKind.shutdown,
         CommandKind.cancel_power_action,
+        CommandKind.query_event_log,
     ):
         return CommandAuthorizationDecision(
             allowed=operator.role == OperatorRole.admin,
@@ -71,6 +72,8 @@ def authorize_command(
                     CommandKind.shutdown,
                     CommandKind.cancel_power_action,
                 }
+                else "event_log_query"
+                if kind == CommandKind.query_event_log
                 else "privileged_remediation"
             ),
             reason=(

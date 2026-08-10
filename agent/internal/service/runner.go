@@ -24,6 +24,7 @@ import (
 
 	"github.com/lcolon231/rmm/agent/internal/client"
 	"github.com/lcolon231/rmm/agent/internal/config"
+	"github.com/lcolon231/rmm/agent/internal/eventlog"
 	"github.com/lcolon231/rmm/agent/internal/executor"
 	"github.com/lcolon231/rmm/agent/internal/inventory"
 	"github.com/lcolon231/rmm/agent/internal/monitoring"
@@ -749,6 +750,8 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		executor.KindRegistryRead, executor.KindRegistryWrite,
 		executor.KindRegistryDelete, executor.KindRemediationRollback:
 		res = remediation.Execute(ctx, cmd.ID, cmd.Kind, cmd.Payload)
+	case executor.KindQueryEventLog:
+		res = eventlog.Execute(ctx, cmd.Kind, cmd.Payload)
 	default:
 		script := extractScript(cmd.Payload)
 		res = a.run(ctx, cmd.Kind, script)
