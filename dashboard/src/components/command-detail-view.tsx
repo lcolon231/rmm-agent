@@ -10,9 +10,11 @@ import {
   commandKindDefinitions,
   describeCommandStatus,
   describeStreamCapture,
+  eventLogQueryResultFromUnknown,
   formatByteCount,
   powerOperationResultFromUnknown,
   type CommandDetailData,
+  type EventLogQueryResult,
   type PowerOperationResult,
   type StreamName,
 } from "@/lib/command-console-core";
@@ -127,6 +129,44 @@ function PowerResult({ result }: { result: PowerOperationResult }) {
   );
 }
 
+function EventLogResult({ result }: { result: EventLogQueryResult }) {
+  const ok = result.status === "ok";
+  return (
+    <div className={`event-log-command-result ${ok ? "succeeded" : "failed"}`}>
+      <header>
+        {ok ? <CheckCircle2 aria-hidden="true" size={21} /> : <AlertTriangle aria-hidden="true" size={21} />}
+        <div>
+          <strong>{result.message ?? `${result.count} event${result.count === 1 ? "" : "s"} from ${result.channel}`}</strong>
+          <span>
+            Metadata only — no message text is collected.
+            {result.hasMore ? ` More events are available; continue from cursor ${result.nextCursor}.` : ""}
+          </span>
+        </div>
+      </header>
+      {result.records.length ? (
+        <table className="event-log-records">
+          <thead>
+            <tr><th>Record</th><th>Time</th><th>Provider</th><th>Event ID</th><th>Level</th></tr>
+          </thead>
+          <tbody>
+            {result.records.map((record) => (
+              <tr key={record.recordId}>
+                <td><code>{record.recordId}</code></td>
+                <td>{record.timeCreated ? formatEndpointDateTime(record.timeCreated) : "—"}</td>
+                <td>{record.provider || "—"}</td>
+                <td>{record.eventId}</td>
+                <td>{record.level}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p>No matching events were returned within the bounded window.</p>
+      )}
+    </div>
+  );
+}
+
 export function CommandDetailView({
   command,
   endpoint,
@@ -151,6 +191,9 @@ export function CommandDetailView({
     : [];
   const isPowerOperation = ["reboot", "shutdown", "cancel_power_action"].includes(command.kind);
   const powerResult = isPowerOperation ? powerOperationResultFromUnknown(command.stdout) : null;
+  const eventLogResult = command.kind === "query_event_log"
+    ? eventLogQueryResultFromUnknown(command.stdout)
+    : null;
 
   return (
     <main className="endpoint-detail-page">
@@ -216,6 +259,18 @@ export function CommandDetailView({
               <div><dt>Window closes</dt><dd>{typeof command.payload.maintenance_window_ends_at === "string" ? formatEndpointDateTime(command.payload.maintenance_window_ends_at) : "Not applicable"}</dd></div>
             </dl>
           </section>
+        ) : command.kind === "query_event_log" ? (
+          <section className="command-payload" aria-labelledby="payload-title">
+            <header><div><span className="eyebrow">Signed query</span><h2 id="payload-title">Event log query</h2></div></header>
+            <dl>
+              <div><dt>Channel</dt><dd>{typeof command.payload.channel === "string" ? command.payload.channel : "—"}</dd></div>
+              <div><dt>Time window</dt><dd>{typeof command.payload.time_window_seconds === "number" ? `${command.payload.time_window_seconds} seconds` : "—"}</dd></div>
+              <div><dt>Max events</dt><dd>{typeof command.payload.max_events === "number" ? command.payload.max_events : "—"}</dd></div>
+              <div><dt>Providers</dt><dd>{Array.isArray(command.payload.providers) ? command.payload.providers.join(", ") : "Any"}</dd></div>
+              <div><dt>Levels</dt><dd>{Array.isArray(command.payload.levels) ? command.payload.levels.join(", ") : "Any"}</dd></div>
+              <div><dt>Event IDs</dt><dd>{Array.isArray(command.payload.event_ids) ? command.payload.event_ids.join(", ") : "Any"}</dd></div>
+            </dl>
+          </section>
         ) : null}
 
         <section className="command-result" aria-labelledby="result-title">
@@ -239,6 +294,11 @@ export function CommandDetailView({
               ) : powerResult ? (
                 <>
                   <PowerResult result={powerResult} />
+                  {command.stderr ? <OutputStream command={command} stream="stderr" /> : null}
+                </>
+              ) : eventLogResult ? (
+                <>
+                  <EventLogResult result={eventLogResult} />
                   {command.stderr ? <OutputStream command={command} stream="stderr" /> : null}
                 </>
               ) : (

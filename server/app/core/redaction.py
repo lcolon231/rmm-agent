@@ -388,6 +388,19 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "kind",
         "agent_completed_at",
     ),
+    # Bounded Windows event log query (issue #58). Records the minimum-necessary
+    # scope of the read — channel, tier, filters, and bounds — never any event
+    # contents. v1 is metadata-only, so there is no free text to digest here.
+    "event_log_query.dispatched": _schema(
+        "channel",
+        "tier",
+        "time_window_seconds",
+        "max_events",
+        "provider_filter",
+        "level_filter",
+        "event_id_filter",
+        "paginated",
+    ),
     "command_detail.viewed": _schema("command_id", "status"),
     "command_detail.access_denied": _schema(
         "command_id", "kind", "operator_role", "reason"

@@ -18,6 +18,7 @@ const (
 	FileTransferCapabilityV1       = "file-transfer-v1"
 	RegistryOperationsCapabilityV1 = "registry-operations-v1"
 	PowerOperationsCapabilityV1    = "power-operations-v1"
+	EventLogQueryCapabilityV1      = "event-log-query-v1"
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
@@ -35,5 +36,6 @@ func SupportedCapabilities() []string {
 		FileTransferCapabilityV1,
 		RegistryOperationsCapabilityV1,
 		PowerOperationsCapabilityV1,
+		EventLogQueryCapabilityV1,
 	}
 }

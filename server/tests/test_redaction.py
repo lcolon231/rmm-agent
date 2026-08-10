@@ -637,6 +637,16 @@ PRODUCER_DETAILS = {
         "kind": "powershell",
         "agent_completed_at": "2026-07-23T00:00:00+00:00",
     },
+    "event_log_query.dispatched": {
+        "channel": "Security",
+        "tier": "elevated",
+        "time_window_seconds": 86400,
+        "max_events": 100,
+        "provider_filter": False,
+        "level_filter": True,
+        "event_id_filter": False,
+        "paginated": True,
+    },
     "command_detail.viewed": {"command_id": ID3, "status": "succeeded"},
     "command_detail.access_denied": {
         "command_id": ID3,

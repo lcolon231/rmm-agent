@@ -14,7 +14,8 @@ export type CommandKind =
   | "remediation_rollback"
   | "reboot"
   | "shutdown"
-  | "cancel_power_action";
+  | "cancel_power_action"
+  | "query_event_log";
 
 export type CommandStatus =
   | "queued"
@@ -78,7 +79,8 @@ export type CommandKindDefinition = {
     | "registry_delete"
     | "rollback"
     | "power_action"
-    | "power_cancel";
+    | "power_cancel"
+    | "event_log_query";
   adminOnly?: boolean;
 };
 
@@ -178,6 +180,14 @@ export const commandKindDefinitions: CommandKindDefinition[] = [
     input: "power_cancel",
     adminOnly: true,
   },
+  {
+    kind: "query_event_log",
+    label: "Query event log",
+    description:
+      "Read bounded, metadata-only Windows event log records from an allowlisted channel.",
+    input: "event_log_query",
+    adminOnly: true,
+  },
 ];
 
 export function commandKindDefinitionsForPermission(
@@ -232,6 +242,31 @@ export function commandDetailRequiresAdmin(kind: CommandKind): boolean {
   return commandKindDefinitions.find((item) => item.kind === kind)?.adminOnly === true;
 }
 
+// Bounded Windows event log access (issue #58). The channel allowlist mirrors
+// the server and is split into a standard tier and an elevated tier that a
+// query must explicitly acknowledge (tier_ack).
+export const EVENT_LOG_STANDARD_CHANNELS = ["System", "Application", "Setup"] as const;
+export const EVENT_LOG_ELEVATED_CHANNELS = [
+  "Security",
+  "Microsoft-Windows-Windows Defender/Operational",
+] as const;
+export const EVENT_LOG_CHANNELS: readonly string[] = [
+  ...EVENT_LOG_STANDARD_CHANNELS,
+  ...EVENT_LOG_ELEVATED_CHANNELS,
+];
+const EVENT_LOG_MIN_WINDOW_SECONDS = 60;
+const EVENT_LOG_MAX_WINDOW_SECONDS = 7 * 24 * 3600;
+const EVENT_LOG_MAX_EVENTS = 500;
+const EVENT_LOG_MAX_PROVIDERS = 16;
+const EVENT_LOG_MAX_EVENT_IDS = 32;
+const EVENT_LOG_PROVIDER = /^[A-Za-z0-9 ._/-]{1,255}$/;
+
+export function eventLogChannelTier(channel: string): "standard" | "elevated" | null {
+  if ((EVENT_LOG_STANDARD_CHANNELS as readonly string[]).includes(channel)) return "standard";
+  if ((EVENT_LOG_ELEVATED_CHANNELS as readonly string[]).includes(channel)) return "elevated";
+  return null;
+}
+
 function validateOperationPayload(
   kind: CommandKind,
   raw: unknown,
@@ -254,6 +289,51 @@ function validateOperationPayload(
     const reasonBytes = new TextEncoder().encode(reason).length;
     if (reasonBytes < 10 || reasonBytes > 512 || /[\u0000-\u001f\u007f]/.test(reason) || !Object.keys(payload).every((key) => ["confirm", "reason"].includes(key))) return null;
     return { confirm: true, reason };
+  }
+  if (kind === "query_event_log") {
+    const allowed = ["channel", "tier_ack", "time_window_seconds", "providers", "levels", "event_ids", "max_events", "cursor"];
+    if (Object.keys(payload).some((key) => !allowed.includes(key))) return null;
+    const channel = payload.channel;
+    if (typeof channel !== "string") return null;
+    const tier = eventLogChannelTier(channel);
+    if (tier === null) return null;
+    const tierAck = payload.tier_ack ?? false;
+    if (typeof tierAck !== "boolean") return null;
+    if (tier === "elevated" && tierAck !== true) return null;
+    if (tier === "standard" && tierAck) return null;
+    const window = payload.time_window_seconds;
+    if (typeof window !== "number" || !Number.isInteger(window) || window < EVENT_LOG_MIN_WINDOW_SECONDS || window > EVENT_LOG_MAX_WINDOW_SECONDS) return null;
+    const maxEvents = payload.max_events;
+    if (typeof maxEvents !== "number" || !Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > EVENT_LOG_MAX_EVENTS) return null;
+    const normalized: Record<string, unknown> = { channel, tier_ack: tierAck, time_window_seconds: window, max_events: maxEvents };
+    const providers = payload.providers;
+    if (providers !== undefined) {
+      if (!Array.isArray(providers) || providers.length < 1 || providers.length > EVENT_LOG_MAX_PROVIDERS) return null;
+      if (!providers.every((item) => typeof item === "string" && EVENT_LOG_PROVIDER.test(item))) return null;
+      normalized.providers = providers;
+    }
+    const levels = payload.levels;
+    if (levels !== undefined) {
+      if (!Array.isArray(levels) || levels.length < 1 || levels.length > 5) return null;
+      const seen = new Set<number>();
+      for (const lvl of levels) {
+        if (typeof lvl !== "number" || !Number.isInteger(lvl) || lvl < 1 || lvl > 5 || seen.has(lvl)) return null;
+        seen.add(lvl);
+      }
+      normalized.levels = levels;
+    }
+    const eventIds = payload.event_ids;
+    if (eventIds !== undefined) {
+      if (!Array.isArray(eventIds) || eventIds.length < 1 || eventIds.length > EVENT_LOG_MAX_EVENT_IDS) return null;
+      if (!eventIds.every((id) => typeof id === "number" && Number.isInteger(id) && id >= 0 && id <= 65535)) return null;
+      normalized.event_ids = eventIds;
+    }
+    const cursor = payload.cursor;
+    if (cursor !== undefined) {
+      if (typeof cursor !== "number" || !Number.isInteger(cursor) || cursor < 0) return null;
+      normalized.cursor = cursor;
+    }
+    return normalized;
   }
   const path = payload.path;
   if (kind === "file_upload") {
@@ -446,6 +526,69 @@ export function powerOperationResultFromUnknown(value: unknown): PowerOperationR
     maintenanceWindowEndsAt: typeof result.maintenance_window_ends_at === "string" ? result.maintenance_window_ends_at : null,
     userConsent: consent === "confirmed" || consent === "no_user_session" ? consent : null,
     reasonSHA256: result.reason_sha256,
+    message: typeof result.message === "string" ? result.message : null,
+  };
+}
+
+export type EventLogRecord = {
+  recordId: number;
+  timeCreated: string;
+  provider: string;
+  eventId: number;
+  level: number;
+  task: number;
+  keywords: string | null;
+  computer: string | null;
+  channel: string;
+};
+
+export type EventLogQueryResult = {
+  status: "ok" | "invalid" | "failed" | "unsupported";
+  channel: string;
+  records: EventLogRecord[];
+  count: number;
+  nextCursor: number | null;
+  hasMore: boolean;
+  message: string | null;
+};
+
+export function eventLogQueryResultFromUnknown(value: unknown): EventLogQueryResult | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const result = parsed as Record<string, unknown>;
+  if (!["ok", "invalid", "failed", "unsupported"].includes(String(result.status))) return null;
+  if (typeof result.channel !== "string") return null;
+  const rawRecords = Array.isArray(result.records) ? result.records : [];
+  const records: EventLogRecord[] = [];
+  for (const item of rawRecords) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    const r = item as Record<string, unknown>;
+    if (typeof r.record_id !== "number" || typeof r.event_id !== "number" || typeof r.level !== "number") return null;
+    records.push({
+      recordId: r.record_id,
+      timeCreated: typeof r.time_created === "string" ? r.time_created : "",
+      provider: typeof r.provider === "string" ? r.provider : "",
+      eventId: r.event_id,
+      level: r.level,
+      task: typeof r.task === "number" ? r.task : 0,
+      keywords: typeof r.keywords === "string" ? r.keywords : null,
+      computer: typeof r.computer === "string" ? r.computer : null,
+      channel: typeof r.channel === "string" ? r.channel : "",
+    });
+  }
+  return {
+    status: result.status as EventLogQueryResult["status"],
+    channel: result.channel,
+    records,
+    count: typeof result.count === "number" ? result.count : records.length,
+    nextCursor: typeof result.next_cursor === "number" ? result.next_cursor : null,
+    hasMore: result.has_more === true,
     message: typeof result.message === "string" ? result.message : null,
   };
 }

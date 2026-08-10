@@ -126,6 +126,7 @@ from app.schemas.schemas import (
     EndpointListItemOut,
     EndpointListOut,
     EndpointTelemetrySampleOut,
+    event_log_channel_tier,
     NavigationClientListOut,
     NavigationClientOut,
     NavigationSiteOut,
@@ -191,6 +192,7 @@ _COMMAND_CAPABILITIES: dict[CommandKind, tuple[str, ...]] = {
     CommandKind.remediation_rollback: (
         "file-transfer-v1", "registry-operations-v1"
     ),
+    CommandKind.query_event_log: ("event-log-query-v1",),
 }
 
 _POWER_ACTION_KINDS = frozenset({CommandKind.reboot, CommandKind.shutdown})
@@ -1379,9 +1381,13 @@ async def dispatch_command(
                             CommandKind.cancel_power_action,
                         }
                         else (
-                            "privileged_remediation_not_authorized"
-                            if body.kind in _COMMAND_CAPABILITIES
-                            else "command_role_not_authorized"
+                            "event_log_query_not_authorized"
+                            if body.kind == CommandKind.query_event_log
+                            else (
+                                "privileged_remediation_not_authorized"
+                                if body.kind in _COMMAND_CAPABILITIES
+                                else "command_role_not_authorized"
+                            )
                         )
                     )
                 )
@@ -1504,6 +1510,27 @@ async def dispatch_command(
         agent_id=agent.id,
         detail=decision_detail,
     )
+    if body.kind == CommandKind.query_event_log:
+        # Record what was queried (channel/tier/filters/bounds) so an auditor can
+        # reconstruct the minimum-necessary scope of an event log read. Never the
+        # results: v1 is metadata-only and the metadata still rides the audited,
+        # admin-only command-detail view like every other typed result.
+        await audit.record(
+            db,
+            action="event_log_query.dispatched",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail={
+                "channel": body.payload["channel"],
+                "tier": event_log_channel_tier(body.payload["channel"]),
+                "time_window_seconds": body.payload["time_window_seconds"],
+                "max_events": body.payload["max_events"],
+                "provider_filter": "providers" in body.payload,
+                "level_filter": "levels" in body.payload,
+                "event_id_filter": "event_ids" in body.payload,
+                "paginated": "cursor" in body.payload,
+            },
+        )
     key_id = active_signing_key().key_id if envelope_version == COMMAND_ENVELOPE_V3 else None
     expires_at = now + timedelta(seconds=body.ttl_seconds)
     if power_window_end is not None:

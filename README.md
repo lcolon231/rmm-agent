@@ -145,6 +145,11 @@ The code in this repository currently provides:
   user-session policy, offline expiry, Windows cancellation, capability-gated
   mixed-version rollout, and durable intent/result evidence. See
   `docs/POWER-OPERATIONS.md`.
+- Administrator-only bounded Windows event log access: capability-gated,
+  metadata-only queries (never message text or EventData) against an allowlisted
+  channel with a standard and an elevated tier, mandatory time-window and
+  event-count bounds, optional provider/level/event-ID filters, cursor
+  pagination, and audited query scope. See `docs/EVENT-LOG-ACCESS.md`.
 - An immutable versioned script library with canonical SHA-256 content
   evidence, bounded language/platform/tag metadata, append-only final reviews,
   terminal idempotent deprecation, role-gated API/dashboard workflows, and no

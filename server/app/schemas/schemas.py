@@ -451,6 +451,38 @@ _REGISTRY_TYPES = {
     "string", "expand_string", "dword", "qword", "multi_string", "binary"
 }
 
+# Bounded Windows event log access (issue #58). Metadata-only v1: the agent
+# returns structured <System> fields only, never message text or EventData, so
+# no PHI-bearing free text crosses the wire or is stored. Channels are a fixed
+# server-side allowlist split into a standard tier and an elevated tier that a
+# query must explicitly acknowledge (tier_ack) and which is separately audited.
+_EVENT_LOG_STANDARD_CHANNELS = {"System", "Application", "Setup"}
+_EVENT_LOG_ELEVATED_CHANNELS = {
+    "Security",
+    "Microsoft-Windows-Windows Defender/Operational",
+}
+_EVENT_LOG_MIN_WINDOW_SECONDS = 60
+_EVENT_LOG_MAX_WINDOW_SECONDS = 7 * 24 * 3600
+_EVENT_LOG_MAX_EVENTS = 500
+_EVENT_LOG_MAX_PROVIDERS = 16
+_EVENT_LOG_MAX_EVENT_IDS = 32
+_EVENT_LOG_MAX_CURSOR = 2**63 - 1
+_EVENT_LOG_PROVIDER_RE = re.compile(r"^[A-Za-z0-9 ._/\-]{1,255}$")
+
+
+def event_log_channel_tier(channel: object) -> str | None:
+    """Return the allowlist tier ("standard"/"elevated") for a channel, or None.
+
+    None means the channel is not on the allowlist and the query must be
+    rejected. Shared with the dispatch handler so the audit event can record the
+    tier alongside the channel.
+    """
+    if channel in _EVENT_LOG_STANDARD_CHANNELS:
+        return "standard"
+    if channel in _EVENT_LOG_ELEVATED_CHANNELS:
+        return "elevated"
+    return None
+
 
 def _validate_managed_windows_path(value: object) -> str:
     if not isinstance(value, str):
@@ -499,6 +531,80 @@ def _validate_registry_location(payload: dict) -> tuple[str, str, str, int]:
     if view not in {32, 64}:
         raise ValueError("registry view must be 32 or 64")
     return hive, key, value_name, view
+
+
+def _validate_event_log_query(payload: dict) -> dict:
+    allowed = {
+        "channel", "tier_ack", "time_window_seconds",
+        "providers", "levels", "event_ids", "max_events", "cursor",
+    }
+    if set(payload) - allowed:
+        raise ValueError("event log query payload contains unsupported fields")
+    channel = payload.get("channel")
+    tier = event_log_channel_tier(channel)
+    if tier is None:
+        raise ValueError("event log channel is not on the allowlist")
+    tier_ack = payload.get("tier_ack", False)
+    if not isinstance(tier_ack, bool):
+        raise ValueError("tier_ack must be a boolean")
+    if tier == "elevated" and tier_ack is not True:
+        raise ValueError("elevated event log channels require tier_ack=true")
+    if tier == "standard" and tier_ack:
+        raise ValueError("tier_ack is only valid for elevated channels")
+    window = payload.get("time_window_seconds")
+    if (
+        not isinstance(window, int) or isinstance(window, bool)
+        or not _EVENT_LOG_MIN_WINDOW_SECONDS <= window <= _EVENT_LOG_MAX_WINDOW_SECONDS
+    ):
+        raise ValueError("time_window_seconds is out of range")
+    max_events = payload.get("max_events")
+    if (
+        not isinstance(max_events, int) or isinstance(max_events, bool)
+        or not 1 <= max_events <= _EVENT_LOG_MAX_EVENTS
+    ):
+        raise ValueError("max_events is out of range")
+    normalized: dict = {
+        "channel": channel,
+        "tier_ack": tier_ack,
+        "time_window_seconds": window,
+        "max_events": max_events,
+    }
+    providers = payload.get("providers")
+    if providers is not None:
+        if not isinstance(providers, list) or not 1 <= len(providers) <= _EVENT_LOG_MAX_PROVIDERS:
+            raise ValueError("providers must be a bounded non-empty list")
+        cleaned: list[str] = []
+        for item in providers:
+            if not isinstance(item, str) or not _EVENT_LOG_PROVIDER_RE.fullmatch(item):
+                raise ValueError("provider name is invalid")
+            cleaned.append(item)
+        normalized["providers"] = cleaned
+    levels = payload.get("levels")
+    if levels is not None:
+        if not isinstance(levels, list) or not 1 <= len(levels) <= 5:
+            raise ValueError("levels must be a bounded non-empty list")
+        seen: list[int] = []
+        for item in levels:
+            if not isinstance(item, int) or isinstance(item, bool) or not 1 <= item <= 5 or item in seen:
+                raise ValueError("levels must be unique integers between 1 and 5")
+            seen.append(item)
+        normalized["levels"] = seen
+    event_ids = payload.get("event_ids")
+    if event_ids is not None:
+        if not isinstance(event_ids, list) or not 1 <= len(event_ids) <= _EVENT_LOG_MAX_EVENT_IDS:
+            raise ValueError("event_ids must be a bounded non-empty list")
+        cleaned_ids: list[int] = []
+        for item in event_ids:
+            if not isinstance(item, int) or isinstance(item, bool) or not 0 <= item <= 65535:
+                raise ValueError("event_id is out of range")
+            cleaned_ids.append(item)
+        normalized["event_ids"] = cleaned_ids
+    cursor = payload.get("cursor")
+    if cursor is not None:
+        if not isinstance(cursor, int) or isinstance(cursor, bool) or not 0 <= cursor <= _EVENT_LOG_MAX_CURSOR:
+            raise ValueError("cursor must be a non-negative integer watermark")
+        normalized["cursor"] = cursor
+    return normalized
 
 
 class CommandCreate(BaseModel):
@@ -656,6 +762,10 @@ class CommandCreate(BaseModel):
         if self.kind == CommandKind.remediation_rollback:
             if set(self.payload) != {"backup_id"} or not isinstance(self.payload["backup_id"], str) or not _BACKUP_ID_RE.fullmatch(self.payload["backup_id"]):
                 raise ValueError("remediation_rollback requires a valid backup_id")
+            return self
+
+        if self.kind == CommandKind.query_event_log:
+            self.payload = _validate_event_log_query(self.payload)
             return self
 
         if self.kind != CommandKind.install_updates:

@@ -10,8 +10,10 @@ import { useRouter } from "next/navigation";
 import {
   commandKindDefinitions,
   commandKindDefinitionsForPermission,
+  eventLogChannelTier,
   ttlOptions,
   validateDispatchInput,
+  EVENT_LOG_CHANNELS,
   type CommandKind,
   type DispatchInput,
 } from "@/lib/command-console-core";
@@ -59,6 +61,14 @@ export function CommandDispatchForm({
   const [powerDelaySeconds, setPowerDelaySeconds] = useState(60);
   const [userConsent, setUserConsent] = useState<"confirmed" | "no_user_session">("confirmed");
   const [powerConfirmation, setPowerConfirmation] = useState("");
+  const [eventChannel, setEventChannel] = useState<string>("System");
+  const [eventTierAck, setEventTierAck] = useState(false);
+  const [eventWindowSeconds, setEventWindowSeconds] = useState(3600);
+  const [eventMaxEvents, setEventMaxEvents] = useState(100);
+  const [eventProviders, setEventProviders] = useState("");
+  const [eventLevels, setEventLevels] = useState("");
+  const [eventIds, setEventIds] = useState("");
+  const [eventCursor, setEventCursor] = useState("");
   const [ttlSeconds, setTtlSeconds] = useState(300);
   const [step, setStep] = useState<Step>({ name: "compose" });
   const [error, setError] = useState("");
@@ -88,6 +98,24 @@ export function CommandDispatchForm({
       return { path: targetPath.trim(), ...(expectedDigest.trim() ? { expected_sha256: expectedDigest.trim().toLowerCase() } : {}) };
     }
     if (kind === "remediation_rollback") return { backup_id: backupId.trim().toLowerCase() };
+    if (kind === "query_event_log") {
+      const toIntList = (raw: string) =>
+        raw.split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean).map(Number);
+      const providers = eventProviders.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+      const levels = toIntList(eventLevels);
+      const ids = toIntList(eventIds);
+      const cursorRaw = eventCursor.trim();
+      return {
+        channel: eventChannel,
+        ...(eventLogChannelTier(eventChannel) === "elevated" ? { tier_ack: eventTierAck } : {}),
+        time_window_seconds: eventWindowSeconds,
+        max_events: eventMaxEvents,
+        ...(providers.length ? { providers } : {}),
+        ...(levels.length ? { levels } : {}),
+        ...(ids.length ? { event_ids: ids } : {}),
+        ...(cursorRaw ? { cursor: Number(cursorRaw) } : {}),
+      };
+    }
     if (["registry_read", "registry_write", "registry_delete"].includes(kind)) {
       const base: Record<string, unknown> = {
         hive: registryHive,
@@ -148,6 +176,8 @@ export function CommandDispatchForm({
                 ? `Enter a reason, delay and consent policy, then type ${hostname} exactly.`
                 : definition.input === "power_cancel"
                   ? `Enter a cancellation reason and type ${hostname} exactly.`
+                : definition.input === "event_log_query"
+                  ? "Choose an allowlisted channel, a time window and event cap; acknowledge the elevated tier for Security or Defender. Provider, level (1-5), and event-ID filters are optional."
               : "Enter a valid managed path, registry location/value, digest, or backup ID for this operation.",
       );
       return;
@@ -277,6 +307,14 @@ export function CommandDispatchForm({
             setPowerDelaySeconds(60);
             setUserConsent("confirmed");
             setPowerConfirmation("");
+            setEventChannel("System");
+            setEventTierAck(false);
+            setEventWindowSeconds(3600);
+            setEventMaxEvents(100);
+            setEventProviders("");
+            setEventLevels("");
+            setEventIds("");
+            setEventCursor("");
           }}
           value={kind}
         >
@@ -308,6 +346,8 @@ export function CommandDispatchForm({
                   ? "Only HKLM/HKCU Software\\NodeLink\\Managed in the selected registry view."
                   : definition.input.startsWith("power_")
                     ? "Administrator only. Restart and shutdown also require an active maintenance window and an explicit user-session policy."
+                  : definition.input === "event_log_query"
+                    ? "Administrator only. Bounded to allowlisted channels; Security and Defender need elevated-tier acknowledgment. Results are metadata-only — no message text ever leaves the endpoint."
                   : "The backup must exist in this endpoint's local NodeLink rollback journal."}
             </span>
           </div>
@@ -459,6 +499,54 @@ export function CommandDispatchForm({
             spellCheck={false}
             value={powerConfirmation}
           />
+        </>
+      ) : definition.input === "event_log_query" ? (
+        <>
+          <div className="dispatch-fields">
+            <label htmlFor="event-channel">Channel</label>
+            <select
+              id="event-channel"
+              onChange={(event) => {
+                setEventChannel(event.target.value);
+                setEventTierAck(false);
+              }}
+              value={eventChannel}
+            >
+              {EVENT_LOG_CHANNELS.map((channel) => (
+                <option key={channel} value={channel}>{channel}</option>
+              ))}
+            </select>
+            <label htmlFor="event-window">Time window</label>
+            <select id="event-window" onChange={(event) => setEventWindowSeconds(Number(event.target.value))} value={eventWindowSeconds}>
+              <option value={3600}>Last hour</option>
+              <option value={21600}>Last 6 hours</option>
+              <option value={86400}>Last 24 hours</option>
+              <option value={604800}>Last 7 days</option>
+            </select>
+            <label htmlFor="event-max">Maximum events</label>
+            <select id="event-max" onChange={(event) => setEventMaxEvents(Number(event.target.value))} value={eventMaxEvents}>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+              <option value={500}>500</option>
+            </select>
+          </div>
+          {eventLogChannelTier(eventChannel) === "elevated" ? (
+            <label className="dispatch-checkbox" htmlFor="event-tier-ack">
+              <input checked={eventTierAck} id="event-tier-ack" onChange={(event) => setEventTierAck(event.target.checked)} type="checkbox" />
+              I acknowledge this is an elevated-tier channel (audited separately).
+            </label>
+          ) : null}
+          <label htmlFor="event-providers">Providers (optional, one per line)</label>
+          <textarea id="event-providers" onChange={(event) => setEventProviders(event.target.value)} placeholder={"Microsoft-Windows-Security-Auditing"} rows={2} spellCheck={false} value={eventProviders} />
+          <div className="dispatch-fields">
+            <label htmlFor="event-levels">Levels (optional, 1-5)</label>
+            <input id="event-levels" onChange={(event) => setEventLevels(event.target.value)} placeholder="2, 3" value={eventLevels} />
+            <label htmlFor="event-ids">Event IDs (optional)</label>
+            <input id="event-ids" onChange={(event) => setEventIds(event.target.value)} placeholder="4624, 4625" value={eventIds} />
+          </div>
+          <label htmlFor="event-cursor">Continue from cursor (optional)</label>
+          <input id="event-cursor" inputMode="numeric" onChange={(event) => setEventCursor(event.target.value)} placeholder="next_cursor from a prior page" value={eventCursor} />
         </>
       ) : null}
       {error ? <p className="dispatch-error" role="alert">{error}</p> : null}

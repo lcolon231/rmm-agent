@@ -19,6 +19,8 @@ function dispatchErrorMessage(error: NodelinkApiError): { message: string; statu
             ? "Controlled file and registry remediation requires an administrator session."
           : error.code === "power_operation_not_authorized"
             ? "Restart, shutdown, and power-action cancellation require an administrator session."
+          : error.code === "event_log_query_not_authorized"
+            ? "Windows event log queries require an administrator session."
           : "Your operator session is not allowed to dispatch commands.",
       status: 403,
     };
