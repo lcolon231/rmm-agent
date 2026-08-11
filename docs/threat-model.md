@@ -247,6 +247,18 @@ missing) and that a stale scan can misgate a selection — operators re-scan bef
 installing, and every decision is audited via `patch_install.gated`. See
 [`PATCH-APPROVAL.md`](PATCH-APPROVAL.md).
 
+Issue #53 adds a post-install reboot boundary. A reboot is only injected as
+signed evidence when the approval gate allows the install and the agent
+advertises `patch-reboot-v1`; the default policy is `never`, and consent wins —
+even a `forced` reboot defers while a signed-in user is present unless the policy
+explicitly clears `requires_no_user`. The reboot reuses the power-operation
+mechanism, so it inherits the signed-window binding and the durable
+result-before-restart guarantee (a reboot mid-install is reported as an unknown
+outcome, never re-run). Scheduled installs are gated identically, closing the
+prior gap where the scheduler dispatched commands without the approval/window
+gate. Residual risk: reboot consent relies on the endpoint's self-reported
+user-session evidence, the same trust assumption as power operations.
+
 Typed script parameters reduce injection and disclosure risk but do not make an
 approved script intrinsically safe. Definitions are immutable with the reviewed
 source. Values are validated without coercion, then the whole resolved document

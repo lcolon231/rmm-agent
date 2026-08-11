@@ -156,8 +156,13 @@ KB, plus a default action and an optional maintenance-window requirement. The
 gate runs before signing: `install_all` is narrowed to the approved subset and an
 explicit selection is fail-closed. Policies are opt-in — with none, installs are
 unchanged. Maintenance windows additionally gained optional timezone/DST-aware
-weekly recurrence, which power operations reuse. See
-[`PATCH-APPROVAL.md`](PATCH-APPROVAL.md).
+weekly recurrence, which power operations reuse. Issue #53 extends a policy with a
+post-install reboot policy (`never`/`if_required`/`forced`, consent-aware) and a
+retry bound; when the gate allows an install for a `patch-reboot-v1` agent it
+injects signed reboot/retry evidence, and the agent tracks per-update results and
+reboots after installing (deferring when a user is present). The same gate is
+applied to scheduled `install_updates` tasks, so automation only dispatches
+approved updates inside policy windows. See [`PATCH-APPROVAL.md`](PATCH-APPROVAL.md).
 
 
 `powershell` and `shell` are arbitrary-script escape hatches and require a

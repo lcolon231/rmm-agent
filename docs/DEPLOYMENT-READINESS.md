@@ -364,6 +364,16 @@ and existing installs are unaffected until a patch policy is authored. Crossing
 before `0033` requires an exact-revision restore or forward fix. See
 [`PATCH-APPROVAL.md`](PATCH-APPROVAL.md).
 
+Revision `0034` adds post-install reboot and retry columns to
+`patch_approval_policy_revisions` (issue #53), all defaulted to the fail-safe
+`never` reboot. Deploy migration/server, then canary agents advertising
+`patch-reboot-v1`, then dashboard. Reboot evidence is capability-gated and only
+injected when a policy opts in, so older agents and existing installs are
+unaffected. One intended tightening ships with #53: scheduled `install_updates`
+tasks now pass through the approval + maintenance-window gate — review existing
+patch schedules, since a scheduled install is now narrowed to the approved subset
+and skipped outside a required window. See [`PATCH-APPROVAL.md`](PATCH-APPROVAL.md).
+
 ## Rollback procedure
 
 Every release needs an exact-tag source manifest under `release-notes/`; the

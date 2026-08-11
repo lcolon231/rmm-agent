@@ -150,12 +150,15 @@ The code in this repository currently provides:
   channel with a standard and an elevated tier, mandatory time-window and
   event-count bounds, optional provider/level/event-ID filters, cursor
   pagination, and audited query scope. See `docs/EVENT-LOG-ACCESS.md`.
-- Server-side patch approval policies: scoped (global/client/site/agent,
-  most-specific-wins), versioned approve/deny/defer rules on classification,
-  severity, or KB with a default action; the gate narrows `install_all` to the
-  approved subset and fails closed on denied selections, with optional
-  timezone/DST-aware recurring maintenance windows and audited install decisions.
-  Opt-in — installs are unchanged until a policy exists. See
+- Server-side patch approval, installation, and reboot policies: scoped
+  (global/client/site/agent, most-specific-wins), versioned approve/deny/defer
+  rules on classification, severity, or KB with a default action; the gate
+  narrows `install_all` to the approved subset and fails closed on denied
+  selections, with optional timezone/DST-aware recurring maintenance windows. A
+  policy can also carry a capability-gated post-install reboot policy
+  (never/if_required/forced, consent-aware) and a retry bound; the agent tracks
+  per-update results and reboots after installing, deferring while a user is
+  present. Scheduled installs pass through the same gate. Opt-in and audited. See
   `docs/PATCH-APPROVAL.md`.
 - An immutable versioned script library with canonical SHA-256 content
   evidence, bounded language/platform/tag metadata, append-only final reviews,

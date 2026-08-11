@@ -11,7 +11,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import audit, metrics
+from app.core import audit, metrics, patch_policies as patch_core
 from app.core.command_envelope import (
     COMMAND_ENVELOPE_V2,
     COMMAND_ENVELOPE_V3,
@@ -235,6 +235,34 @@ async def dispatch_scheduled_tasks_once(
                 if active_cmd_res.first() is not None:
                     continue
 
+            # Patch approval + maintenance-window gate (issue #52/#53): a scheduled
+            # install_updates must honor the effective approval policy and only fire
+            # inside an active window, exactly like an interactive dispatch. The
+            # payload is narrowed to the approved subset; a blocked outcome skips
+            # this agent this tick.
+            command_payload = task.payload
+            if task.kind == CommandKind.install_updates:
+                decision = await patch_core.evaluate_patch_install(db, agent, task.payload, now)
+                if decision is not None:
+                    await audit.record(
+                        db,
+                        action="patch_install.gated",
+                        actor="system",
+                        agent_id=agent.id,
+                        detail=decision["gated_detail"],
+                    )
+                    if decision["reboot_detail"] is not None:
+                        await audit.record(
+                            db,
+                            action="patch_install.reboot_authorized",
+                            actor="system",
+                            agent_id=agent.id,
+                            detail=decision["reboot_detail"],
+                        )
+                    if decision["outcome"] != "allowed":
+                        continue
+                    command_payload = decision["payload"]
+
             # Dispatch command
             envelope_version = (
                 select_command_envelope_version(agent.command_envelope_versions or [])
@@ -247,7 +275,7 @@ async def dispatch_scheduled_tasks_once(
                 id=str(uuid.uuid4()),
                 agent_id=agent.id,
                 kind=task.kind,
-                payload=task.payload,
+                payload=command_payload,
                 envelope_version=envelope_version,
                 schema_version=COMMAND_SCHEMA_VERSION,
                 issued_at=now,

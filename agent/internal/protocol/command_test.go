@@ -42,6 +42,19 @@ func TestSupportedCapabilitiesAdvertisesEventLogQuery(t *testing.T) {
 	t.Fatalf("SupportedCapabilities() = %v, want it to include %q", caps, EventLogQueryCapabilityV1)
 }
 
+func TestSupportedCapabilitiesAdvertisesPatchReboot(t *testing.T) {
+	caps := SupportedCapabilities()
+	for _, capability := range caps {
+		if capability == PatchRebootCapabilityV1 {
+			if PatchRebootCapabilityV1 != "patch-reboot-v1" {
+				t.Fatalf("capability name drift: %q", PatchRebootCapabilityV1)
+			}
+			return
+		}
+	}
+	t.Fatalf("SupportedCapabilities() = %v, want it to include %q", caps, PatchRebootCapabilityV1)
+}
+
 func TestSupportedCapabilitiesReturnsFreshSlice(t *testing.T) {
 	first := SupportedCapabilities()
 	if len(first) == 0 {

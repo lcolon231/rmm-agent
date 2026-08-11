@@ -290,6 +290,15 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "window_required",
         "window_present",
     ),
+    # Signed reboot evidence injected into an approved install (issue #53).
+    "patch_install.reboot_authorized": _schema(
+        "policy_id",
+        "reboot_policy",
+        "delay_seconds",
+        "requires_no_user",
+        "window_present",
+        "user_present",
+    ),
     "monitoring_alert.acknowledged": _schema(
         "alert_id", "generation", "request_id", "from_state", "to_state",
         "comment", "comment_redacted", digest_fields=("comment",),

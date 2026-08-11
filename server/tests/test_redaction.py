@@ -434,6 +434,14 @@ PRODUCER_DETAILS = {
         "window_required": True,
         "window_present": True,
     },
+    "patch_install.reboot_authorized": {
+        "policy_id": ID1,
+        "reboot_policy": "if_required",
+        "delay_seconds": 300,
+        "requires_no_user": True,
+        "window_present": True,
+        "user_present": False,
+    },
     "monitoring_alert.acknowledged": {
         "alert_id": ID1,
         "generation": 1,

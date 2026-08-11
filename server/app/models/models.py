@@ -1079,6 +1079,17 @@ class PatchApprovalPolicyRevision(Base):
     require_maintenance_window: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    # Post-install reboot policy (issue #53). ``never`` (default, fail-safe) leaves
+    # a required reboot to the operator; ``if_required``/``forced`` inject signed
+    # reboot evidence into the install payload so the endpoint reboots after
+    # installing, deferring when a user is present unless ``reboot_requires_no_user``
+    # is false. ``max_install_attempts`` bounds the agent's per-update retry.
+    reboot_policy: Mapped[str] = mapped_column(String(16), nullable=False, default="never")
+    reboot_delay_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
+    reboot_requires_no_user: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    max_install_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     change_note: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str | None] = mapped_column(String(320))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

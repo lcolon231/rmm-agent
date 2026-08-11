@@ -3,8 +3,10 @@
 package patching
 
 import (
+	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -67,11 +69,124 @@ func NormalizeInstallTargets(targets InstallTargets) (InstallTargets, error) {
 	return normalized, nil
 }
 
+// UpdateOutcome is the per-update result of an install attempt (issue #53).
+type UpdateOutcome struct {
+	Identifier string `json:"identifier"`
+	ResultCode int    `json:"result_code"`
+	HResult    string `json:"hresult,omitempty"`
+	Attempts   int    `json:"attempts"`
+}
+
+// RebootOutcome records the post-install reboot decision (issue #53).
+type RebootOutcome struct {
+	Policy       string `json:"policy"`
+	Decision     string `json:"decision"`
+	DelaySeconds int    `json:"delay_seconds,omitempty"`
+}
+
 // InstallResult captures the outcome of an on-demand update installation request.
 type InstallResult struct {
-	Status         string   `json:"status"`
-	InstalledKBs   []string `json:"installed_kbs"`
-	FailedKBs      []string `json:"failed_kbs"`
-	RebootRequired bool     `json:"reboot_required"`
-	Message        string   `json:"message"`
+	Status         string          `json:"status"`
+	InstalledKBs   []string        `json:"installed_kbs"`
+	FailedKBs      []string        `json:"failed_kbs"`
+	Results        []UpdateOutcome `json:"results,omitempty"`
+	RebootRequired bool            `json:"reboot_required"`
+	Reboot         *RebootOutcome  `json:"reboot,omitempty"`
+	Message        string          `json:"message"`
+}
+
+// installOnce is a seam over the platform install so retry orchestration and
+// tests do not shell out to the real Windows Update service.
+var installOnce = Install
+
+// InstallWithRetry installs the targets and retries KB-identified failures up to
+// maxAttempts (issue #53). WUA installs are idempotent per update, so a retry
+// never double-installs a succeeded update; only failures are re-attempted, by
+// KB. Per-update outcomes carry the number of attempts made.
+func InstallWithRetry(ctx context.Context, targets InstallTargets, maxAttempts int) (InstallResult, error) {
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	first, err := installOnce(ctx, targets)
+	if err != nil {
+		return first, err
+	}
+	if len(first.Results) == 0 {
+		return first, nil // platform reported no per-update detail (e.g. unsupported)
+	}
+
+	outcomes := map[string]UpdateOutcome{}
+	order := []string{}
+	for _, outcome := range first.Results {
+		outcome.Attempts = 1
+		if _, seen := outcomes[outcome.Identifier]; !seen {
+			order = append(order, outcome.Identifier)
+		}
+		outcomes[outcome.Identifier] = outcome
+	}
+	rebootRequired := first.RebootRequired
+	message := first.Message
+
+	for attempt := 2; attempt <= maxAttempts; attempt++ {
+		retryable := retryableKBs(outcomes)
+		if len(retryable) == 0 {
+			break
+		}
+		retry, retryErr := installOnce(ctx, InstallTargets{KBIDs: retryable})
+		if retryErr != nil {
+			break
+		}
+		rebootRequired = rebootRequired || retry.RebootRequired
+		if retry.Message != "" {
+			message = retry.Message
+		}
+		for _, outcome := range retry.Results {
+			prev, ok := outcomes[outcome.Identifier]
+			if ok {
+				outcome.Attempts = prev.Attempts + 1
+			} else {
+				outcome.Attempts = attempt
+				order = append(order, outcome.Identifier)
+			}
+			outcomes[outcome.Identifier] = outcome
+		}
+	}
+	return assembleInstallResult(outcomes, order, rebootRequired, message), nil
+}
+
+// retryableKBs returns the KB-identified updates that have not yet succeeded.
+// Update-ID-only failures are not retried (they cannot be targeted by KB).
+func retryableKBs(outcomes map[string]UpdateOutcome) []string {
+	var kbs []string
+	for identifier, outcome := range outcomes {
+		if outcome.ResultCode != 2 && kbTargetPattern.MatchString(identifier) {
+			kbs = append(kbs, identifier)
+		}
+	}
+	sort.Strings(kbs)
+	return kbs
+}
+
+func assembleInstallResult(
+	outcomes map[string]UpdateOutcome, order []string, rebootRequired bool, message string,
+) InstallResult {
+	res := InstallResult{RebootRequired: rebootRequired, Message: message}
+	for _, identifier := range order {
+		outcome := outcomes[identifier]
+		res.Results = append(res.Results, outcome)
+		if outcome.ResultCode == 2 {
+			res.InstalledKBs = append(res.InstalledKBs, identifier)
+		} else {
+			res.FailedKBs = append(res.FailedKBs, identifier)
+		}
+	}
+	switch {
+	case len(res.FailedKBs) == 0:
+		res.Status = "success"
+	case len(res.InstalledKBs) == 0:
+		res.Status = "failed"
+	default:
+		res.Status = "partial"
+	}
+	return res
 }
