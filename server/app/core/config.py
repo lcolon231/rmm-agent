@@ -213,6 +213,14 @@ class Settings(BaseSettings):
     patch_install_default_max_attempts: int = 2
     patch_reboot_default_delay_seconds: int = 300
 
+    # --- Patch compliance reporting (issue #54) ---
+    # A scan older than this is reported "stale". The scope size is capped so a
+    # single report cannot iterate an unbounded fleet; history is bounded to the
+    # retained snapshots.
+    patch_compliance_stale_after_hours: int = 24
+    patch_compliance_max_endpoints: int = 5000
+    patch_compliance_history_limit: int = 50
+
     # --- Alert email delivery (issue #45) ---
     # "disabled" is the safe default. "resend" uses the HTTPS Email API;
     # credentials remain environment-only and are never persisted or returned.

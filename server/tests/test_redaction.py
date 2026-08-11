@@ -442,6 +442,20 @@ PRODUCER_DETAILS = {
         "window_present": True,
         "user_present": False,
     },
+    "patch_compliance.viewed": {
+        "client_id": None,
+        "site_id": None,
+        "state": None,
+        "view": "summary",
+        "result_count": 3,
+    },
+    "patch_compliance.exported": {
+        "client_id": None,
+        "site_id": ID1,
+        "state": "non_compliant",
+        "format": "csv",
+        "row_count": 5,
+    },
     "monitoring_alert.acknowledged": {
         "alert_id": ID1,
         "generation": 1,

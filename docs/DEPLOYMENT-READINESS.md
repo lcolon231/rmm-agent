@@ -374,6 +374,9 @@ tasks now pass through the approval + maintenance-window gate — review existin
 patch schedules, since a scheduled install is now narrowed to the approved subset
 and skipped outside a required window. See [`PATCH-APPROVAL.md`](PATCH-APPROVAL.md).
 
+Patch compliance reporting (issue #54) is read-only and requires no schema or
+agent change; deploy the reporting API before the dashboard page.
+
 ## Rollback procedure
 
 Every release needs an exact-tag source manifest under `release-notes/`; the

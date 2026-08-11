@@ -160,6 +160,10 @@ The code in this repository currently provides:
   per-update results and reboots after installing, deferring while a user is
   present. Scheduled installs pass through the same gate. Opt-in and audited. See
   `docs/PATCH-APPROVAL.md`.
+- Read-only patch compliance reporting by client, site, and endpoint, with
+  compliant/non-compliant/stale/unknown/exempt states, current-policy history,
+  bounded CSV/JSON exports, and audit evidence. No migration or agent change.
+  See `docs/PATCH-COMPLIANCE.md`.
 - An immutable versioned script library with canonical SHA-256 content
   evidence, bounded language/platform/tag metadata, append-only final reviews,
   terminal idempotent deprecation, role-gated API/dashboard workflows, and no

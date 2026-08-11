@@ -11,9 +11,12 @@ Authorization model:
 """
 from __future__ import annotations
 
+import csv
+import dataclasses
 import hashlib
 import hmac
 import io
+import json
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -35,6 +38,7 @@ from app.core import (
     inventory_diff,
     metrics,
     monitoring as monitoring_core,
+    patch_compliance as compliance_core,
     patch_policies as patch_core,
     retention,
     webhook_notifications,
@@ -68,6 +72,15 @@ from app.schemas.patch_policies import (
     PatchApprovalPolicyRevisionOut,
     PatchApprovalPolicyUpdate,
     PatchUpdateDecisionOut,
+)
+from app.schemas.patch_compliance import (
+    ComplianceEndpointDetailOut,
+    ComplianceEndpointOut,
+    ComplianceHistoryOut,
+    ComplianceHistoryPointOut,
+    ComplianceListOut,
+    ComplianceSummaryOut,
+    ComplianceUpdateDecisionOut,
 )
 from app.core.script_authorization import (
     authorize_command,
@@ -2520,6 +2533,325 @@ async def get_agent_effective_patch_policy(
         default_action=effective.revision.default_action,
         require_maintenance_window=effective.revision.require_maintenance_window,
         decisions=decisions,
+    )
+
+
+async def _compliance_agents(
+    db: AsyncSession,
+    client_id: str | None,
+    site_id: str | None,
+) -> tuple[list[Agent], bool]:
+    filters = [Agent.trust_state != AgentTrustState.revoked]
+    if client_id:
+        filters.append(Client.id == client_id)
+    if site_id:
+        filters.append(Site.id == site_id)
+    cap = settings.patch_compliance_max_endpoints
+    rows = (
+        await db.execute(
+            select(Agent)
+            .join(Site, Agent.site_id == Site.id)
+            .join(Client, Site.client_id == Client.id)
+            .where(*filters)
+            .order_by(Agent.id)
+            .limit(cap + 1)
+        )
+    ).scalars().all()
+    return list(rows[:cap]), len(rows) > cap
+
+
+async def _compliance_rows(
+    db: AsyncSession,
+    agents: list[Agent],
+    now: datetime,
+) -> list[compliance_core.EndpointCompliance]:
+    stale_after = timedelta(hours=settings.patch_compliance_stale_after_hours)
+    return [
+        await compliance_core.endpoint_compliance(
+            db,
+            agent,
+            now,
+            stale_after=stale_after,
+        )
+        for agent in agents
+    ]
+
+
+def _validate_compliance_state(value: str | None) -> None:
+    if value is not None and value not in compliance_core.COMPLIANCE_STATES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_patch_compliance_state"},
+        )
+
+
+@router.get("/patch-compliance/summary", response_model=ComplianceSummaryOut)
+async def get_patch_compliance_summary(
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    client_id: str | None = Query(default=None, max_length=36),
+    site_id: str | None = Query(default=None, max_length=36),
+    db: AsyncSession = Depends(get_db),
+):
+    agents, truncated = await _compliance_agents(db, client_id, site_id)
+    rows = await _compliance_rows(db, agents, _now())
+    summary = compliance_core.summarize(rows, truncated=truncated)
+    await audit.record(
+        db,
+        action="patch_compliance.viewed",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        organization_id=client_id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "client_id": client_id,
+            "site_id": site_id,
+            "state": None,
+            "view": "summary",
+            "result_count": len(rows),
+        },
+    )
+    return ComplianceSummaryOut.model_validate(summary)
+
+
+@router.get("/patch-compliance", response_model=ComplianceListOut)
+async def list_patch_compliance(
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    client_id: str | None = Query(default=None, max_length=36),
+    site_id: str | None = Query(default=None, max_length=36),
+    state: str | None = Query(default=None),
+    search: str | None = Query(default=None, max_length=100),
+    sort: str = Query(
+        default="hostname",
+        pattern="^(hostname|state|approved_missing|scanned_at)$",
+    ),
+    direction: str = Query(default="asc", pattern="^(asc|desc)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    _validate_compliance_state(state)
+    agents, truncated = await _compliance_agents(db, client_id, site_id)
+    rows = await _compliance_rows(db, agents, _now())
+    if state is not None:
+        rows = [row for row in rows if row.state == state]
+    if search:
+        term = search.strip().casefold()
+        rows = [row for row in rows if term in row.hostname.casefold()]
+
+    rows.sort(key=lambda row: row.agent_id)
+    sort_keys = {
+        "hostname": lambda row: row.hostname.casefold(),
+        "state": lambda row: row.state,
+        "approved_missing": lambda row: row.approved_missing,
+        "scanned_at": lambda row: (
+            row.scanned_at is None,
+            row.scanned_at or datetime.min.replace(tzinfo=timezone.utc),
+        ),
+    }
+    rows.sort(key=sort_keys[sort], reverse=direction == "desc")
+    total = len(rows)
+    start = (page - 1) * page_size
+    page_rows = rows[start : start + page_size]
+    await audit.record(
+        db,
+        action="patch_compliance.viewed",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        organization_id=client_id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "client_id": client_id,
+            "site_id": site_id,
+            "state": state,
+            "view": "list",
+            "result_count": len(page_rows),
+        },
+    )
+    return ComplianceListOut(
+        items=[ComplianceEndpointOut.model_validate(row) for row in page_rows],
+        page=page,
+        page_size=page_size,
+        total=total,
+        truncated=truncated,
+    )
+
+
+@router.get(
+    "/agents/{agent_id}/patch-compliance",
+    response_model=ComplianceEndpointDetailOut,
+)
+async def get_agent_patch_compliance(
+    agent_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    now = _now()
+    compliance = await compliance_core.endpoint_compliance(
+        db,
+        agent,
+        now,
+        stale_after=timedelta(hours=settings.patch_compliance_stale_after_hours),
+    )
+    missing = await patch_core.latest_missing_updates(db, agent.id)
+    effective = await patch_core.resolve_effective_patch_policy(db, agent)
+    rules = patch_core.parse_rules(effective.revision.rules) if effective else []
+    decisions: list[ComplianceUpdateDecisionOut] = []
+    for item in missing:
+        verdict = (
+            patch_core.evaluate_update(
+                rules,
+                effective.revision.default_action,
+                item,
+                now,
+            )
+            if effective
+            else None
+        )
+        decisions.append(
+            ComplianceUpdateDecisionOut(
+                kb_id=item.get("kb_id"),
+                update_id=item.get("update_id"),
+                title=item.get("title") or "",
+                classification=item.get("classification"),
+                severity=item.get("severity"),
+                decision=verdict.decision if verdict else "approve",
+                reason=verdict.reason if verdict else "no_policy",
+                matched_rule_key=verdict.matched_rule_key if verdict else None,
+            )
+        )
+    return ComplianceEndpointDetailOut(
+        **dataclasses.asdict(compliance),
+        decisions=decisions,
+    )
+
+
+@router.get(
+    "/agents/{agent_id}/patch-compliance/history",
+    response_model=ComplianceHistoryOut,
+)
+async def get_agent_patch_compliance_history(
+    agent_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    limit: int = Query(
+        default=settings.patch_compliance_history_limit,
+        ge=1,
+        le=200,
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    points = await compliance_core.endpoint_history(db, agent, _now(), limit)
+    effective = await patch_core.resolve_effective_patch_policy(db, agent)
+    return ComplianceHistoryOut(
+        agent_id=agent.id,
+        policy_id=effective.policy.id if effective else None,
+        evaluated_against="current_policy",
+        points=[ComplianceHistoryPointOut.model_validate(point) for point in points],
+    )
+
+
+@router.get("/patch-compliance/export", response_class=Response)
+async def export_patch_compliance(
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    format: str = Query(default="csv", pattern="^(csv|json)$"),
+    client_id: str | None = Query(default=None, max_length=36),
+    site_id: str | None = Query(default=None, max_length=36),
+    state: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    _validate_compliance_state(state)
+    agents, truncated = await _compliance_agents(db, client_id, site_id)
+    now = _now()
+    rows = await _compliance_rows(db, agents, now)
+    if state is not None:
+        rows = [row for row in rows if row.state == state]
+
+    if format == "csv":
+        stream = io.StringIO(newline="")
+        writer = csv.writer(stream)
+        writer.writerow(
+            [
+                "client_id",
+                "client_name",
+                "site_id",
+                "site_name",
+                "endpoint_id",
+                "hostname",
+                "state",
+                "policy_id",
+                "scanned_at",
+                "total_missing",
+                "approved_missing",
+                "deferred_missing",
+                "denied_missing",
+            ]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    row.client_id,
+                    row.client_name,
+                    row.site_id,
+                    row.site_name,
+                    row.agent_id,
+                    row.hostname,
+                    row.state,
+                    row.policy_id or "",
+                    row.scanned_at.isoformat() if row.scanned_at else "",
+                    row.total_missing,
+                    row.approved_missing,
+                    row.deferred_missing,
+                    row.denied_missing,
+                ]
+            )
+        content = stream.getvalue().encode("utf-8")
+        media_type = "text/csv"
+    else:
+        content = json.dumps(
+            {
+                "generated_at": now.isoformat(),
+                "truncated": truncated,
+                "rows": [dataclasses.asdict(row) for row in rows],
+            },
+            default=str,
+        ).encode("utf-8")
+        media_type = "application/json"
+
+    await audit.record(
+        db,
+        action="patch_compliance.exported",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        organization_id=client_id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "client_id": client_id,
+            "site_id": site_id,
+            "state": state,
+            "format": format,
+            "row_count": len(rows),
+        },
+    )
+    extension = "csv" if format == "csv" else "json"
+    filename = f"patch-compliance-{now:%Y%m%dT%H%M%SZ}.{extension}"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
     )
 
 

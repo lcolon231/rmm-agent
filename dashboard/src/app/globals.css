@@ -3033,6 +3033,31 @@ textarea:focus-visible,
 .monitoring-summary-grid > section { display: flex; min-height: 92px; flex-direction: column; justify-content: center; padding: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 5px; box-shadow: 0 7px 22px rgb(9 27 41 / 4%); }
 .monitoring-summary-grid span { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .monitoring-summary-grid strong { margin-top: 6px; color: var(--ink); font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
+.compliance-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.compliance-summary-grid article { position: relative; min-height: 100px; padding: 17px 16px 14px; overflow: hidden; background: var(--paper); border: 1px solid var(--line); border-radius: 5px; box-shadow: 0 7px 22px rgb(9 27 41 / 4%); }
+.compliance-summary-grid article::before { position: absolute; inset: 0 0 auto; height: 4px; content: ""; background: #6b6780; }
+.compliance-summary-grid article.compliant::before { background: #12805c; }
+.compliance-summary-grid article.non_compliant::before { background: #dc4c3f; }
+.compliance-summary-grid article.stale::before { background: #d88a14; }
+.compliance-summary-grid article.unknown::before { background: #6b6780; }
+.compliance-summary-grid article.exempt::before { background: #4e69a2; }
+.compliance-summary-grid span { display: block; color: var(--muted); font-size: 8px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.compliance-summary-grid strong { display: block; margin-top: 7px; color: var(--ink-deep); font: 800 28px var(--font-data); letter-spacing: -.05em; }
+.compliance-summary-grid small { color: var(--muted); font-size: 9px; }
+.compliance-boundary-banner { color: #1e4d78; background: #eef4fb; border-color: #c6d8eb; border-left-color: #4e69a2; }
+.compliance-summary-unavailable, .compliance-truncated { margin: 0 0 14px; padding: 10px 12px; color: #854d0e; font-size: 10px; background: #fef3c7; border: 1px solid #f4d991; border-radius: 4px; }
+.compliance-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.compliance-export-actions { display: flex; gap: 7px; }
+.compliance-export-actions a { display: inline-flex; min-height: 38px; align-items: center; gap: 6px; padding: 0 11px; color: var(--blue); font-size: 9px; font-weight: 800; text-decoration: none; background: white; border: 1px solid var(--line); border-radius: 4px; }
+.compliance-export-actions a:hover { border-color: #9eb8d4; }
+.compliance-export-actions a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.compliance-state-chip { display: inline-flex; min-height: 24px; align-items: center; padding: 0 8px; font-size: 8px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; border-radius: 999px; }
+.compliance-state-chip.compliant { color: #0b6b4c; background: var(--success-soft); }
+.compliance-state-chip.non_compliant { color: #991b1b; background: var(--red-soft); }
+.compliance-state-chip.stale { color: #854d0e; background: var(--amber-soft); }
+.compliance-state-chip.unknown { color: #4d4960; background: #ebe8f3; }
+.compliance-state-chip.exempt { color: #1e4d78; background: #e5eef8; }
+.compliance-missing-count { color: #b42318 !important; font: 800 13px var(--font-data); }
 .monitoring-check-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; padding: 14px; }
 .monitoring-check-grid > article { overflow: hidden; border: 1px solid var(--line); border-radius: 5px; }
 .monitoring-check-grid > article.disabled { background: #faf9fd; border-style: dashed; }
@@ -3216,6 +3241,8 @@ textarea:focus-visible,
   .windows-update-pagination { grid-template-columns: 1fr auto; }
   .windows-update-pagination > a { grid-column: 1 / -1; justify-self: start; }
   .monitoring-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compliance-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .compliance-toolbar { align-items: stretch; flex-direction: column; }
 }
 
 @media (max-width: 620px) {
@@ -3255,6 +3282,9 @@ textarea:focus-visible,
   .windows-update-rescan-prompt { align-items: flex-start; flex-wrap: wrap; }
   .windows-update-rescan-prompt a { width: 100%; margin-left: 22px; }
   .monitoring-summary-grid { grid-template-columns: 1fr; }
+  .compliance-summary-grid { grid-template-columns: 1fr 1fr; }
+  .compliance-summary-grid article:last-child { grid-column: 1 / -1; }
+  .compliance-export-actions a { flex: 1; justify-content: center; }
   .monitoring-check-grid { grid-template-columns: 1fr; padding: 10px; }
   .alert-history article { grid-template-columns: 28px 1fr; }
   .alert-history article > small { grid-column: 2; text-align: left; }
