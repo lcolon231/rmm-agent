@@ -65,6 +65,8 @@ and SHA-256/Merkle roots—remains readable.
 | `patch_approval_policy.deleted` | `api/management.py` patch policy deletion | `policy_id`, `scope`, `scope_id`, `name_sha256`, `name_bytes` |
 | `patch_install.gated` | `api/management.py` install_updates approval gate | `policy_id`, `outcome`, `install_all`, `requested`, `approved`, `denied`, `deferred`, `window_required`, `window_present` |
 | `patch_install.reboot_authorized` | `api/management.py` signed reboot evidence injected into an approved install (issue #53) | `policy_id`, `reboot_policy`, `delay_seconds`, `requires_no_user`, `window_present`, `user_present` |
+| `patch_compliance.viewed` | `api/management.py` patch compliance summary or list view (issue #54) | `client_id`, `site_id`, `state`, `view`, `result_count` |
+| `patch_compliance.exported` | `api/management.py` patch compliance CSV/JSON export (issue #54) | `client_id`, `site_id`, `state`, `format`, `row_count` |
 | `monitoring_alert.acknowledged` | `api/management.py` technician acknowledgement | `alert_id`, `generation`, `request_id`, `from_state`, `to_state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.assigned` | `api/management.py` technician assignment | `alert_id`, `generation`, `request_id`, `assigned_to_operator_id`, `assigned_to_email_sha256`, `assigned_to_email_bytes`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.commented` | `api/management.py` technician comment | `alert_id`, `generation`, `request_id`, `state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |

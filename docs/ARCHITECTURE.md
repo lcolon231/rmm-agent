@@ -19,8 +19,8 @@ navigation is live and read-only, while the overview remains fixture-backed.
 Monitoring policy inventory and revision detail are also live and read-only;
 the agent does not execute those checks yet.
 There is no production
-endpoint console, patch engine, live remote shell, remote desktop, compliance
-exporter, or tenant-scoped authorization. Production and regulated endpoint use remain outside the
+endpoint console, patch engine, live remote shell, remote desktop, general
+compliance evidence-bundle exporter, or tenant-scoped authorization. Production and regulated endpoint use remain outside the
 supported boundary until the deployment-safety gates in
 [DEPLOYMENT-READINESS.md](DEPLOYMENT-READINESS.md) are satisfied.
 
@@ -163,6 +163,14 @@ injects signed reboot/retry evidence, and the agent tracks per-update results an
 reboots after installing (deferring when a user is present). The same gate is
 applied to scheduled `install_updates` tasks, so automation only dispatches
 approved updates inside policy windows. See [`PATCH-APPROVAL.md`](PATCH-APPROVAL.md).
+
+Patch compliance reporting (issue #54) is a read-only projection over those
+effective policies and retained `windows_updates` snapshots. It classifies each
+endpoint as compliant, non-compliant, stale, unknown, or exempt; provides
+client/site summaries, per-update detail, and a retained-snapshot history
+evaluated against the current policy; and exports the bounded rows as CSV or
+JSON. It adds no table, job, migration, or agent behavior. See
+[`PATCH-COMPLIANCE.md`](PATCH-COMPLIANCE.md).
 
 
 `powershell` and `shell` are arbitrary-script escape hatches and require a

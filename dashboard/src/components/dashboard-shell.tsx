@@ -64,6 +64,7 @@ const navItems = [
   { label: "Schedules", icon: Clock3, count: null, href: "/schedules" },
 
   { label: "Monitoring", icon: HeartPulse, count: null, href: "/monitoring" },
+  { label: "Patch compliance", icon: Shield, count: null, href: "/patch-compliance" },
   { label: "Audit", icon: ShieldCheck, count: null, href: "/audit" },
   { label: "Administration", icon: Settings, count: null, href: "/enrollment" },
   { label: "Operators", icon: Users, count: null, href: "/operators", adminOnly: true },

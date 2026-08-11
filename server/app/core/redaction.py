@@ -299,6 +299,12 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "window_present",
         "user_present",
     ),
+    "patch_compliance.viewed": _schema(
+        "client_id", "site_id", "state", "view", "result_count",
+    ),
+    "patch_compliance.exported": _schema(
+        "client_id", "site_id", "state", "format", "row_count",
+    ),
     "monitoring_alert.acknowledged": _schema(
         "alert_id", "generation", "request_id", "from_state", "to_state",
         "comment", "comment_redacted", digest_fields=("comment",),
