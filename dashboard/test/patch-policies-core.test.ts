@@ -22,6 +22,8 @@ const policy = {
   rule_count: 3,
   default_action: "deny",
   require_maintenance_window: true,
+  reboot_policy: "if_required",
+  max_install_attempts: 2,
 };
 
 test("policy lists are allowlisted and drop secret-adjacent fields", () => {

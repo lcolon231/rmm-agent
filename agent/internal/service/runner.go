@@ -839,14 +839,29 @@ func updateScanCommandResult(summary patching.Summary, stderr string) executor.R
 	return executor.Result{ExitCode: exitCode, Stdout: string(out), Stderr: stderr}
 }
 
-// runUpdateInstall handles the install_updates typed command: it executes
-// selective downloading and installation by KB or Windows Update identity.
+// Seams so install, active-user detection, and reboot scheduling can be faked in
+// tests without shelling out to Windows Update or shutdown.exe (issue #53).
+var (
+	patchInstallWithRetry = patching.InstallWithRetry
+	patchActiveUser       = power.ActiveUser
+	patchScheduleReboot   = power.ScheduleReboot
+)
+
+// runUpdateInstall handles the install_updates typed command: it installs the
+// selected updates (retrying failures up to the signed max_attempts) and applies
+// the signed post-install reboot policy, if any.
 func (a *Agent) runUpdateInstall(ctx context.Context, rawPayload json.RawMessage) executor.Result {
 	var payload struct {
-		InstallAll bool     `json:"install_all"`
-		KBIDs      []string `json:"kb_ids"`
-		TargetKBs  []string `json:"target_kbs"`
-		UpdateIDs  []string `json:"update_ids"`
+		InstallAll  bool     `json:"install_all"`
+		KBIDs       []string `json:"kb_ids"`
+		TargetKBs   []string `json:"target_kbs"`
+		UpdateIDs   []string `json:"update_ids"`
+		MaxAttempts int      `json:"max_attempts"`
+		Reboot      *struct {
+			Policy         string `json:"policy"`
+			DelaySeconds   int    `json:"delay_seconds"`
+			RequiresNoUser bool   `json:"requires_no_user"`
+		} `json:"reboot"`
 	}
 	if len(rawPayload) > 0 {
 		if err := json.Unmarshal(rawPayload, &payload); err != nil {
@@ -854,28 +869,55 @@ func (a *Agent) runUpdateInstall(ctx context.Context, rawPayload json.RawMessage
 		}
 	}
 	targetKBs := append(append([]string{}, payload.KBIDs...), payload.TargetKBs...)
+	maxAttempts := payload.MaxAttempts
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
 
-	installRes, err := patching.Install(ctx, patching.InstallTargets{
+	installRes, err := patchInstallWithRetry(ctx, patching.InstallTargets{
 		All:       payload.InstallAll,
 		KBIDs:     targetKBs,
 		UpdateIDs: payload.UpdateIDs,
-	})
-	outBytes, _ := json.Marshal(installRes)
+	}, maxAttempts)
 	if err != nil {
+		outBytes, _ := json.Marshal(installRes)
 		return executor.Result{
 			ExitCode: -1,
 			Stdout:   string(outBytes),
 			Stderr:   "windows update install failed: " + err.Error(),
 		}
 	}
+
+	// Post-install reboot policy (issue #53). Present only when the server
+	// authorized a reboot for this capable agent. The result is durably stored by
+	// processCommand after this returns; the signed delay (>=60s) leaves time to
+	// upload before the OS restarts, mirroring the power-operation contract.
+	if payload.Reboot != nil {
+		user, _ := patchActiveUser(ctx)
+		decision := patching.DecideReboot(patching.RebootDecisionInput{
+			Policy:         payload.Reboot.Policy,
+			RequiresNoUser: payload.Reboot.RequiresNoUser,
+			RebootRequired: installRes.RebootRequired,
+			ActiveUser:     user,
+		})
+		installRes.Reboot = &patching.RebootOutcome{
+			Policy:       payload.Reboot.Policy,
+			Decision:     decision,
+			DelaySeconds: payload.Reboot.DelaySeconds,
+		}
+		if decision == patching.RebootScheduled {
+			if _, _, rerr := patchScheduleReboot(ctx, payload.Reboot.DelaySeconds, "NodeLink post-install reboot"); rerr != nil {
+				installRes.Reboot.Decision = "schedule_failed"
+			}
+		}
+	}
+
+	outBytes, _ := json.Marshal(installRes)
 	exitCode := 0
 	if installRes.Status == "failed" {
 		exitCode = 1
 	}
-	return executor.Result{
-		ExitCode: exitCode,
-		Stdout:   string(outBytes),
-	}
+	return executor.Result{ExitCode: exitCode, Stdout: string(outBytes)}
 }
 
 func pendingResultNotices(store *SeenStore, limit int) []client.PendingResultNotice {

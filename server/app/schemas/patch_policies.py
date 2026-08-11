@@ -39,6 +39,11 @@ MAX_MATCH_CLASSIFICATIONS = 16
 MAX_MATCH_SEVERITIES = 8
 MAX_MATCH_KB_IDS = 64
 MAX_DEFER_DAYS = 365
+# Post-install reboot + retry bounds (issue #53).
+MIN_REBOOT_DELAY_SECONDS = 60
+MAX_REBOOT_DELAY_SECONDS = 3600
+MIN_INSTALL_ATTEMPTS = 1
+MAX_INSTALL_ATTEMPTS = 5
 
 RuleKey = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")]
 MatchText = Annotated[str, StringConstraints(min_length=1, max_length=64, strip_whitespace=True)]
@@ -57,6 +62,15 @@ class PatchAction(str, Enum):
 class PatchDefaultAction(str, Enum):
     approve = "approve"
     deny = "deny"
+
+
+class RebootPolicy(str, Enum):
+    """Post-install reboot behavior (issue #53). ``never`` is the fail-safe
+    default: an install that needs a reboot leaves it to the operator."""
+
+    never = "never"
+    if_required = "if_required"
+    forced = "forced"
 
 
 class PatchMatch(BaseModel):
@@ -113,7 +127,16 @@ def _unique_rule_keys(value: list[PatchRule]) -> list[PatchRule]:
     return value
 
 
-class PatchApprovalPolicyCreate(BaseModel):
+class _RebootSettings(BaseModel):
+    """Reboot + retry fields carried on a revision (issue #53)."""
+
+    reboot_policy: RebootPolicy = RebootPolicy.never
+    reboot_delay_seconds: int = Field(default=300, ge=MIN_REBOOT_DELAY_SECONDS, le=MAX_REBOOT_DELAY_SECONDS)
+    reboot_requires_no_user: bool = True
+    max_install_attempts: int = Field(default=2, ge=MIN_INSTALL_ATTEMPTS, le=MAX_INSTALL_ATTEMPTS)
+
+
+class PatchApprovalPolicyCreate(_RebootSettings):
     model_config = ConfigDict(extra="forbid")
     name: ShortText
     scope: MonitoringScope
@@ -132,7 +155,7 @@ class PatchApprovalPolicyCreate(BaseModel):
         return self
 
 
-class PatchApprovalPolicyUpdate(BaseModel):
+class PatchApprovalPolicyUpdate(_RebootSettings):
     """A new revision: fully replaces the rule set and revision-level settings.
 
     Scope and name are identity and are not changed by a revision.
@@ -154,6 +177,10 @@ class PatchApprovalPolicyRevisionOut(BaseModel):
     version: int
     default_action: str
     require_maintenance_window: bool
+    reboot_policy: str
+    reboot_delay_seconds: int
+    reboot_requires_no_user: bool
+    max_install_attempts: int
     change_note: str | None
     created_by: str | None
     created_at: datetime
@@ -171,6 +198,8 @@ class PatchApprovalPolicyOut(BaseModel):
     rule_count: int = Field(ge=0)
     default_action: str
     require_maintenance_window: bool
+    reboot_policy: str
+    max_install_attempts: int
 
 
 class PatchApprovalPolicyDetailOut(PatchApprovalPolicyOut):

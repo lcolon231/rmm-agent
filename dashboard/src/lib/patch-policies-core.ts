@@ -21,6 +21,8 @@ export type PatchRule = {
   defer_days: number | null;
 };
 
+export type RebootPolicy = "never" | "if_required" | "forced";
+
 export type PatchApprovalPolicy = {
   id: string;
   name: string;
@@ -32,6 +34,8 @@ export type PatchApprovalPolicy = {
   rule_count: number;
   default_action: PatchDefaultAction;
   require_maintenance_window: boolean;
+  reboot_policy: RebootPolicy;
+  max_install_attempts: number;
 };
 
 export type PatchApprovalPolicyRevision = {
@@ -73,6 +77,7 @@ export type EffectivePatchPolicy = {
 const scopes = new Set<PatchScope>(["global", "client", "site", "agent"]);
 const actions = new Set<PatchAction>(["approve", "deny", "defer"]);
 const defaults = new Set<PatchDefaultAction>(["approve", "deny"]);
+const rebootPolicies = new Set<RebootPolicy>(["never", "if_required", "forced"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -133,6 +138,9 @@ export function patchPolicyFromUnknown(value: unknown): PatchApprovalPolicy | nu
     || (value.rule_count as number) < 0
     || !defaults.has(value.default_action as PatchDefaultAction)
     || typeof value.require_maintenance_window !== "boolean"
+    || !rebootPolicies.has(value.reboot_policy as RebootPolicy)
+    || !Number.isInteger(value.max_install_attempts)
+    || (value.max_install_attempts as number) < 1
   ) {
     return null;
   }
@@ -150,6 +158,8 @@ export function patchPolicyFromUnknown(value: unknown): PatchApprovalPolicy | nu
     rule_count: value.rule_count as number,
     default_action: value.default_action as PatchDefaultAction,
     require_maintenance_window: value.require_maintenance_window,
+    reboot_policy: value.reboot_policy as RebootPolicy,
+    max_install_attempts: value.max_install_attempts as number,
   };
 }
 

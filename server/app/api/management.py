@@ -282,16 +282,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def _latest_missing_updates(db: AsyncSession, agent_id: str) -> list[dict]:
-    """The agent's latest scanned missing Windows updates, or an empty list."""
-    sections = await inventory.latest_sections(db, agent_id)
-    snapshot = sections.get(InventorySection.windows_updates.value)
-    if snapshot is None:
-        return []
-    missing = (snapshot.payload or {}).get("missing")
-    return [item for item in missing if isinstance(item, dict)] if isinstance(missing, list) else []
-
-
 async def _apply_patch_approval_policy(
     db: AsyncSession,
     agent: Agent,
@@ -299,124 +289,39 @@ async def _apply_patch_approval_policy(
     payload: dict,
     now: datetime,
 ) -> dict:
-    """Gate an install_updates dispatch on the agent's effective patch policy.
+    """Endpoint install gate: evaluate the policy, audit, and fail closed on a block.
 
-    Opt-in: with no applicable policy the payload is returned unchanged. With a
-    policy, ``install_all`` is narrowed to the approved subset and an explicit
-    selection is fail-closed — any denied, deferred, or not-currently-scanned
-    target rejects the whole command. A ``patch_install.gated`` audit records the
-    outcome and counts, never update titles. On a block the audit is committed
-    before the HTTP error so the decision is durable.
+    On a block the audit is committed before the HTTP error so the decision is
+    durable. Reused non-raising evaluation lives in ``_evaluate_patch_install`` so
+    the scheduler applies the same gate.
     """
     if kind != CommandKind.install_updates:
         return payload
-    effective = await patch_core.resolve_effective_patch_policy(db, agent)
-    if effective is None:
+    decision = await patch_core.evaluate_patch_install(db, agent, payload, now)
+    if decision is None:
         return payload
-
-    revision = effective.revision
-    rules = patch_core.parse_rules(revision.rules)
-    missing = await _latest_missing_updates(db, agent.id)
-    by_kb = {(item.get("kb_id") or "").upper(): item for item in missing if item.get("kb_id")}
-    by_id = {(item.get("update_id") or "").lower(): item for item in missing if item.get("update_id")}
-
-    window_required = bool(revision.require_maintenance_window)
-    window_present = True
-    if window_required:
-        windows = await monitoring_core.active_maintenance_windows(db, agent, at=now)
-        window_present = bool(windows)
-
-    install_all = payload.get("install_all") is True
-    approved = denied = deferred = 0
-    blocked: list[str] = []
-    approved_kbs: list[str] = []
-    approved_ids: list[str] = []
-
-    def classify(item: dict) -> bool:
-        nonlocal approved, denied, deferred
-        verdict = patch_core.evaluate_update(rules, revision.default_action, item, now)
-        if verdict.decision == "approve":
-            approved += 1
-            return True
-        if verdict.decision == "deny":
-            denied += 1
-        else:
-            deferred += 1
-        return False
-
-    if install_all:
-        requested = len(missing)
-        for item in missing:
-            if classify(item):
-                if item.get("kb_id"):
-                    approved_kbs.append(item["kb_id"].upper())
-                elif item.get("update_id"):
-                    approved_ids.append(item["update_id"].lower())
-        result_payload = {
-            "install_all": False,
-            "kb_ids": sorted(set(approved_kbs)),
-            "update_ids": sorted(set(approved_ids)),
-        }
-    else:
-        requested_kbs = [str(value).upper() for value in payload.get("kb_ids", [])]
-        requested_ids = [str(value).lower() for value in payload.get("update_ids", [])]
-        requested = len(requested_kbs) + len(requested_ids)
-        for kb in requested_kbs:
-            item = by_kb.get(kb)
-            if item is None:
-                denied += 1
-                blocked.append(kb)
-            elif not classify(item):
-                blocked.append(kb)
-        for uid in requested_ids:
-            item = by_id.get(uid)
-            if item is None:
-                denied += 1
-                blocked.append(uid)
-            elif not classify(item):
-                blocked.append(uid)
-        result_payload = payload
-
-    if window_required and not window_present:
-        outcome = "maintenance_window_required"
-    elif install_all and not approved_kbs and not approved_ids:
-        outcome = "no_approved_updates"
-    elif not install_all and blocked:
-        outcome = "denied"
-    else:
-        outcome = "allowed"
-
     await audit.record(
         db,
         action="patch_install.gated",
         actor=agent.id,
         agent_id=agent.id,
-        detail={
-            "policy_id": effective.policy.id,
-            "outcome": outcome,
-            "install_all": install_all,
-            "requested": requested,
-            "approved": approved,
-            "denied": denied,
-            "deferred": deferred,
-            "window_required": window_required,
-            "window_present": window_present,
-        },
+        detail=decision["gated_detail"],
     )
-
-    if outcome != "allowed":
+    if decision["reboot_detail"] is not None:
+        await audit.record(
+            db,
+            action="patch_install.reboot_authorized",
+            actor=agent.id,
+            agent_id=agent.id,
+            detail=decision["reboot_detail"],
+        )
+    if decision["outcome"] != "allowed":
         await db.commit()
-        code = {
-            "maintenance_window_required": "patch_install_maintenance_window_required",
-            "no_approved_updates": "patch_install_no_approved_updates",
-            "denied": "patch_install_denied",
-        }[outcome]
-        detail: dict = {"code": code, "policy_id": effective.policy.id}
-        if outcome == "denied":
-            detail["blocked"] = blocked[:100]
+        detail: dict = {"code": decision["code"], "policy_id": decision["policy_id"]}
+        if decision["outcome"] == "denied":
+            detail["blocked"] = decision["blocked"][:100]
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
-
-    return result_payload
+    return decision["payload"]
 
 
 MAX_NAVIGATION_CLIENTS = 200
@@ -2344,6 +2249,8 @@ async def _patch_policy_out(
         require_maintenance_window=(
             revision.require_maintenance_window if revision is not None else False
         ),
+        reboot_policy=revision.reboot_policy if revision is not None else "never",
+        max_install_attempts=revision.max_install_attempts if revision is not None else 2,
     )
 
 
@@ -2401,6 +2308,10 @@ async def create_patch_policy(
         rules=[rule.model_dump(mode="json") for rule in body.rules],
         default_action=body.default_action.value,
         require_maintenance_window=body.require_maintenance_window,
+        reboot_policy=body.reboot_policy.value,
+        reboot_delay_seconds=body.reboot_delay_seconds,
+        reboot_requires_no_user=body.reboot_requires_no_user,
+        max_install_attempts=body.max_install_attempts,
         change_note=body.change_note,
         created_by=operator.email,
     )
@@ -2488,6 +2399,10 @@ async def revise_patch_policy(
         rules=[rule.model_dump(mode="json") for rule in body.rules],
         default_action=body.default_action.value,
         require_maintenance_window=body.require_maintenance_window,
+        reboot_policy=body.reboot_policy.value,
+        reboot_delay_seconds=body.reboot_delay_seconds,
+        reboot_requires_no_user=body.reboot_requires_no_user,
+        max_install_attempts=body.max_install_attempts,
         change_note=body.change_note,
         created_by=operator.email,
     )
@@ -2557,7 +2472,7 @@ async def get_agent_effective_patch_policy(
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
     effective = await patch_core.resolve_effective_patch_policy(db, agent)
-    missing = await _latest_missing_updates(db, agent_id)
+    missing = await patch_core.latest_missing_updates(db, agent_id)
     if effective is None:
         # Opt-in gating: with no policy, every missing update is installable.
         return EffectivePatchPolicyOut(

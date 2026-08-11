@@ -1,10 +1,12 @@
-# Patch approval policies and maintenance windows
+# Patch approval, installation, and reboot policies
 
 Issue #52 adds a server-side control plane over Windows Update installation
 (#51): scoped approval/deny/defer rules, an auditable effective policy, and
-recurring timezone/DST-aware maintenance windows. It changes no agent or command
-envelope — the gate runs before a command is signed and only ever narrows or
-blocks an `install_updates` payload the agent already understands.
+recurring timezone/DST-aware maintenance windows. The gate runs before a command
+is signed and only ever narrows or blocks an `install_updates` payload. Issue #53
+adds per-update result tracking, bounded retry, and a post-install reboot policy,
+and routes scheduled installs through the same gate — see
+"Installation and reboot (issue #53)" below.
 
 ## Policy model
 
@@ -77,19 +79,57 @@ on Windows and slim Linux images. Power operations consume the same
 - Install gate refusals are all `409` with the codes above; each is preceded by a
   durable `patch_install.gated` audit record.
 
+## Installation and reboot (issue #53)
+
+A policy revision also carries installation and reboot behavior:
+
+- **`reboot_policy`** — `never` (default, fail-safe), `if_required`, or `forced`.
+  **`reboot_delay_seconds`** (60–3600), **`reboot_requires_no_user`** (default
+  true), and **`max_install_attempts`** (1–5, default 2).
+- When the gate **allows** an install and the agent advertises the
+  **`patch-reboot-v1`** capability, the signed payload gains `max_attempts` and,
+  if `reboot_policy != never`, a signed `reboot` block (policy, delay,
+  `requires_no_user`, and — when a window is required — the bound
+  `maintenance_window_id`/`ends_at`). Agents without the capability get neither
+  field, so a mixed-version fleet is safe and older agents never reboot.
+- The **agent** retries updates that fail with a retryable code up to
+  `max_attempts` (WUA installs are idempotent per update, so nothing
+  double-installs) and reports **per-update outcomes** (`identifier`,
+  `result_code`, `hresult`, `attempts`). After installing it applies the reboot
+  decision: consent wins first — if `requires_no_user` and a user is present the
+  reboot is **deferred**; `if_required` is a no-op when no reboot is pending;
+  otherwise the reboot is **scheduled** via the same `shutdown.exe /r` mechanism
+  as power operations. The result is stored durably before the delayed reboot, so
+  a restart never loses the outcome or re-installs (the agent's replay journal
+  turns an interrupted command into a reported unknown-outcome, never a re-run).
+- **Scheduled installs go through the same gate.** A `install_updates`
+  scheduled task (issue #49) is evaluated against the effective policy before
+  signing: its payload is narrowed to the approved subset and it is skipped for
+  an agent whose policy blocks it (e.g. outside a required window). This is how
+  "approved updates dispatch only inside policy windows" holds for automation as
+  well as interactive dispatch.
+
 ## Audit
 
 `patch_approval_policy.created` / `.revised` / `.deleted` (names and change notes
-are digest-only) and `patch_install.gated` (counts and outcome only). See
-[`AUDIT-EVENTS.md`](AUDIT-EVENTS.md).
+are digest-only), `patch_install.gated` (counts and outcome only), and
+`patch_install.reboot_authorized` (the injected reboot policy, no update titles).
+See [`AUDIT-EVENTS.md`](AUDIT-EVENTS.md).
 
 ## Rollout
 
-Server-only, forward-only. Deploy migration `0033` and the server, then the
-dashboard. `0033` creates the two `patch_approval_policies*` tables and adds
-nullable `timezone`/`recurrence` to `maintenance_windows`; existing absolute
-windows and existing installs are unaffected. Policies are opt-in, so nothing
-changes until one is authored.
+Forward-only. Deploy migration `0033`/`0034` and the server, then canary agents
+advertising `patch-reboot-v1`, then the dashboard. `0033` creates the two
+`patch_approval_policies*` tables and adds nullable `timezone`/`recurrence` to
+`maintenance_windows`; `0034` adds the reboot/retry columns to policy revisions
+(all defaulted to the fail-safe `never`). Existing absolute windows, existing
+installs, and older agents are unaffected — reboot injection is capability-gated
+and default `never`, and policies are opt-in.
+
+One intended behavior change: **scheduled `install_updates` tasks now honor the
+approval policy and maintenance windows** (issue #53). A scheduled install that
+was previously ungated is now narrowed to the approved subset and skipped when a
+required window is inactive. Review existing patch schedules before deploying.
 
 ## Verification
 

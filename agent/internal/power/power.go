@@ -149,3 +149,16 @@ func executeAt(ctx context.Context, kind string, raw json.RawMessage, now time.T
 func Execute(ctx context.Context, kind string, raw json.RawMessage) executor.Result {
 	return executeAt(ctx, kind, raw, time.Now().UTC())
 }
+
+// ScheduleReboot schedules an OS restart after delaySeconds, reusing the same
+// platform mechanism as a power operation. Exposed for the post-install reboot
+// policy (issue #53); it goes through the same test seam as Execute.
+func ScheduleReboot(ctx context.Context, delaySeconds int, reason string) (string, string, error) {
+	return scheduleAction(ctx, KindReboot, delaySeconds, reason)
+}
+
+// ActiveUser returns the current interactive user, or an empty string when none
+// is signed in. Reused by the post-install reboot consent check (issue #53).
+func ActiveUser(ctx context.Context) (string, error) {
+	return activeUser(ctx)
+}

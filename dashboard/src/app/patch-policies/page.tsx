@@ -77,6 +77,7 @@ export default async function PatchPoliciesPage() {
                   <th>Rules</th>
                   <th>Default</th>
                   <th>Window</th>
+                  <th>Reboot</th>
                   <th>Revision</th>
                   <th>Created (UTC)</th>
                 </tr>
@@ -97,6 +98,7 @@ export default async function PatchPoliciesPage() {
                     <td>{policy.rule_count}</td>
                     <td>{policy.default_action === "approve" ? "Approve" : "Deny"}</td>
                     <td>{policy.require_maintenance_window ? "Required" : "—"}</td>
+                    <td>{policy.reboot_policy === "never" ? "—" : policy.reboot_policy.replaceAll("_", " ")}</td>
                     <td><code>v{policy.current_version}</code></td>
                     <td>{formatMonitoringTimestamp(policy.created_at)}</td>
                   </tr>

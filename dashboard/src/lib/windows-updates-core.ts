@@ -237,10 +237,25 @@ export function windowsUpdateScanIsStale(
   return nowMs - scannedMs >= staleHours * 60 * 60 * 1_000;
 }
 
+export type InstallUpdateOutcome = {
+  identifier: string;
+  resultCode: number;
+  hresult: string | null;
+  attempts: number;
+};
+
+export type InstallRebootView = {
+  policy: string;
+  decision: string;
+  delaySeconds: number | null;
+};
+
 export type InstallUpdatesResultView = {
   status: "success" | "partial" | "failed";
   installedKBs: string[];
   failedKBs: string[];
+  results: InstallUpdateOutcome[];
+  reboot: InstallRebootView | null;
   rebootRequired: boolean;
   message: string;
 };
@@ -266,10 +281,42 @@ export function installUpdatesResultFromUnknown(value: unknown): InstallUpdatesR
   if (installedKBs === null || failedKBs === null || typeof parsed.reboot_required !== "boolean") {
     return null;
   }
+
+  // Per-update outcomes (issue #53) — optional and back-compatible.
+  const results: InstallUpdateOutcome[] = [];
+  if (parsed.results !== undefined) {
+    if (!Array.isArray(parsed.results)) return null;
+    for (const item of parsed.results.slice(0, 100)) {
+      if (!isRecord(item) || typeof item.identifier !== "string" || typeof item.result_code !== "number") {
+        return null;
+      }
+      results.push({
+        identifier: item.identifier,
+        resultCode: item.result_code,
+        hresult: typeof item.hresult === "string" ? item.hresult : null,
+        attempts: typeof item.attempts === "number" ? item.attempts : 1,
+      });
+    }
+  }
+
+  let reboot: InstallRebootView | null = null;
+  if (parsed.reboot !== undefined && parsed.reboot !== null) {
+    if (!isRecord(parsed.reboot) || typeof parsed.reboot.policy !== "string" || typeof parsed.reboot.decision !== "string") {
+      return null;
+    }
+    reboot = {
+      policy: parsed.reboot.policy,
+      decision: parsed.reboot.decision,
+      delaySeconds: typeof parsed.reboot.delay_seconds === "number" ? parsed.reboot.delay_seconds : null,
+    };
+  }
+
   return {
     status,
     installedKBs,
     failedKBs,
+    results,
+    reboot,
     rebootRequired: parsed.reboot_required,
     message: str(parsed.message) ?? "The agent did not provide a result message.",
   };

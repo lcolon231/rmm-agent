@@ -19,6 +19,7 @@ const (
 	RegistryOperationsCapabilityV1 = "registry-operations-v1"
 	PowerOperationsCapabilityV1    = "power-operations-v1"
 	EventLogQueryCapabilityV1      = "event-log-query-v1"
+	PatchRebootCapabilityV1        = "patch-reboot-v1"
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
@@ -37,5 +38,6 @@ func SupportedCapabilities() []string {
 		RegistryOperationsCapabilityV1,
 		PowerOperationsCapabilityV1,
 		EventLogQueryCapabilityV1,
+		PatchRebootCapabilityV1,
 	}
 }

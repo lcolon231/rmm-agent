@@ -205,10 +205,32 @@ test("parses successful and failed install results for structured rendering", ()
       status: "partial",
       installedKBs: ["KB5000001"],
       failedKBs: ["KB5000002"],
+      results: [],
+      reboot: null,
       rebootRequired: true,
       message: "Installed 1 update, 1 failed.",
     },
   );
   assert.equal(installUpdatesResultFromUnknown("not-json"), null);
   assert.equal(installUpdatesResultFromUnknown({ status: "failed", installed_kbs: [], failed_kbs: [] }), null);
+});
+
+test("parses per-update outcomes and the reboot decision (issue #53)", () => {
+  const result = installUpdatesResultFromUnknown(JSON.stringify({
+    status: "success",
+    installed_kbs: ["KB5000001"],
+    failed_kbs: [],
+    reboot_required: true,
+    results: [{ identifier: "KB5000001", result_code: 2, hresult: "0x00000000", attempts: 2 }],
+    reboot: { policy: "if_required", decision: "scheduled", delay_seconds: 300 },
+    message: "ok",
+  }));
+  assert.ok(result);
+  assert.equal(result.results[0].attempts, 2);
+  assert.equal(result.reboot?.decision, "scheduled");
+  assert.equal(result.reboot?.delaySeconds, 300);
+
+  // A malformed per-update row or reboot object fails the whole parse.
+  assert.equal(installUpdatesResultFromUnknown({ status: "success", installed_kbs: [], failed_kbs: [], reboot_required: false, results: [{ identifier: 5 }] }), null);
+  assert.equal(installUpdatesResultFromUnknown({ status: "success", installed_kbs: [], failed_kbs: [], reboot_required: false, reboot: { policy: "x" } }), null);
 });

@@ -98,6 +98,28 @@ function UpdateInstallResult({
           ) : <p>None reported.</p>}
         </section>
       </div>
+      {result.reboot ? (
+        <p className="windows-update-reboot-note">
+          Reboot policy <code>{result.reboot.policy}</code> →{" "}
+          <strong>{result.reboot.decision.replaceAll("_", " ")}</strong>
+          {result.reboot.decision === "scheduled" && result.reboot.delaySeconds !== null
+            ? ` in ${result.reboot.delaySeconds} seconds`
+            : result.reboot.decision === "deferred_user_present"
+              ? " — a user is signed in, so the reboot was held"
+              : ""}
+          .
+        </p>
+      ) : null}
+      {result.results.some((outcome) => outcome.attempts > 1) ? (
+        <p className="windows-update-reboot-note">
+          Some updates were retried:{" "}
+          {result.results
+            .filter((outcome) => outcome.attempts > 1)
+            .map((outcome) => `${outcome.identifier} (${outcome.attempts} attempts)`)
+            .join(", ")}
+          .
+        </p>
+      ) : null}
       <p className="windows-update-rescan-prompt">
         <RefreshCw aria-hidden="true" size={15} />
         Installation results do not refresh inventory automatically. Run a new scan to verify the endpoint&apos;s remaining updates.

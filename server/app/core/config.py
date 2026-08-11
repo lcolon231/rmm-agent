@@ -206,6 +206,13 @@ class Settings(BaseSettings):
     check_result_history_per_key: int = 100
     monitoring_max_maintenance_windows: int = 500
 
+    # --- Patch installation and reboot policy (issue #53) ---
+    # Defaults applied when a patch policy revision leaves them unset. Reboot
+    # stays fail-safe (never) at the policy level; these bound the values a
+    # policy may carry.
+    patch_install_default_max_attempts: int = 2
+    patch_reboot_default_delay_seconds: int = 300
+
     # --- Alert email delivery (issue #45) ---
     # "disabled" is the safe default. "resend" uses the HTTPS Email API;
     # credentials remain environment-only and are never persisted or returned.

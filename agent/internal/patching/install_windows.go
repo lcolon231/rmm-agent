@@ -36,6 +36,7 @@ $result = [ordered]@{
   status = 'success'
   installed_kbs = @()
   failed_kbs = @()
+  results = @()
   reboot_required = $false
   message = ''
 }
@@ -104,6 +105,8 @@ try {
     if ($u.KBArticleIDs.Count -gt 0) { $kbStr = 'KB' + $u.KBArticleIDs.Item(0) } else { $kbStr = $u.Identity.UpdateID }
     
     $uResult = $installRes.GetUpdateResult($i)
+    $hr = ('0x{0:X8}' -f ($uResult.HResult -band 0xFFFFFFFF))
+    $result.results += [ordered]@{ identifier = $kbStr; result_code = [int]$uResult.ResultCode; hresult = $hr }
     if ($uResult.ResultCode -eq 2) { # 2 = OperationResultCode.orcSucceeded
       $result.installed_kbs += $kbStr
     } else {
