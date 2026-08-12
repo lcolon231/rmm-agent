@@ -18,10 +18,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func waitForPIDFile(t *testing.T, path string) uint32 {
+const windowsProcessStartupTimeout = 30 * time.Second
+
+func waitForPIDFile(t *testing.T, path string, earlyResult <-chan Result) uint32 {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := time.NewTimer(windowsProcessStartupTimeout)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer deadline.Stop()
+	defer ticker.Stop()
+
+	for {
 		data, err := os.ReadFile(path)
 		if err == nil {
 			value, parseErr := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 32)
@@ -30,10 +36,23 @@ func waitForPIDFile(t *testing.T, path string) uint32 {
 			}
 			return uint32(value)
 		}
-		time.Sleep(50 * time.Millisecond)
+
+		select {
+		case result := <-earlyResult:
+			// Check once more in case the result and PID file became ready together.
+			if data, readErr := os.ReadFile(path); readErr == nil {
+				value, parseErr := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 32)
+				if parseErr != nil {
+					t.Fatalf("parse child PID %q: %v", data, parseErr)
+				}
+				return uint32(value)
+			}
+			t.Fatalf("command exited before child PID file was created: %+v", result)
+		case <-ticker.C:
+		case <-deadline.C:
+			t.Fatalf("child PID file %s was not created within %s", path, windowsProcessStartupTimeout)
+		}
 	}
-	t.Fatalf("child PID file %s was not created", path)
-	return 0
 }
 
 func assertProcessTerminated(t *testing.T, pid uint32) {
@@ -81,7 +100,7 @@ func TestWindowsJobObjectKillsDescendantsOnCancellation(t *testing.T) {
 		done <- RunContext(ctx, KindPowerShell, childScript(pidPath, true))
 	}()
 
-	pid := waitForPIDFile(t, pidPath)
+	pid := waitForPIDFile(t, pidPath, done)
 	cancel()
 	select {
 	case result := <-done:
@@ -104,6 +123,6 @@ func TestWindowsJobObjectKillsDeferredDescendantsOnParentExit(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("parent command failed: %+v", result)
 	}
-	pid := waitForPIDFile(t, pidPath)
+	pid := waitForPIDFile(t, pidPath, nil)
 	assertProcessTerminated(t, pid)
 }
