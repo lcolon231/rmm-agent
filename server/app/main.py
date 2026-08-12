@@ -94,6 +94,7 @@ app.include_router(management.router, prefix="/api/v1")
 app.include_router(script_library.router, prefix="/api/v1")
 app.include_router(scheduled_tasks.router, prefix="/api/v1")
 app.include_router(shell_sessions.router, prefix="/api/v1")
+app.include_router(shell_sessions.agent_router, prefix="/api/v1")
 
 
 

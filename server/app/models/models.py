@@ -545,7 +545,7 @@ class Agent(Base):
         JSON, default=list, nullable=False
     )
     # Optional feature capabilities this agent most recently advertised (issue
-    # #61), e.g. "shell-session-v1". NULL/empty means the agent predates or does
+    # #61), e.g. "shell-session-v2". NULL/empty means the agent predates or does
     # not support the capability, so features that require it fail closed as
     # "unsupported" rather than being offered.
     supported_capabilities: Mapped[list[str] | None] = mapped_column(JSON)
@@ -696,10 +696,9 @@ class Command(Base):
 class ShellSession(Base):
     """An authorized, bounded, audited interactive shell session (issue #61).
 
-    Phase 1 persists only the session lifecycle and its bounds/evidence — never
-    the streamed input or output bytes, which are sensitive exactly like
-    ``Command.stdout``/``stderr`` and are relayed through a bounded in-memory
-    channel in a later phase. The row is the durable record an operator and the
+    This row persists lifecycle and bounds/evidence — never streamed input or
+    output bytes, which are sensitive exactly like ``Command.stdout``/``stderr``
+    and use a bounded in-memory relay. It is the durable record an operator and the
     audit log point at: who opened it, against which agent, under what limits,
     and how it ended.
     """
@@ -729,7 +728,7 @@ class ShellSession(Base):
         index=True,
     )
     # The negotiated agent capability that authorized this session, e.g.
-    # "shell-session-v1"; recorded so a later protocol revision stays auditable.
+    # "shell-session-v2"; recorded so a later protocol revision stays auditable.
     capability_version: Mapped[str | None] = mapped_column(String(64))
     close_reason: Mapped[str | None] = mapped_column(String(64))
 

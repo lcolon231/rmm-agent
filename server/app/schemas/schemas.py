@@ -182,7 +182,7 @@ class CommandEnvelopeCapabilities(BaseModel):
         default_factory=list, max_length=8
     )
     # Optional feature capabilities the agent advertises (issue #61), e.g.
-    # "shell-session-v1". Absent means the agent supports none, so features that
+    # "shell-session-v2". Absent means the agent supports none, so features that
     # require one fail closed as "unsupported".
     supported_capabilities: list[CapabilityName] = Field(
         default_factory=list, max_length=16
@@ -1411,6 +1411,7 @@ class EndpointDetailOut(BaseModel):
     os_version: str
     agent_version: str
     command_envelope_versions: list[EnvelopeVersion]
+    supported_capabilities: list[CapabilityName] = Field(default_factory=list)
     status: AgentStatus
     trust_state: AgentTrustState
     last_seen_at: datetime | None

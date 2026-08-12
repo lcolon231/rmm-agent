@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.core import audit, metrics, monitoring
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.shell_relay import registry as shell_relay_registry
 from app.models.models import (
     Agent,
     AgentStatus,
@@ -118,6 +119,7 @@ async def _shell_session_sweep_once() -> None:
                     "frames_out": session_row.frames_out,
                 },
             )
+            await shell_relay_registry.close(session_row.id)
         await db.commit()
 
 

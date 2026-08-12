@@ -27,6 +27,12 @@ func buildCommand(kind, script string) *exec.Cmd {
 	}
 }
 
+func interactiveCommand() *exec.Cmd {
+	return exec.Command("powershell.exe",
+		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+		"-Command", "-")
+}
+
 var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
 
 // runCommand starts the command suspended, assigns it to a kill-on-close Job

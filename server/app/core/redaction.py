@@ -151,6 +151,7 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "idle_deadline",
     ),
     "shell_session.viewed": _schema("session_id", "status"),
+    "shell_session.activated": _schema("session_id", "capability_version"),
     "shell_session.denied": _schema(
         "session_id",
         "reason",
@@ -169,6 +170,14 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "session_id",
         "reason",
         "output_bytes_total",
+        "frames_in",
+        "frames_out",
+    ),
+    "shell_session.failed": _schema(
+        "session_id",
+        "reason",
+        "output_bytes_total",
+        "output_bytes_limit",
         "frames_in",
         "frames_out",
     ),

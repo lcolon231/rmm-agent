@@ -1,33 +1,30 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Operator-facing interactive shell session lifecycle (issue #61), Phase 1.
-
-This module lands the authorized, audited, bounded session *contract*: open,
-status, and close, with fail-closed authorization, an agent-capability gate, and
-single-active-session admission. The live streaming frame relay (input/output
-long-poll and the agent attach path) is a later phase; until an agent advertises
-the capability and attaches, a session stays ``pending`` and the operator sees a
-clearly bounded, non-streaming state.
-
-Authorization mirrors command dispatch: an interactive shell is at least as
-privileged as running an arbitrary script, so it requires the same explicit
-script-execution scope on the operator, a trusted agent, and the advertised
-capability. Nothing here ever stores or logs streamed I/O bytes.
-"""
+"""Authenticated, bounded interactive shell transport (issue #61)."""
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_role
+from app.api.deps import get_current_agent, require_role
 from app.core import audit
 from app.core.clientip import client_ip
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.script_authorization import authorize_command
+from app.core.shell_relay import (
+    Backpressure,
+    CursorExpired,
+    RelayClosed,
+    RelayFrame,
+    SequenceConflict,
+    registry,
+)
 from app.models.models import (
     Agent,
     AgentTrustState,
@@ -38,22 +35,33 @@ from app.models.models import (
     ShellSessionStatus,
 )
 from app.schemas.shell_sessions import (
+    ShellAgentAttachOut,
+    ShellAgentComplete,
+    ShellFrameBatch,
+    ShellFrameIn,
+    ShellFrameOut,
     ShellSessionClose,
     ShellSessionOpen,
     ShellSessionOut,
 )
 
-# The agent capability that authorizes a session. An agent that does not
-# advertise this fails closed as "unsupported" rather than being offered a shell.
-SHELL_SESSION_CAPABILITY = "shell-session-v1"
+# v1 was lifecycle advertisement only. v2 means the agent implements attach,
+# framed I/O, acknowledgements, reconnect, and bounded output.
+SHELL_SESSION_CAPABILITY = "shell-session-v2"
 
 router = APIRouter(
     tags=["shell-sessions"],
     dependencies=[Depends(require_role(OperatorRole.readonly))],
 )
+agent_router = APIRouter(tags=["agent-shell-sessions"])
 
-# The non-terminal states that hold the single-active-session admission slot.
 _LIVE_STATES = (ShellSessionStatus.pending, ShellSessionStatus.active)
+_TERMINAL_STATES = (
+    ShellSessionStatus.closed,
+    ShellSessionStatus.timed_out,
+    ShellSessionStatus.denied,
+    ShellSessionStatus.failed,
+)
 
 
 def _now() -> datetime:
@@ -69,6 +77,57 @@ def _request_evidence(request: Request, operator: Operator) -> dict[str, Any]:
     }
 
 
+def _agent_evidence(request: Request, agent: Agent) -> dict[str, Any]:
+    return {
+        "actor": f"agent:{agent.id}",
+        "source_ip": client_ip(request),
+        "user_agent": request.headers.get("user-agent", "")[:500] or None,
+    }
+
+
+def _decode_frame(body: ShellFrameIn, allowed_streams: set[str]) -> RelayFrame:
+    if body.stream not in allowed_streams:
+        raise HTTPException(422, detail={"code": "shell_stream_invalid"})
+    try:
+        decoded = base64.b64decode(body.data_b64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(422, detail={"code": "shell_frame_base64_invalid"})
+    if not decoded and not body.eof and body.stream != "control":
+        raise HTTPException(422, detail={"code": "shell_frame_empty"})
+    if len(decoded) > settings.shell_session_max_frame_bytes:
+        raise HTTPException(413, detail={"code": "shell_frame_too_large"})
+    return RelayFrame(
+        seq=body.seq,
+        stream=body.stream,
+        data_b64=body.data_b64,
+        eof=body.eof,
+        byte_length=len(decoded),
+    )
+
+
+def _frames_out(frames: list[RelayFrame]) -> list[ShellFrameOut]:
+    return [
+        ShellFrameOut(
+            seq=frame.seq,
+            stream=frame.stream,
+            data_b64=frame.data_b64,
+            eof=frame.eof,
+            byte_length=frame.byte_length,
+        )
+        for frame in frames
+    ]
+
+
+def _touch(row: ShellSession) -> None:
+    now = _now()
+    row.last_activity_at = now
+    idle = now + timedelta(seconds=settings.shell_session_idle_timeout_seconds)
+    absolute = row.absolute_deadline
+    if absolute is not None and absolute.tzinfo is None:
+        absolute = absolute.replace(tzinfo=timezone.utc)
+    row.idle_deadline = min(idle, absolute) if absolute else idle
+
+
 async def _record_denied(
     db: AsyncSession,
     agent: Agent,
@@ -77,8 +136,6 @@ async def _record_denied(
     policy: str,
     evidence: dict[str, Any],
 ) -> None:
-    """Audit a fail-closed open refusal, then commit so the record survives the
-    HTTPException rollback. No session row is created on denial."""
     await audit.record(
         db,
         action="shell_session.denied",
@@ -94,6 +151,53 @@ async def _record_denied(
     await db.commit()
 
 
+async def _get_session(db: AsyncSession, agent_id: str, session_id: str) -> ShellSession:
+    row = (
+        await db.execute(
+            select(ShellSession).where(
+                ShellSession.id == session_id,
+                ShellSession.agent_id == agent_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, detail="Shell session not found")
+    return row
+
+
+def _require_owner(row: ShellSession, operator: Operator) -> None:
+    # Return 404 so a second operator cannot use this endpoint as a session-ID
+    # oracle. Admins can inspect lifecycle evidence through the audit log.
+    if row.operator_id != operator.id:
+        raise HTTPException(404, detail="Shell session not found")
+
+
+def _require_live(row: ShellSession) -> None:
+    if row.status not in _LIVE_STATES:
+        raise HTTPException(409, detail={"code": "shell_session_not_live"})
+
+
+async def _relay_for(row: ShellSession):
+    relay = await registry.get(row.id)
+    if relay is None:
+        raise HTTPException(409, detail={"code": "shell_relay_unavailable"})
+    return relay
+
+
+def _relay_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, Backpressure):
+        return HTTPException(
+            429,
+            detail={"code": exc.code},
+            headers={"Retry-After": "1"},
+        )
+    if isinstance(exc, CursorExpired):
+        return HTTPException(409, detail={"code": exc.code})
+    if isinstance(exc, (SequenceConflict, RelayClosed)):
+        return HTTPException(409, detail={"code": exc.code})
+    raise exc
+
+
 @router.post(
     "/agents/{agent_id}/shell-sessions",
     response_model=ShellSessionOut,
@@ -106,73 +210,51 @@ async def open_shell_session(
     operator: Operator = Depends(require_role(OperatorRole.operator)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Open a bounded, authorized shell session against an agent.
-
-    Fail-closed order: authorize (arbitrary-script scope), require a trusted
-    agent, require the advertised capability, then admit at most one live
-    session per agent. Every refusal is audited before the error is raised.
-    """
     agent = await db.get(Agent, agent_id)
     if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-
+        raise HTTPException(404, detail="Agent not found")
     evidence = _request_evidence(request, operator)
-
-    # A shell session is at least as powerful as running an arbitrary script, so
-    # it requires the same explicit script-execution authorization.
-    decision = authorize_command(operator, agent, CommandKind.powershell)
-    if not decision.allowed:
+    authorization = authorize_command(operator, agent, CommandKind.powershell)
+    if not authorization.allowed:
         await _record_denied(
-            db, agent, reason=decision.reason, policy=decision.policy, evidence=evidence
+            db,
+            agent,
+            reason="shell_session_not_authorized",
+            policy=authorization.policy,
+            evidence=evidence,
         )
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "shell_session_not_authorized"},
-        )
-
-    # Trust gate: never open a live channel to an agent we no longer fully trust.
+        raise HTTPException(403, detail={"code": "shell_session_not_authorized"})
     if agent.trust_state != AgentTrustState.active:
         await _record_denied(
-            db, agent, reason="agent_not_trusted", policy="trust_gate", evidence=evidence
+            db, agent, reason="agent_not_trusted", policy="trust_state", evidence=evidence
         )
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "agent_not_trusted",
-                "trust_state": agent.trust_state.value,
-            },
-        )
-
-    # Capability gate: the agent must advertise interactive-shell support.
-    capabilities = agent.supported_capabilities or []
-    if SHELL_SESSION_CAPABILITY not in capabilities:
+        raise HTTPException(409, detail={"code": "agent_not_trusted"})
+    if SHELL_SESSION_CAPABILITY not in (agent.supported_capabilities or []):
         await _record_denied(
             db,
             agent,
             reason="shell_session_unsupported",
-            policy="capability_gate",
+            policy="capability",
             evidence=evidence,
         )
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "shell_session_unsupported",
-                "required_capability": SHELL_SESSION_CAPABILITY,
-            },
-        )
-
-    # Admission: at most one live (pending or active) session per agent.
-    live = (
+        raise HTTPException(409, detail={"code": "shell_session_unsupported"})
+    live_rows = (
         await db.execute(
-            select(func.count())
-            .select_from(ShellSession)
+            select(ShellSession)
             .where(
                 ShellSession.agent_id == agent_id,
                 ShellSession.status.in_(_LIVE_STATES),
             )
+            .order_by(ShellSession.created_at)
+            .limit(settings.shell_session_max_concurrent_per_agent)
         )
-    ).scalar_one()
-    if live >= settings.shell_session_max_concurrent_per_agent:
+    ).scalars().all()
+    # A repeated open by the owner is an idempotent reconnect. This covers a
+    # lost create response and lets the dashboard recover its live session
+    # after a browser transport interruption without creating a second shell.
+    if live_rows and live_rows[0].operator_id == operator.id:
+        return live_rows[0]
+    if len(live_rows) >= settings.shell_session_max_concurrent_per_agent:
         await _record_denied(
             db,
             agent,
@@ -180,13 +262,10 @@ async def open_shell_session(
             policy="admission",
             evidence=evidence,
         )
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "shell_session_already_active"},
-        )
+        raise HTTPException(409, detail={"code": "shell_session_already_active"})
 
     now = _now()
-    session_row = ShellSession(
+    row = ShellSession(
         agent_id=agent_id,
         operator_id=operator.id,
         actor_email=operator.email,
@@ -194,51 +273,35 @@ async def open_shell_session(
         capability_version=SHELL_SESSION_CAPABILITY,
         created_at=now,
         last_activity_at=now,
-        absolute_deadline=now
-        + timedelta(seconds=settings.shell_session_max_lifetime_seconds),
-        idle_deadline=now
-        + timedelta(seconds=settings.shell_session_idle_timeout_seconds),
+        absolute_deadline=now + timedelta(seconds=settings.shell_session_max_lifetime_seconds),
+        idle_deadline=now + timedelta(seconds=settings.shell_session_idle_timeout_seconds),
         output_bytes_limit=settings.shell_session_output_byte_limit,
     )
-    db.add(session_row)
+    db.add(row)
     await db.flush()
-
+    await registry.create(
+        row.id,
+        max_input_bytes=settings.shell_session_input_buffer_bytes,
+        max_output_bytes=settings.shell_session_relay_buffer_bytes,
+        max_frames=settings.shell_session_relay_max_frames,
+    )
     await audit.record(
         db,
         action="shell_session.opened",
         agent_id=agent.id,
         detail={
-            "session_id": session_row.id,
-            "capability_version": session_row.capability_version,
-            "output_bytes_limit": session_row.output_bytes_limit,
-            "absolute_deadline": session_row.absolute_deadline.isoformat(),
-            "idle_deadline": session_row.idle_deadline.isoformat(),
+            "session_id": row.id,
+            "capability_version": row.capability_version,
+            "output_bytes_limit": row.output_bytes_limit,
+            "absolute_deadline": row.absolute_deadline.isoformat(),
+            "idle_deadline": row.idle_deadline.isoformat(),
         },
         **evidence,
     )
-    return session_row
+    return row
 
 
-async def _get_session(
-    db: AsyncSession, agent_id: str, session_id: str
-) -> ShellSession:
-    session_row = (
-        await db.execute(
-            select(ShellSession).where(
-                ShellSession.id == session_id,
-                ShellSession.agent_id == agent_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if session_row is None:
-        raise HTTPException(status_code=404, detail="Shell session not found")
-    return session_row
-
-
-@router.get(
-    "/agents/{agent_id}/shell-sessions/{session_id}",
-    response_model=ShellSessionOut,
-)
+@router.get("/agents/{agent_id}/shell-sessions/{session_id}", response_model=ShellSessionOut)
 async def get_shell_session(
     agent_id: str,
     session_id: str,
@@ -246,22 +309,73 @@ async def get_shell_session(
     operator: Operator = Depends(require_role(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Read a session's lifecycle state. The read itself is audited."""
-    session_row = await _get_session(db, agent_id, session_id)
+    row = await _get_session(db, agent_id, session_id)
+    _require_owner(row, operator)
     await audit.record(
         db,
         action="shell_session.viewed",
         agent_id=agent_id,
-        detail={"session_id": session_row.id, "status": session_row.status.value},
+        detail={"session_id": row.id, "status": row.status.value},
         **_request_evidence(request, operator),
     )
-    return session_row
+    return row
 
 
-@router.post(
-    "/agents/{agent_id}/shell-sessions/{session_id}/close",
-    response_model=ShellSessionOut,
+@router.post("/agents/{agent_id}/shell-sessions/{session_id}/input", response_model=ShellSessionOut)
+async def send_shell_input(
+    agent_id: str,
+    session_id: str,
+    body: ShellFrameIn,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await _get_session(db, agent_id, session_id)
+    _require_owner(row, operator)
+    _require_live(row)
+    frame = _decode_frame(body, {"input", "control"})
+    relay = await _relay_for(row)
+    try:
+        accepted = await relay.append("input", frame)
+    except Exception as exc:
+        raise _relay_http_error(exc)
+    if accepted:
+        row.client_last_seq = frame.seq
+        row.frames_in += 1
+        _touch(row)
+    return row
+
+
+@router.get(
+    "/agents/{agent_id}/shell-sessions/{session_id}/output",
+    response_model=ShellFrameBatch,
 )
+async def read_shell_output(
+    agent_id: str,
+    session_id: str,
+    after: int = Query(0, ge=0),
+    ack: int = Query(0, ge=0),
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await _get_session(db, agent_id, session_id)
+    _require_owner(row, operator)
+    if row.status in _TERMINAL_STATES:
+        return ShellFrameBatch(session=row, frames=[])
+    relay = await _relay_for(row)
+    try:
+        frames = await relay.read(
+            "output",
+            after=after,
+            ack=ack,
+            limit=64,
+            timeout=settings.shell_session_poll_timeout_seconds,
+        )
+    except Exception as exc:
+        raise _relay_http_error(exc)
+    return ShellFrameBatch(session=row, frames=_frames_out(frames))
+
+
+@router.post("/agents/{agent_id}/shell-sessions/{session_id}/close", response_model=ShellSessionOut)
 async def close_shell_session(
     agent_id: str,
     session_id: str,
@@ -270,32 +384,219 @@ async def close_shell_session(
     operator: Operator = Depends(require_role(OperatorRole.operator)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Close a session. Idempotent: closing an already-terminal session returns
-    its current state without re-auditing."""
-    session_row = await _get_session(db, agent_id, session_id)
-    if session_row.status in (
-        ShellSessionStatus.closed,
-        ShellSessionStatus.timed_out,
-        ShellSessionStatus.denied,
-        ShellSessionStatus.failed,
-    ):
-        return session_row
-
-    session_row.status = ShellSessionStatus.closed
-    session_row.close_reason = (body.reason or "operator_closed")[:64]
-    session_row.closed_at = _now()
+    row = await _get_session(db, agent_id, session_id)
+    _require_owner(row, operator)
+    if row.status in _TERMINAL_STATES:
+        return row
+    row.status = ShellSessionStatus.closed
+    row.close_reason = (body.reason or "operator_closed")[:64]
+    row.closed_at = _now()
+    await registry.close(row.id)
     await audit.record(
         db,
         action="shell_session.closed",
         agent_id=agent_id,
         detail={
-            "session_id": session_row.id,
-            "status": session_row.status.value,
-            "reason": session_row.close_reason,
-            "output_bytes_total": session_row.output_bytes_total,
-            "frames_in": session_row.frames_in,
-            "frames_out": session_row.frames_out,
+            "session_id": row.id,
+            "status": row.status.value,
+            "reason": row.close_reason,
+            "output_bytes_total": row.output_bytes_total,
+            "frames_in": row.frames_in,
+            "frames_out": row.frames_out,
         },
         **_request_evidence(request, operator),
     )
-    return session_row
+    return row
+
+
+@agent_router.post("/agents/me/shell-sessions/attach", response_model=ShellAgentAttachOut)
+async def attach_shell_session(
+    request: Request,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    row = (
+        await db.execute(
+            select(ShellSession)
+            .where(ShellSession.agent_id == agent.id, ShellSession.status.in_(_LIVE_STATES))
+            .order_by(ShellSession.created_at)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return ShellAgentAttachOut(session=None)
+    if agent.trust_state != AgentTrustState.active:
+        return ShellAgentAttachOut(session=None)
+    relay = await registry.get(row.id)
+    if row.status == ShellSessionStatus.active and relay is None:
+        row.status = ShellSessionStatus.failed
+        row.close_reason = "relay_unavailable"
+        row.closed_at = _now()
+        await audit.record(
+            db,
+            action="shell_session.failed",
+            agent_id=agent.id,
+            detail={
+                "session_id": row.id,
+                "reason": row.close_reason,
+                "output_bytes_total": row.output_bytes_total,
+                "output_bytes_limit": row.output_bytes_limit,
+                "frames_in": row.frames_in,
+                "frames_out": row.frames_out,
+            },
+            **_agent_evidence(request, agent),
+        )
+        return ShellAgentAttachOut(session=None)
+    if relay is None:
+        relay = await registry.create(
+            row.id,
+            input_seq=row.client_last_seq,
+            output_seq=row.agent_last_seq,
+            max_input_bytes=settings.shell_session_input_buffer_bytes,
+            max_output_bytes=settings.shell_session_relay_buffer_bytes,
+            max_frames=settings.shell_session_relay_max_frames,
+        )
+    if row.status == ShellSessionStatus.pending:
+        row.status = ShellSessionStatus.active
+        row.activated_at = _now()
+        _touch(row)
+        await audit.record(
+            db,
+            action="shell_session.activated",
+            agent_id=agent.id,
+            detail={"session_id": row.id, "capability_version": row.capability_version},
+            **_agent_evidence(request, agent),
+        )
+    return ShellAgentAttachOut(session=row)
+
+
+async def _get_agent_session(db: AsyncSession, agent: Agent, session_id: str) -> ShellSession:
+    if agent.trust_state != AgentTrustState.active:
+        raise HTTPException(409, detail={"code": "agent_not_trusted"})
+    row = await _get_session(db, agent.id, session_id)
+    _require_live(row)
+    return row
+
+
+@agent_router.get(
+    "/agents/me/shell-sessions/{session_id}/input",
+    response_model=ShellFrameBatch,
+)
+async def read_shell_input(
+    session_id: str,
+    after: int = Query(0, ge=0),
+    ack: int = Query(0, ge=0),
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await _get_agent_session(db, agent, session_id)
+    relay = await _relay_for(row)
+    try:
+        frames = await relay.read(
+            "input",
+            after=after,
+            ack=ack,
+            limit=64,
+            timeout=settings.shell_session_poll_timeout_seconds,
+        )
+    except Exception as exc:
+        raise _relay_http_error(exc)
+    return ShellFrameBatch(session=row, frames=_frames_out(frames))
+
+
+@agent_router.post(
+    "/agents/me/shell-sessions/{session_id}/output",
+    response_model=ShellSessionOut,
+)
+async def send_shell_output(
+    session_id: str,
+    body: ShellFrameIn,
+    request: Request,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await _get_agent_session(db, agent, session_id)
+    frame = _decode_frame(body, {"stdout", "stderr", "control"})
+    limit = row.output_bytes_limit or settings.shell_session_output_byte_limit
+    if frame.seq > row.agent_last_seq and row.output_bytes_total + frame.byte_length > limit:
+        row.status = ShellSessionStatus.failed
+        row.close_reason = "output_limit"
+        row.closed_at = _now()
+        await registry.close(row.id)
+        await audit.record(
+            db,
+            action="shell_session.failed",
+            agent_id=agent.id,
+            detail={
+                "session_id": row.id,
+                "reason": row.close_reason,
+                "output_bytes_total": row.output_bytes_total,
+                "output_bytes_limit": limit,
+                "frames_in": row.frames_in,
+                "frames_out": row.frames_out,
+            },
+            **_agent_evidence(request, agent),
+        )
+        await db.commit()
+        raise HTTPException(413, detail={"code": "shell_output_limit"})
+    relay = await _relay_for(row)
+    try:
+        accepted = await relay.append("output", frame)
+    except Exception as exc:
+        raise _relay_http_error(exc)
+    if accepted:
+        row.agent_last_seq = frame.seq
+        row.frames_out += 1
+        row.output_bytes_total += frame.byte_length
+        _touch(row)
+    return row
+
+
+@agent_router.post(
+    "/agents/me/shell-sessions/{session_id}/complete",
+    response_model=ShellSessionOut,
+)
+async def complete_shell_session(
+    session_id: str,
+    body: ShellAgentComplete,
+    request: Request,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await _get_session(db, agent.id, session_id)
+    if row.status in _TERMINAL_STATES:
+        return row
+    row.status = (
+        ShellSessionStatus.failed if body.status == "failed" else ShellSessionStatus.closed
+    )
+    row.close_reason = (body.reason or "agent_completed")[:64]
+    row.closed_at = _now()
+    await registry.close(row.id)
+    detail = {
+        "session_id": row.id,
+        "reason": row.close_reason,
+        "output_bytes_total": row.output_bytes_total,
+        "frames_in": row.frames_in,
+        "frames_out": row.frames_out,
+    }
+    if row.status == ShellSessionStatus.failed:
+        detail["output_bytes_limit"] = row.output_bytes_limit
+    else:
+        detail["status"] = row.status.value
+    if row.status == ShellSessionStatus.failed:
+        await audit.record(
+            db,
+            action="shell_session.failed",
+            agent_id=agent.id,
+            detail=detail,
+            **_agent_evidence(request, agent),
+        )
+    else:
+        await audit.record(
+            db,
+            action="shell_session.closed",
+            agent_id=agent.id,
+            detail=detail,
+            **_agent_evidence(request, agent),
+        )
+    return row

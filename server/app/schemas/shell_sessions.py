@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Pydantic schemas for interactive shell sessions (issue #61).
-
-Phase 1 exposes the session lifecycle only. No streamed input/output bytes are
-carried by these schemas; the live frame relay is a later phase.
-"""
+"""Validated interactive-shell lifecycle and frame contracts (issue #61)."""
 from __future__ import annotations
 
 from datetime import datetime
+
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,3 +40,30 @@ class ShellSessionOut(BaseModel):
     output_bytes_total: int
     frames_in: int
     frames_out: int
+    client_last_seq: int
+    agent_last_seq: int
+
+
+class ShellFrameIn(BaseModel):
+    seq: int = Field(ge=1)
+    stream: Literal["input", "stdout", "stderr", "control"]
+    data_b64: str = Field(default="", max_length=24_000)
+    eof: bool = False
+
+
+class ShellFrameOut(ShellFrameIn):
+    byte_length: int = Field(ge=0)
+
+
+class ShellFrameBatch(BaseModel):
+    session: ShellSessionOut
+    frames: list[ShellFrameOut] = Field(default_factory=list, max_length=64)
+
+
+class ShellAgentAttachOut(BaseModel):
+    session: ShellSessionOut | None
+
+
+class ShellAgentComplete(BaseModel):
+    status: Literal["closed", "failed"] = "closed"
+    reason: str | None = Field(None, max_length=64)

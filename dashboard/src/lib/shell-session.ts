@@ -4,7 +4,9 @@ import "server-only";
 
 import { nodelinkApiRequest } from "@/lib/nodelink-api";
 import {
+  type ShellFrameBatchData,
   type ShellSessionData,
+  shellFrameBatchFromUnknown,
   shellSessionFromUnknown,
 } from "@/lib/shell-session-core";
 
@@ -61,4 +63,38 @@ export async function closeShellSession(
     },
   );
   return parse(raw);
+}
+
+export async function sendShellInput(
+  sessionToken: string,
+  endpointId: string,
+  sessionId: string,
+  frame: { seq: number; data_b64: string; eof?: boolean },
+): Promise<ShellSessionData> {
+  const raw = await nodelinkApiRequest<unknown>(
+    `/api/v1/agents/${encodeURIComponent(endpointId)}/shell-sessions/${encodeURIComponent(sessionId)}/input`,
+    {
+      body: JSON.stringify({ ...frame, stream: "input" }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+      sessionToken,
+    },
+  );
+  return parse(raw);
+}
+
+export async function readShellOutput(
+  sessionToken: string,
+  endpointId: string,
+  sessionId: string,
+  after: number,
+  ack: number,
+): Promise<ShellFrameBatchData> {
+  const raw = await nodelinkApiRequest<unknown>(
+    `/api/v1/agents/${encodeURIComponent(endpointId)}/shell-sessions/${encodeURIComponent(sessionId)}/output?after=${after}&ack=${ack}`,
+    { method: "GET", sessionToken },
+  );
+  const parsed = shellFrameBatchFromUnknown(raw);
+  if (parsed === null) throw new ShellSessionShapeError("Unexpected shell frame response shape.");
+  return parsed;
 }

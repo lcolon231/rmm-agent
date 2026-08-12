@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/inventory"
@@ -44,6 +45,7 @@ func IsUnauthorized(err error) bool {
 
 // Client talks to the RMM server API.
 type Client struct {
+	mu         sync.RWMutex
 	baseURL    string
 	agentToken string
 	// agentVersion is the running build's version, reported on every
@@ -213,26 +215,94 @@ func (c *Client) EnrollWithName(ctx context.Context, token, agentName string, ho
 // SetToken switches the bearer credential used for authenticated requests. The
 // client is driven by the single check-in goroutine, so this needs no locking.
 // Used after a successful credential renewal to adopt the rotated token.
-func (c *Client) SetToken(token string) { c.agentToken = token }
+func (c *Client) SetToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.agentToken = token
+}
 
 // SetAgentVersion records the running build's version so every subsequent
 // heartbeat reports it. Called once when the check-in session is built; like
 // SetToken it needs no locking because a single goroutine drives the client.
-func (c *Client) SetAgentVersion(agentVersion string) { c.agentVersion = agentVersion }
+func (c *Client) SetAgentVersion(agentVersion string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.agentVersion = agentVersion
+}
 
 // SetCapabilities overrides the advertised optional-feature set for enroll and
 // heartbeat. The runtime uses this to include config-gated capabilities such as
 // the opt-in Chocolatey provider. Like SetToken it needs no locking because a
 // single goroutine drives the client.
-func (c *Client) SetCapabilities(capabilities []string) { c.capabilities = capabilities }
+func (c *Client) SetCapabilities(capabilities []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.capabilities = append([]string(nil), capabilities...)
+}
 
 // advertisedCapabilities returns the configured capability set, or the default
 // set when SetCapabilities was never called (e.g. a bare client in a test).
 func (c *Client) advertisedCapabilities() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.capabilities != nil {
-		return c.capabilities
+		return append([]string(nil), c.capabilities...)
 	}
 	return protocol.SupportedCapabilities()
+}
+
+// ShellSession is the payload shared by the lifecycle and framed-I/O APIs.
+type ShellSession struct {
+	ID               string `json:"id"`
+	AgentID          string `json:"agent_id"`
+	Status           string `json:"status"`
+	CloseReason      string `json:"close_reason"`
+	ClientLastSeq    int64  `json:"client_last_seq,omitempty"`
+	AgentLastSeq     int64  `json:"agent_last_seq,omitempty"`
+	OutputBytesLimit int64  `json:"output_bytes_limit"`
+}
+
+type ShellFrame struct {
+	Seq        int64  `json:"seq"`
+	Stream     string `json:"stream"`
+	DataBase64 string `json:"data_b64"`
+	EOF        bool   `json:"eof"`
+	ByteLength int    `json:"byte_length,omitempty"`
+}
+
+type ShellFrameBatch struct {
+	Session ShellSession `json:"session"`
+	Frames  []ShellFrame `json:"frames"`
+}
+
+func (c *Client) AttachShellSession(ctx context.Context) (*ShellSession, error) {
+	var out struct {
+		Session *ShellSession `json:"session"`
+	}
+	if err := c.do(ctx, "POST", "/api/v1/agents/me/shell-sessions/attach", map[string]any{}, &out, true); err != nil {
+		return nil, err
+	}
+	return out.Session, nil
+}
+
+func (c *Client) PollShellInput(ctx context.Context, sessionID string, after, ack int64) (*ShellFrameBatch, error) {
+	path := fmt.Sprintf("/api/v1/agents/me/shell-sessions/%s/input?after=%d&ack=%d", url.PathEscape(sessionID), after, ack)
+	var out ShellFrameBatch
+	if err := c.do(ctx, "GET", path, nil, &out, true); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) SendShellOutput(ctx context.Context, sessionID string, frame ShellFrame) error {
+	path := fmt.Sprintf("/api/v1/agents/me/shell-sessions/%s/output", url.PathEscape(sessionID))
+	return c.do(ctx, "POST", path, frame, nil, true)
+}
+
+func (c *Client) CompleteShellSession(ctx context.Context, sessionID, state, reason string) error {
+	path := fmt.Sprintf("/api/v1/agents/me/shell-sessions/%s/complete", url.PathEscape(sessionID))
+	body := map[string]any{"status": state, "reason": reason}
+	return c.do(ctx, "POST", path, body, nil, true)
 }
 
 // AgentCredentialRenewResponse mirrors the server schema (issue #125).
@@ -341,8 +411,11 @@ func (c *Client) HeartbeatWithPendingResults(
 	// rather than waiting for a re-enrollment or an inventory change. The
 	// server rejects an empty value, so an unset version is omitted instead of
 	// sent blank — that only happens in tests that build a bare client.
-	if c.agentVersion != "" {
-		body["agent_version"] = c.agentVersion
+	c.mu.RLock()
+	agentVersion := c.agentVersion
+	c.mu.RUnlock()
+	if agentVersion != "" {
+		body["agent_version"] = agentVersion
 	}
 	// Only digests ride on the beat. Full snapshots go to SubmitInventory when
 	// the server asks, so heartbeat size stays independent of how much hardware
@@ -423,10 +496,13 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, auth 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if auth {
-		if c.agentToken == "" {
+		c.mu.RLock()
+		token := c.agentToken
+		c.mu.RUnlock()
+		if token == "" {
 			return fmt.Errorf("auth required but agent token is empty")
 		}
-		req.Header.Set("Authorization", "Bearer "+c.agentToken)
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.http.Do(req)

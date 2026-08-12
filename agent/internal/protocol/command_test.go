@@ -7,15 +7,18 @@ func TestSupportedCapabilitiesAdvertisesShellSession(t *testing.T) {
 	caps := SupportedCapabilities()
 	found := false
 	for _, c := range caps {
-		if c == ShellSessionCapabilityV1 {
+		if c == ShellSessionCapabilityV2 {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("SupportedCapabilities() = %v, want it to include %q", caps, ShellSessionCapabilityV1)
+		t.Fatalf("SupportedCapabilities() = %v, want it to include %q", caps, ShellSessionCapabilityV2)
 	}
 	if ShellSessionCapabilityV1 != "shell-session-v1" {
 		t.Fatalf("capability name drift: %q", ShellSessionCapabilityV1)
+	}
+	if ShellSessionCapabilityV2 != "shell-session-v2" {
+		t.Fatalf("capability name drift: %q", ShellSessionCapabilityV2)
 	}
 }
 

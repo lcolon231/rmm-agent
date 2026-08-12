@@ -281,8 +281,8 @@ func TestEnrollAdvertisesShellSessionCapability(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if !bodyHasCapability(body, protocol.ShellSessionCapabilityV1) {
-			t.Fatalf("enroll body must advertise %q; got %v", protocol.ShellSessionCapabilityV1, body["supported_capabilities"])
+		if !bodyHasCapability(body, protocol.ShellSessionCapabilityV2) {
+			t.Fatalf("enroll body must advertise %q; got %v", protocol.ShellSessionCapabilityV2, body["supported_capabilities"])
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -307,8 +307,8 @@ func TestHeartbeatAdvertisesShellSessionCapability(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if !bodyHasCapability(body, protocol.ShellSessionCapabilityV1) {
-			t.Fatalf("heartbeat body must advertise %q; got %v", protocol.ShellSessionCapabilityV1, body["supported_capabilities"])
+		if !bodyHasCapability(body, protocol.ShellSessionCapabilityV2) {
+			t.Fatalf("heartbeat body must advertise %q; got %v", protocol.ShellSessionCapabilityV2, body["supported_capabilities"])
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"pending_commands":[],"command_public_keys":{},"trust_state":"active"}`))

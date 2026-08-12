@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
-// Pure, framework-free logic for interactive shell sessions (issue #61),
-// Phase 1. Covers the documented states and the allowlisting of the server's
-// session record. No streaming/terminal logic lives here yet — that arrives
-// with the live frame relay in a later phase.
+// Pure, framework-free validation for interactive shell lifecycle and frames.
 
 export type ShellSessionStatus =
   | "pending"
@@ -31,10 +28,25 @@ export interface ShellSessionData {
   output_bytes_total: number;
   frames_in: number;
   frames_out: number;
+  client_last_seq: number;
+  agent_last_seq: number;
+}
+
+export interface ShellFrameData {
+  seq: number;
+  stream: "stdout" | "stderr" | "control";
+  data_b64: string;
+  eof: boolean;
+  byte_length: number;
+}
+
+export interface ShellFrameBatchData {
+  session: ShellSessionData;
+  frames: ShellFrameData[];
 }
 
 // The agent capability that unlocks the feature; mirrors the server and agent.
-export const SHELL_SESSION_CAPABILITY = "shell-session-v1";
+export const SHELL_SESSION_CAPABILITY = "shell-session-v2";
 
 const STATUSES: readonly ShellSessionStatus[] = [
   "pending",
@@ -158,7 +170,35 @@ export function shellSessionFromUnknown(value: unknown): ShellSessionData | null
     output_bytes_total: optionalNumber(raw.output_bytes_total) ?? 0,
     frames_in: optionalNumber(raw.frames_in) ?? 0,
     frames_out: optionalNumber(raw.frames_out) ?? 0,
+    client_last_seq: optionalNumber(raw.client_last_seq) ?? 0,
+    agent_last_seq: optionalNumber(raw.agent_last_seq) ?? 0,
   };
+}
+
+export function shellFrameBatchFromUnknown(value: unknown): ShellFrameBatchData | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  const session = shellSessionFromUnknown(raw.session);
+  if (session === null || !Array.isArray(raw.frames) || raw.frames.length > 64) return null;
+  const frames: ShellFrameData[] = [];
+  for (const candidate of raw.frames) {
+    if (typeof candidate !== "object" || candidate === null) return null;
+    const frame = candidate as Record<string, unknown>;
+    if (
+      typeof frame.seq !== "number" || !Number.isSafeInteger(frame.seq) || frame.seq < 1 ||
+      !["stdout", "stderr", "control"].includes(String(frame.stream)) ||
+      typeof frame.data_b64 !== "string" || frame.data_b64.length > 24_000 ||
+      typeof frame.eof !== "boolean" || typeof frame.byte_length !== "number"
+    ) return null;
+    frames.push({
+      seq: frame.seq,
+      stream: frame.stream as ShellFrameData["stream"],
+      data_b64: frame.data_b64,
+      eof: frame.eof,
+      byte_length: frame.byte_length,
+    });
+  }
+  return { session, frames };
 }
 
 /** Map a server error code/status to an operator-facing message. */

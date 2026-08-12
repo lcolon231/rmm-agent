@@ -854,12 +854,12 @@ lines over the existing HTTP transport (chunked long-poll), so the agent stays
 stdlib-only and the current Caddy/Render proxy needs no change; polling remains
 the fallback. A session is a first-class, authorized, audited, bounded entity:
 operator role plus explicit arbitrary-script scope, a trusted agent, an advertised
-`shell-session-v1` capability, at most one live session per agent, server-authored
+`shell-session-v2` capability, at most one live session per agent, server-authored
 idle and absolute deadlines, and a per-session output-byte cap. Streamed I/O is
-sensitive like command output and never enters the audit chain. Phase 1 implements
-the session lifecycle, authorization, capability negotiation, timeouts, and audit;
-the frame relay, the agent shell loop, and the terminal UI are deferred. See
-`docs/SHELL-SESSIONS.md`.
+sensitive like command output and never enters the audit chain. The server uses a
+bounded in-memory, sequence/ack relay; the agent runs one contained line-oriented
+shell; and the endpoint detail page exposes a polling terminal. The signed command
+poll path remains the compatibility fallback. See `docs/SHELL-SESSIONS.md`.
 
 ### Remote desktop
 
@@ -886,17 +886,14 @@ moved merely to match an aspirational tree.
 
 ## 11. Known limitations and documentation corrections
 
-- Polling is the only command transport; output is buffered, not streamed, and
-  a dispatched command cannot be cancelled — expiry is the only bound. The
-  interactive-shell foundation (issue #61, Phase 1) adds an authorized, audited,
-  capability-negotiated, time- and byte-bounded session lifecycle
-  (`docs/SHELL-SESSIONS.md`), but the live streaming frame relay, the agent's
-  shell I/O loop, and the terminal UI are deferred, so no command yet streams or
-  cancels.
+- Signed commands still use polling with buffered output and cannot be
+  cancelled — expiry is their only bound. Interactive PowerShell uses a
+  separate bounded long-poll frame relay, agent shell loop, and terminal UI
+  (`docs/SHELL-SESSIONS.md`).
 - The dashboard requires an authenticated operator but its overview remains
   fixture-backed; beyond the endpoint telemetry and command console views,
   live audit UI, complete inventory, monitoring alerts, scheduling, patching,
-  remediation, remote shell, and remote desktop are not implemented.
+  remediation and remote desktop are not implemented.
 - Operator administration has no delete endpoint, password change/reset or
   forced-rotation flow, server-enforced password complexity, or pagination.
   The dashboard omits those controls rather than simulating them.

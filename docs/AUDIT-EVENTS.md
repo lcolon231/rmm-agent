@@ -41,9 +41,11 @@ and SHA-256/Merkle roots—remains readable.
 | `agent.commands_expired_on_revoke` | `api/management.py` revoke cleanup | `command_ids` |
 | `shell_session.opened` | `api/shell_sessions.py` session open (issue #61) | `session_id`, `capability_version`, `output_bytes_limit`, `absolute_deadline`, `idle_deadline` |
 | `shell_session.viewed` | `api/shell_sessions.py` session status read | `session_id`, `status` |
+| `shell_session.activated` | `api/shell_sessions.py` authenticated agent attach | `session_id`, `capability_version` |
 | `shell_session.denied` | `api/shell_sessions.py` fail-closed open refusal | `session_id`, `reason`, `policy`, `trust_state` |
 | `shell_session.closed` | `api/shell_sessions.py` operator close | `session_id`, `status`, `reason`, `output_bytes_total`, `frames_in`, `frames_out` |
 | `shell_session.timed_out` | `core/tasks.py` shell session sweep | `session_id`, `reason`, `output_bytes_total`, `frames_in`, `frames_out` |
+| `shell_session.failed` | `api/shell_sessions.py` fail-closed transport/process/output termination | `session_id`, `reason`, `output_bytes_total`, `output_bytes_limit`, `frames_in`, `frames_out` |
 | `audit.anchored` | `api/management.py` local anchor creation | `anchor_id`, `merkle_root`, `event_count` |
 | `audit_timeline.viewed` | `api/management.py` audit timeline list | `event_type`, `actor_filter`, `agent_id`, `organization_id`, `date_from`, `date_to`, `before_seq`, `page`, `page_size`, `result_count`, `total` |
 | `audit_event.viewed` | `api/management.py` audit event detail | `event_id`, `action`, `seq` |

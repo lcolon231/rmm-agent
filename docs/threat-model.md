@@ -345,10 +345,10 @@ rewriting the original outcome.
 The interactive shell (`docs/SHELL-SESSIONS.md`) introduces a new live
 operator→agent channel and therefore a new trust boundary. Because a shell is at
 least as powerful as arbitrary script execution, it inherits boundary (4)'s
-concern: anyone who can open one has effective admin on the endpoint. Phase 1
-lands the fail-closed controls around it, in this order at open time: the operator
+concern: anyone who can open one has effective admin on the endpoint. The
+fail-closed controls apply in this order at open time: the operator
 must hold role ≥ `operator` **and** the explicit arbitrary-script scope; the agent
-must be `trust_state == active`; the agent must advertise the `shell-session-v1`
+must be `trust_state == active`; the agent must advertise the `shell-session-v2`
 capability (an agent that does not is refused as unsupported, not silently
 degraded); and at most one live session is admitted per agent. Every refusal is
 audited (`shell_session.denied`) before the response, so denials are as
@@ -360,10 +360,11 @@ and a per-session output-byte cap enforced fail-closed. Streamed input and outpu
 are classified sensitive exactly like command output — they are never written to
 an audit detail, a log line, or an error message; only lifecycle metadata is
 recorded. The transport is capability-negotiated and additive, so a mixed-version
-fleet stays safe: older agents simply never offer the capability and the feature
-remains unavailable for them. The live frame relay, the agent's shell I/O loop,
-and the terminal UI are deferred to later phases and are not yet a reachable
-attack surface.
+fleet stays safe: older agents simply never offer the v2 capability and the
+feature remains unavailable for them. The relay enforces exact sequences,
+idempotent identical retries, acknowledgement bounds, frame/window/output caps,
+and owner-bound access. An active session fails closed if volatile relay state is
+lost during server restart.
 
 ## Audit log: tamper-evidence
 
