@@ -87,11 +87,10 @@ func replaceRunningBinary(src, dest string) error {
 		}
 		return fmt.Errorf("install new binary: %w", err)
 	}
-	if displacedExisting {
-		// Best effort: the displaced image stays locked while the old process
-		// runs, so it is removed on a later start instead.
-		_ = os.Remove(displaced)
-	}
+	// Left in place even though displacedExisting: the running process still
+	// holds this image open (with FILE_SHARE_DELETE, the way the loader does),
+	// so an immediate os.Remove would unlink it right away instead of leaving it
+	// for the process to keep using. It is pruned on a later start instead.
 	return nil
 }
 
