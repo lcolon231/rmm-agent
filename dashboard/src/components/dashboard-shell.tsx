@@ -130,14 +130,14 @@ type SidebarProps = {
 
 function Sidebar({
   activePath,
-  navigation: _navigation,
-  navigationError: _navigationError,
+  navigation,
+  navigationError,
   onClose,
   open,
   operator,
-  selectedClientId: _selectedClientId,
-  selectedSiteId: _selectedSiteId,
-  selectionError: _selectionError,
+  selectedClientId,
+  selectedSiteId,
+  selectionError,
 }: SidebarProps) {
   return (
     <>
@@ -162,30 +162,89 @@ function Sidebar({
               <small>Technologies</small>
             </span>
           </Link>
-          <button className="mobile-close" onClick={onClose} aria-label="Close navigation">
-            <X size={18} />
+          <button className="sidebar-close" onClick={onClose} aria-label="Close navigation">
+            <X size={20} />
           </button>
         </div>
 
-        <nav className="sidebar-nav">
-          {navItems.map(({ label, icon: Icon, count, href, adminOnly }) => {
-            if (adminOnly && operator.role !== "admin") {
-              return null;
-            }
-            const isActive = activePath === href;
-            return (
+        <div className="sidebar-section client-section">
+          <div className="sidebar-label">
+            <span>Clients</span>
+            {operator.role === "readonly" ? (
+              <small>View only</small>
+            ) : (
               <Link
-                key={label}
-                className={`nav-item ${isActive ? "active" : ""}`}
-                href={href}
+                aria-label="Add client"
+                className="add-client-link"
+                href="/enrollment/setup"
                 onClick={onClose}
+                title="Add client"
               >
-                <Icon size={19} />
-                <span>{label}</span>
-                {count ? <span className="nav-count">{count}</span> : null}
+                +
               </Link>
-            );
-          })}
+            )}
+          </div>
+          {navigationError ? (
+            <div className="navigation-state" role="alert">
+              <span>Client navigation is unavailable.</span>
+              <button onClick={() => window.location.reload()}>Retry</button>
+            </div>
+          ) : navigation?.items.length === 0 ? (
+            <p className="navigation-state">No clients are available to this operator.</p>
+          ) : (
+            navigation?.items.map((client) => (
+              <div className="client-tree" key={client.id}>
+                <Link
+                  className={`client-name ${selectedClientId === client.id && !selectedSiteId ? "active" : ""}`}
+                  href={`/?client=${encodeURIComponent(client.id)}`}
+                  onClick={onClose}
+                >
+                  <span className="client-avatar">{client.name.slice(0, 2).toUpperCase()}</span>
+                  <span>{client.name}</span>
+                  <ChevronDown size={15} />
+                </Link>
+                <div className="site-list">
+                  {client.sites.map((site) => (
+                    <Link
+                      aria-current={selectedSiteId === site.id ? "page" : undefined}
+                      className={selectedSiteId === site.id ? "active" : ""}
+                      href={`/?client=${encodeURIComponent(client.id)}&site=${encodeURIComponent(site.id)}`}
+                      key={site.id}
+                      onClick={onClose}
+                    >
+                      <span>{site.name}</span>
+                      <span className="site-count">{site.endpoint_count}</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+          {navigation?.truncated ? <p className="navigation-state">Only the first 200 clients are shown.</p> : null}
+          {selectionError ? <p className="navigation-state" role="alert">The requested client or site is unavailable.</p> : null}
+        </div>
+
+        <nav className="sidebar-section main-nav" aria-label="Primary navigation">
+          <div className="sidebar-label">Navigation</div>
+          {navItems
+            .filter((item) => !item.adminOnly || operator.role === "admin")
+            .map(({ label, icon: Icon, count, href }) => {
+              const isActive = activePath === href || (href !== "/" && activePath.startsWith(`${href}/`));
+              return (
+                <Link
+                  aria-current={isActive ? "page" : undefined}
+                  className={isActive ? "active" : ""}
+                  href={href}
+                  key={label}
+                  onClick={onClose}
+                >
+                  <Icon size={19} />
+                  <span>{label}</span>
+                  {count ? <span className="nav-count">{count}</span> : null}
+                  {label === "Administration" ? <ChevronRight className="nav-chevron" size={15} /> : null}
+                </Link>
+              );
+            })}
         </nav>
 
         <button className="collapse-button">
