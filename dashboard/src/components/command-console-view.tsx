@@ -25,6 +25,7 @@ import {
   type CommandHistoryItem,
 } from "@/lib/command-console-core";
 import { formatEndpointDateTime } from "@/lib/endpoint-detail-core";
+import type { MaintenanceWindow } from "@/lib/maintenance-windows-core";
 
 function NodeLinkMark() {
   return (
@@ -82,10 +83,15 @@ export function CommandConsoleView({
   endpoint,
   history,
   operator,
+  maintenanceWindows,
+  serverNowMs,
 }: {
   endpoint: EndpointDetailData;
   history: CommandHistoryData;
   operator: DashboardOperator;
+  /** Null when the window inventory could not be verified. */
+  maintenanceWindows: MaintenanceWindow[] | null;
+  serverNowMs: number;
 }) {
   const canDispatch = operator.role === "operator" || operator.role === "admin";
   const canExecuteScripts = endpoint.script_execution_allowed;
@@ -162,6 +168,13 @@ export function CommandConsoleView({
               endpointId={endpoint.id}
               hostname={endpoint.hostname}
               isAdmin={operator.role === "admin"}
+              maintenanceTarget={{
+                agentId: endpoint.id,
+                siteId: endpoint.site_id,
+                clientId: endpoint.client_id,
+              }}
+              maintenanceWindows={maintenanceWindows}
+              serverNowMs={serverNowMs}
             />
           </section>
         ) : null}

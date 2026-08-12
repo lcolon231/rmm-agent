@@ -3403,3 +3403,51 @@ textarea:focus-visible,
 .schedule-modal footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 10px; border-top: 1px solid var(--line); padding-top: 14px; }
 .schedule-error-banner { padding: 10px 14px; border-radius: 6px; background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; font-size: 12px; }
 
+
+/* Maintenance windows (issue #211) */
+.maintenance-power-callout { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 15px; padding: 13px 15px; color: #854d0e; background: #fff8e8; border: 1px solid #efd49c; border-left: 4px solid var(--amber); border-radius: 5px; }
+.maintenance-power-callout div { display: flex; flex-direction: column; gap: 3px; }
+.maintenance-power-callout strong { font-size: 11px; }
+.maintenance-power-callout span { color: #6f5a32; font-size: 9px; line-height: 1.5; }
+.maintenance-summary-grid { margin-bottom: 15px; }
+.maintenance-summary-grid strong { font-size: 13px; }
+.maintenance-create-panel { margin-bottom: 16px; }
+.maintenance-create-panel > form { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 14px; padding: 17px 18px 18px; }
+.maintenance-create-panel form > label { display: flex; flex-direction: column; gap: 6px; color: var(--slate); font-size: 9px; font-weight: 750; }
+.maintenance-create-panel input, .maintenance-create-panel select { width: 100%; min-height: 37px; padding: 0 10px; color: var(--ink); font: inherit; background: #fff; border: 1px solid var(--line-strong); border-radius: 4px; }
+.maintenance-create-panel input:disabled { color: var(--muted); background: #f6f5fa; }
+.maintenance-presets { display: flex; grid-column: 1 / -1; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; padding: 11px 12px; border: 1px solid #cec8dd; border-radius: 4px; }
+.maintenance-presets legend { padding: 0 5px; color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.maintenance-presets button { min-height: 30px; padding: 0 11px; color: var(--blue); font-size: 9px; font-weight: 800; background: #fff; border: 1px solid var(--line-strong); border-radius: 999px; cursor: pointer; }
+.maintenance-presets button:hover { border-color: #9eb8d4; }
+.maintenance-preview { display: flex; grid-column: 1 / -1; align-items: center; gap: 7px; margin: 0; color: var(--slate); font-family: var(--font-data); font-size: 9px; line-height: 1.5; }
+.maintenance-create-panel form > button { display: inline-flex; grid-column: 1 / -1; min-height: 37px; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; color: white; font-size: 9px; font-weight: 800; background: #6c2ce9; border: 1px solid #5416cf; border-radius: 4px; cursor: pointer; }
+.maintenance-create-panel form > button:disabled { opacity: .5; cursor: not-allowed; }
+.maintenance-created { display: flex; align-items: center; gap: 12px; margin-bottom: 15px; padding: 13px 16px; color: #0b6b4c; background: var(--success-soft); border: 1px solid #b4e0cc; border-radius: 5px; }
+.maintenance-created div { display: flex; flex: 1; flex-direction: column; gap: 3px; }
+.maintenance-created strong { font-size: 11px; }
+.maintenance-created span { color: #2f6b56; font-size: 9px; line-height: 1.5; }
+.maintenance-return { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 12px; color: white; font-size: 9px; font-weight: 800; text-decoration: none; background: #0b6b4c; border-radius: 4px; white-space: nowrap; }
+.maintenance-state-chip { display: inline-flex; min-height: 24px; align-items: center; padding: 0 8px; color: #4d4960; font-size: 8px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; background: #ebe8f3; border-radius: 999px; }
+.maintenance-state-chip.active { color: #0b6b4c; background: var(--success-soft); }
+.maintenance-state-chip.upcoming { color: #1e4d78; background: #e5eef8; }
+.maintenance-state-chip.between_occurrences { color: #854d0e; background: var(--amber-soft); }
+.maintenance-confirm { display: flex; flex-direction: column; gap: 6px; min-width: 190px; }
+.maintenance-confirm label { color: var(--muted); font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.maintenance-confirm input { width: 100%; min-height: 30px; padding: 0 8px; font: inherit; border: 1px solid var(--line-strong); border-radius: 4px; }
+.maintenance-confirm div { display: flex; gap: 6px; }
+.maintenance-confirm button, .enrollment-panel td > button { display: inline-flex; min-height: 30px; align-items: center; gap: 5px; padding: 0 10px; color: var(--slate); font-size: 9px; font-weight: 800; background: #fff; border: 1px solid var(--line-strong); border-radius: 4px; cursor: pointer; }
+.maintenance-confirm button.danger { color: #991b1b; background: #fff; border-color: #fecaca; }
+.maintenance-confirm button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Power-action coverage evidence in the command console (issue #211) */
+.power-window-notice { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0; padding: 12px 13px; border: 1px solid var(--line-strong); border-left-width: 4px; border-radius: 4px; }
+.power-window-notice div { display: grid; flex: 1; gap: 3px; }
+.power-window-notice strong { font-size: 10px; letter-spacing: .04em; }
+.power-window-notice span { color: var(--slate); font-family: var(--font-data); font-size: 9px; line-height: 1.5; }
+.power-window-notice.covered { color: #0b6b4c; background: var(--success-soft); border-color: #b4e0cc; border-left-color: #12805c; }
+.power-window-notice.blocked { color: #991b1b; background: var(--red-soft); border-color: #fecaca; border-left-color: var(--red); }
+.power-window-notice.unknown { color: #854d0e; background: var(--amber-soft); border-color: #efd49c; border-left-color: var(--amber); }
+.power-window-link { display: inline-flex; min-height: 30px; align-items: center; gap: 6px; padding: 0 11px; color: var(--blue); font-size: 9px; font-weight: 800; text-decoration: none; white-space: nowrap; background: #fff; border: 1px solid var(--line-strong); border-radius: 4px; }
+.power-window-link:hover { border-color: #9eb8d4; }
+.power-window-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

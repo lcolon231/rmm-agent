@@ -2,10 +2,12 @@
 
 "use client";
 
-import { ArrowLeft, Send, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CalendarClock, Send, ShieldCheck, TriangleAlert } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
+
+import { clockSnapshot, subscribeToClock } from "@/lib/dashboard-clock";
 
 import {
   commandKindDefinitions,
@@ -17,12 +19,26 @@ import {
   type CommandKind,
   type DispatchInput,
 } from "@/lib/command-console-core";
+import {
+  formatDurationSeconds,
+  isMaintenanceWindowErrorCode,
+  maintenanceWindowPromptHref,
+  powerWindowCoverage,
+  type MaintenanceTarget,
+  type MaintenanceWindow,
+} from "@/lib/maintenance-windows-core";
+import { formatMonitoringTimestamp } from "@/lib/monitoring-core";
 
 type DispatchFormProps = {
   endpointId: string;
   hostname: string;
   canExecuteScripts: boolean;
   isAdmin: boolean;
+  /** Null when the window inventory could not be verified; coverage is then
+   * left entirely to the server rather than guessed at here. */
+  maintenanceWindows: MaintenanceWindow[] | null;
+  maintenanceTarget: MaintenanceTarget;
+  serverNowMs: number;
 };
 
 type Step =
@@ -35,6 +51,9 @@ export function CommandDispatchForm({
   hostname,
   canExecuteScripts,
   isAdmin,
+  maintenanceWindows,
+  maintenanceTarget,
+  serverNowMs,
 }: DispatchFormProps) {
   const router = useRouter();
   const [kind, setKind] = useState<CommandKind>(
@@ -72,7 +91,111 @@ export function CommandDispatchForm({
   const [ttlSeconds, setTtlSeconds] = useState(300);
   const [step, setStep] = useState<Step>({ name: "compose" });
   const [error, setError] = useState("");
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Server-rendered instant during hydration, then the live clock: coverage is
+  // time-sensitive and a stale "covered" reading would mislead.
+  const nowMs = useSyncExternalStore(subscribeToClock, clockSnapshot, () => serverNowMs);
+
+  const isPowerAction = kind === "reboot" || kind === "shutdown";
+  const coverage = maintenanceWindows && isPowerAction
+    ? powerWindowCoverage(maintenanceWindows, maintenanceTarget, powerDelaySeconds, nowMs)
+    : null;
+  const windowHref = maintenanceWindowPromptHref({
+    endpointId,
+    hostname,
+    delaySeconds: isPowerAction ? powerDelaySeconds : null,
+    returnPath: `/endpoints/${encodeURIComponent(endpointId)}/commands`,
+  });
+
+  function CoverageNotice() {
+    if (!isPowerAction) return null;
+    if (coverage === null) {
+      return (
+        <div className="power-window-notice unknown" role="status">
+          <TriangleAlert aria-hidden="true" size={16} />
+          <div>
+            <strong>Maintenance window coverage is unverified</strong>
+            <span>
+              The window inventory could not be read, so coverage is unknown here. The server still
+              refuses the dispatch unless a window covers this endpoint.
+            </span>
+          </div>
+          <MaintenanceWindowLink label="Manage windows" />
+        </div>
+      );
+    }
+    if (coverage.status === "no_window") {
+      return (
+        <div className="power-window-notice blocked" role="status">
+          <TriangleAlert aria-hidden="true" size={16} />
+          <div>
+            <strong>No maintenance window covers this endpoint</strong>
+            <span>
+              The server will refuse this restart or shutdown. Open a window covering{" "}
+              {hostname} for at least {formatDurationSeconds(powerDelaySeconds)}, then confirm again.
+            </span>
+          </div>
+          <MaintenanceWindowLink label="Create a window" />
+        </div>
+      );
+    }
+    if (coverage.status === "delay_exceeds_window") {
+      return (
+        <div className="power-window-notice blocked" role="status">
+          <TriangleAlert aria-hidden="true" size={16} />
+          <div>
+            <strong>The delay outlives the covering window</strong>
+            <span>
+              {coverage.window.name} closes at {formatMonitoringTimestamp(coverage.window.ends_at)} —
+              in {formatDurationSeconds(coverage.secondsRemaining)}, less than the{" "}
+              {formatDurationSeconds(powerDelaySeconds)} delay. Shorten the delay or open a longer window.
+            </span>
+          </div>
+          <MaintenanceWindowLink label="Extend coverage" />
+        </div>
+      );
+    }
+    return (
+      <div className="power-window-notice covered" role="status">
+        <ShieldCheck aria-hidden="true" size={16} />
+        <div>
+          <strong>Covered by {coverage.window.name}</strong>
+          <span>
+            The window closes at {formatMonitoringTimestamp(coverage.window.ends_at)}, in{" "}
+            {formatDurationSeconds(coverage.secondsRemaining)}. The server re-checks coverage when
+            it signs the command.
+          </span>
+        </div>
+        <MaintenanceWindowLink label="Manage windows" />
+      </div>
+    );
+  }
+
+  function DispatchError() {
+    if (!error) return null;
+    return (
+      <p className="dispatch-error" role="alert">
+        {error}
+        {isMaintenanceWindowErrorCode(errorCode) ? (
+          <>
+            {" "}
+            <MaintenanceWindowLink label="Open the maintenance-window workflow" />
+          </>
+        ) : null}
+      </p>
+    );
+  }
+
+  function MaintenanceWindowLink({ label }: { label: string }) {
+    // Opened in a new tab so the reviewed command, its typed confirmation, and
+    // its reason survive the detour to create the window.
+    return (
+      <Link className="power-window-link" href={windowHref} rel="noopener" target="_blank">
+        <CalendarClock aria-hidden="true" size={14} /> {label}
+      </Link>
+    );
+  }
 
   const definition = commandKindDefinitions.find((d) => d.kind === kind)!;
   const availableDefinitions =
@@ -156,6 +279,7 @@ export function CommandDispatchForm({
 
   function handleReview() {
     setError("");
+    setErrorCode(null);
     const input = validateDispatchInput({
       kind,
       script,
@@ -187,6 +311,7 @@ export function CommandDispatchForm({
 
   async function handleConfirm(input: DispatchInput) {
     setError("");
+    setErrorCode(null);
     setIsSubmitting(true);
     try {
       const response = await fetch(`/api/endpoints/${encodeURIComponent(endpointId)}/commands`, {
@@ -195,7 +320,7 @@ export function CommandDispatchForm({
         method: "POST",
       });
       const body = await response.json().catch(() => null) as
-        | { command?: { id: string }; error?: string }
+        | { command?: { id: string }; error?: string; code?: string }
         | null;
       if (response.ok && body?.command?.id) {
         setStep({ name: "dispatched", commandId: body.command.id });
@@ -209,6 +334,7 @@ export function CommandDispatchForm({
         router.refresh();
       } else {
         setError(body?.error ?? "The command could not be dispatched. Try again.");
+        setErrorCode(isMaintenanceWindowErrorCode(body?.code) ? body.code : null);
         setStep({ name: "compose" });
       }
     } catch {
@@ -264,6 +390,7 @@ export function CommandDispatchForm({
         ) : (
           <p className="dispatch-noscript">No script payload — this is a bounded typed operation.</p>
         )}
+        {step.input.kind === "reboot" || step.input.kind === "shutdown" ? <CoverageNotice /> : null}
         <div className="dispatch-review-actions">
           <button disabled={isSubmitting} onClick={() => setStep({ name: "compose" })} type="button">
             <ArrowLeft size={15} /> Edit
@@ -272,7 +399,7 @@ export function CommandDispatchForm({
             <Send size={15} /> {isSubmitting ? "Dispatching…" : "Confirm dispatch"}
           </button>
         </div>
-        {error ? <p className="dispatch-error" role="alert">{error}</p> : null}
+        <DispatchError />
       </div>
     );
   }
@@ -491,6 +618,7 @@ export function CommandDispatchForm({
               </select>
             </div>
           ) : null}
+          {definition.input === "power_action" ? <CoverageNotice /> : null}
           <label htmlFor="power-confirmation">Type <code>{hostname}</code> to confirm</label>
           <input
             autoComplete="off"
@@ -549,7 +677,7 @@ export function CommandDispatchForm({
           <input id="event-cursor" inputMode="numeric" onChange={(event) => setEventCursor(event.target.value)} placeholder="next_cursor from a prior page" value={eventCursor} />
         </>
       ) : null}
-      {error ? <p className="dispatch-error" role="alert">{error}</p> : null}
+      <DispatchError />
       <button type="submit">Review dispatch</button>
     </form>
   );
