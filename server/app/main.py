@@ -14,6 +14,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select, text
 
 from app.api import (
+    agent_updates,
     agents,
     auth,
     management,
@@ -95,6 +96,8 @@ app.include_router(script_library.router, prefix="/api/v1")
 app.include_router(scheduled_tasks.router, prefix="/api/v1")
 app.include_router(shell_sessions.router, prefix="/api/v1")
 app.include_router(shell_sessions.agent_router, prefix="/api/v1")
+app.include_router(agent_updates.router, prefix="/api/v1")
+app.include_router(agent_updates.agent_router, prefix="/api/v1")
 
 
 

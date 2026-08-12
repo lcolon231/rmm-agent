@@ -87,8 +87,14 @@ These hold across all supported Windows targets unless noted:
   ([`docs/CERTIFICATE-PINNING.md`](CERTIFICATE-PINNING.md)).
 - **Upgrade/rollback:** installer upgrade-in-place preserves `config.json`/
   `identity.json`; uninstall removes agent-created credential files. Signed,
-  staged agent self-update is future work (Milestone 2). Windows artifacts are
-  not yet Authenticode-signed (issue #24).
+  staged agent self-update is available on Windows builds (issue #63): the agent
+  advertises `agent-self-update-v1`, verifies the artifact digest, replaces
+  itself atomically, restarts through the SCM, health-checks the new build, and
+  restores the retained previous build automatically when the check fails — see
+  [`AGENT-SELF-UPDATE.md`](AGENT-SELF-UPDATE.md). It is a Windows-only capability
+  because committing an update requires the managed service restart. Windows
+  artifacts are not yet Authenticode-signed (issue #24), so the optional pinned
+  signer check applies only to artifacts an operator signs themselves.
 
 ## Support and deprecation policy
 

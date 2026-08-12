@@ -80,6 +80,7 @@ func canonicalCommandBytes(envelopeVersion string, schemaVersion int, commandID,
 	case "scan_packages", "install_packages":
 	case "deploy_software":
 	case "list_services", "control_service", "list_processes", "terminate_process":
+	case "agent_self_update", "agent_update_rollback":
 	default:
 		return nil, fmt.Errorf("unsupported command kind %q", kind)
 	}

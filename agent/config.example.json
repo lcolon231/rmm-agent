@@ -6,5 +6,8 @@
   "packages": {
     "chocolatey_enabled": false,
     "chocolatey_sources": []
+  },
+  "update": {
+    "channel": "stable"
   }
 }

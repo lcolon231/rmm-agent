@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package protocol
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestSupportedCapabilitiesAdvertisesShellSession(t *testing.T) {
 	caps := SupportedCapabilities()
@@ -113,6 +116,24 @@ func TestSupportedCapabilitiesAlwaysAdvertisesSoftwareDeployment(t *testing.T) {
 		}
 	}
 	t.Fatalf("SupportedCapabilities() must include %q", SoftwareDeploymentCapabilityV1)
+}
+
+func TestSelfUpdateCapabilityIsAdvertisedOnlyOnWindows(t *testing.T) {
+	if AgentSelfUpdateCapabilityV1 != "agent-self-update-v1" {
+		t.Fatalf("capability name drift: %q", AgentSelfUpdateCapabilityV1)
+	}
+	advertised := false
+	for _, capability := range SupportedCapabilities() {
+		if capability == AgentSelfUpdateCapabilityV1 {
+			advertised = true
+		}
+	}
+	// Committing an update needs the managed Windows service restart, so other
+	// platforms must not offer the capability at all: the server then keeps
+	// failing closed instead of dispatching an update that cannot complete.
+	if want := runtime.GOOS == "windows"; advertised != want {
+		t.Fatalf("self-update advertised = %v on %s, want %v", advertised, runtime.GOOS, want)
+	}
 }
 
 func TestSupportedCapabilitiesReturnsFreshSlice(t *testing.T) {

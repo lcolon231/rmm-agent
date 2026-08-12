@@ -78,11 +78,20 @@ def authorize_command(
         CommandKind.deploy_software,
         CommandKind.control_service,
         CommandKind.terminate_process,
+        # Replacing the agent binary, or restoring the previous one, changes the
+        # code running on the endpoint itself. Nothing here is broader.
+        CommandKind.agent_self_update,
+        CommandKind.agent_update_rollback,
     ):
         return CommandAuthorizationDecision(
             allowed=operator.role == OperatorRole.admin,
             policy=(
-                "service_process"
+                "agent_self_update"
+                if kind in {
+                    CommandKind.agent_self_update,
+                    CommandKind.agent_update_rollback,
+                }
+                else "service_process"
                 if kind in {
                     CommandKind.control_service,
                     CommandKind.terminate_process,

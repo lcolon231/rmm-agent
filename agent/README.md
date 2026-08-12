@@ -106,6 +106,23 @@ stay in `config.json`, so an existing agent picks up an overlap/recovery set on
 restart without re-enrollment. Use current+next overlap and rehearse the
 out-of-band stale-pin path in [`CERTIFICATE-PINNING.md`](../docs/CERTIFICATE-PINNING.md).
 
+### Self-update channel
+
+Signed, staged self-update is server-driven and always signed; `config.json`
+only decides which published channel this endpoint will accept a release from:
+
+```json
+"update": { "channel": "stable" }
+```
+
+`stable` (the default when absent), `beta`, or `canary`. Anything else refuses to
+start rather than being treated as "no channel" or a wildcard. The agent reports
+the channel on enrollment and every heartbeat, and refuses a signed release for
+any other channel locally — so moving a machine onto an early channel is a
+deliberate endpoint-side decision the server cannot make for it. Self-update is
+advertised only by Windows builds, because committing an update needs the managed
+service restart. See [`AGENT-SELF-UPDATE.md`](../docs/AGENT-SELF-UPDATE.md).
+
 On Windows the persisted identity is DPAPI-encrypted in user scope under the
 account that enrolled (LocalSystem for the installed service) and its DACL is
 restricted to SYSTEM and Administrators. Enrolling interactively as one user
@@ -295,6 +312,8 @@ agent/
     ├── client/                  # HTTP client for the server API
     ├── telemetry/               # metrics (per-OS build tags)
     ├── executor/                # command execution (per-OS build tags)
+    ├── selfupdate/              # Signed staged self-update: artifact verification,
+    │                            #   journal, atomic replace, health check, rollback
     ├── verify/                  # Ed25519 command signature verification
     └── service/                 # OS-independent runtime + Windows service (SCM,
                                  #   install/uninstall/start/stop, auto-recovery,
@@ -304,7 +323,7 @@ agent/
 ## Roadmap
 
 - Per-agent concurrency limits, typed endpoint operations, and signed releases.
-- Complete Windows inventory, typed endpoint operations, and signed self-update.
+- Complete Windows inventory and the remaining typed endpoint operations.
 - An interactive transport for lower-latency/streaming workflows while keeping
   heartbeat polling as a resilient fallback.
 - Technician-to-end-user chat: a message-only chat window the agent surfaces on

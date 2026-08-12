@@ -137,6 +137,14 @@ class CommandKind(str, enum.Enum):
     control_service = "control_service"
     list_processes = "list_processes"
     terminate_process = "terminate_process"
+    # Signed, staged agent self-update and rollback (issue #63). The signed
+    # payload carries the published release metadata: version, channel, platform,
+    # artifact URL/digest/size, and the anti-rollback floor. The agent verifies
+    # the artifact against that signed digest, replaces itself atomically,
+    # restarts, health-checks the new build, and restores the retained previous
+    # build automatically when the check fails. Neither kind carries script text.
+    agent_self_update = "agent_self_update"
+    agent_update_rollback = "agent_update_rollback"
 
 
 class CommandStatus(str, enum.Enum):
@@ -549,6 +557,10 @@ class Agent(Base):
     # not support the capability, so features that require it fail closed as
     # "unsupported" rather than being offered.
     supported_capabilities: Mapped[list[str] | None] = mapped_column(JSON)
+    # Release channel this endpoint reported following (issue #63). NULL means
+    # the endpoint predates self-update or has not reported one, so it is only
+    # ever targeted by a stable-channel release.
+    update_channel: Mapped[str | None] = mapped_column(String(16))
 
     status: Mapped[AgentStatus] = mapped_column(
         Enum(AgentStatus), default=AgentStatus.pending
@@ -1812,3 +1824,204 @@ class ScheduledTask(Base):
         DateTime(timezone=True), default=_now, nullable=False
     )
 
+
+
+# --------------------------------------------------------------------------- #
+# Signed, staged agent self-update (issue #63)
+# --------------------------------------------------------------------------- #
+class AgentUpdateChannel(str, enum.Enum):
+    """Release channel an endpoint follows.
+
+    An endpoint accepts a release only for the channel configured locally, so
+    moving a machine onto an early channel is a deliberate endpoint decision the
+    server cannot make on its behalf.
+    """
+
+    stable = "stable"
+    beta = "beta"
+    canary = "canary"
+
+
+class AgentUpdateReleaseState(str, enum.Enum):
+    """Lifecycle of a published agent release.
+
+    published -> signed metadata exists; no endpoint has been targeted yet
+    rolling   -> a staged rollout is active at the recorded percentage
+    paused    -> operator paused; existing attempts finish, none are added
+    halted    -> terminal stop (operator or automatic canary halt); fail closed
+    completed -> the rollout reached 100% and every targeted attempt resolved
+    """
+
+    published = "published"
+    rolling = "rolling"
+    paused = "paused"
+    halted = "halted"
+    completed = "completed"
+
+
+class AgentUpdateAttemptStatus(str, enum.Enum):
+    """Per-endpoint outcome of one release.
+
+    dispatched  -> a signed agent_self_update command was queued
+    staged      -> the endpoint verified and installed the artifact and restarted
+    succeeded   -> the new build passed its post-restart health check
+    rolled_back -> the endpoint restored the retained previous build
+    failed      -> the attempt ended without installing the new build
+    """
+
+    dispatched = "dispatched"
+    staged = "staged"
+    succeeded = "succeeded"
+    rolled_back = "rolled_back"
+    failed = "failed"
+
+
+class AgentUpdateRelease(Base):
+    """A signed, published agent release and its staged rollout state.
+
+    The row holds the immutable signed manifest (metadata plus its Ed25519
+    signature and the key ID that produced it) and the mutable rollout controls.
+    Republishing is not possible: the signature covers the manifest, so any
+    change to version, channel, platform, digest, or floor is a new release.
+    """
+
+    __tablename__ = "agent_update_releases"
+    __table_args__ = (
+        UniqueConstraint(
+            "version", "channel", "platform", name="uq_agent_update_release_identity"
+        ),
+        Index("ix_agent_update_releases_channel_state", "channel", "state"),
+        CheckConstraint(
+            "rollout_percent >= 0 AND rollout_percent <= 100",
+            name="ck_agent_update_rollout_percent",
+        ),
+        CheckConstraint(
+            "failure_threshold_percent >= 1 AND failure_threshold_percent <= 100",
+            name="ck_agent_update_failure_threshold",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    version: Mapped[str] = mapped_column(String(64), nullable=False)
+    channel: Mapped[AgentUpdateChannel] = mapped_column(
+        Enum(
+            AgentUpdateChannel,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    # Artifact selector, e.g. "windows/amd64". One release row describes one
+    # platform artifact so a digest is never ambiguous.
+    platform: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    artifact_url: Mapped[str] = mapped_column(Text, nullable=False)
+    artifact_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    artifact_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Optional pinned Authenticode signer thumbprint, checked at the endpoint on
+    # top of the digest.
+    signer_thumbprint: Mapped[str | None] = mapped_column(String(40))
+    # Anti-rollback floor: endpoints refuse this release if the target is below
+    # it, which is how a withdrawn build is prevented from returning.
+    min_supported_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # The canonical signed manifest, its digest, and the signature over it.
+    manifest: Mapped[dict] = mapped_column(JSON, nullable=False)
+    manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    signature: Mapped[str] = mapped_column(Text, nullable=False)
+    signing_key_id: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    state: Mapped[AgentUpdateReleaseState] = mapped_column(
+        Enum(
+            AgentUpdateReleaseState,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+        default=AgentUpdateReleaseState.published,
+    )
+    # Current staged rollout percentage. Endpoints are assigned a stable bucket
+    # from (release_id, agent_id), so raising the percentage only ever adds
+    # endpoints and never reshuffles the ones already updated.
+    rollout_percent: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    # Automatic canary halt: once at least min_attempts_before_halt attempts have
+    # resolved, a failure ratio at or above this percentage halts the release.
+    failure_threshold_percent: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=20, server_default="20"
+    )
+    min_attempts_before_halt: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=5, server_default="5"
+    )
+    # Seconds the endpoint gives the new build to report healthy before it
+    # rolls back on its own.
+    health_timeout_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=600, server_default="600"
+    )
+
+    created_by_email: Mapped[str | None] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    halted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Coded, non-secret halt reason (e.g. failure_threshold_exceeded).
+    halted_reason: Mapped[str | None] = mapped_column(String(100))
+
+    attempts: Mapped[list["AgentUpdateAttempt"]] = relationship(
+        back_populates="release", cascade="all, delete-orphan"
+    )
+
+
+class AgentUpdateAttempt(Base):
+    """One endpoint's attempt at one release: the operator-visible evidence.
+
+    Exactly one row exists per (release, agent). It is created when the signed
+    command is dispatched and updated by the endpoint's post-restart report, so
+    the halt rule counts resolved outcomes rather than dispatches.
+    """
+
+    __tablename__ = "agent_update_attempts"
+    __table_args__ = (
+        UniqueConstraint("release_id", "agent_id", name="uq_agent_update_attempt"),
+        Index("ix_agent_update_attempts_status", "release_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    release_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_update_releases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    command_id: Mapped[str | None] = mapped_column(
+        ForeignKey("commands.id", ondelete="SET NULL")
+    )
+    status: Mapped[AgentUpdateAttemptStatus] = mapped_column(
+        Enum(
+            AgentUpdateAttemptStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+        default=AgentUpdateAttemptStatus.dispatched,
+    )
+    from_version: Mapped[str | None] = mapped_column(String(64))
+    to_version: Mapped[str | None] = mapped_column(String(64))
+    # The version the endpoint actually reported running after the restart.
+    observed_version: Mapped[str | None] = mapped_column(String(64))
+    # Coded, non-secret outcome reason from the endpoint (e.g.
+    # health_check_failed, artifact_digest_mismatch).
+    reason: Mapped[str | None] = mapped_column(String(100))
+    # Health-check starts the endpoint spent on this attempt.
+    health_attempts: Mapped[int | None] = mapped_column(Integer)
+    # Stable rollout bucket (0-99) this endpoint occupies for this release.
+    rollout_bucket: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dispatched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    release: Mapped["AgentUpdateRelease"] = relationship(back_populates="attempts")

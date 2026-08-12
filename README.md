@@ -186,6 +186,21 @@ The code in this repository currently provides:
   `terminate_process` commands. Guarded by protected-target denylists, mandatory
   confirmation and reason, capability-gated (`service-process-v1`), audited, and
   fail-closed. No schema change. Dashboard UI is deferred. See `docs/SERVICE-PROCESS-MANAGEMENT.md`.
+- Administrator-only signed, staged agent self-update and rollback (issue #63):
+  an administrator publishes a release whose metadata (version, channel,
+  platform, artifact URL/digest/size, anti-rollback floor) is Ed25519-signed both
+  on the wire and as a durable domain-separated manifest, then advances a staged
+  rollout by stable per-release bucket. The endpoint verifies the artifact's
+  mandatory SHA-256 and byte count (plus an optional pinned Authenticode signer),
+  journals the attempt, backs up and atomically replaces its own binary,
+  restarts, and commits only after a successful authenticated check-in —
+  otherwise it restores the retained previous build on its own. Anti-rollback is
+  enforced independently at both ends, a resolved failure rate at or above the
+  release's threshold halts the release terminally, and an operator can roll a
+  single endpoint back to its retained build. Capability-gated
+  (`agent-self-update-v1`, Windows builds only), administrator-only, audited, and
+  additive at revision `0035`. Dashboard UI is deferred. See
+  `docs/AGENT-SELF-UPDATE.md`.
 - An immutable versioned script library with canonical SHA-256 content
   evidence, bounded language/platform/tag metadata, append-only final reviews,
   terminal idempotent deprecation, role-gated API/dashboard workflows, and no
@@ -373,8 +388,9 @@ and redeployed Windows agent before `install_updates` can be used. Other current
 - **Milestone 2 — Patch and Remediation:** Windows Update policies and
   installation, software deployment, endpoint operations, interactive shell,
   streaming output, technician-to-end-user chat (a chat window on the endpoint
-  so the machine's user can talk to the technician from their computer),
-  MeshCentral integration, and agent self-update.
+  so the machine's user can talk to the technician from their computer), and
+  MeshCentral integration. Signed, staged agent self-update with automatic
+  rollback is implemented (`docs/AGENT-SELF-UPDATE.md`).
 - **Milestone 3 — Compliance Productization:** evidence bundles, approval
   workflows, tenant-scoped authorization, stronger identity controls,
   immutable retention, audit verification tools, and a customer audit portal.

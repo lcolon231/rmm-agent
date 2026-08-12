@@ -187,6 +187,10 @@ class CommandEnvelopeCapabilities(BaseModel):
     supported_capabilities: list[CapabilityName] = Field(
         default_factory=list, max_length=16
     )
+    # Release channel this endpoint follows (issue #63). Absent means the agent
+    # predates self-update or follows the default, so it is only ever targeted
+    # by a stable-channel release.
+    update_channel: Literal["stable", "beta", "canary"] | None = None
 
     @field_validator("supported_command_envelope_versions")
     @classmethod
@@ -883,6 +887,112 @@ def _validate_process_terminate(payload: dict) -> dict:
     }
 
 
+# Agent self-update validation (issue #63).
+_SELF_UPDATE_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+_SELF_UPDATE_PLATFORM_RE = re.compile(r"^[a-z0-9]{1,16}/[a-z0-9]{1,16}$")
+_SELF_UPDATE_VERSION_RE = re.compile(
+    r"^\d{1,6}\.\d{1,6}\.\d{1,6}(?:-[0-9A-Za-z.-]{1,64})?$"
+)
+_SELF_UPDATE_MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
+_SELF_UPDATE_CHANNELS = frozenset({"stable", "beta", "canary"})
+
+
+def _validate_agent_self_update(payload: dict) -> dict:
+    """agent_self_update: the signed release metadata the endpoint acts on.
+
+    The rollout path builds this from a published, signed manifest, so this
+    validator is the fail-closed structural gate that keeps anything else from
+    reaching an endpoint. It is deliberately identical in shape to the agent's
+    own re-check (agent/internal/selfupdate).
+    """
+    allowed = {
+        "release_id", "version", "channel", "platform", "artifact",
+        "min_supported_version", "signer_thumbprint", "health_check",
+    }
+    required = {
+        "release_id", "version", "channel", "platform", "artifact",
+        "min_supported_version",
+    }
+    if set(payload) - allowed or not required.issubset(payload):
+        raise ValueError("agent_self_update payload contains unsupported or missing fields")
+
+    release_id = payload["release_id"]
+    if not isinstance(release_id, str) or not _SELF_UPDATE_ID_RE.fullmatch(release_id):
+        raise ValueError("agent_self_update release_id is invalid")
+    for field in ("version", "min_supported_version"):
+        value = payload[field]
+        if not isinstance(value, str) or not _SELF_UPDATE_VERSION_RE.fullmatch(value):
+            raise ValueError(f"agent_self_update {field} must be MAJOR.MINOR.PATCH[-prerelease]")
+    channel = payload["channel"]
+    if channel not in _SELF_UPDATE_CHANNELS:
+        raise ValueError("agent_self_update channel is invalid")
+    platform = payload["platform"]
+    if not isinstance(platform, str) or not _SELF_UPDATE_PLATFORM_RE.fullmatch(platform):
+        raise ValueError("agent_self_update platform is invalid")
+
+    artifact = payload["artifact"]
+    if not isinstance(artifact, dict) or set(artifact) != {"url", "sha256", "size_bytes"}:
+        raise ValueError("agent_self_update artifact is invalid")
+    url = artifact["url"]
+    if not isinstance(url, str) or len(url) > _DEPLOY_MAX_URL_LEN:
+        raise ValueError("agent_self_update artifact url is invalid")
+    if any(ord(c) < 32 or ord(c) == 127 for c in url):
+        raise ValueError("agent_self_update artifact url contains control characters")
+    if not re.match(r"^https://", url, re.IGNORECASE):
+        raise ValueError("agent_self_update artifact url must be https")
+    if not isinstance(artifact["sha256"], str) or not _SHA256_RE.fullmatch(artifact["sha256"]):
+        raise ValueError("agent_self_update artifact sha256 must be a lowercase SHA-256 digest")
+    size = artifact["size_bytes"]
+    if not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= _SELF_UPDATE_MAX_ARTIFACT_BYTES:
+        raise ValueError("agent_self_update artifact size_bytes is out of range")
+
+    normalized = {
+        "release_id": release_id,
+        "version": payload["version"],
+        "channel": channel,
+        "platform": platform,
+        "artifact": {"url": url, "sha256": artifact["sha256"], "size_bytes": size},
+        "min_supported_version": payload["min_supported_version"],
+    }
+    thumbprint = payload.get("signer_thumbprint")
+    if thumbprint is not None:
+        if not isinstance(thumbprint, str) or not _THUMBPRINT_RE.fullmatch(thumbprint):
+            raise ValueError("agent_self_update signer_thumbprint must be a 40-char hex thumbprint")
+        normalized["signer_thumbprint"] = thumbprint
+    health = payload.get("health_check")
+    if health is not None:
+        if not isinstance(health, dict) or set(health) != {"timeout_seconds"}:
+            raise ValueError("agent_self_update health_check is invalid")
+        timeout = health["timeout_seconds"]
+        if not isinstance(timeout, int) or isinstance(timeout, bool) or not 60 <= timeout <= 3600:
+            raise ValueError("agent_self_update health_check.timeout_seconds must be 60-3600")
+        normalized["health_check"] = {"timeout_seconds": timeout}
+    return normalized
+
+
+def _validate_agent_update_rollback(payload: dict) -> dict:
+    """agent_update_rollback: restore the endpoint's retained previous build."""
+    allowed = {"reason", "confirm", "expected_current_version"}
+    if set(payload) - allowed or not {"reason", "confirm"}.issubset(payload):
+        raise ValueError("agent_update_rollback payload contains unsupported or missing fields")
+    if payload.get("confirm") is not True:
+        raise ValueError("agent_update_rollback requires confirm=true")
+    reason = payload.get("reason")
+    if not isinstance(reason, str):
+        raise ValueError("reason must be a string")
+    reason = reason.strip()
+    reason_bytes = len(reason.encode("utf-8"))
+    if not 10 <= reason_bytes <= 256 or any(ord(c) < 32 or ord(c) == 127 for c in reason):
+        raise ValueError("reason must contain 10-256 printable UTF-8 bytes")
+    normalized = {"reason": reason, "confirm": True}
+    expected = payload.get("expected_current_version")
+    if expected is not None:
+        if not isinstance(expected, str) or not _SELF_UPDATE_VERSION_RE.fullmatch(expected):
+            raise ValueError("expected_current_version must be MAJOR.MINOR.PATCH[-prerelease]")
+        normalized["expected_current_version"] = expected
+    return normalized
+
+
 class CommandCreate(BaseModel):
     kind: CommandKind
     payload: dict = Field(default_factory=dict)
@@ -1074,6 +1184,14 @@ class CommandCreate(BaseModel):
 
         if self.kind == CommandKind.terminate_process:
             self.payload = _validate_process_terminate(self.payload)
+            return self
+
+        if self.kind == CommandKind.agent_self_update:
+            self.payload = _validate_agent_self_update(self.payload)
+            return self
+
+        if self.kind == CommandKind.agent_update_rollback:
+            self.payload = _validate_agent_update_rollback(self.payload)
             return self
 
         if self.kind != CommandKind.install_updates:

@@ -68,3 +68,39 @@ func TestLoadWithoutTLSSPKIPinsKeepsPinningDisabled(t *testing.T) {
 		t.Fatalf("tls_spki_pins = %v, want disabled", loaded.TLSSPKIPins)
 	}
 }
+
+func TestLoadUpdateChannel(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	for _, channel := range []string{"stable", "beta", "canary"} {
+		loaded, err := Load(write(t, `{"server_url":"https://rmm.example","update":{"channel":"`+channel+`"}}`))
+		if err != nil {
+			t.Fatalf("channel %q: %v", channel, err)
+		}
+		if loaded.Update.Channel != channel {
+			t.Fatalf("channel = %q, want %q", loaded.Update.Channel, channel)
+		}
+	}
+
+	// Absent means the default stable channel, reported as empty so the agent
+	// omits it and the server's stored value is left untouched.
+	loaded, err := Load(write(t, `{"server_url":"https://rmm.example"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Update.Channel != "" {
+		t.Fatalf("absent channel = %q, want empty", loaded.Update.Channel)
+	}
+
+	// A typo must not silently become "no channel" or a wildcard.
+	if _, err := Load(write(t, `{"server_url":"https://rmm.example","update":{"channel":"nightly"}}`)); err == nil {
+		t.Fatal("an unknown update channel must refuse to start")
+	}
+}

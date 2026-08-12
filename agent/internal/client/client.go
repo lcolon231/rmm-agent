@@ -58,7 +58,11 @@ type Client struct {
 	// this lets the runtime add config-gated capabilities (e.g. Chocolatey)
 	// without threading config through every call site.
 	capabilities []string
-	http         *http.Client
+	// updateChannel is the release channel this endpoint follows (issue #63).
+	// Empty means the endpoint follows the default stable channel and the field
+	// is omitted, which an older server ignores.
+	updateChannel string
+	http          *http.Client
 }
 
 // New creates a client. agentToken may be empty for the enrollment call.
@@ -199,6 +203,9 @@ func (c *Client) EnrollWithName(ctx context.Context, token, agentName string, ho
 		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
 		"supported_capabilities":              c.advertisedCapabilities(),
 	}
+	if channel := c.advertisedUpdateChannel(); channel != "" {
+		body["update_channel"] = channel
+	}
 	var out EnrollResponse
 	if err := c.do(ctx, "POST", "/api/v1/enroll", body, &out, false); err != nil {
 		return nil, err
@@ -238,6 +245,21 @@ func (c *Client) SetCapabilities(capabilities []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.capabilities = append([]string(nil), capabilities...)
+}
+
+// SetUpdateChannel records the release channel this endpoint follows so the
+// server only ever targets it with a release published on that channel. An
+// empty value means the default (stable) and is not sent.
+func (c *Client) SetUpdateChannel(channel string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.updateChannel = channel
+}
+
+func (c *Client) advertisedUpdateChannel() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.updateChannel
 }
 
 // advertisedCapabilities returns the configured capability set, or the default
@@ -417,6 +439,11 @@ func (c *Client) HeartbeatWithPendingResults(
 	if agentVersion != "" {
 		body["agent_version"] = agentVersion
 	}
+	// Additive like the version: an older server ignores it, and omitting it
+	// leaves the server's stored channel untouched rather than resetting it.
+	if channel := c.advertisedUpdateChannel(); channel != "" {
+		body["update_channel"] = channel
+	}
 	// Only digests ride on the beat. Full snapshots go to SubmitInventory when
 	// the server asks, so heartbeat size stays independent of how much hardware
 	// an endpoint has.
@@ -478,6 +505,27 @@ type CommandResult struct {
 func (c *Client) ReportResult(ctx context.Context, commandID string, r CommandResult) error {
 	path := fmt.Sprintf("/api/v1/commands/%s/result", commandID)
 	return c.do(ctx, "POST", path, r, nil, true)
+}
+
+// SelfUpdateOutcome is the post-restart resolution of a staged self-update
+// (issue #63). It is reported separately from the command result because the
+// deciding evidence — did the new build come up healthy — only exists after the
+// restart, by which time the command that staged it has already completed.
+type SelfUpdateOutcome struct {
+	ReleaseID       string `json:"release_id,omitempty"`
+	CommandID       string `json:"command_id,omitempty"`
+	FromVersion     string `json:"from_version,omitempty"`
+	ToVersion       string `json:"to_version,omitempty"`
+	ObservedVersion string `json:"observed_version,omitempty"`
+	Status          string `json:"status"`
+	Reason          string `json:"reason,omitempty"`
+	Attempts        int    `json:"attempts,omitempty"`
+}
+
+// ReportSelfUpdate submits a resolved self-update attempt. The server records
+// the evidence and feeds it into the staged rollout's halt rule.
+func (c *Client) ReportSelfUpdate(ctx context.Context, outcome SelfUpdateOutcome) error {
+	return c.do(ctx, "POST", "/api/v1/agents/me/self-update/report", outcome, nil, true)
 }
 
 // do performs a JSON request. If auth is true, the agent bearer token is sent.

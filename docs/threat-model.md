@@ -306,6 +306,41 @@ compromised endpoint can misreport the result. Reboot reuses the #53 mechanism
 and its self-reported user-session assumption. See
 [`SOFTWARE-DEPLOYMENT.md`](SOFTWARE-DEPLOYMENT.md).
 
+Issue #63 adds the agent self-update boundary, which is the broadest one in the
+product: it replaces the code that enforces every other boundary. Two signatures
+guard it. The instruction and all release metadata — version, channel, platform,
+artifact URL, artifact digest and size, and the anti-rollback floor — ride the
+ordinary Ed25519-signed `command-v3` envelope, so the agent verifies them under a
+pinned key ID before the feature is entered; there is no weaker update-specific
+path. Publication additionally produces an immutable signed manifest under a
+domain-separated context (`nodelink-agent-update-manifest:v1:`), which prevents a
+manifest signature from ever being replayed as a command signature or the
+reverse, and gives an auditor a durable record to re-verify. Artifact integrity
+is a **mandatory** SHA-256 plus an exact byte count, with an optional pinned
+Authenticode signer layered on top, never instead. Anti-rollback is enforced
+independently at both ends with parsers that must agree: an equal target is a
+no-op, an older target or one below the release's floor is refused, so a replayed
+or withdrawn build cannot be reintroduced through the update path. The only way
+back to an older build is the explicit rollback command, which restores a binary
+the endpoint itself retained and digested and refuses a backup whose digest no
+longer matches — never a downloaded downgrade. `agent_self_update` is refused on
+the generic dispatch endpoint so every update is attributable to a published
+release and countable by that release's canary halt rule. Availability is
+protected by the endpoint journal: the record is written before every action it
+authorizes, so an interrupted download, a crash between staging and the swap, a
+failed restart, or a build that never becomes healthy all resolve to the new
+build or the retained previous build, never to no agent. Residual risks: the
+operator is trusted to publish a digest for the artifact they intended (a
+consistent wrong digest/URL pair ships whatever they pointed at); a compromised
+endpoint can misreport its outcome, so the canary halt sees what endpoints
+report, not ground truth; the health check proves a working check-in, not
+functional correctness of the new build; an endpoint too broken to check in
+cannot be reached by self-update at all and needs the installer path; and the
+signing key is a single point of compromise shared with command signing —
+compromise means fleet-wide code execution, which is why key custody and rotation
+([`KEY-ROTATION.md`](KEY-ROTATION.md)) are load-bearing here. See
+[`AGENT-SELF-UPDATE.md`](AGENT-SELF-UPDATE.md).
+
 Typed script parameters reduce injection and disclosure risk but do not make an
 approved script intrinsically safe. Definitions are immutable with the reviewed
 source. Values are validated without coercion, then the whole resolved document

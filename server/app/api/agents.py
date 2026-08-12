@@ -373,6 +373,11 @@ async def heartbeat(
     # Advertised feature capabilities (issue #61) drive capability-gated features
     # such as interactive shell sessions; refresh them on every beat.
     agent.supported_capabilities = body.supported_capabilities
+    # Release channel the endpoint follows (issue #63). Absent leaves the stored
+    # value untouched so an older agent is not silently moved between channels;
+    # a NULL value is treated as "stable" wherever targeting is decided.
+    if body.update_channel is not None:
+        agent.update_channel = body.update_channel
     # Inventory refresh negotiation. Only hashes travel on the beat; the server
     # decides what is worth resending and the agent POSTs those sections to the
     # bounded inventory endpoint. A steady-state endpoint transfers nothing.

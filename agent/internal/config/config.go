@@ -27,6 +27,18 @@ type Config struct {
 	// #55). Winget needs no configuration; Chocolatey is opt-in and off unless
 	// explicitly enabled here.
 	Packages PackagesConfig `json:"packages,omitempty"`
+	// Update configures signed, staged agent self-update (issue #63).
+	Update UpdateConfig `json:"update,omitempty"`
+}
+
+// UpdateConfig selects the release channel this endpoint follows. Self-update
+// is always signed and server-driven; this only decides which published channel
+// the endpoint will accept a release from.
+type UpdateConfig struct {
+	// Channel is stable (the default when empty), beta, or canary. A signed
+	// release for any other channel is refused at the endpoint, so moving a
+	// machine onto an early channel is a deliberate local decision.
+	Channel string `json:"channel,omitempty"`
 }
 
 // PackagesConfig gates the optional Chocolatey provider. Winget is always
@@ -105,6 +117,13 @@ func Load(path string) (*Config, error) {
 	}
 	if c.ServerURL == "" {
 		return nil, fmt.Errorf("config: server_url is required")
+	}
+	switch c.Update.Channel {
+	case "", "stable", "beta", "canary":
+	default:
+		// A typo must not silently become "follows no channel" or, worse, be
+		// treated as a wildcard: refuse to start instead.
+		return nil, fmt.Errorf("config: update.channel must be stable, beta, or canary")
 	}
 	return &c, nil
 }

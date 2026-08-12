@@ -17,6 +17,27 @@ backup discards later definitions and prepared values and requires explicit
 data-loss approval; never rotate/discard the key as a substitute for the
 incident decision record.
 
+Agent self-update note: revision `0035` is additive — two new tables
+(`agent_update_releases`, `agent_update_attempts`), a nullable
+`agents.update_channel` column, and new PostgreSQL enum values. An older
+application ignores all of it and never dispatches `agent_self_update` or
+`agent_update_rollback`, so a component rollback degrades to "self-update
+unavailable" rather than misbehaving. Before crossing back: halt every active
+release so no further endpoint is targeted, let in-flight attempts report (or
+accept that their outcome evidence is lost), and retain the release rows,
+attempt rows, and their audit/anchor evidence — an older application cannot
+record or halt a rollout. Endpoints keep their own retained previous build and
+journal under `%ProgramData%`-adjacent `.nodelink-update`, so endpoint-level
+rollback via `agent_update_rollback` still works from a current server even when
+the rollout plane is unavailable; a fully rolled-back server has no way to issue
+it, and the installer upgrade path is then the recovery route. PostgreSQL enum
+values cannot be removed in place: crossing back before `0035` requires the
+exact-revision restore procedure below, not an Alembic downgrade. Note that
+`0035` also repairs the `commandkind` enum for the kinds added by issues #55,
+#56, and #57, which landed as ORM-only changes; a database that never received
+those values gains them here. See
+[`AGENT-SELF-UPDATE.md`](AGENT-SELF-UPDATE.md).
+
 This runbook is for a bad NodeLink release. It is deliberately conservative:
 automatic rollout must be paused first, database migrations are forward-only,
 and a schema rollback is a restore with an explicit data-loss decision. The

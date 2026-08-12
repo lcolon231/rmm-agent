@@ -67,6 +67,14 @@ const (
 	KindControlService   = "control_service"
 	KindListProcesses    = "list_processes"
 	KindTerminateProcess = "terminate_process"
+	// Signed, staged agent self-update and rollback (issue #63). The signed
+	// payload carries the release metadata (version, channel, artifact digest,
+	// anti-rollback floor); the agent verifies the artifact, stages it, replaces
+	// itself atomically, restarts, health-checks the new build, and restores the
+	// retained previous build automatically when the check fails. Neither kind
+	// ever accepts script text.
+	KindAgentSelfUpdate     = "agent_self_update"
+	KindAgentUpdateRollback = "agent_update_rollback"
 )
 
 // defaultTimeout bounds how long any single command may run.
