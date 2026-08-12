@@ -62,7 +62,7 @@ import type { Endpoint, EndpointStatus } from "@/data/dashboard";
 const navItems = [
   { label: "Overview", icon: Activity, href: "/" },
   { label: "Endpoints", icon: Monitor, count: null, href: "/endpoints" },
-  { label: "Alerts", icon: AlertTriangle, count: 7, href: "/alerts" },
+  { label: "Alerts", icon: AlertTriangle, count: null, href: "/alerts" },
   { label: "Automation", icon: Bot, count: null, href: "/scripts" },
   { label: "Tasks", icon: ListChecks, count: null, href: "/tasks" },
   { label: "Schedules", icon: Clock3, count: null, href: "/schedules" },
@@ -151,18 +151,10 @@ function Sidebar({
           <Link className="dashboard-brand" href="/" onClick={onClose}>
             <Image
               alt="NodeLink"
-              className="brand-logo dark-logo"
+              className="brand-logo"
               height={36}
               priority
               src="/brand/nodelink-dark.svg"
-              width={140}
-            />
-            <Image
-              alt="NodeLink"
-              className="brand-logo light-logo"
-              height={36}
-              priority
-              src="/brand/nodelink-light.svg"
               width={140}
             />
           </Link>
@@ -748,7 +740,7 @@ export function DashboardShell({
           </section>
 
           <section className="panel attention-panel">
-            <header className="panel-header danger-heading">
+            <header className={`panel-header ${attentionItemsList.length > 0 ? "danger-heading" : ""}`}>
               <div>
                 <AlertTriangle size={20} />
                 <h2>
