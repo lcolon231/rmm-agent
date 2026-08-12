@@ -17,6 +17,7 @@ Run just this file:  pytest tests/test_shell_sessions.py -q
 from __future__ import annotations
 
 import os
+import base64
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -35,6 +36,7 @@ from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.core.command_envelope import COMMAND_ENVELOPE_V2  # noqa: E402
 from app.core.tasks import _shell_session_sweep_once  # noqa: E402
+from app.core.config import settings  # noqa: E402
 from app.models.models import (  # noqa: E402
     AuditEvent,
     Operator,
@@ -44,11 +46,14 @@ from app.models.models import (  # noqa: E402
     ShellSessionStatus,
 )
 
-CAP = "shell-session-v1"
+CAP = "shell-session-v2"
 
 
 @pytest_asyncio.fixture
 async def client():
+    from app.core.shell_relay import registry
+
+    await registry.reset_for_tests()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
@@ -124,6 +129,39 @@ async def _enroll(c, op_auth, *, capabilities=(CAP,)) -> str:
     return r.json()["agent_id"]
 
 
+async def _enroll_identity(c, op_auth, *, capabilities=(CAP,)) -> tuple[str, dict]:
+    cl = (
+        await c.post(
+            "/clients", json={"name": f"Relay Clinic {uuid4().hex}"}, headers=op_auth
+        )
+    ).json()
+    st = (
+        await c.post(
+            "/sites", json={"client_id": cl["id"], "name": "HQ"}, headers=op_auth
+        )
+    ).json()
+    et = (
+        await c.post(
+            "/enrollment-tokens",
+            json={"site_id": st["id"], "max_uses": 1},
+            headers=op_auth,
+        )
+    ).json()
+    r = await c.post(
+        "/enroll",
+        json={
+            "enrollment_token": et["token"],
+            "hostname": "PC-RELAY",
+            "os": "windows",
+            "supported_command_envelope_versions": [COMMAND_ENVELOPE_V2],
+            "supported_capabilities": list(capabilities),
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    return body["agent_id"], {"Authorization": f"Bearer {body['agent_token']}"}
+
+
 async def _open(c, auth, agent_id):
     return await c.post(f"/agents/{agent_id}/shell-sessions", json={}, headers=auth)
 
@@ -174,6 +212,16 @@ async def test_operator_with_scope_opens_pending_bounded_session(client):
     assert "shell_session.opened" in await _audit_actions()
 
 
+@pytest.mark.asyncio
+async def test_endpoint_detail_exposes_capability_for_fail_closed_ui(client):
+    op = await _auth(client, "sh-op@nodelink.test", "op-pass")
+    agent_id = await _enroll(client, op)
+    response = await client.get(f"/endpoints/{agent_id}", headers=op)
+    assert response.status_code == 200
+    assert CAP in response.json()["supported_capabilities"]
+    assert response.json()["script_execution_allowed"] is True
+
+
 # --------------------------------------------------------------------------- #
 # Agent gates (fail closed)
 # --------------------------------------------------------------------------- #
@@ -206,8 +254,8 @@ async def test_second_concurrent_session_is_refused(client):
     first = await _open(client, op, agent_id)
     assert first.status_code == 201
     second = await _open(client, op, agent_id)
-    assert second.status_code == 409
-    assert second.json()["detail"]["code"] == "shell_session_already_active"
+    assert second.status_code == 201
+    assert second.json()["id"] == first.json()["id"]
 
 
 # --------------------------------------------------------------------------- #
@@ -297,3 +345,178 @@ async def test_audit_details_never_carry_io_bytes(client):
         keys = set(event.detail)
         assert "stdout" not in keys and "stderr" not in keys
         assert "input" not in keys and "bytes" not in keys
+
+
+# --------------------------------------------------------------------------- #
+# Framed relay, ownership, replay, and recovery
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_agent_attach_and_bidirectional_frames_are_bounded_and_not_persisted(client):
+    op = await _auth(client, "sh-op@nodelink.test", "op-pass")
+    agent_id, agent_auth = await _enroll_identity(client, op)
+    session = (await _open(client, op, agent_id)).json()
+    session_id = session["id"]
+
+    attached = await client.post("/agents/me/shell-sessions/attach", headers=agent_auth)
+    assert attached.status_code == 200
+    assert attached.json()["session"]["status"] == "active"
+
+    command = base64.b64encode(b"Get-Date\n").decode()
+    sent = await client.post(
+        f"/agents/{agent_id}/shell-sessions/{session_id}/input",
+        json={"seq": 1, "stream": "input", "data_b64": command},
+        headers=op,
+    )
+    assert sent.status_code == 200
+    assert sent.json()["frames_in"] == 1
+    polled = await client.get(
+        f"/agents/me/shell-sessions/{session_id}/input?after=0&ack=0",
+        headers=agent_auth,
+    )
+    assert polled.status_code == 200
+    assert polled.json()["frames"][0]["data_b64"] == command
+
+    output = base64.b64encode(b"Wednesday\r\n").decode()
+    posted = await client.post(
+        f"/agents/me/shell-sessions/{session_id}/output",
+        json={"seq": 1, "stream": "stdout", "data_b64": output},
+        headers=agent_auth,
+    )
+    assert posted.status_code == 200
+    read = await client.get(
+        f"/agents/{agent_id}/shell-sessions/{session_id}/output?after=0&ack=0",
+        headers=op,
+    )
+    assert read.status_code == 200
+    assert read.json()["frames"][0]["data_b64"] == output
+
+    async with AsyncSessionLocal() as db:
+        row = await db.get(ShellSession, session_id)
+        assert row.output_bytes_total == len(b"Wednesday\r\n")
+        # The lifecycle row contains counters only, never frame payloads.
+        assert not hasattr(row, "stdout") and not hasattr(row, "input")
+
+
+@pytest.mark.asyncio
+async def test_session_hijack_is_hidden_from_other_operator_and_agent(client):
+    owner = await _auth(client, "sh-op@nodelink.test", "op-pass")
+    other = await _auth(client, "sh-noscope@nodelink.test", "noscope-pass")
+    agent_id, agent_auth = await _enroll_identity(client, owner)
+    other_agent_id, other_agent_auth = await _enroll_identity(client, owner)
+    session_id = (await _open(client, owner, agent_id)).json()["id"]
+
+    assert (
+        await client.get(
+            f"/agents/{agent_id}/shell-sessions/{session_id}", headers=other
+        )
+    ).status_code == 404
+    assert (
+        await client.post(
+            f"/agents/{agent_id}/shell-sessions/{session_id}/input",
+            json={"seq": 1, "stream": "input", "data_b64": "WAo="},
+            headers=other,
+        )
+    ).status_code == 404
+    wrong_attach = await client.post(
+        "/agents/me/shell-sessions/attach", headers=other_agent_auth
+    )
+    assert wrong_attach.status_code == 200
+    assert wrong_attach.json()["session"] is None
+    right_attach = await client.post(
+        "/agents/me/shell-sessions/attach", headers=agent_auth
+    )
+    assert right_attach.json()["session"]["id"] == session_id
+    assert other_agent_id != agent_id
+
+
+@pytest.mark.asyncio
+async def test_identical_retry_is_idempotent_but_altered_replay_is_rejected(client):
+    op = await _auth(client, "sh-op@nodelink.test", "op-pass")
+    agent_id, agent_auth = await _enroll_identity(client, op)
+    session_id = (await _open(client, op, agent_id)).json()["id"]
+    await client.post("/agents/me/shell-sessions/attach", headers=agent_auth)
+    frame = {"seq": 1, "stream": "stdout", "data_b64": "b25jZQ=="}
+
+    first = await client.post(
+        f"/agents/me/shell-sessions/{session_id}/output", json=frame, headers=agent_auth
+    )
+    retry = await client.post(
+        f"/agents/me/shell-sessions/{session_id}/output", json=frame, headers=agent_auth
+    )
+    altered = await client.post(
+        f"/agents/me/shell-sessions/{session_id}/output",
+        json={**frame, "data_b64": "dHdpY2U="},
+        headers=agent_auth,
+    )
+    assert first.status_code == retry.status_code == 200
+    assert retry.json()["frames_out"] == 1
+    assert altered.status_code == 409
+    assert altered.json()["detail"]["code"] == "shell_sequence_conflict"
+
+
+@pytest.mark.asyncio
+async def test_backpressure_and_expired_cursor_fail_closed(client, monkeypatch):
+    monkeypatch.setattr(settings, "shell_session_relay_buffer_bytes", 4)
+    op = await _auth(client, "sh-op@nodelink.test", "op-pass")
+    agent_id, agent_auth = await _enroll_identity(client, op)
+    session_id = (await _open(client, op, agent_id)).json()["id"]
+    await client.post("/agents/me/shell-sessions/attach", headers=agent_auth)
+
+    first = await client.post(
+        f"/agents/me/shell-sessions/{session_id}/output",
+        json={"seq": 1, "stream": "stdout", "data_b64": "MTIzNA=="},
+        headers=agent_auth,
+    )
+    blocked = await client.post(
+        f"/agents/me/shell-sessions/{session_id}/output",
+        json={"seq": 2, "stream": "stdout", "data_b64": "NQ=="},
+        headers=agent_auth,
+    )
+    assert first.status_code == 200
+    assert blocked.status_code == 429
+    assert blocked.headers["retry-after"] == "1"
+
+    delivered = await client.get(
+        f"/agents/{agent_id}/shell-sessions/{session_id}/output?after=0&ack=0",
+        headers=op,
+    )
+    assert delivered.status_code == 200
+    expired = await client.get(
+        f"/agents/{agent_id}/shell-sessions/{session_id}/output?after=0&ack=1",
+        headers=op,
+    )
+    assert expired.status_code == 409
+    assert expired.json()["detail"]["code"] == "shell_cursor_expired"
+
+
+@pytest.mark.asyncio
+async def test_output_limit_fails_session_and_audits_only_metadata(client, monkeypatch):
+    monkeypatch.setattr(settings, "shell_session_output_byte_limit", 3)
+    op = await _auth(client, "sh-op@nodelink.test", "op-pass")
+    agent_id, agent_auth = await _enroll_identity(client, op)
+    session_id = (await _open(client, op, agent_id)).json()["id"]
+    await client.post("/agents/me/shell-sessions/attach", headers=agent_auth)
+    too_large = await client.post(
+        f"/agents/me/shell-sessions/{session_id}/output",
+        json={"seq": 1, "stream": "stderr", "data_b64": "Zm91cg=="},
+        headers=agent_auth,
+    )
+    assert too_large.status_code == 413
+    status_response = await client.get(
+        f"/agents/{agent_id}/shell-sessions/{session_id}", headers=op
+    )
+    assert status_response.json()["status"] == "failed"
+    assert status_response.json()["close_reason"] == "output_limit"
+    assert "shell_session.failed" in await _audit_actions()
+
+
+@pytest.mark.asyncio
+async def test_agent_can_reattach_active_session_after_transport_disconnect(client):
+    op = await _auth(client, "sh-op@nodelink.test", "op-pass")
+    agent_id, agent_auth = await _enroll_identity(client, op)
+    session_id = (await _open(client, op, agent_id)).json()["id"]
+    first = await client.post("/agents/me/shell-sessions/attach", headers=agent_auth)
+    second = await client.post("/agents/me/shell-sessions/attach", headers=agent_auth)
+    assert first.json()["session"]["id"] == session_id
+    assert second.json()["session"]["id"] == session_id
+    assert second.json()["session"]["status"] == "active"

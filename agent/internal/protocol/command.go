@@ -9,12 +9,10 @@ const (
 	CommandEnvelopeV3 = "command-v3"
 	CommandSchemaV1   = 1
 
-	// ShellSessionCapabilityV1 names interactive shell session support (issue
-	// #61). The agent advertises it so the server can offer the feature; an
-	// agent that does not advertise it makes the server fail closed as
-	// "unsupported". Phase 1 advertises the capability only — the streaming
-	// loop is added in a later phase.
+	// V1 advertised lifecycle-only support and must not unlock a terminal.
+	// V2 means the agent implements the bounded framed transport.
 	ShellSessionCapabilityV1       = "shell-session-v1"
+	ShellSessionCapabilityV2       = "shell-session-v2"
 	FileTransferCapabilityV1       = "file-transfer-v1"
 	RegistryOperationsCapabilityV1 = "registry-operations-v1"
 	PowerOperationsCapabilityV1    = "power-operations-v1"
@@ -60,7 +58,7 @@ func SupportedCapabilities() []string {
 // is returned so callers cannot mutate process-global negotiation state.
 func SupportedCapabilitiesWith(chocolateyEnabled bool) []string {
 	caps := []string{
-		ShellSessionCapabilityV1,
+		ShellSessionCapabilityV2,
 		FileTransferCapabilityV1,
 		RegistryOperationsCapabilityV1,
 		PowerOperationsCapabilityV1,

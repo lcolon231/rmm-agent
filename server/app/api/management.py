@@ -1287,6 +1287,7 @@ async def get_endpoint_detail(
         os_version=agent.os_version,
         agent_version=agent.agent_version,
         command_envelope_versions=agent.command_envelope_versions,
+        supported_capabilities=agent.supported_capabilities or [],
         status=agent.status,
         trust_state=agent.trust_state,
         last_seen_at=agent.last_seen_at,

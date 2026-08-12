@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/client"
@@ -158,6 +159,9 @@ type session struct {
 	// packagesConfig carries the endpoint's opt-in package-provider settings
 	// (issue #55) so a Chocolatey command fails closed unless enabled here.
 	packagesConfig packages.Config
+	// executionMu preserves the one-privileged-process-at-a-time invariant when
+	// the interactive transport and heartbeat command queue run concurrently.
+	executionMu sync.Mutex
 }
 
 // Run enrolls if needed and then checks in until ctx is cancelled. On
@@ -227,6 +231,9 @@ func (a *Agent) loop(ctx, execCtx context.Context) error {
 	}
 	b.Reset()
 	a.log.Printf("check-in interval: %s", sess.interval)
+	shellCtx, cancelShell := context.WithCancel(ctx)
+	defer cancelShell()
+	go a.shellSessionLoop(shellCtx, sess)
 
 	// Immediate first beat, then on the interval; back off on network failure.
 	for {
@@ -526,7 +533,10 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	// arrive at once; this loop is what keeps them serialized.
 	a.log.Printf("received %d command(s)", len(ack.PendingCommands))
 	for i, cmd := range ack.PendingCommands {
-		if err := a.processCommand(execCtx, s, cmd); err != nil {
+		s.executionMu.Lock()
+		err := a.processCommand(execCtx, s, cmd)
+		s.executionMu.Unlock()
+		if err != nil {
 			if isFatal(err) {
 				return err
 			}

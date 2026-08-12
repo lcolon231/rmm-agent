@@ -25,6 +25,13 @@ func buildCommand(kind, script string) *exec.Cmd {
 	}
 }
 
+func interactiveCommand() *exec.Cmd {
+	if _, err := exec.LookPath("pwsh"); err == nil {
+		return exec.Command("pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-")
+	}
+	return exec.Command("/bin/sh", "-s")
+}
+
 // runCommand puts every command in a fresh process group. Cancellation and
 // normal parent exit kill descendants that remain in the command's group.
 func runCommand(ctx context.Context, cmd *exec.Cmd) error {

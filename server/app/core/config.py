@@ -146,6 +146,10 @@ class Settings(BaseSettings):
     shell_session_output_byte_limit: int = 1024 * 1024
     shell_session_max_concurrent_per_agent: int = 1
     shell_session_poll_timeout_seconds: int = 25
+    shell_session_max_frame_bytes: int = 16 * 1024
+    shell_session_relay_buffer_bytes: int = 128 * 1024
+    shell_session_input_buffer_bytes: int = 64 * 1024
+    shell_session_relay_max_frames: int = 128
 
     @property
     def offline_threshold_seconds(self) -> int:

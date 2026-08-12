@@ -20,6 +20,7 @@ export type EndpointDetailData = {
   os_version: string;
   agent_version: string;
   command_envelope_versions: string[];
+  supported_capabilities: string[];
   status: "pending" | "online" | "offline";
   trust_state: "active" | "quarantined" | "revoked";
   last_seen_at: string | null;

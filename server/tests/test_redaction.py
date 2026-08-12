@@ -287,12 +287,16 @@ PRODUCER_DETAILS = {
     "agent.commands_expired_on_revoke": {"command_ids": [ID3]},
     "shell_session.opened": {
         "session_id": ID1,
-        "capability_version": "shell-session-v1",
+        "capability_version": "shell-session-v2",
         "output_bytes_limit": 1048576,
         "absolute_deadline": "2026-08-08T00:30:00+00:00",
         "idle_deadline": "2026-08-08T00:05:00+00:00",
     },
     "shell_session.viewed": {"session_id": ID1, "status": "pending"},
+    "shell_session.activated": {
+        "session_id": ID1,
+        "capability_version": "shell-session-v2",
+    },
     "shell_session.denied": {
         "session_id": None,
         "reason": "shell_session_unsupported",
@@ -313,6 +317,14 @@ PRODUCER_DETAILS = {
         "output_bytes_total": 0,
         "frames_in": 0,
         "frames_out": 0,
+    },
+    "shell_session.failed": {
+        "session_id": ID1,
+        "reason": "output_limit",
+        "output_bytes_total": 1048576,
+        "output_bytes_limit": 1048576,
+        "frames_in": 2,
+        "frames_out": 128,
     },
     "audit.anchored": {
         "anchor_id": ID1,

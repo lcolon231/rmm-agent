@@ -261,8 +261,9 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
 - Implement service, process, and event-log operations as typed operations with
   narrow validation and least privilege where feasible. Restart and shutdown
   are implemented; least-privilege service execution remains open.
-- Apply stronger session authorization, idle/absolute timeouts, recording
-  metadata, and rate limits to interactive shell and streaming transport.
+- [x] Apply owner-bound session authorization, idle/absolute timeouts,
+  metadata-only audit, exact replay protection, and bounded backpressure to the
+  interactive shell and streaming transport (`SHELL-SESSIONS.md`).
 - Constrain technician-to-end-user chat as a message-only channel: the chat
   window the agent surfaces on the endpoint must carry text between the
   machine's user and an authorized technician and nothing else — no command

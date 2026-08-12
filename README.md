@@ -351,10 +351,9 @@ regenerated backup and rollback evidence. Building on `v0.1.2`, it has:
 - added loss-safe agent credential renewal (#125): server-enforced credential
   expiry with a bounded rotation overlap, so a dropped renewal never strands an
   endpoint;
-- landed the Phase-1 interactive shell session foundation (#61): an authorized,
-  audited, capability-negotiated, and time- and byte-bounded session lifecycle,
-  with the live streaming transport, agent shell I/O loop, and terminal UI
-  deferred, so no shell session is usable end to end yet;
+- completed interactive shell sessions (#61): an owner-bound, audited,
+  capability-negotiated terminal with bounded long-poll streaming, protected
+  agent PowerShell execution, reconnect semantics, and fail-closed limits;
 - landed the Phase-1 Windows Update scan (#51): a typed `scan_updates` command
   and a normalized missing/installed update inventory section, with update
   installation/deployment explicitly out of scope; and
@@ -364,7 +363,7 @@ regenerated backup and rollback evidence. Building on `v0.1.2`, it has:
 The tagged `v0.1.3` agent remains scan-only. Current `main` contains the Phase-2
 Windows Update installation work and requires server schema `0029` plus a rebuilt
 and redeployed Windows agent before `install_updates` can be used. Other current
-work includes live shell streaming (#61) and tenant-aware authorization design.
+  work includes tenant-aware authorization design.
 
 ## Planned
 
@@ -392,15 +391,10 @@ The repository does **not** currently contain:
   console, enrollment administration/audit, and operator administration use
   live API data; aggregate overview and general audit panels remain
   fixture-backed.
-- A working interactive remote shell, live streaming command output,
-  technician-to-end-user chat, or command cancellation. Polling remains the only
-  command transport and a dispatched command is bounded only by its signed
-  expiry. The interactive shell **foundation** has landed (issue #61, Phase 1):
-  the authorized/audited/bounded session lifecycle, agent capability
-  negotiation, server-side idle/absolute timeouts, and output-limit contract,
-  with fail-closed defaults (`docs/SHELL-SESSIONS.md`). The live streaming
-  transport, the agent's shell I/O loop, and the dashboard terminal UI are not
-  built yet, so the capability is not usable end to end.
+- Technician-to-end-user chat or command cancellation. Signed command polling
+  remains the compatibility path; interactive PowerShell now uses its own
+  bounded long-poll transport, contained agent process, and endpoint terminal
+  (`docs/SHELL-SESSIONS.md`).
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, or TPM
   inventory beyond the read-only sections described above.
 - Additional notification providers beyond email and signed generic webhooks.

@@ -7,6 +7,7 @@ import {
   SHELL_SESSION_CAPABILITY,
   describeShellSessionAvailability,
   isShellSessionStatus,
+  shellFrameBatchFromUnknown,
   shellSessionFromUnknown,
   shellSessionOpenErrorMessage,
   shellSessionStatePresentation,
@@ -78,6 +79,8 @@ test("session allowlisting keeps expected fields and drops secret-adjacent ones"
     output_bytes_total: 0,
     frames_in: 0,
     frames_out: 0,
+    client_last_seq: 0,
+    agent_last_seq: 0,
     // secret-adjacent field that must never survive
     access_token: "session-token-sentinel",
     stdout: "should not appear",
@@ -89,6 +92,26 @@ test("session allowlisting keeps expected fields and drops secret-adjacent ones"
     JSON.stringify(session),
     /session-token-sentinel|access_token|stdout/,
   );
+});
+
+test("frame batches validate sequence, streams, and bounded payload shape", () => {
+  const session = {
+    id: "s1", agent_id: "a1", status: "active", capability_version: SHELL_SESSION_CAPABILITY,
+    close_reason: null, created_at: "2026-08-08T00:00:00Z", activated_at: null,
+    last_activity_at: null, closed_at: null, absolute_deadline: null, idle_deadline: null,
+    output_bytes_limit: 100, output_bytes_total: 2, frames_in: 0, frames_out: 1,
+    client_last_seq: 0, agent_last_seq: 1,
+  };
+  const batch = shellFrameBatchFromUnknown({
+    session,
+    frames: [{ seq: 1, stream: "stdout", data_b64: "b2s=", eof: false, byte_length: 2 }],
+    bearer_token: "must-drop",
+  });
+  assert.ok(batch);
+  assert.equal(batch.frames[0].stream, "stdout");
+  assert.doesNotMatch(JSON.stringify(batch), /bearer_token|must-drop/);
+  assert.equal(shellFrameBatchFromUnknown({ session, frames: [{ seq: 0, stream: "stdout", data_b64: "", eof: false, byte_length: 0 }] }), null);
+  assert.equal(shellFrameBatchFromUnknown({ session, frames: [{ seq: 1, stream: "input", data_b64: "", eof: false, byte_length: 0 }] }), null);
 });
 
 test("session allowlisting rejects malformed shapes", () => {

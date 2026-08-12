@@ -19,6 +19,8 @@ import Link from "next/link";
 
 import type { DashboardOperator } from "@/lib/dashboard-auth-core";
 import type { EndpointDetailData, EndpointTelemetrySample } from "@/lib/endpoint-detail";
+import { SHELL_SESSION_CAPABILITY } from "@/lib/shell-session-core";
+import { ShellSessionPanel } from "@/components/shell-session-panel";
 import {
   buildMetricPath,
   formatAgentVersion,
@@ -189,6 +191,13 @@ export function EndpointDetailView({ endpoint, operator }: { endpoint: EndpointD
           </header>
           <div className="detail-metric-grid">{metricDefinitions.map((definition) => <MetricReading definition={definition} key={definition.key} sample={sample} />)}</div>
         </section>
+
+        <ShellSessionPanel
+          endpointId={endpoint.id}
+          trusted={endpoint.trust_state === "active"}
+          capable={endpoint.supported_capabilities.includes(SHELL_SESSION_CAPABILITY)}
+          canExecuteScripts={endpoint.script_execution_allowed}
+        />
 
         <section className="telemetry-tape" aria-labelledby="telemetry-history-title">
           <header className="telemetry-tape-header">
