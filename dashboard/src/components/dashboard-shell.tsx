@@ -150,13 +150,17 @@ function Sidebar({
         <div className="brand-row">
           <Link className="dashboard-brand" href="/" onClick={onClose}>
             <Image
-              alt="NodeLink"
-              className="brand-logo"
-              height={36}
+              className="dashboard-brand-logo"
+              src="/brand/nodelink-logo.jpg"
+              alt="NodeLink Technologies"
+              width={48}
+              height={48}
               priority
-              src="/brand/nodelink-dark.svg"
-              width={140}
             />
+            <span className="dashboard-brand-name" aria-hidden="true">
+              <strong>NodeLink</strong>
+              <small>Technologies</small>
+            </span>
           </Link>
           <button className="mobile-close" onClick={onClose} aria-label="Close navigation">
             <X size={18} />
@@ -260,7 +264,7 @@ function TrustRail({
             <em>
               {trustStatus.activeSigningKeyId
                 ? `${trustStatus.activeSigningKeyId.slice(0, 16)}…`
-                : "Default key"}
+                : "default"}
             </em>
           </div>
         </div>
