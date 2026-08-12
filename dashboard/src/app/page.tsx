@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { DashboardShell } from "@/components/dashboard-shell";
+import { getAuditAnchors, getAuditEventPage, verifyAuditChain } from "@/lib/audit";
+import type { AuditAnchorRecord, AuditChainVerification, AuditEventRecord } from "@/lib/audit-core";
 import { getClientNavigation, type NavigationData } from "@/lib/client-navigation";
+import { getSigningKeys } from "@/lib/dashboard-overview";
+import type { SigningKeyInfo } from "@/lib/dashboard-overview-core";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import { getEndpointList, type EndpointListData } from "@/lib/endpoint-list";
+import { getMonitoringAlerts } from "@/lib/monitoring";
+import type { MonitoringAlert } from "@/lib/monitoring-core";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -40,10 +46,20 @@ export default async function Home({ searchParams }: HomePageProps) {
   const endpointDirection = query.dir === "asc" ? "asc" : "desc";
   const endpointPage = typeof query.page === "string" && /^\d+$/.test(query.page) ? Math.max(1, Number(query.page)) : 1;
   const endpointSearch = typeof query.search === "string" ? query.search.slice(0, 100) : undefined;
+
   let navigation: NavigationData | null = null;
   let endpointList: EndpointListData | null = null;
+  let alerts: MonitoringAlert[] = [];
+  let auditEvents: AuditEventRecord[] = [];
+  let chainVerification: AuditChainVerification | null = null;
+  let anchors: AuditAnchorRecord[] = [];
+  let signingKeys: SigningKeyInfo | null = null;
+
   let navigationError = false;
   let endpointError = false;
+  let alertsError = false;
+  let auditError = false;
+  let trustError = false;
 
   try {
     navigation = await getClientNavigation(session.sessionToken);
@@ -55,6 +71,32 @@ export default async function Home({ searchParams }: HomePageProps) {
     endpointList = await getEndpointList(session.sessionToken, { clientId: selectedClientId, direction: endpointDirection, page: endpointPage, search: endpointSearch, siteId: selectedSiteId, sort: endpointSort, status: endpointStatus });
   } catch {
     endpointError = true;
+  }
+
+  try {
+    alerts = await getMonitoringAlerts(session.sessionToken);
+  } catch {
+    alertsError = true;
+  }
+
+  try {
+    const auditPage = await getAuditEventPage(session.sessionToken, { page: 1 });
+    auditEvents = auditPage.items;
+  } catch {
+    auditError = true;
+  }
+
+  try {
+    const [chain, anchorList, keys] = await Promise.all([
+      verifyAuditChain(session.sessionToken).catch(() => null),
+      getAuditAnchors(session.sessionToken).catch(() => []),
+      getSigningKeys(session.sessionToken).catch(() => null),
+    ]);
+    chainVerification = chain;
+    anchors = anchorList;
+    signingKeys = keys;
+  } catch {
+    trustError = true;
   }
 
   const selectedSite = navigation?.items
@@ -74,6 +116,14 @@ export default async function Home({ searchParams }: HomePageProps) {
       endpointSearch={endpointSearch ?? ""}
       endpointSort={endpointSort}
       endpointStatus={endpointStatus}
+      alerts={alerts}
+      alertsError={alertsError}
+      auditEvents={auditEvents}
+      auditError={auditError}
+      chainVerification={chainVerification}
+      anchors={anchors}
+      signingKeys={signingKeys}
+      trustError={trustError}
       operator={session.operator}
       selectedClientId={selectedClientId}
       selectedSiteId={selectedSiteId}
