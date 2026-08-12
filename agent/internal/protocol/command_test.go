@@ -67,6 +67,19 @@ func TestSupportedCapabilitiesAlwaysAdvertisesPackageManagement(t *testing.T) {
 	t.Fatalf("SupportedCapabilities() must include %q", PackageManagementCapabilityV1)
 }
 
+func TestSupportedCapabilitiesAdvertisesServiceProcess(t *testing.T) {
+	for _, capability := range SupportedCapabilities() {
+		if capability == ServiceProcessCapabilityV1 {
+			if ServiceProcessCapabilityV1 != "service-process-v1" {
+				t.Fatalf("capability name drift: %q", ServiceProcessCapabilityV1)
+			}
+			return
+		}
+	}
+	t.Fatalf("SupportedCapabilities() must include %q", ServiceProcessCapabilityV1)
+}
+
+
 func TestChocolateyCapabilityIsGatedByConfig(t *testing.T) {
 	contains := func(caps []string, want string) bool {
 		for _, c := range caps {

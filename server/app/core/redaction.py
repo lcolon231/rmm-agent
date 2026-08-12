@@ -326,6 +326,20 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "success_code_override",
         "reboot_policy",
     ),
+    # Windows service control dispatch (issue #57): action, service, reason digest.
+    "service_control.dispatched": _schema(
+        "action",
+        "service",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    # Windows process termination dispatch (issue #57): pid, expected_name_present, reason digest.
+    "process_terminate.dispatched": _schema(
+        "pid",
+        "expected_name_present",
+        "reason",
+        digest_fields=("reason",),
+    ),
     "patch_compliance.viewed": _schema(
         "client_id", "site_id", "state", "view", "result_count",
     ),

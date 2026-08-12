@@ -23,6 +23,7 @@ SUPPORTED_COMMAND_KINDS = frozenset(
         "query_event_log",
         "scan_packages", "install_packages",
         "deploy_software",
+        "list_services", "control_service", "list_processes", "terminate_process",
     }
 )
 

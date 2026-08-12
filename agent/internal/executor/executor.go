@@ -60,6 +60,13 @@ const (
 	// policy and timeout, maps the exit code, and applies a reboot policy (issue
 	// #56). It never accepts script text.
 	KindDeploySoftware = "deploy_software"
+	// Windows service and process management (issue #57). Listing is read-only;
+	// control/terminate are validated, confirmed, protected-target-guarded typed
+	// operations that never accept script text.
+	KindListServices     = "list_services"
+	KindControlService   = "control_service"
+	KindListProcesses    = "list_processes"
+	KindTerminateProcess = "terminate_process"
 )
 
 // defaultTimeout bounds how long any single command may run.

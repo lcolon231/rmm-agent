@@ -70,6 +70,8 @@ and SHA-256/Merkle roots—remains readable.
 | `package_install.gated` | `api/management.py` package install/upgrade gate (issue #55) | `provider`, `operation`, `requested`, `source_present`, `source_digest`, `signer_present` |
 | `package_scan.dispatched` | `api/management.py` package discovery dispatch (issue #55) | `provider` |
 | `software_deployment.dispatched` | `api/management.py` MSI/EXE deployment dispatch (issue #56) | `installer_type`, `sha256`, `url_sha256`, `argument_count`, `timeout_seconds`, `signer_pinned`, `success_code_override`, `reboot_policy` |
+| `service_control.dispatched` | `api/management.py` service control dispatch (issue #57) | `action`, `service`, `reason_sha256`, `reason_bytes` |
+| `process_terminate.dispatched` | `api/management.py` process termination dispatch (issue #57) | `pid`, `expected_name_present`, `reason_sha256`, `reason_bytes` |
 | `monitoring_alert.acknowledged` | `api/management.py` technician acknowledgement | `alert_id`, `generation`, `request_id`, `from_state`, `to_state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.assigned` | `api/management.py` technician assignment | `alert_id`, `generation`, `request_id`, `assigned_to_operator_id`, `assigned_to_email_sha256`, `assigned_to_email_bytes`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.commented` | `api/management.py` technician comment | `alert_id`, `generation`, `request_id`, `state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |

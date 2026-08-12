@@ -181,6 +181,11 @@ The code in this repository currently provides:
   and the download is bounded and always cleaned up. Capability-gated
   (`software-deployment-v1`), audited (source URL stored only as a digest), and no
   schema change. Dashboard UI is deferred. See `docs/SOFTWARE-DEPLOYMENT.md`.
+- Administrator-only Windows service and process management (issue #57): typed
+  `list_services`, `control_service` (start/stop/restart), `list_processes`, and
+  `terminate_process` commands. Guarded by protected-target denylists, mandatory
+  confirmation and reason, capability-gated (`service-process-v1`), audited, and
+  fail-closed. No schema change. Dashboard UI is deferred. See `docs/SERVICE-PROCESS-MANAGEMENT.md`.
 - An immutable versioned script library with canonical SHA-256 content
   evidence, bounded language/platform/tag metadata, append-only final reviews,
   terminal idempotent deprecation, role-gated API/dashboard workflows, and no

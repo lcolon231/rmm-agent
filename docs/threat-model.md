@@ -234,6 +234,16 @@ endpoint can falsify results. Message-body retrieval is deferred behind opt-in
 attestation, short retention, and legal/BAA review. See
 [`EVENT-LOG-ACCESS.md`](EVENT-LOG-ACCESS.md).
 
+Issue #57 adds a Windows service and process management boundary. `list_services`
+and `list_processes` are operator-level, read-only discovery operations; `control_service`
+and `terminate_process` require `admin` plus `service-process-v1`. Service control
+and process termination require explicit UI confirmation and a 10–512 printable-byte
+reason. Both server and agent enforce identical protected target denylists (agent's
+own service/process, security stack, critical Windows OS services/processes, PIDs 0 and 4).
+`terminate_process` additionally supports optional expected image name validation to prevent
+accidental termination if a PID was recycled. Operational reasons are stored only as SHA-256
+digests in audit events. See [`SERVICE-PROCESS-MANAGEMENT.md`](SERVICE-PROCESS-MANAGEMENT.md).
+
 Issue #52 adds a patch approval boundary in front of `install_updates`. A scoped,
 versioned policy (most-specific wins) approves, denies, or defers updates by
 classification, severity, or KB; the server evaluates the selection against the

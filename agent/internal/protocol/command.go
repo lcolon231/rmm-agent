@@ -35,6 +35,11 @@ const (
 	// bounded install, and reboot policy. The server fails closed and never
 	// dispatches deploy_software to an agent that has not advertised it.
 	SoftwareDeploymentCapabilityV1 = "software-deployment-v1"
+	// ServiceProcessCapabilityV1 names Windows service/process management (issue
+	// #57): list services/processes and validated, protected-target-guarded
+	// service control and process termination. The server fails closed and never
+	// dispatches those kinds to an agent that has not advertised it.
+	ServiceProcessCapabilityV1 = "service-process-v1"
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
@@ -63,6 +68,7 @@ func SupportedCapabilitiesWith(chocolateyEnabled bool) []string {
 		PatchRebootCapabilityV1,
 		PackageManagementCapabilityV1,
 		SoftwareDeploymentCapabilityV1,
+		ServiceProcessCapabilityV1,
 	}
 	if chocolateyEnabled {
 		caps = append(caps, ChocolateyProviderCapabilityV1)
