@@ -145,7 +145,7 @@ func Scan(ctx context.Context) (inventory.Section, Summary, error) {
 	}
 
 	var raw rawScan
-	if err := json.Unmarshal(out, &raw); err != nil {
+	if err := json.Unmarshal(extractPSJSON(out), &raw); err != nil {
 		return inventory.Section{}, Summary{}, err
 	}
 	section, summary := BuildSection(
