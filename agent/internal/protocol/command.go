@@ -30,6 +30,11 @@ const (
 	// config, so a Chocolatey install can never be dispatched to an endpoint that
 	// has not opted in.
 	ChocolateyProviderCapabilityV1 = "chocolatey-provider-v1"
+	// SoftwareDeploymentCapabilityV1 names MSI/EXE software deployment support
+	// (issue #56): authenticated HTTPS download, digest/signature verification,
+	// bounded install, and reboot policy. The server fails closed and never
+	// dispatches deploy_software to an agent that has not advertised it.
+	SoftwareDeploymentCapabilityV1 = "software-deployment-v1"
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
@@ -57,6 +62,7 @@ func SupportedCapabilitiesWith(chocolateyEnabled bool) []string {
 		EventLogQueryCapabilityV1,
 		PatchRebootCapabilityV1,
 		PackageManagementCapabilityV1,
+		SoftwareDeploymentCapabilityV1,
 	}
 	if chocolateyEnabled {
 		caps = append(caps, ChocolateyProviderCapabilityV1)

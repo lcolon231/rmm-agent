@@ -276,6 +276,26 @@ and verify package contents — NodeLink does not itself hash-verify the install
 bytes — and a compromised endpoint can misreport discovery results, the same
 self-report assumption as inventory. See [`PACKAGE-MANAGEMENT.md`](PACKAGE-MANAGEMENT.md).
 
+Issue #56 adds a software-deployment boundary. `deploy_software` downloads an
+MSI/EXE from an operator-supplied HTTPS source and runs it — arbitrary vendor
+code on the endpoint, so it is administrator-only and capability-gated
+(`software-deployment-v1`). Unlike the package providers, integrity here does not
+rely on a third-party CLI: the source URL must be HTTPS, the downloader refuses a
+redirect that leaves HTTPS, and a **mandatory SHA-256** of the exact bytes is
+verified after download — a mismatch fails closed before the installer runs. An
+optional pinned Authenticode `signer_thumbprint` adds signer verification. The
+download is bounded (≤1 GiB temp file, always removed) so a hostile source cannot
+exhaust disk, and the run is bounded by a signed timeout. Arguments are printable
+argv tokens passed without a shell, so there is no quoting/injection surface.
+Audit stores only the artifact digest, the source `url_sha256` (never the URL
+prose), and the dispatch bounds. Residual risks: the operator is trusted to
+supply a correct digest for the intended artifact (a wrong-but-consistent
+digest/URL pair deploys whatever the operator pointed at), an EXE installer's own
+behavior and any network it performs are outside NodeLink's control, and a
+compromised endpoint can misreport the result. Reboot reuses the #53 mechanism
+and its self-reported user-session assumption. See
+[`SOFTWARE-DEPLOYMENT.md`](SOFTWARE-DEPLOYMENT.md).
+
 Typed script parameters reduce injection and disclosure risk but do not make an
 approved script intrinsically safe. Definitions are immutable with the reviewed
 source. Values are validated without coercion, then the whole resolved document

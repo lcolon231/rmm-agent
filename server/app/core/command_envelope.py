@@ -22,6 +22,7 @@ SUPPORTED_COMMAND_KINDS = frozenset(
         "reboot", "shutdown", "cancel_power_action",
         "query_event_log",
         "scan_packages", "install_packages",
+        "deploy_software",
     }
 )
 

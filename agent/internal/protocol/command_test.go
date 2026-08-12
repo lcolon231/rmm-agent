@@ -88,6 +88,18 @@ func TestChocolateyCapabilityIsGatedByConfig(t *testing.T) {
 	}
 }
 
+func TestSupportedCapabilitiesAlwaysAdvertisesSoftwareDeployment(t *testing.T) {
+	for _, capability := range SupportedCapabilities() {
+		if capability == SoftwareDeploymentCapabilityV1 {
+			if SoftwareDeploymentCapabilityV1 != "software-deployment-v1" {
+				t.Fatalf("capability name drift: %q", SoftwareDeploymentCapabilityV1)
+			}
+			return
+		}
+	}
+	t.Fatalf("SupportedCapabilities() must include %q", SoftwareDeploymentCapabilityV1)
+}
+
 func TestSupportedCapabilitiesReturnsFreshSlice(t *testing.T) {
 	first := SupportedCapabilities()
 	if len(first) == 0 {
