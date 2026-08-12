@@ -3,6 +3,8 @@
 // HTTP client and command verifier.
 package protocol
 
+import "runtime"
+
 const (
 	CommandEnvelopeV1 = "command-v1"
 	CommandEnvelopeV2 = "command-v2"
@@ -38,6 +40,12 @@ const (
 	// service control and process termination. The server fails closed and never
 	// dispatches those kinds to an agent that has not advertised it.
 	ServiceProcessCapabilityV1 = "service-process-v1"
+	// AgentSelfUpdateCapabilityV1 names signed, staged agent self-update with
+	// automatic rollback (issue #63). It is advertised only by Windows builds,
+	// because committing an update needs the managed service restart the SCM
+	// provides; the server fails closed and never dispatches agent_self_update
+	// or agent_update_rollback to an agent that has not advertised it.
+	AgentSelfUpdateCapabilityV1 = "agent-self-update-v1"
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
@@ -67,6 +75,11 @@ func SupportedCapabilitiesWith(chocolateyEnabled bool) []string {
 		PackageManagementCapabilityV1,
 		SoftwareDeploymentCapabilityV1,
 		ServiceProcessCapabilityV1,
+	}
+	// Self-update commits through a Windows service restart, so only Windows
+	// builds advertise it. Elsewhere the server keeps failing closed.
+	if runtime.GOOS == "windows" {
+		caps = append(caps, AgentSelfUpdateCapabilityV1)
 	}
 	if chocolateyEnabled {
 		caps = append(caps, ChocolateyProviderCapabilityV1)

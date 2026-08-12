@@ -159,6 +159,9 @@ type session struct {
 	// packagesConfig carries the endpoint's opt-in package-provider settings
 	// (issue #55) so a Chocolatey command fails closed unless enabled here.
 	packagesConfig packages.Config
+	// updateChannel is the release channel this endpoint follows (issue #63).
+	// A signed release for any other channel is refused locally.
+	updateChannel string
 	// executionMu preserves the one-privileged-process-at-a-time invariant when
 	// the interactive transport and heartbeat command queue run concurrently.
 	executionMu sync.Mutex
@@ -230,6 +233,10 @@ func (a *Agent) loop(ctx, execCtx context.Context) error {
 		sess = s
 	}
 	b.Reset()
+	// Resolve any self-update this process was restarted for before the first
+	// beat: an unhealthy new build must be rolled back promptly, and the outcome
+	// is what lets the server halt a bad staged rollout.
+	a.resolveSelfUpdate(ctx, sess)
 	a.log.Printf("check-in interval: %s", sess.interval)
 	shellCtx, cancelShell := context.WithCancel(ctx)
 	defer cancelShell()
@@ -334,6 +341,9 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	// (issue #55) so the server never dispatches a Chocolatey install to an
 	// agent that has not enabled it.
 	api.SetCapabilities(protocol.SupportedCapabilitiesWith(cfg.Packages.ChocolateyEnabled))
+	// Report the release channel this endpoint follows (issue #63) so the server
+	// only ever targets it with a release published on that channel.
+	api.SetUpdateChannel(cfg.Update.Channel)
 	monitoringStore, err := monitoring.LoadStore(monitoring.StatePath(a.configPath))
 	if err != nil {
 		return nil, fatal(err)
@@ -353,6 +363,7 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 			ChocolateyEnabled: cfg.Packages.ChocolateyEnabled,
 			ChocolateySources: cfg.Packages.ChocolateySources,
 		},
+		updateChannel: cfg.Update.Channel,
 	}, nil
 }
 
@@ -377,6 +388,7 @@ func (a *Agent) ensureEnrolled(ctx context.Context, cfg *config.Config, idPath s
 	if err != nil {
 		return nil, fatal(fmt.Errorf("agent HTTP client: %w", err))
 	}
+	api.SetUpdateChannel(cfg.Update.Channel)
 	resp, err := api.Enroll(ctx, cfg.EnrollmentToken, host, a.version)
 	if err != nil {
 		return nil, err // network/enroll error: retryable
@@ -785,6 +797,11 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 	case executor.KindListServices, executor.KindControlService,
 		executor.KindListProcesses, executor.KindTerminateProcess:
 		res = svcproc.Execute(ctx, cmd.Kind, cmd.Payload)
+	case executor.KindAgentSelfUpdate, executor.KindAgentUpdateRollback:
+		// The result is reported before the restart takes effect: the durable
+		// result outbox is written here, and the outcome of the new build is
+		// decided by the health check on the next start.
+		res = a.runSelfUpdate(ctx, s, cmd.ID, cmd.Kind, cmd.Payload)
 	default:
 		script := extractScript(cmd.Payload)
 		res = a.run(ctx, cmd.Kind, script)

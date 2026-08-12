@@ -276,7 +276,16 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
 - Treat MeshCentral as a separate trust boundary; synchronize least-privilege
   access and audit NodeLink's session authorization and launch.
 - Sign self-updates, stage rollout, enforce anti-rollback policy, and retain a
-  recovery path.
+  recovery path. **Implemented (issue #63).** Release metadata is Ed25519-signed
+  both on the wire (the `command-v3` envelope) and at rest (a domain-separated
+  manifest); the artifact is pinned by a mandatory SHA-256 and byte count with an
+  optional Authenticode signer; rollout is staged by a stable per-release bucket
+  with a terminal canary halt; anti-rollback is enforced independently at both
+  ends; and every endpoint retains a digested previous build that it restores
+  automatically when a new build fails its post-restart health check. See
+  [`AGENT-SELF-UPDATE.md`](AGENT-SELF-UPDATE.md). Windows release artifacts are
+  still not Authenticode-signed by this project (issue #24), so the optional
+  signer pin is only as useful as the artifacts an operator publishes.
 
 ## Milestone 3 — productize regulated-environment controls
 

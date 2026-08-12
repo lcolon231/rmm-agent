@@ -231,6 +231,10 @@ _COMMAND_CAPABILITIES: dict[CommandKind, tuple[str, ...]] = {
     CommandKind.control_service: ("service-process-v1",),
     CommandKind.list_processes: ("service-process-v1",),
     CommandKind.terminate_process: ("service-process-v1",),
+    # Signed, staged agent self-update (issue #63). Only Windows builds advertise
+    # this capability, so dispatch to anything else fails closed here.
+    CommandKind.agent_self_update: ("agent-self-update-v1",),
+    CommandKind.agent_update_rollback: ("agent-self-update-v1",),
 }
 
 _POWER_ACTION_KINDS = frozenset({CommandKind.reboot, CommandKind.shutdown})
@@ -1521,6 +1525,19 @@ async def dispatch_command(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if body.kind == CommandKind.agent_self_update:
+        # An update must be attributable to a published, signed release and
+        # countable by that release's canary halt rule. A hand-rolled update
+        # dispatched here would satisfy neither, so it is refused outright and
+        # the operator is pointed at the rollout API (issue #63). The rollback
+        # kind stays dispatchable: recovery must work even for a halted release.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "agent_self_update_requires_release",
+                "hint": "POST /api/v1/agent-updates/releases/{release_id}/rollout",
+            },
+        )
     decision = authorize_command(operator, agent, body.kind)
     decision_detail = decision_audit_detail(
         decision,
@@ -1574,9 +1591,16 @@ async def dispatch_command(
                                             CommandKind.terminate_process,
                                         }
                                         else (
-                                            "privileged_remediation_not_authorized"
-                                            if body.kind in _COMMAND_CAPABILITIES
-                                            else "command_role_not_authorized"
+                                            "agent_self_update_not_authorized"
+                                            if body.kind in {
+                                                CommandKind.agent_self_update,
+                                                CommandKind.agent_update_rollback,
+                                            }
+                                            else (
+                                                "privileged_remediation_not_authorized"
+                                                if body.kind in _COMMAND_CAPABILITIES
+                                                else "command_role_not_authorized"
+                                            )
                                         )
                                     )
                                 )
@@ -1766,6 +1790,23 @@ async def dispatch_command(
                 "action": body.payload["action"],
                 "service": body.payload["name"],
                 "reason": body.payload["reason"],
+            },
+        )
+    elif body.kind == CommandKind.agent_update_rollback:
+        # Restoring the previously retained agent build is a deliberate,
+        # recorded decision. The reason is operator prose, so it is stored as a
+        # digest by the audit policy rather than verbatim.
+        await audit.record(
+            db,
+            action="agent_update.rollback_dispatched",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail={
+                "reason": body.payload["reason"],
+                "expected_current_version": body.payload.get(
+                    "expected_current_version", ""
+                ),
+                "current_version": agent.agent_version or "",
             },
         )
     elif body.kind == CommandKind.terminate_process:

@@ -114,7 +114,8 @@ The current command kinds are `powershell`, `shell`, `collect_inventory`,
 `registry_read`, `registry_write`, `registry_delete`, and
 `remediation_rollback`, plus `reboot`, `shutdown`, `cancel_power_action`,
 `query_event_log`, `scan_packages`, `install_packages`, `deploy_software`,
-`list_services`, `control_service`, `list_processes`, and `terminate_process`.
+`list_services`, `control_service`, `list_processes`, `terminate_process`,
+`agent_self_update`, and `agent_update_rollback`.
 Inventory/update operations are authorized by the operator role.
 Software deployment (`deploy_software`) is administrator-only and capability-gated
 (`software-deployment-v1`); see [`SOFTWARE-DEPLOYMENT.md`](SOFTWARE-DEPLOYMENT.md).
@@ -123,6 +124,11 @@ typed operations; service control (`control_service`) and process termination
 (`terminate_process`) are administrator-only and capability-gated (`service-process-v1`),
 guarded by protected-target denylists, confirmation, and mandatory reasons.
 See [`SERVICE-PROCESS-MANAGEMENT.md`](SERVICE-PROCESS-MANAGEMENT.md).
+Agent self-update (`agent_self_update`) and rollback (`agent_update_rollback`)
+are administrator-only and capability-gated (`agent-self-update-v1`);
+`agent_self_update` is additionally refused on the generic dispatch endpoint and
+may only be issued by a published release's staged rollout. See
+[`AGENT-SELF-UPDATE.md`](AGENT-SELF-UPDATE.md).
 File/registry remediation is administrator-only and separately
 capability-gated; see [`CONTROLLED-REMEDIATION.md`](CONTROLLED-REMEDIATION.md).
 Power operations are administrator-only and capability-gated. Restart and
@@ -206,6 +212,25 @@ execution; the installer is downloaded to a bounded temp file that is always
 removed. A successful MSI records its `ProductCode` as rollback metadata in the
 command result. It is capability-gated by `software-deployment-v1` and adds no
 table or migration. See [`SOFTWARE-DEPLOYMENT.md`](SOFTWARE-DEPLOYMENT.md).
+
+Agent self-update (issue #63) adds a publication and rollout plane on top of the
+existing command transport. `agent_update_releases` stores an immutable signed
+manifest — version, channel, platform, artifact URL/digest/size, and the
+anti-rollback floor, canonicalized and Ed25519-signed under a domain-separated
+context — plus the mutable staged-rollout controls. `agent_update_attempts`
+records one row per (release, endpoint) and is the evidence the canary halt rule
+counts. Publishing targets nothing; a rollout advance assigns each endpoint a
+stable bucket from `SHA-256(release_id + ":" + agent_id)`, so widening a stage
+only ever adds endpoints, and dispatches a signed `agent_self_update` command
+whose payload is a strict projection of the manifest. At the endpoint the agent
+verifies the artifact digest and size (plus an optional pinned Authenticode
+signer), journals the attempt, backs up and atomically replaces its own binary,
+restarts, and on the next start commits only after a successful authenticated
+check-in — otherwise it restores the retained previous build on its own.
+Endpoints report the resolved outcome to an agent-authenticated endpoint, and a
+resolved failure rate at or above the release's threshold halts the release
+terminally. Alembic revision `0035` is additive. See
+[`AGENT-SELF-UPDATE.md`](AGENT-SELF-UPDATE.md).
 
 
 `powershell` and `shell` are arbitrary-script escape hatches and require a

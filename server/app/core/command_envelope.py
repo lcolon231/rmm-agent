@@ -24,6 +24,7 @@ SUPPORTED_COMMAND_KINDS = frozenset(
         "scan_packages", "install_packages",
         "deploy_software",
         "list_services", "control_service", "list_processes", "terminate_process",
+        "agent_self_update", "agent_update_rollback",
     }
 )
 

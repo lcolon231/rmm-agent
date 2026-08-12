@@ -349,6 +349,52 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "reason",
         digest_fields=("reason",),
     ),
+    # Signed, staged agent self-update (issue #63). Every field here is a
+    # bounded, non-secret build or policy identifier, which is exactly what makes
+    # an unexpected update or an unexplained rollback auditable. The artifact
+    # source URL is operator prose, so only its digest is recorded; the operator
+    # halt/rollback reasons are prose too and are stored digest-only.
+    "agent_update.release_published": _schema(
+        "release_id",
+        "version",
+        "channel",
+        "platform",
+        "artifact_sha256",
+        "artifact_size_bytes",
+        "artifact_url_sha256",
+        "min_supported_version",
+        "signer_pinned",
+        "manifest_sha256",
+        "signing_key_id",
+        "failure_threshold_percent",
+        "min_attempts_before_halt",
+    ),
+    "agent_update.rollout_advanced": _schema(
+        "release_id", "version", "channel", "rollout_percent", "dispatched",
+        "truncated",
+    ),
+    "agent_update.dispatched": _schema(
+        "release_id", "command_id", "version", "channel", "from_version",
+        "artifact_sha256", "rollout_bucket",
+    ),
+    "agent_update.rollout_paused": _schema("release_id", "rollout_percent"),
+    "agent_update.rollout_resumed": _schema("release_id", "rollout_percent"),
+    "agent_update.rollout_halted": _schema(
+        "release_id", "version", "channel", "reason", "rollout_percent",
+    ),
+    "agent_update.halt_reason_recorded": _schema(
+        "release_id", "reason", digest_fields=("reason",),
+    ),
+    "agent_update.rollback_dispatched": _schema(
+        "reason", "expected_current_version", "current_version",
+        digest_fields=("reason",),
+    ),
+    # The endpoint's post-restart resolution. Coded reasons only — the agent
+    # never sends prose here, and the schema is what enforces that.
+    "agent_update.outcome_reported": _schema(
+        "release_id", "command_id", "status", "reason", "from_version",
+        "to_version", "observed_version", "health_attempts", "recorded",
+    ),
     "patch_compliance.viewed": _schema(
         "client_id", "site_id", "state", "view", "result_count",
     ),

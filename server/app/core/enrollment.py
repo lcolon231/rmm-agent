@@ -138,6 +138,7 @@ async def redeem_enrollment_token(
         ip_address=source_ip,
         command_envelope_versions=body.supported_command_envelope_versions,
         supported_capabilities=body.supported_capabilities,
+        update_channel=body.update_channel,
         status=AgentStatus.pending,
         enrolled_at=now,
     )

@@ -74,6 +74,15 @@ and SHA-256/Merkle roots—remains readable.
 | `software_deployment.dispatched` | `api/management.py` MSI/EXE deployment dispatch (issue #56) | `installer_type`, `sha256`, `url_sha256`, `argument_count`, `timeout_seconds`, `signer_pinned`, `success_code_override`, `reboot_policy` |
 | `service_control.dispatched` | `api/management.py` service control dispatch (issue #57) | `action`, `service`, `reason_sha256`, `reason_bytes` |
 | `process_terminate.dispatched` | `api/management.py` process termination dispatch (issue #57) | `pid`, `expected_name_present`, `reason_sha256`, `reason_bytes` |
+| `agent_update.release_published` | `api/agent_updates.py` signed agent release publication (issue #63) | `release_id`, `version`, `channel`, `platform`, `artifact_sha256`, `artifact_size_bytes`, `artifact_url_sha256`, `min_supported_version`, `signer_pinned`, `manifest_sha256`, `signing_key_id`, `failure_threshold_percent`, `min_attempts_before_halt` |
+| `agent_update.rollout_advanced` | `api/agent_updates.py` staged rollout widened (issue #63) | `release_id`, `version`, `channel`, `rollout_percent`, `dispatched`, `truncated` |
+| `agent_update.dispatched` | `api/agent_updates.py` signed self-update command queued for one endpoint (issue #63) | `release_id`, `command_id`, `version`, `channel`, `from_version`, `artifact_sha256`, `rollout_bucket` |
+| `agent_update.rollout_paused` | `api/agent_updates.py` rollout paused (issue #63) | `release_id`, `rollout_percent` |
+| `agent_update.rollout_resumed` | `api/agent_updates.py` rollout resumed (issue #63) | `release_id`, `rollout_percent` |
+| `agent_update.rollout_halted` | `api/agent_updates.py` rollout halted by operator or canary rule (issue #63) | `release_id`, `version`, `channel`, `reason`, `rollout_percent` |
+| `agent_update.halt_reason_recorded` | `api/agent_updates.py` operator halt justification (issue #63) | `release_id`, `reason_sha256`, `reason_bytes` |
+| `agent_update.rollback_dispatched` | `api/management.py` operator-requested rollback to the retained previous build (issue #63) | `reason_sha256`, `reason_bytes`, `expected_current_version`, `current_version` |
+| `agent_update.outcome_reported` | `api/agent_updates.py` endpoint post-restart resolution (issue #63) | `release_id`, `command_id`, `status`, `reason`, `from_version`, `to_version`, `observed_version`, `health_attempts`, `recorded` |
 | `monitoring_alert.acknowledged` | `api/management.py` technician acknowledgement | `alert_id`, `generation`, `request_id`, `from_state`, `to_state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.assigned` | `api/management.py` technician assignment | `alert_id`, `generation`, `request_id`, `assigned_to_operator_id`, `assigned_to_email_sha256`, `assigned_to_email_bytes`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.commented` | `api/management.py` technician comment | `alert_id`, `generation`, `request_id`, `state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |

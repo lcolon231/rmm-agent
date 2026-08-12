@@ -160,7 +160,12 @@ Workstreams, in order:
    capability piggybacked on the chat channel.
 6. MeshCentral remote desktop integration with explicit authorization and audit
    boundaries.
-7. Signed, staged, rollback-capable agent self-update.
+7. Signed, staged, rollback-capable agent self-update. **Implemented**
+   (issue #63): signed release metadata and digest-pinned artifacts, staged
+   rollout with an automatic canary halt, anti-rollback enforced at both ends,
+   and automatic endpoint rollback to a retained previous build on a failed
+   post-restart health check. See
+   [`AGENT-SELF-UPDATE.md`](AGENT-SELF-UPDATE.md).
 
 Exit requires maintenance-window and reboot safety tests, idempotent remediation
 where appropriate, complete audit coverage, and Windows end-to-end evidence.
