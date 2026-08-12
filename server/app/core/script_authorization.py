@@ -40,7 +40,13 @@ def authorize_command(
             reason="operator_role_insufficient",
         )
 
-    if kind in (CommandKind.collect_inventory, CommandKind.scan_updates, CommandKind.install_updates):
+    if kind in (
+        CommandKind.collect_inventory,
+        CommandKind.scan_updates,
+        CommandKind.install_updates,
+        # Package discovery is read-only, like a Windows Update scan: operator+.
+        CommandKind.scan_packages,
+    ):
         return CommandAuthorizationDecision(
             allowed=True,
             policy="typed_operation",
@@ -62,6 +68,9 @@ def authorize_command(
         CommandKind.shutdown,
         CommandKind.cancel_power_action,
         CommandKind.query_event_log,
+        # Installing/upgrading arbitrary software is a broad trust boundary
+        # (chocolatey pulls third-party sources); keep it admin-only.
+        CommandKind.install_packages,
     ):
         return CommandAuthorizationDecision(
             allowed=operator.role == OperatorRole.admin,
@@ -74,6 +83,8 @@ def authorize_command(
                 }
                 else "event_log_query"
                 if kind == CommandKind.query_event_log
+                else "package_management"
+                if kind == CommandKind.install_packages
                 else "privileged_remediation"
             ),
             reason=(

@@ -299,6 +299,21 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "window_present",
         "user_present",
     ),
+    # Package install/upgrade gate decision (issue #55). Package ids and source
+    # URLs are never stored as prose: only counts and the accountable SHA-256
+    # source digest ride the audit trail.
+    "package_install.gated": _schema(
+        "provider",
+        "operation",
+        "requested",
+        "source_present",
+        "source_digest",
+        "signer_present",
+    ),
+    # Package discovery dispatch (issue #55): what provider was scanned, no results.
+    "package_scan.dispatched": _schema(
+        "provider",
+    ),
     "patch_compliance.viewed": _schema(
         "client_id", "site_id", "state", "view", "result_count",
     ),

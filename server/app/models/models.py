@@ -122,6 +122,12 @@ class CommandKind(str, enum.Enum):
     # only: the agent returns structured <System> fields, never message text or
     # EventData, so no PHI-bearing free text crosses the wire or is stored.
     query_event_log = "query_event_log"
+    # Package-provider operations (issue #55). scan_packages is a read-only typed
+    # discovery whose result lands in the installed_packages inventory section;
+    # install_packages installs/upgrades an explicit, bounded set of packages via
+    # winget (default) or the opt-in, capability-gated chocolatey provider.
+    scan_packages = "scan_packages"
+    install_packages = "install_packages"
 
 
 class CommandStatus(str, enum.Enum):

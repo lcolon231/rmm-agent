@@ -34,6 +34,8 @@ LIST_IDENTITIES: dict[tuple[str, str], tuple[str, ...]] = {
     (InventorySection.security_defender.value, "third_party_products"): (),
     (InventorySection.windows_updates.value, "missing"): ("update_id",),
     (InventorySection.windows_updates.value, "installed"): ("update_id",),
+    (InventorySection.installed_packages.value, "installed"): ("package_id",),
+    (InventorySection.installed_packages.value, "upgradable"): ("package_id",),
 }
 
 

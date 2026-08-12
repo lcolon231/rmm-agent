@@ -218,6 +218,12 @@ _COMMAND_CAPABILITIES: dict[CommandKind, tuple[str, ...]] = {
         "file-transfer-v1", "registry-operations-v1"
     ),
     CommandKind.query_event_log: ("event-log-query-v1",),
+    # Package operations (issue #55) require the base package-management
+    # capability. The additional chocolatey-provider capability is required only
+    # when a command selects the chocolatey provider; that conditional check is
+    # applied after payload parsing in _apply_package_install_policy.
+    CommandKind.scan_packages: ("package-management-v1",),
+    CommandKind.install_packages: ("package-management-v1",),
 }
 
 _POWER_ACTION_KINDS = frozenset({CommandKind.reboot, CommandKind.shutdown})
@@ -335,6 +341,98 @@ async def _apply_patch_approval_policy(
             detail["blocked"] = decision["blocked"][:100]
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
     return decision["payload"]
+
+
+_CHOCOLATEY_PROVIDER_CAPABILITY = "chocolatey-provider-v1"
+
+
+async def _require_chocolatey_capability(
+    db: AsyncSession, operator: Operator, agent: Agent, kind: CommandKind
+) -> None:
+    """Fail closed unless the endpoint opted into the chocolatey provider.
+
+    The base package-management capability is checked generically; this adds the
+    per-provider opt-in so a chocolatey command can never reach an endpoint that
+    has not enabled it. Audits the denial before raising so it is durable.
+    """
+    if _CHOCOLATEY_PROVIDER_CAPABILITY in (agent.supported_capabilities or []):
+        return
+    await audit.record(
+        db,
+        action="command.authorization_denied",
+        actor=operator.email,
+        agent_id=agent.id,
+        detail={
+            "operator_id": operator.id,
+            "operator_role": operator.role.value,
+            "kind": kind.value,
+            "site_id": agent.site_id,
+            "policy": "agent_capability",
+            "reason": "required_capability_missing",
+            "permission_scope": None,
+            "permission_scope_id": None,
+        },
+    )
+    await db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "agent_capability_unsupported",
+            "required": [_CHOCOLATEY_PROVIDER_CAPABILITY],
+            "missing": [_CHOCOLATEY_PROVIDER_CAPABILITY],
+            "agent_supported": agent.supported_capabilities or [],
+        },
+    )
+
+
+async def _apply_package_install_policy(
+    db: AsyncSession,
+    operator: Operator,
+    agent: Agent,
+    kind: CommandKind,
+    payload: dict,
+) -> dict:
+    """Package command gate (issue #55): opt-in provider check + audit evidence.
+
+    Winget needs no configuration. Chocolatey additionally requires the endpoint
+    to have advertised the opt-in provider capability, and the signed source /
+    digest / signer evidence the payload validator already enforced. Records the
+    operator-visible gating evidence; package ids and source URLs never enter the
+    audit trail — only counts and the accountable source digest do.
+    """
+    if kind == CommandKind.scan_packages:
+        provider = payload.get("provider") or "winget"
+        if provider == "chocolatey":
+            await _require_chocolatey_capability(db, operator, agent, kind)
+        await audit.record(
+            db,
+            action="package_scan.dispatched",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail={"provider": provider},
+        )
+        return payload
+    if kind != CommandKind.install_packages:
+        return payload
+
+    provider = payload["provider"]
+    if provider == "chocolatey":
+        await _require_chocolatey_capability(db, operator, agent, kind)
+    await audit.record(
+        db,
+        action="package_install.gated",
+        actor=operator.email,
+        agent_id=agent.id,
+        detail={
+            "provider": provider,
+            "operation": payload["operation"],
+            "requested": len(payload["package_ids"]),
+            "source_present": bool(payload.get("source")),
+            "source_digest": payload.get("source_digest", ""),
+            "signer_present": bool(payload.get("signer")),
+        },
+    )
+    return payload
 
 
 MAX_NAVIGATION_CLIENTS = 200
@@ -1451,9 +1549,16 @@ async def dispatch_command(
                             "event_log_query_not_authorized"
                             if body.kind == CommandKind.query_event_log
                             else (
-                                "privileged_remediation_not_authorized"
-                                if body.kind in _COMMAND_CAPABILITIES
-                                else "command_role_not_authorized"
+                                "package_management_not_authorized"
+                                if body.kind in {
+                                    CommandKind.scan_packages,
+                                    CommandKind.install_packages,
+                                }
+                                else (
+                                    "privileged_remediation_not_authorized"
+                                    if body.kind in _COMMAND_CAPABILITIES
+                                    else "command_role_not_authorized"
+                                )
                             )
                         )
                     )
@@ -1574,6 +1679,12 @@ async def dispatch_command(
     # subset or fails closed on a denied/deferred selection. Opt-in — a no-op when
     # no policy applies. Self-audits and commits its decision before any refusal.
     body.payload = await _apply_patch_approval_policy(db, agent, body.kind, body.payload, now)
+
+    # Package provider gate (issue #55): opt-in chocolatey capability check plus
+    # operator-visible gating evidence. A no-op for non-package kinds.
+    body.payload = await _apply_package_install_policy(
+        db, operator, agent, body.kind, body.payload
+    )
 
     await audit.record(
         db,
@@ -1781,7 +1892,15 @@ async def get_command(
     ).scalar_one_or_none()
     if cmd is None:
         raise HTTPException(status_code=404, detail="Command not found")
-    if cmd.kind in _COMMAND_CAPABILITIES and operator.role != OperatorRole.admin:
+    # scan_packages is capability-gated for dispatch but its captured output is a
+    # non-sensitive summary and its dispatch is operator-level, so its detail view
+    # follows the same operator/readonly visibility as scan_updates rather than the
+    # admin-only rule for privileged typed operations.
+    if (
+        cmd.kind in _COMMAND_CAPABILITIES
+        and cmd.kind != CommandKind.scan_packages
+        and operator.role != OperatorRole.admin
+    ):
         await audit.record(
             db,
             action="command_detail.access_denied",

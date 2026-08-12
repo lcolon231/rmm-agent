@@ -607,6 +607,93 @@ def _validate_event_log_query(payload: dict) -> dict:
     return normalized
 
 
+# Package-provider validation (issue #55). Identifiers cover winget, msstore, and
+# chocolatey ids; the bound matches the agent's normalizePackageIDs.
+_PACKAGE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
+_PACKAGE_PROVIDERS = {"winget", "chocolatey"}
+_PACKAGE_OPERATIONS = {"install", "upgrade"}
+_MAX_PACKAGE_TARGETS = 100
+
+
+def _normalize_package_ids(raw: object) -> list[str]:
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("package_ids must be a non-empty array")
+    if len(raw) > _MAX_PACKAGE_TARGETS:
+        raise ValueError(f"at most {_MAX_PACKAGE_TARGETS} package targets are allowed")
+    normalized: list[str] = []
+    for value in raw:
+        if not isinstance(value, str):
+            raise ValueError("every package_id must be a string")
+        package_id = value.strip()
+        if not _PACKAGE_ID_RE.fullmatch(package_id):
+            raise ValueError(f"invalid package_id: {value!r}")
+        if package_id not in normalized:
+            normalized.append(package_id)
+    return normalized
+
+
+def _validate_package_scan(payload: dict) -> dict:
+    """scan_packages accepts an optional provider filter and nothing else."""
+    if set(payload) - {"provider"}:
+        raise ValueError("scan_packages payload contains unsupported fields")
+    provider = payload.get("provider")
+    if provider is None:
+        return {}
+    if provider not in _PACKAGE_PROVIDERS:
+        raise ValueError("scan_packages provider is unsupported")
+    return {"provider": provider}
+
+
+def _validate_package_install(payload: dict) -> dict:
+    """install_packages: bounded targets via winget or opt-in chocolatey.
+
+    Chocolatey additionally requires signed source, source_digest, and signer
+    evidence; winget must not carry any of it. The server validates the shape and
+    records the evidence; endpoint opt-in is enforced by the capability gate and
+    re-checked on the agent.
+    """
+    allowed = {"provider", "operation", "package_ids", "source", "source_digest", "signer"}
+    if set(payload) - allowed:
+        raise ValueError("install_packages payload contains unsupported fields")
+    provider = payload.get("provider")
+    if provider not in _PACKAGE_PROVIDERS:
+        raise ValueError("install_packages provider is unsupported")
+    operation = payload.get("operation")
+    if operation not in _PACKAGE_OPERATIONS:
+        raise ValueError("install_packages operation must be install or upgrade")
+    package_ids = _normalize_package_ids(payload.get("package_ids"))
+
+    if provider == "winget":
+        if any(key in payload for key in ("source", "source_digest", "signer")):
+            raise ValueError("winget install must not include source evidence")
+        return {"provider": provider, "operation": operation, "package_ids": package_ids}
+
+    # Chocolatey: require and normalize the signed source trust evidence.
+    source = payload.get("source")
+    if not isinstance(source, str):
+        raise ValueError("chocolatey install requires a source string")
+    source = source.strip()
+    if not 1 <= len(source.encode("utf-8")) <= 512 or any(ord(c) < 32 or ord(c) == 127 for c in source):
+        raise ValueError("chocolatey source must be 1-512 printable bytes")
+    digest = payload.get("source_digest")
+    if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
+        raise ValueError("chocolatey source_digest must be a lowercase SHA-256 digest")
+    signer = payload.get("signer")
+    if not isinstance(signer, str):
+        raise ValueError("chocolatey install requires a signer string")
+    signer = signer.strip()
+    if not 1 <= len(signer.encode("utf-8")) <= 255 or any(ord(c) < 32 or ord(c) == 127 for c in signer):
+        raise ValueError("chocolatey signer must be 1-255 printable bytes")
+    return {
+        "provider": provider,
+        "operation": operation,
+        "package_ids": package_ids,
+        "source": source,
+        "source_digest": digest,
+        "signer": signer,
+    }
+
+
 class CommandCreate(BaseModel):
     kind: CommandKind
     payload: dict = Field(default_factory=dict)
@@ -766,6 +853,14 @@ class CommandCreate(BaseModel):
 
         if self.kind == CommandKind.query_event_log:
             self.payload = _validate_event_log_query(self.payload)
+            return self
+
+        if self.kind == CommandKind.scan_packages:
+            self.payload = _validate_package_scan(self.payload)
+            return self
+
+        if self.kind == CommandKind.install_packages:
+            self.payload = _validate_package_install(self.payload)
             return self
 
         if self.kind != CommandKind.install_updates:

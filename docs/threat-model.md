@@ -259,6 +259,23 @@ prior gap where the scheduler dispatched commands without the approval/window
 gate. Residual risk: reboot consent relies on the endpoint's self-reported
 user-session evidence, the same trust assumption as power operations.
 
+Issue #55 adds a package-management boundary. Discovery (`scan_packages`) is
+read-only and operator-level; install/upgrade (`install_packages`) is
+administrator-only and installs an explicit, bounded set of package ids — never a
+script. Winget is the default and needs no configuration. Chocolatey introduces a
+third-party-source trust boundary and is contained two ways: it is opt-in per
+endpoint (the agent advertises `chocolatey-provider-v1` only when the operator
+enabled it, so the server fails closed for every other endpoint), and a
+Chocolatey install must carry signed `source`, `source_digest`, and `signer`
+evidence that the server records (`package_install.gated`, storing only counts
+and the source digest) and the agent re-validates at the endpoint, optionally
+against a config source allowlist. Both kinds require `package-management-v1`, so
+a mixed-version fleet fails closed. Residual risks: the provider CLIs
+(`winget.exe`/`choco.exe`) and their configured sources are trusted to resolve
+and verify package contents — NodeLink does not itself hash-verify the installed
+bytes — and a compromised endpoint can misreport discovery results, the same
+self-report assumption as inventory. See [`PACKAGE-MANAGEMENT.md`](PACKAGE-MANAGEMENT.md).
+
 Typed script parameters reduce injection and disclosure risk but do not make an
 approved script intrinsically safe. Definitions are immutable with the reviewed
 source. Values are validated without coercion, then the whole resolved document

@@ -164,6 +164,14 @@ The code in this repository currently provides:
   compliant/non-compliant/stale/unknown/exempt states, current-policy history,
   bounded CSV/JSON exports, and audit evidence. No migration or agent change.
   See `docs/PATCH-COMPLIANCE.md`.
+- Package management via a provider interface (issue #55): typed `scan_packages`
+  (read-only, operator-level discovery into the `installed_packages` inventory
+  section) and administrator-only `install_packages` (install/upgrade of a
+  bounded package-id set). Winget is the always-on default; Chocolatey is opt-in
+  per endpoint (advertised only when enabled in config) and additionally requires
+  signed source/digest/signer evidence. Capability-gated (`package-management-v1`,
+  `chocolatey-provider-v1`), audited, and fail-closed. No schema change. Dashboard
+  UI is deferred. See `docs/PACKAGE-MANAGEMENT.md`.
 - An immutable versioned script library with canonical SHA-256 content
   evidence, bounded language/platform/tag metadata, append-only final reviews,
   terminal idempotent deprecation, role-gated API/dashboard workflows, and no
