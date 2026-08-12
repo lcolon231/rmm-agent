@@ -157,6 +157,7 @@ select:focus-visible {
   display: flex;
   width: 228px;
   flex-direction: column;
+  overflow-y: auto;
   color: #ece9f5;
   background:
     linear-gradient(135deg, rgb(255 255 255 / 4%) 0 1px, transparent 1px 22px),
