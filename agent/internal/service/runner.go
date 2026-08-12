@@ -24,6 +24,7 @@ import (
 
 	"github.com/lcolon231/rmm/agent/internal/client"
 	"github.com/lcolon231/rmm/agent/internal/config"
+	"github.com/lcolon231/rmm/agent/internal/deploy"
 	"github.com/lcolon231/rmm/agent/internal/eventlog"
 	"github.com/lcolon231/rmm/agent/internal/executor"
 	"github.com/lcolon231/rmm/agent/internal/inventory"
@@ -768,6 +769,8 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		res = a.runPackageScan(ctx, s, cmd.Payload)
 	case executor.KindInstallPackages:
 		res = packages.ExecuteInstall(ctx, cmd.Kind, cmd.Payload, s.packagesConfig)
+	case executor.KindDeploySoftware:
+		res = deploy.Execute(ctx, cmd.Kind, cmd.Payload)
 	default:
 		script := extractScript(cmd.Payload)
 		res = a.run(ctx, cmd.Kind, script)

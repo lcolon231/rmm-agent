@@ -453,6 +453,16 @@ PRODUCER_DETAILS = {
     "package_scan.dispatched": {
         "provider": "winget",
     },
+    "software_deployment.dispatched": {
+        "installer_type": "msi",
+        "sha256": "b" * 64,
+        "url_sha256": "c" * 64,
+        "argument_count": 1,
+        "timeout_seconds": 600,
+        "signer_pinned": True,
+        "success_code_override": False,
+        "reboot_policy": "never",
+    },
     "patch_compliance.viewed": {
         "client_id": None,
         "site_id": None,

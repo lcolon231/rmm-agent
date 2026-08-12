@@ -224,6 +224,9 @@ _COMMAND_CAPABILITIES: dict[CommandKind, tuple[str, ...]] = {
     # applied after payload parsing in _apply_package_install_policy.
     CommandKind.scan_packages: ("package-management-v1",),
     CommandKind.install_packages: ("package-management-v1",),
+    # Software deployment (issue #56) requires the deployment capability; dispatch
+    # to an agent that has not advertised it fails closed.
+    CommandKind.deploy_software: ("software-deployment-v1",),
 }
 
 _POWER_ACTION_KINDS = frozenset({CommandKind.reboot, CommandKind.shutdown})
@@ -1555,9 +1558,13 @@ async def dispatch_command(
                                     CommandKind.install_packages,
                                 }
                                 else (
-                                    "privileged_remediation_not_authorized"
-                                    if body.kind in _COMMAND_CAPABILITIES
-                                    else "command_role_not_authorized"
+                                    "software_deployment_not_authorized"
+                                    if body.kind == CommandKind.deploy_software
+                                    else (
+                                        "privileged_remediation_not_authorized"
+                                        if body.kind in _COMMAND_CAPABILITIES
+                                        else "command_role_not_authorized"
+                                    )
                                 )
                             )
                         )
@@ -1712,6 +1719,27 @@ async def dispatch_command(
                 "level_filter": "levels" in body.payload,
                 "event_id_filter": "event_ids" in body.payload,
                 "paginated": "cursor" in body.payload,
+            },
+        )
+    if body.kind == CommandKind.deploy_software:
+        # Record accountable deployment evidence: the artifact digest, installer
+        # type, argument/timeout/reboot bounds, and whether a signer was pinned.
+        # The source URL is prose, so only its SHA-256 rides the audit trail.
+        reboot = body.payload.get("reboot") or {}
+        await audit.record(
+            db,
+            action="software_deployment.dispatched",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail={
+                "installer_type": body.payload["installer_type"],
+                "sha256": body.payload["sha256"],
+                "url_sha256": hashlib.sha256(body.payload["url"].encode("utf-8")).hexdigest(),
+                "argument_count": len(body.payload.get("arguments", [])),
+                "timeout_seconds": body.payload["timeout_seconds"],
+                "signer_pinned": "signer_thumbprint" in body.payload,
+                "success_code_override": "success_exit_codes" in body.payload,
+                "reboot_policy": reboot.get("policy", "never"),
             },
         )
     key_id = active_signing_key().key_id if envelope_version == COMMAND_ENVELOPE_V3 else None

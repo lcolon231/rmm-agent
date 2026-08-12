@@ -694,6 +694,103 @@ def _validate_package_install(payload: dict) -> dict:
     }
 
 
+# Software-deployment validation (issue #56).
+_THUMBPRINT_RE = re.compile(r"^[0-9A-Fa-f]{40}$")
+_DEPLOY_MAX_ARGS = 32
+_DEPLOY_MAX_ARG_LEN = 256
+_DEPLOY_MAX_URL_LEN = 2048
+_DEPLOY_MAX_SUCCESS_CODES = 32
+
+
+def _validate_software_deploy(payload: dict) -> dict:
+    """deploy_software: authenticated MSI/EXE deployment with integrity checks.
+
+    Source trust is https + a mandatory SHA-256 digest, with an optional
+    Authenticode signer thumbprint. Arguments are bounded printable argv tokens
+    (installers run as argv, never through a shell). Reboot reuses the #53
+    post-install reboot shape.
+    """
+    allowed = {
+        "url", "sha256", "installer_type", "arguments",
+        "signer_thumbprint", "timeout_seconds", "success_exit_codes", "reboot",
+    }
+    if set(payload) - allowed:
+        raise ValueError("deploy_software payload contains unsupported fields")
+
+    url = payload.get("url")
+    if not isinstance(url, str) or not 1 <= len(url) <= _DEPLOY_MAX_URL_LEN:
+        raise ValueError("deploy_software url is required")
+    if any(ord(c) < 32 or ord(c) == 127 for c in url):
+        raise ValueError("deploy_software url contains control characters")
+    if not re.match(r"^https://", url, re.IGNORECASE):
+        raise ValueError("deploy_software url must be https")
+
+    sha = payload.get("sha256")
+    if not isinstance(sha, str) or not _SHA256_RE.fullmatch(sha):
+        raise ValueError("deploy_software sha256 must be a lowercase SHA-256 digest")
+
+    installer_type = payload.get("installer_type")
+    if installer_type not in {"msi", "exe"}:
+        raise ValueError("deploy_software installer_type must be msi or exe")
+
+    arguments = payload.get("arguments", [])
+    if not isinstance(arguments, list) or len(arguments) > _DEPLOY_MAX_ARGS:
+        raise ValueError(f"deploy_software allows at most {_DEPLOY_MAX_ARGS} arguments")
+    for arg in arguments:
+        if not isinstance(arg, str) or len(arg) > _DEPLOY_MAX_ARG_LEN:
+            raise ValueError("deploy_software arguments must be short strings")
+        if any(ord(c) < 32 or ord(c) == 127 for c in arg):
+            raise ValueError("deploy_software arguments must be printable")
+
+    timeout = payload.get("timeout_seconds")
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or not 30 <= timeout <= 3600:
+        raise ValueError("deploy_software timeout_seconds must be between 30 and 3600")
+
+    result: dict = {
+        "url": url,
+        "sha256": sha,
+        "installer_type": installer_type,
+        "arguments": list(arguments),
+        "timeout_seconds": timeout,
+    }
+
+    thumbprint = payload.get("signer_thumbprint")
+    if thumbprint is not None:
+        if not isinstance(thumbprint, str) or not _THUMBPRINT_RE.fullmatch(thumbprint):
+            raise ValueError("deploy_software signer_thumbprint must be a 40-char hex thumbprint")
+        result["signer_thumbprint"] = thumbprint
+
+    success_codes = payload.get("success_exit_codes")
+    if success_codes is not None:
+        if not isinstance(success_codes, list) or len(success_codes) > _DEPLOY_MAX_SUCCESS_CODES:
+            raise ValueError("deploy_software success_exit_codes is invalid")
+        for code in success_codes:
+            if not isinstance(code, int) or isinstance(code, bool) or not 0 <= code <= 65535:
+                raise ValueError("deploy_software success_exit_codes must be 0-65535 integers")
+        result["success_exit_codes"] = list(success_codes)
+
+    reboot = payload.get("reboot")
+    if reboot is not None:
+        if not isinstance(reboot, dict) or set(reboot) - {"policy", "delay_seconds", "requires_no_user"}:
+            raise ValueError("deploy_software reboot is invalid")
+        policy = reboot.get("policy")
+        if policy not in {"never", "if_required", "forced"}:
+            raise ValueError("deploy_software reboot.policy is invalid")
+        normalized_reboot: dict = {"policy": policy}
+        if policy != "never":
+            delay = reboot.get("delay_seconds")
+            if not isinstance(delay, int) or isinstance(delay, bool) or not 60 <= delay <= 3600:
+                raise ValueError("deploy_software reboot.delay_seconds must be between 60 and 3600")
+            requires_no_user = reboot.get("requires_no_user", True)
+            if not isinstance(requires_no_user, bool):
+                raise ValueError("deploy_software reboot.requires_no_user must be a boolean")
+            normalized_reboot["delay_seconds"] = delay
+            normalized_reboot["requires_no_user"] = requires_no_user
+        result["reboot"] = normalized_reboot
+
+    return result
+
+
 class CommandCreate(BaseModel):
     kind: CommandKind
     payload: dict = Field(default_factory=dict)
@@ -861,6 +958,10 @@ class CommandCreate(BaseModel):
 
         if self.kind == CommandKind.install_packages:
             self.payload = _validate_package_install(self.payload)
+            return self
+
+        if self.kind == CommandKind.deploy_software:
+            self.payload = _validate_software_deploy(self.payload)
             return self
 
         if self.kind != CommandKind.install_updates:

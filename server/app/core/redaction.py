@@ -314,6 +314,18 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     "package_scan.dispatched": _schema(
         "provider",
     ),
+    # Software deployment dispatch (issue #56). The source URL is prose and never
+    # stored — only its SHA-256 digest and the artifact digest, plus bounds.
+    "software_deployment.dispatched": _schema(
+        "installer_type",
+        "sha256",
+        "url_sha256",
+        "argument_count",
+        "timeout_seconds",
+        "signer_pinned",
+        "success_code_override",
+        "reboot_policy",
+    ),
     "patch_compliance.viewed": _schema(
         "client_id", "site_id", "state", "view", "result_count",
     ),
