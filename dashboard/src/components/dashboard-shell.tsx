@@ -48,7 +48,6 @@ import {
   deriveAttentionItems,
   formatSignedActions,
   formatTrustStatus,
-  type AttentionItem,
   type SignedAction,
   type SigningKeyInfo,
   type TrustStatus,
@@ -131,14 +130,14 @@ type SidebarProps = {
 
 function Sidebar({
   activePath,
-  navigation,
-  navigationError,
+  navigation: _navigation,
+  navigationError: _navigationError,
   onClose,
   open,
   operator,
-  selectedClientId,
-  selectedSiteId,
-  selectionError,
+  selectedClientId: _selectedClientId,
+  selectedSiteId: _selectedSiteId,
+  selectionError: _selectionError,
 }: SidebarProps) {
   return (
     <>
