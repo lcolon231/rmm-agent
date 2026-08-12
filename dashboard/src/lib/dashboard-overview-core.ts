@@ -69,7 +69,7 @@ export function calculateFleetSummary(items: EndpointListItem[], totalCount?: nu
   for (const item of items) {
     if (item.status === "offline") {
       offlineCount++;
-    } else if (item.status === "critical") {
+    } else if ((item.status as string) === "critical") {
       criticalCount++;
     } else if (item.status === "pending") {
       warningCount++;
