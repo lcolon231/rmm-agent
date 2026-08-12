@@ -227,6 +227,10 @@ _COMMAND_CAPABILITIES: dict[CommandKind, tuple[str, ...]] = {
     # Software deployment (issue #56) requires the deployment capability; dispatch
     # to an agent that has not advertised it fails closed.
     CommandKind.deploy_software: ("software-deployment-v1",),
+    CommandKind.list_services: ("service-process-v1",),
+    CommandKind.control_service: ("service-process-v1",),
+    CommandKind.list_processes: ("service-process-v1",),
+    CommandKind.terminate_process: ("service-process-v1",),
 }
 
 _POWER_ACTION_KINDS = frozenset({CommandKind.reboot, CommandKind.shutdown})
@@ -1561,9 +1565,18 @@ async def dispatch_command(
                                     "software_deployment_not_authorized"
                                     if body.kind == CommandKind.deploy_software
                                     else (
-                                        "privileged_remediation_not_authorized"
-                                        if body.kind in _COMMAND_CAPABILITIES
-                                        else "command_role_not_authorized"
+                                        "service_process_not_authorized"
+                                        if body.kind in {
+                                            CommandKind.list_services,
+                                            CommandKind.control_service,
+                                            CommandKind.list_processes,
+                                            CommandKind.terminate_process,
+                                        }
+                                        else (
+                                            "privileged_remediation_not_authorized"
+                                            if body.kind in _COMMAND_CAPABILITIES
+                                            else "command_role_not_authorized"
+                                        )
                                     )
                                 )
                             )
@@ -1740,6 +1753,30 @@ async def dispatch_command(
                 "signer_pinned": "signer_thumbprint" in body.payload,
                 "success_code_override": "success_exit_codes" in body.payload,
                 "reboot_policy": reboot.get("policy", "never"),
+            },
+        )
+    elif body.kind == CommandKind.control_service:
+        await audit.record(
+            db,
+            action="service_control.dispatched",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail={
+                "action": body.payload["action"],
+                "service": body.payload["name"],
+                "reason": body.payload["reason"],
+            },
+        )
+    elif body.kind == CommandKind.terminate_process:
+        await audit.record(
+            db,
+            action="process_terminate.dispatched",
+            actor=operator.email,
+            agent_id=agent.id,
+            detail={
+                "pid": body.payload["pid"],
+                "expected_name_present": bool(body.payload.get("expected_name")),
+                "reason": body.payload["reason"],
             },
         )
     key_id = active_signing_key().key_id if envelope_version == COMMAND_ENVELOPE_V3 else None

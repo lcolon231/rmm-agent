@@ -34,6 +34,7 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/power"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/remediation"
+	"github.com/lcolon231/rmm/agent/internal/svcproc"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
 	"github.com/lcolon231/rmm/agent/internal/verify"
 )
@@ -771,6 +772,9 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		res = packages.ExecuteInstall(ctx, cmd.Kind, cmd.Payload, s.packagesConfig)
 	case executor.KindDeploySoftware:
 		res = deploy.Execute(ctx, cmd.Kind, cmd.Payload)
+	case executor.KindListServices, executor.KindControlService,
+		executor.KindListProcesses, executor.KindTerminateProcess:
+		res = svcproc.Execute(ctx, cmd.Kind, cmd.Payload)
 	default:
 		script := extractScript(cmd.Payload)
 		res = a.run(ctx, cmd.Kind, script)

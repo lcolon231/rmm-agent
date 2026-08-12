@@ -463,6 +463,16 @@ PRODUCER_DETAILS = {
         "success_code_override": False,
         "reboot_policy": "never",
     },
+    "service_control.dispatched": {
+        "action": "stop",
+        "service": "Spooler",
+        "reason": SENTINEL,
+    },
+    "process_terminate.dispatched": {
+        "pid": 1234,
+        "expected_name_present": True,
+        "reason": SENTINEL,
+    },
     "patch_compliance.viewed": {
         "client_id": None,
         "site_id": None,

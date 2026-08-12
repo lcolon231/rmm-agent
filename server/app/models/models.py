@@ -132,6 +132,11 @@ class CommandKind(str, enum.Enum):
     # SHA-256 (and optional Authenticode) verification, bounded install with an
     # argument policy and timeout, exit-code mapping, and reboot policy.
     deploy_software = "deploy_software"
+    # Windows service and process management operations (issue #57).
+    list_services = "list_services"
+    control_service = "control_service"
+    list_processes = "list_processes"
+    terminate_process = "terminate_process"
 
 
 class CommandStatus(str, enum.Enum):

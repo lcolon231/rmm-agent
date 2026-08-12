@@ -46,6 +46,8 @@ def authorize_command(
         CommandKind.install_updates,
         # Package discovery is read-only, like a Windows Update scan: operator+.
         CommandKind.scan_packages,
+        CommandKind.list_services,
+        CommandKind.list_processes,
     ):
         return CommandAuthorizationDecision(
             allowed=True,
@@ -74,11 +76,18 @@ def authorize_command(
         # Deploying a downloaded MSI/EXE runs arbitrary vendor code on the
         # endpoint; the broadest trust boundary here, so admin-only.
         CommandKind.deploy_software,
+        CommandKind.control_service,
+        CommandKind.terminate_process,
     ):
         return CommandAuthorizationDecision(
             allowed=operator.role == OperatorRole.admin,
             policy=(
-                "power_operation"
+                "service_process"
+                if kind in {
+                    CommandKind.control_service,
+                    CommandKind.terminate_process,
+                }
+                else "power_operation"
                 if kind in {
                     CommandKind.reboot,
                     CommandKind.shutdown,

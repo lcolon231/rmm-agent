@@ -106,16 +106,24 @@ MFA/federation, tenant-scoped authorization, and certificate pinning.
 ### 3.2 Operations plane
 
 The operations plane delivers endpoint state and actions. It currently contains
-enrollment, heartbeat telemetry, polling command pickup, eighteen command kinds,
+enrollment, heartbeat telemetry, polling command pickup, twenty-two command kinds,
 buffered result submission, command history, and offline status transitions.
 
 The current command kinds are `powershell`, `shell`, `collect_inventory`,
 `scan_updates`, `install_updates`, `file_upload`, `file_download`,
 `registry_read`, `registry_write`, `registry_delete`, and
 `remediation_rollback`, plus `reboot`, `shutdown`, `cancel_power_action`,
-`query_event_log`, `scan_packages`, `install_packages`, and `deploy_software`.
-Inventory/update operations are authorized by the
-operator role. File/registry remediation is administrator-only and separately
+`query_event_log`, `scan_packages`, `install_packages`, `deploy_software`,
+`list_services`, `control_service`, `list_processes`, and `terminate_process`.
+Inventory/update operations are authorized by the operator role.
+Software deployment (`deploy_software`) is administrator-only and capability-gated
+(`software-deployment-v1`); see [`SOFTWARE-DEPLOYMENT.md`](SOFTWARE-DEPLOYMENT.md).
+Service and process discovery (`list_services`, `list_processes`) are operator-level
+typed operations; service control (`control_service`) and process termination
+(`terminate_process`) are administrator-only and capability-gated (`service-process-v1`),
+guarded by protected-target denylists, confirmation, and mandatory reasons.
+See [`SERVICE-PROCESS-MANAGEMENT.md`](SERVICE-PROCESS-MANAGEMENT.md).
+File/registry remediation is administrator-only and separately
 capability-gated; see [`CONTROLLED-REMEDIATION.md`](CONTROLLED-REMEDIATION.md).
 Power operations are administrator-only and capability-gated. Restart and
 shutdown additionally bind a live maintenance window, delay, reason, and

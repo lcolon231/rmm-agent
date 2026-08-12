@@ -791,6 +791,98 @@ def _validate_software_deploy(payload: dict) -> dict:
     return result
 
 
+# ProtectedServices is the case-insensitive denylist of services that may never be controlled.
+# MUST stay in sync with agent/internal/svcproc/svcproc.go ProtectedServices.
+PROTECTED_SERVICES: frozenset[str] = frozenset(
+    {
+        "nodelinkagent", "windefend", "mpssvc", "eventlog",
+        "rpcss", "dcomlaunch", "rpceptmapper", "winmgmt",
+        "lsm", "dnscache", "dhcp", "bfe", "gpsvc",
+        "netlogon", "samss", "cryptsvc", "schedule",
+        "profsvc", "plugplay", "power", "nsi",
+    }
+)
+
+# ProtectedProcesses is the case-insensitive image-name denylist for termination.
+# MUST stay in sync with agent/internal/svcproc/svcproc.go ProtectedProcesses.
+PROTECTED_PROCESSES: frozenset[str] = frozenset(
+    {
+        "system", "idle", "smss.exe", "csrss.exe",
+        "wininit.exe", "winlogon.exe", "services.exe",
+        "lsass.exe", "lsm.exe", "svchost.exe",
+        "nodelinkagent.exe",
+    }
+)
+
+_SERVICE_NAME_RE = re.compile(r"^[A-Za-z0-9_.\- ]{1,256}$")
+_SERVICE_ACTIONS = frozenset({"start", "stop", "restart"})
+
+
+def _validate_service_control(payload: dict) -> dict:
+    allowed = {"name", "action", "confirm", "reason"}
+    if set(payload) != allowed:
+        raise ValueError("control_service requires name, action, confirm, and reason")
+    name = payload.get("name")
+    if not isinstance(name, str) or not _SERVICE_NAME_RE.fullmatch(name):
+        raise ValueError("service name is invalid")
+    name_clean = name.strip()
+    if name_clean.lower() in PROTECTED_SERVICES:
+        raise ValueError("service is protected and cannot be controlled")
+    action = payload.get("action")
+    if action not in _SERVICE_ACTIONS:
+        raise ValueError("service action must be start, stop, or restart")
+    if payload.get("confirm") is not True:
+        raise ValueError("control_service requires confirm=true")
+    reason = payload.get("reason")
+    if not isinstance(reason, str):
+        raise ValueError("reason must be a string")
+    reason = reason.strip()
+    reason_bytes = len(reason.encode("utf-8"))
+    if not 10 <= reason_bytes <= 512 or any(ord(c) < 32 or ord(c) == 127 for c in reason):
+        raise ValueError("reason must contain 10-512 printable UTF-8 bytes")
+    return {
+        "name": name_clean,
+        "action": action,
+        "confirm": True,
+        "reason": reason,
+    }
+
+
+def _validate_process_terminate(payload: dict) -> dict:
+    allowed = {"pid", "confirm", "reason", "expected_name"}
+    if set(payload) - allowed or not {"pid", "confirm", "reason"}.issubset(payload):
+        raise ValueError("terminate_process payload contains unsupported or missing fields")
+    pid = payload.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid < 0:
+        raise ValueError("process pid must be a positive integer")
+    if pid in (0, 4):
+        raise ValueError("process is protected and cannot be terminated")
+    if payload.get("confirm") is not True:
+        raise ValueError("terminate_process requires confirm=true")
+    reason = payload.get("reason")
+    if not isinstance(reason, str):
+        raise ValueError("reason must be a string")
+    reason = reason.strip()
+    reason_bytes = len(reason.encode("utf-8"))
+    if not 10 <= reason_bytes <= 512 or any(ord(c) < 32 or ord(c) == 127 for c in reason):
+        raise ValueError("reason must contain 10-512 printable UTF-8 bytes")
+    expected_name = payload.get("expected_name")
+    if expected_name is not None:
+        if not isinstance(expected_name, str):
+            raise ValueError("expected_name must be a string")
+        expected_name = expected_name.strip()
+        if len(expected_name) > 260 or any(ord(c) < 32 or ord(c) == 127 for c in expected_name):
+            raise ValueError("expected_name is invalid")
+        if expected_name.lower() in PROTECTED_PROCESSES:
+            raise ValueError("process is protected and cannot be terminated")
+    return {
+        "pid": pid,
+        "confirm": True,
+        "reason": reason,
+        **({"expected_name": expected_name} if expected_name else {}),
+    }
+
+
 class CommandCreate(BaseModel):
     kind: CommandKind
     payload: dict = Field(default_factory=dict)
@@ -962,6 +1054,26 @@ class CommandCreate(BaseModel):
 
         if self.kind == CommandKind.deploy_software:
             self.payload = _validate_software_deploy(self.payload)
+            return self
+
+        if self.kind == CommandKind.list_services:
+            if set(self.payload):
+                raise ValueError("list_services payload must be empty")
+            self.payload = {}
+            return self
+
+        if self.kind == CommandKind.list_processes:
+            if set(self.payload):
+                raise ValueError("list_processes payload must be empty")
+            self.payload = {}
+            return self
+
+        if self.kind == CommandKind.control_service:
+            self.payload = _validate_service_control(self.payload)
+            return self
+
+        if self.kind == CommandKind.terminate_process:
+            self.payload = _validate_process_terminate(self.payload)
             return self
 
         if self.kind != CommandKind.install_updates:
