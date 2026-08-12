@@ -79,7 +79,6 @@ func TestSupportedCapabilitiesAdvertisesServiceProcess(t *testing.T) {
 	t.Fatalf("SupportedCapabilities() must include %q", ServiceProcessCapabilityV1)
 }
 
-
 func TestChocolateyCapabilityIsGatedByConfig(t *testing.T) {
 	contains := func(caps []string, want string) bool {
 		for _, c := range caps {
