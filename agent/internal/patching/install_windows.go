@@ -89,10 +89,11 @@ try {
     if (-not $u.EulaAccepted) { $u.AcceptEula() }
   }
 
-  # Download phase
+  # Download phase. The download result is captured, never left on the pipeline:
+  # an unassigned COM return value is formatted onto stdout ahead of the JSON.
   $downloader = $session.CreateUpdateDownloader()
   $downloader.Updates = $toInstall
-  $downloader.Download()
+  $null = $downloader.Download()
 
   # Install phase
   $installer = $session.CreateUpdateInstaller()
@@ -175,7 +176,7 @@ func Install(ctx context.Context, targets InstallTargets) (InstallResult, error)
 	}
 
 	var res InstallResult
-	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+	if err := json.Unmarshal(extractPSJSON(stdout.Bytes()), &res); err != nil {
 		return InstallResult{
 			Status:  "failed",
 			Message: fmt.Sprintf("failed to parse install script result JSON: %v, raw stdout: %s", err, stdout.String()),
