@@ -1,0 +1,148 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "v0.1.7",
+    "title": "NodeLink v0.1.7 corrected Windows Update installation reporting",
+    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after the sole repository owner reviewed and accepted the release evidence. This is a single-defect patch release on top of v0.1.6. It corrects the Windows Update installation path, where the agent installed exactly the operator-selected updates and then failed to parse its own result, reporting a failed command for work that had already succeeded. There is no schema change, no new command kind, no protocol change, and no authorization change. It is not approved for multi-tenant or high-availability claims."
+  },
+  "server": {
+    "tag": "v0.1.7",
+    "deployment": "Deploy source from the exact commit bound to v0.1.7 by the release workflow. No server-side behavior changes in this release; the defect and its fix are entirely inside the agent's Windows Update installation collector."
+  },
+  "agent": {
+    "version": "0.1.7",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "0.1.7",
+    "filename": "NodeLinkAgentSetup-0.1.7.exe"
+  },
+  "database": {
+    "alembic_revision": "0035",
+    "compatible_from": [
+      "0001",
+      "0012",
+      "0029",
+      "0035"
+    ],
+    "migration_policy": "Migrations are forward-only. v0.1.7 adds no revision and stays at 0035, the head v0.1.6 introduced, so a v0.1.6 database needs no migration and `alembic upgrade head` is a no-op that leaves every row untouched. A v0.1.5 database at 0029 runs the six additive revisions 0030 through 0035 exactly as documented for v0.1.6; a v0.1.3 database at 0028 upgrades forward through the full chain; an unversioned public v0.1.1 database must pass guarded schema adoption at 0001 first. Never edit a revision or perform an in-place downgrade. PostgreSQL enum values added by 0030 through 0035 still cannot be removed in place, so crossing back below 0035 continues to require the exact-revision restore procedure in docs/ROLLBACK.md rather than an Alembic downgrade."
+  },
+  "protocols": {
+    "command_envelopes": [
+      "command-v3"
+    ],
+    "mixed_version_behavior": "command-v3 is unchanged from v0.1.6, and no command kind is added or removed, so a v0.1.6 and a v0.1.7 agent are protocol-identical and a mixed fleet needs no staging. The only observable difference is the corrected result of an install_updates command: a v0.1.6 agent that successfully installs an update still reports the command as failed with a JSON parse error, while a v0.1.7 agent reports the installed KB list and reboot requirement it actually observed. A v0.1.7 agent against a v0.1.5 or v0.1.6 server behaves identically to v0.1.6 because the corrected value is produced entirely on the endpoint and travels in the existing result fields."
+  },
+  "known_limitations": [
+    "Endpoints still running v0.1.6 or earlier keep misreporting successful Windows Update installations as failed commands. The recorded failure is a reporting defect only; the updates were installed. Command history written under v0.1.6 is not retroactively corrected by this release, so an operator reconciling past install_updates commands should re-scan the affected endpoints rather than trust the stored result.",
+    "#24: Windows agent and installer artifacts are not Authenticode signed, so SmartScreen or antivirus warnings remain possible. Signed self-update artifacts use the existing Ed25519 command-signing trust, not Authenticode; an optional Authenticode signer-thumbprint pin is available once a certificate exists.",
+    "#66: Roles are global and clients or sites are not authorization tenants; do not market or operate this release as multi-tenant.",
+    "#84: Enrollment rate limits, counters, and metrics are process-local; no multi-worker or high-availability protection claim is made.",
+    "#126: Empty deployments must bootstrap the first client and site through the existing administrative API before using enrollment.",
+    "This manifest's backup, restore, and rollback rehearsal evidence was produced against a disposable rehearsal database seeded with a representative dataset (server/tests/test_backup_restore.py shape), not a production database, and has no external immutable audit-anchor receipt to cross-check because anchor publication is opt-in and was not configured for the rehearsal.",
+    "Endpoint inventory, monitoring checks, alerting, patching, remediation, and self-update are Windows-first; Linux and macOS remain development-only builds with reduced or absent collectors and no self-update support (self-update is a Windows-only capability because committing an update requires the managed service restart).",
+    "Alert email and signed webhook delivery are best-effort with process-local state; there is no multi-worker delivery deduplication or high-availability guarantee.",
+    "#179: an agent's reported version refreshes only on a successful authenticated heartbeat, so an offline, quarantined, or unauthenticated endpoint keeps displaying its last recorded version. A successful self-update changes this sooner because the agent reports its new version on the very next heartbeat after the health-checked restart.",
+    "Agent self-update is disabled by default (per-agent update_channel is nullable and unset) and must be explicitly enrolled into a channel and targeted by an admin-authorized rollout; it never applies itself without an operator-published, signed release.",
+    "The automatic post-update health check and rollback covers process start and a bounded number of successful heartbeats; it does not evaluate application-level regressions beyond that window, so a release that misbehaves only after the health-check window is a forward-fix or operator-triggered rollback, not an automatic one.",
+    "Over-long operating-system strings are trimmed by the agent to the server's field bounds, so an unusually long update title or description is stored truncated rather than costing the endpoint its entire scan.",
+    "This manifest's evidence is complete for the rollback procedure and the no-migration schema decision; the full release drill's production HTTPS deployment and Windows canary phases are not part of these records and remain operator tasks before broad rollout."
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "Pause enrollment, command dispatch, scheduled-task execution, agent self-update rollouts, server promotion, and external agent rollout automation.",
+      "Take a fresh encrypted backup of the live v0.1.6 (schema 0035) database with deploy/backup/nodelink-backup.sh and verify its manifest checksums. No migration runs in this release, so this backup is a routine recovery point rather than a pre-migration one.",
+      "Confirm Python 3.12, PostgreSQL, command signing keys, production secrets, trusted-proxy settings, HTTPS public URL, and server-only dashboard API URL are configured.",
+      "Verify every release artifact checksum and GitHub build-provenance attestation, and confirm each agent binary reports 0.1.7 via `rmm-agent version -expect 0.1.7` rather than the unstamped 0.1.0-dev fallback."
+    ],
+    "steps": [
+      "Confirm the live database is already at 0035. `alembic upgrade head` from a v0.1.6 database is a no-op in this release; the startup revision guard must still report 0035 before serving traffic.",
+      "For a v0.1.5 database at 0029, run `alembic upgrade head` to apply the six additive revisions 0030 through 0035; for a v0.1.3 database at 0028 or older, upgrade forward through the full chain, and for an unversioned public v0.1.1 database run guarded adoption to 0001 first.",
+      "Deploy the server and dashboard together from the workflow-bound v0.1.7 source commit.",
+      "Deploy the checksum-verified Windows agent or installer to one owned canary endpoint before expanding the rollout; the installer upgrades an enrolled endpoint in place without an enrollment token.",
+      "Leave every agent's update_channel unset (the default) until self-update has been separately qualified on the pilot topology; enrolling a channel is a deliberate, later operator action, not part of this upgrade."
+    ],
+    "verification": [
+      "Confirm Alembic current reports 0035 and health, readiness, metrics, login, and production configuration checks pass over verified HTTPS.",
+      "Confirm the upgraded canary endpoint keeps its agent ID and credentials and reports agent version 0.1.7 after its first heartbeat.",
+      "Dispatch an install_updates command for a single explicitly selected KB against the canary endpoint and confirm the command completes with a success status, a populated installed_kbs list, and the observed reboot requirement, rather than the v0.1.6 JSON parse failure.",
+      "Confirm an install_updates command still installs only the explicitly selected KB IDs or Update GUIDs, with empty or ambiguous selection failing closed.",
+      "Confirm a scan_updates command still returns missing and installed update inventory for the canary endpoint.",
+      "Confirm heartbeat, audit sequence, expected metric deltas, token revocation, agent revocation, and post-revocation authentication rejection."
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "Prefer a forward fix. v0.1.7 adds no Alembic revision, so the running database, the retained recovery point, and the v0.1.6 rollback target all sit at 0035.",
+      "Because the current and target schema revisions are identical, the planner resolves to redeploy_without_database_restore. This was rehearsed for this tag with server/scripts/plan_release_rollback.py against a 0035 recovery point, and the retained plan records status ready, restore_required false, and data_loss_accepted false.",
+      "No database restore is required and no post-backup data loss is incurred, which is the material difference from the v0.1.6 rollback path. Redeploy the v0.1.6 server commit and reinstall the v0.1.6 agent and installer artifacts recorded below.",
+      "Before rolling back, pause rollout, agent self-update, and writers, and name the decision maker, exactly as for any component rollback.",
+      "Rolling back reinstates the defect this release fixes: a v0.1.6 endpoint still installs the operator-selected Windows updates but reports the command as failed with a JSON parse error, so patch compliance must be reconciled by re-scanning rather than by reading command results.",
+      "If artifact, audit, or startup verification fails, keep promotion blocked and continue with a reviewed forward fix."
+    ],
+    "target": {
+      "server": {
+        "tag": "v0.1.6",
+        "commit": "dd0aa36e6b1ded699608e8e5fe374154da746f97"
+      },
+      "agent": {
+        "version": "0.1.6",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "322788d8ec7777aadb0e9a7feb40ba00cc6a4a97de323be8daa9b8887387b9c6",
+          "rmm-agent-linux-amd64": "5b008adc42d8bef6d55e10229de863f2bf1dc7a02dcc4a3ec56ee672efff42d2",
+          "rmm-agent-darwin-arm64": "6ae6cd035c18d73c6abe5ab0755f41e89acb1c186a91dc5b1d9c5aef9956d07d"
+        }
+      },
+      "installer": {
+        "filename": "NodeLinkAgentSetup-0.1.6.exe",
+        "sha256": "77df2320757dce1cf85b609379ed84e262b830797c5ff3165155905d769585cc"
+      },
+      "database": {
+        "alembic_revision": "0035",
+        "backup_manifest": {
+          "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/873c94a98c4c80e88bd447f097627bef753cec0d/release-notes/evidence/v0.1.7/nodelink-backup-20260812T201942Z.manifest.json",
+          "sha256": "f3829c47b46a369618fabdc1d3b4aa28763c382507e43e96d587fa0f3996370b"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "command-v3"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "v0.1.7 is a single-defect patch release confined to the agent's Windows Update installation collector. It adds no Alembic revision, no command kind, no protocol version, and no new endpoint capability, and it changes no authorization, TLS, signing, or audit behavior. The corrected defect is one of reporting integrity: the endpoint installed exactly the signed, operator-selected updates it was dispatched, then wrote a failure result because unrelated text preceded the JSON its own script emitted.",
+    "fixed_vulnerabilities": [
+      "No vulnerability is fixed by this release and no security boundary failed. The defect never widened what an endpoint would install: target selection, signature verification, and the fail-closed rejection of an empty or ambiguous selection were all correct and are unchanged. What failed was the recorded outcome, which contradicted the endpoint's real state and could lead an operator to believe a critical update was still missing, to retry an install that had already applied, or to distrust patch compliance reporting generally."
+    ],
+    "new_risks": [
+      "The result parser is deliberately more tolerant than before: it now selects the last line of collector stdout that is a valid JSON object instead of requiring the entire stream to be JSON. This is bounded by the collectors always emitting their result as a single compressed JSON line last, and unparseable output still fails closed with the raw stdout retained in the failure message, but it is a genuine widening of what the agent will accept from its own script.",
+      "Until an endpoint is upgraded it keeps recording false installation failures, so patch compliance derived from v0.1.6 command results understates what is actually installed. This is a data-quality risk during a staged rollout, not an endpoint-security risk.",
+      "#24 remains open because Windows artifacts are unsigned and require checksum and provenance verification; the self-update Authenticode signer-thumbprint pin is therefore not enforced by default.",
+      "#66 remains open because authorization roles are global rather than tenant scoped.",
+      "#84 remains open because enrollment limiting and counters are process local."
+    ],
+    "operator_actions": [
+      "Take and verify a fresh encrypted backup of the live 0035 database before promoting, even though no migration runs, so the recovery point matches the deployed release.",
+      "After upgrading endpoints, re-scan any endpoint that was dispatched an install_updates command under v0.1.6 and reconcile patch state from the scan rather than from the stored command result, which may record a failure for an update that was installed.",
+      "Leave every agent's update_channel unset after upgrading; do not enroll endpoints into a self-update channel until the rollout, health-check, and rollback behavior has been separately qualified on the pilot topology.",
+      "Because independent second-operator review is not available, the sole release operator must personally verify the complete v0.1.7 evidence index, retained digests, preflight result, and green release checks before tagging.",
+      "Complete the production HTTPS deployment and Windows canary phases of the release drill and retain their evidence before broad rollout."
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/873c94a98c4c80e88bd447f097627bef753cec0d/release-notes/evidence/v0.1.7/restore-verification-0035.json",
+      "sha256": "81de854b1da541c8027973307da4f411ccabec2bca41be725ee28419196630a1"
+    },
+    "rollback_rehearsal": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/873c94a98c4c80e88bd447f097627bef753cec0d/release-notes/evidence/v0.1.7/rollback-plan-v017-to-v016.json",
+      "sha256": "f349883b3a9e435c9011d6efdd93d26771330dfea1a5c89f0ba422e1cfa251b3"
+    }
+  }
+}
