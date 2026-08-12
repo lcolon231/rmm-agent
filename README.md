@@ -172,6 +172,15 @@ The code in this repository currently provides:
   signed source/digest/signer evidence. Capability-gated (`package-management-v1`,
   `chocolatey-provider-v1`), audited, and fail-closed. No schema change. Dashboard
   UI is deferred. See `docs/PACKAGE-MANAGEMENT.md`.
+- Administrator-only MSI/EXE software deployment (issue #56): typed
+  `deploy_software` downloads an installer from an operator-supplied HTTPS source,
+  verifies a mandatory SHA-256 (and an optional pinned Authenticode signer), runs
+  it under a bounded argument policy and timeout, maps the exit code
+  (`1641`/`3010` as success-with-reboot), applies the post-install reboot policy,
+  and records the MSI `ProductCode` as rollback metadata. Integrity is fail-closed
+  and the download is bounded and always cleaned up. Capability-gated
+  (`software-deployment-v1`), audited (source URL stored only as a digest), and no
+  schema change. Dashboard UI is deferred. See `docs/SOFTWARE-DEPLOYMENT.md`.
 - An immutable versioned script library with canonical SHA-256 content
   evidence, bounded language/platform/tag metadata, append-only final reviews,
   terminal idempotent deprecation, role-gated API/dashboard workflows, and no

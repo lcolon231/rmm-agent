@@ -128,6 +128,10 @@ class CommandKind(str, enum.Enum):
     # winget (default) or the opt-in, capability-gated chocolatey provider.
     scan_packages = "scan_packages"
     install_packages = "install_packages"
+    # MSI/EXE software deployment (issue #56): authenticated HTTPS download,
+    # SHA-256 (and optional Authenticode) verification, bounded install with an
+    # argument policy and timeout, exit-code mapping, and reboot policy.
+    deploy_software = "deploy_software"
 
 
 class CommandStatus(str, enum.Enum):

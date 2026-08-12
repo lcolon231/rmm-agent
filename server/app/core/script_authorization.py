@@ -71,6 +71,9 @@ def authorize_command(
         # Installing/upgrading arbitrary software is a broad trust boundary
         # (chocolatey pulls third-party sources); keep it admin-only.
         CommandKind.install_packages,
+        # Deploying a downloaded MSI/EXE runs arbitrary vendor code on the
+        # endpoint; the broadest trust boundary here, so admin-only.
+        CommandKind.deploy_software,
     ):
         return CommandAuthorizationDecision(
             allowed=operator.role == OperatorRole.admin,
@@ -85,6 +88,8 @@ def authorize_command(
                 if kind == CommandKind.query_event_log
                 else "package_management"
                 if kind == CommandKind.install_packages
+                else "software_deployment"
+                if kind == CommandKind.deploy_software
                 else "privileged_remediation"
             ),
             reason=(

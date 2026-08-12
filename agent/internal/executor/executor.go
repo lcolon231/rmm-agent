@@ -55,6 +55,11 @@ const (
 	// via a chosen provider (winget, or opt-in chocolatey). It never accepts script
 	// text and re-validates the signed provider evidence at the endpoint.
 	KindInstallPackages = "install_packages"
+	// KindDeploySoftware downloads an MSI/EXE installer over HTTPS, verifies its
+	// SHA-256 (and optional Authenticode signer), runs it with a bounded argument
+	// policy and timeout, maps the exit code, and applies a reboot policy (issue
+	// #56). It never accepts script text.
+	KindDeploySoftware = "deploy_software"
 )
 
 // defaultTimeout bounds how long any single command may run.

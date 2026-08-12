@@ -106,15 +106,15 @@ MFA/federation, tenant-scoped authorization, and certificate pinning.
 ### 3.2 Operations plane
 
 The operations plane delivers endpoint state and actions. It currently contains
-enrollment, heartbeat telemetry, polling command pickup, seventeen command kinds,
+enrollment, heartbeat telemetry, polling command pickup, eighteen command kinds,
 buffered result submission, command history, and offline status transitions.
 
 The current command kinds are `powershell`, `shell`, `collect_inventory`,
 `scan_updates`, `install_updates`, `file_upload`, `file_download`,
 `registry_read`, `registry_write`, `registry_delete`, and
 `remediation_rollback`, plus `reboot`, `shutdown`, `cancel_power_action`,
-`query_event_log`, `scan_packages`, and `install_packages`. Inventory/update
-operations are authorized by the
+`query_event_log`, `scan_packages`, `install_packages`, and `deploy_software`.
+Inventory/update operations are authorized by the
 operator role. File/registry remediation is administrator-only and separately
 capability-gated; see [`CONTROLLED-REMEDIATION.md`](CONTROLLED-REMEDIATION.md).
 Power operations are administrator-only and capability-gated. Restart and
@@ -187,6 +187,17 @@ require the `package-management-v1` capability, so dispatch to an agent that has
 not advertised it fails closed. It adds no table or migration; the discovery
 result rides the per-section inventory framework. See
 [`PACKAGE-MANAGEMENT.md`](PACKAGE-MANAGEMENT.md).
+
+Software deployment (issue #56) adds one administrator-only kind,
+`deploy_software`, that downloads an MSI/EXE from an operator-supplied HTTPS
+source, verifies a mandatory SHA-256 (and an optional pinned Authenticode
+signer), runs it under a bounded argument policy and timeout, maps the exit code
+(with `1641`/`3010` as success-with-reboot), and applies the #53 post-install
+reboot policy. Integrity is fail-closed: digest first, signer second, then
+execution; the installer is downloaded to a bounded temp file that is always
+removed. A successful MSI records its `ProductCode` as rollback metadata in the
+command result. It is capability-gated by `software-deployment-v1` and adds no
+table or migration. See [`SOFTWARE-DEPLOYMENT.md`](SOFTWARE-DEPLOYMENT.md).
 
 
 `powershell` and `shell` are arbitrary-script escape hatches and require a
