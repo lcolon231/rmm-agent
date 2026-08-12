@@ -37,6 +37,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -76,16 +77,6 @@ const statusLabels: Record<EndpointStatus, string> = {
   critical: "Critical",
   offline: "Offline",
 };
-
-function NodeLinkMark() {
-  return (
-    <span className="brand-mark" aria-hidden="true">
-      <span />
-      <span />
-      <span />
-    </span>
-  );
-}
 
 function StatusMark({ status }: { status: EndpointStatus }) {
   if (status === "online") {
@@ -155,8 +146,20 @@ function Sidebar({
       />
       <aside className={`sidebar ${open ? "is-open" : ""}`}>
         <div className="brand-row">
-          <NodeLinkMark />
-          <strong>NodeLink</strong>
+          <Link className="dashboard-brand" href="/" onClick={onClose}>
+            <Image
+              className="dashboard-brand-logo"
+              src="/brand/nodelink-logo.jpg"
+              alt="NodeLink Technologies"
+              width={48}
+              height={48}
+              priority
+            />
+            <span className="dashboard-brand-name" aria-hidden="true">
+              <strong>NodeLink</strong>
+              <small>Technologies</small>
+            </span>
+          </Link>
           <button className="sidebar-close" onClick={onClose} aria-label="Close navigation">
             <X size={20} />
           </button>
