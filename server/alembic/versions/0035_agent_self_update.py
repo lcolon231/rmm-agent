@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 
 revision = "0035"
@@ -28,25 +29,26 @@ depends_on = None
 
 # Type names match what SQLAlchemy derives from the ORM enums, so the migrated
 # schema and the ORM agree on PostgreSQL.
-agent_update_channel = sa.Enum(
-    "stable", "beta", "canary", name="agentupdatechannel"
-)
-agent_update_release_state = sa.Enum(
-    "published",
-    "rolling",
-    "paused",
-    "halted",
-    "completed",
-    name="agentupdatereleasestate",
-)
-agent_update_attempt_status = sa.Enum(
+CHANNEL_VALUES = ("stable", "beta", "canary")
+RELEASE_STATE_VALUES = ("published", "rolling", "paused", "halted", "completed")
+ATTEMPT_STATUS_VALUES = (
     "dispatched",
     "staged",
     "succeeded",
     "rolled_back",
     "failed",
-    name="agentupdateattemptstatus",
 )
+
+
+def _enum_column(values: tuple[str, ...], name: str) -> postgresql.ENUM:
+    """Column type that reuses an already-created PostgreSQL enum.
+
+    ``create_type=False`` matters: the types are created once by the explicit
+    ``.create(checkfirst=True)`` calls in :func:`upgrade`, so ``create_table``
+    must not emit ``CREATE TYPE`` a second time (which fails outright on
+    PostgreSQL). Mirrors the pattern established by revision ``0016``.
+    """
+    return postgresql.ENUM(*values, name=name, create_type=False)
 
 # Command kinds introduced by this revision plus the kinds added by issues #55,
 # #56, and #57, which landed as ORM-only changes. ADD VALUE IF NOT EXISTS is
@@ -80,15 +82,25 @@ def upgrade() -> None:
     # following the default stable channel wherever targeting is decided.
     op.add_column("agents", sa.Column("update_channel", sa.String(16), nullable=True))
 
-    agent_update_channel.create(bind, checkfirst=True)
-    agent_update_release_state.create(bind, checkfirst=True)
-    agent_update_attempt_status.create(bind, checkfirst=True)
+    # Create the enum types up front, idempotently. These objects DO create the
+    # type; the per-column objects from _enum_column deliberately do not.
+    postgresql.ENUM(*CHANNEL_VALUES, name="agentupdatechannel").create(
+        bind, checkfirst=True
+    )
+    postgresql.ENUM(
+        *RELEASE_STATE_VALUES, name="agentupdatereleasestate"
+    ).create(bind, checkfirst=True)
+    postgresql.ENUM(
+        *ATTEMPT_STATUS_VALUES, name="agentupdateattemptstatus"
+    ).create(bind, checkfirst=True)
 
     op.create_table(
         "agent_update_releases",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("version", sa.String(64), nullable=False),
-        sa.Column("channel", agent_update_channel, nullable=False),
+        sa.Column(
+            "channel", _enum_column(CHANNEL_VALUES, "agentupdatechannel"), nullable=False
+        ),
         sa.Column("platform", sa.String(64), nullable=False),
         sa.Column("artifact_url", sa.Text(), nullable=False),
         sa.Column("artifact_sha256", sa.String(64), nullable=False),
@@ -102,7 +114,7 @@ def upgrade() -> None:
         sa.Column("signing_key_id", sa.String(64), nullable=False),
         sa.Column(
             "state",
-            agent_update_release_state,
+            _enum_column(RELEASE_STATE_VALUES, "agentupdatereleasestate"),
             nullable=False,
             server_default="published",
         ),
@@ -173,7 +185,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "status",
-            agent_update_attempt_status,
+            _enum_column(ATTEMPT_STATUS_VALUES, "agentupdateattemptstatus"),
             nullable=False,
             server_default="dispatched",
         ),
