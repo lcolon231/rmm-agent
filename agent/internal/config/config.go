@@ -23,6 +23,24 @@ type Config struct {
 	// TLSSPKIPins optionally adds an SPKI pin requirement after normal TLS
 	// chain and hostname verification. Multiple pins support key rotation.
 	TLSSPKIPins []string `json:"tls_spki_pins,omitempty"`
+	// Packages configures optional third-party package-manager support (issue
+	// #55). Winget needs no configuration; Chocolatey is opt-in and off unless
+	// explicitly enabled here.
+	Packages PackagesConfig `json:"packages,omitempty"`
+}
+
+// PackagesConfig gates the optional Chocolatey provider. Winget is always
+// available on Windows and needs nothing here.
+type PackagesConfig struct {
+	// ChocolateyEnabled opts this endpoint into Chocolatey installs. When false
+	// (the default) the agent does not advertise the Chocolatey capability and
+	// refuses any Chocolatey command.
+	ChocolateyEnabled bool `json:"chocolatey_enabled,omitempty"`
+	// ChocolateySources, when non-empty, is the allowlist of source feeds a
+	// Chocolatey install may use. An empty list means the agent trusts only the
+	// signed source the server supplies; a non-empty list additionally requires
+	// the signed source to be a member.
+	ChocolateySources []string `json:"chocolatey_sources,omitempty"`
 }
 
 // Identity is what the agent persists after a successful enrollment. It is

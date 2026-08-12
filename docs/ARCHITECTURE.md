@@ -106,14 +106,15 @@ MFA/federation, tenant-scoped authorization, and certificate pinning.
 ### 3.2 Operations plane
 
 The operations plane delivers endpoint state and actions. It currently contains
-enrollment, heartbeat telemetry, polling command pickup, fifteen command kinds,
+enrollment, heartbeat telemetry, polling command pickup, seventeen command kinds,
 buffered result submission, command history, and offline status transitions.
 
 The current command kinds are `powershell`, `shell`, `collect_inventory`,
 `scan_updates`, `install_updates`, `file_upload`, `file_download`,
 `registry_read`, `registry_write`, `registry_delete`, and
-`remediation_rollback`, plus `reboot`, `shutdown`, `cancel_power_action`, and
-`query_event_log`. Inventory/update operations are authorized by the
+`remediation_rollback`, plus `reboot`, `shutdown`, `cancel_power_action`,
+`query_event_log`, `scan_packages`, and `install_packages`. Inventory/update
+operations are authorized by the
 operator role. File/registry remediation is administrator-only and separately
 capability-gated; see [`CONTROLLED-REMEDIATION.md`](CONTROLLED-REMEDIATION.md).
 Power operations are administrator-only and capability-gated. Restart and
@@ -171,6 +172,21 @@ client/site summaries, per-update detail, and a retained-snapshot history
 evaluated against the current policy; and exports the bounded rows as CSV or
 JSON. It adds no table, job, migration, or agent behavior. See
 [`PATCH-COMPLIANCE.md`](PATCH-COMPLIANCE.md).
+
+Package management (issue #55) adds two typed kinds behind a package-provider
+interface. `scan_packages` is a read-only, operator-level discovery of installed
+packages and available upgrades that lands in the `installed_packages` inventory
+section (reusing the §6.2 history/diff machinery); `install_packages` installs or
+upgrades an explicit, bounded set of package ids and is administrator-only.
+Winget is the always-available default and needs no configuration; Chocolatey is
+opt-in per endpoint — the agent advertises `chocolatey-provider-v1` only when the
+operator enabled it in config, and a Chocolatey `install_packages` additionally
+carries signed `source`, `source_digest`, and `signer` evidence that the server
+records and the agent re-validates before invoking the provider. Both kinds
+require the `package-management-v1` capability, so dispatch to an agent that has
+not advertised it fails closed. It adds no table or migration; the discovery
+result rides the per-section inventory framework. See
+[`PACKAGE-MANAGEMENT.md`](PACKAGE-MANAGEMENT.md).
 
 
 `powershell` and `shell` are arbitrary-script escape hatches and require a

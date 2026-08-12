@@ -442,6 +442,17 @@ PRODUCER_DETAILS = {
         "window_present": True,
         "user_present": False,
     },
+    "package_install.gated": {
+        "provider": "chocolatey",
+        "operation": "install",
+        "requested": 2,
+        "source_present": True,
+        "source_digest": "a" * 64,
+        "signer_present": True,
+    },
+    "package_scan.dispatched": {
+        "provider": "winget",
+    },
     "patch_compliance.viewed": {
         "client_id": None,
         "site_id": None,

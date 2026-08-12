@@ -51,6 +51,11 @@ type Client struct {
 	// after an in-place upgrade without a re-enrollment (issue #179). Empty
 	// until SetAgentVersion is called; the field is then omitted from the beat.
 	agentVersion string
+	// capabilities is the advertised optional-feature set. Empty until
+	// SetCapabilities is called, in which case the default set is advertised;
+	// this lets the runtime add config-gated capabilities (e.g. Chocolatey)
+	// without threading config through every call site.
+	capabilities []string
 	http         *http.Client
 }
 
@@ -190,7 +195,7 @@ func (c *Client) EnrollWithName(ctx context.Context, token, agentName string, ho
 		"agent_version":                       agentVersion,
 		"architecture":                        runtime.GOARCH,
 		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
-		"supported_capabilities":              protocol.SupportedCapabilities(),
+		"supported_capabilities":              c.advertisedCapabilities(),
 	}
 	var out EnrollResponse
 	if err := c.do(ctx, "POST", "/api/v1/enroll", body, &out, false); err != nil {
@@ -214,6 +219,21 @@ func (c *Client) SetToken(token string) { c.agentToken = token }
 // heartbeat reports it. Called once when the check-in session is built; like
 // SetToken it needs no locking because a single goroutine drives the client.
 func (c *Client) SetAgentVersion(agentVersion string) { c.agentVersion = agentVersion }
+
+// SetCapabilities overrides the advertised optional-feature set for enroll and
+// heartbeat. The runtime uses this to include config-gated capabilities such as
+// the opt-in Chocolatey provider. Like SetToken it needs no locking because a
+// single goroutine drives the client.
+func (c *Client) SetCapabilities(capabilities []string) { c.capabilities = capabilities }
+
+// advertisedCapabilities returns the configured capability set, or the default
+// set when SetCapabilities was never called (e.g. a bare client in a test).
+func (c *Client) advertisedCapabilities() []string {
+	if c.capabilities != nil {
+		return c.capabilities
+	}
+	return protocol.SupportedCapabilities()
+}
 
 // AgentCredentialRenewResponse mirrors the server schema (issue #125).
 type AgentCredentialRenewResponse struct {
@@ -313,7 +333,7 @@ func (c *Client) HeartbeatWithPendingResults(
 		"uptime_seconds":                      s.UptimeSeconds,
 		"logged_in_user":                      s.LoggedInUser,
 		"supported_command_envelope_versions": protocol.SupportedCommandEnvelopeVersions(),
-		"supported_capabilities":              protocol.SupportedCapabilities(),
+		"supported_capabilities":              c.advertisedCapabilities(),
 		"pending_results":                     pendingResults,
 	}
 	// The running build's version rides on every beat so an in-place upgrade

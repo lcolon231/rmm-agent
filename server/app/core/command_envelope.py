@@ -21,6 +21,7 @@ SUPPORTED_COMMAND_KINDS = frozenset(
         "registry_delete", "remediation_rollback",
         "reboot", "shutdown", "cancel_power_action",
         "query_event_log",
+        "scan_packages", "install_packages",
     }
 )
 

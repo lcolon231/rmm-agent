@@ -46,6 +46,15 @@ const (
 	// KindQueryEventLog runs a bounded, metadata-only Windows event log query
 	// (issue #58). It never returns message text or EventData.
 	KindQueryEventLog = "query_event_log"
+	// KindScanPackages triggers a bounded package-manager discovery (issue #55):
+	// installed packages and available upgrades from the enabled provider(s). Like
+	// scan_updates it is a read-only typed operation whose normalized result lands
+	// in the installed_packages inventory section.
+	KindScanPackages = "scan_packages"
+	// KindInstallPackages installs or upgrades an explicit, bounded set of packages
+	// via a chosen provider (winget, or opt-in chocolatey). It never accepts script
+	// text and re-validates the signed provider evidence at the endpoint.
+	KindInstallPackages = "install_packages"
 )
 
 // defaultTimeout bounds how long any single command may run.

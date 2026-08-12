@@ -92,6 +92,10 @@ class InventorySection(str, Enum):
     #: heartbeat inventory path, because a live scan takes far longer than the
     #: per-section heartbeat budget.
     windows_updates = "windows_updates"
+    #: Package-manager discovery (issue #55): installed packages and available
+    #: upgrades from winget (or the opt-in chocolatey provider). Populated on
+    #: demand by the scan_packages typed command, not on the heartbeat path.
+    installed_packages = "installed_packages"
 
 
 class InventorySectionStatus(str, Enum):
@@ -521,6 +525,56 @@ class WindowsUpdatesInventory(BaseModel):
     )
 
 
+#: Bounds on discovered packages. Endpoints can install a lot of software, so
+#: the installed list is generous; upgrades are usually far fewer.
+MAX_INSTALLED_PACKAGES = 2048
+MAX_UPGRADABLE_PACKAGES = 1024
+
+
+class InstalledPackage(BaseModel):
+    """One package reported as installed by a provider (issue #55)."""
+
+    model_config = ConfigDict(extra="forbid")
+    package_id: Identifier
+    name: ShortText | None = None
+    version: ShortText | None = None
+    #: Provider/source, e.g. "winget", "msstore", or "chocolatey".
+    source: ShortText | None = None
+
+
+class UpgradablePackage(BaseModel):
+    """One installed package with an available upgrade (issue #55)."""
+
+    model_config = ConfigDict(extra="forbid")
+    package_id: Identifier
+    name: ShortText | None = None
+    current_version: ShortText | None = None
+    available_version: ShortText | None = None
+    source: ShortText | None = None
+
+
+class InstalledPackagesInventory(BaseModel):
+    """Normalized package-manager discovery result (issue #55).
+
+    Populated on demand by the ``scan_packages`` typed command. ``source``
+    records which provider produced the snapshot; an empty ``upgradable`` with
+    ``status == ok`` means "everything installed is current".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    scanned_at: datetime | None = None
+    #: Provider that produced this snapshot, e.g. "winget" or "chocolatey".
+    source: ShortText | None = None
+    #: Non-secret discovery error string when the scan itself failed.
+    error_code: ShortText | None = None
+    installed: list[InstalledPackage] = Field(
+        default_factory=list, max_length=MAX_INSTALLED_PACKAGES
+    )
+    upgradable: list[UpgradablePackage] = Field(
+        default_factory=list, max_length=MAX_UPGRADABLE_PACKAGES
+    )
+
+
 #: Section name -> payload model. The submission validator uses this to pick the
 #: right model, so an unknown section is rejected rather than stored unparsed.
 SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
@@ -536,6 +590,7 @@ SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
     InventorySection.security_tpm: TpmInventory,
     InventorySection.local_administrators: LocalAdministratorsInventory,
     InventorySection.windows_updates: WindowsUpdatesInventory,
+    InventorySection.installed_packages: InstalledPackagesInventory,
 }
 
 

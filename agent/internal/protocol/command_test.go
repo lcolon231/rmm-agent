@@ -55,6 +55,39 @@ func TestSupportedCapabilitiesAdvertisesPatchReboot(t *testing.T) {
 	t.Fatalf("SupportedCapabilities() = %v, want it to include %q", caps, PatchRebootCapabilityV1)
 }
 
+func TestSupportedCapabilitiesAlwaysAdvertisesPackageManagement(t *testing.T) {
+	for _, capability := range SupportedCapabilities() {
+		if capability == PackageManagementCapabilityV1 {
+			if PackageManagementCapabilityV1 != "package-management-v1" {
+				t.Fatalf("capability name drift: %q", PackageManagementCapabilityV1)
+			}
+			return
+		}
+	}
+	t.Fatalf("SupportedCapabilities() must include %q", PackageManagementCapabilityV1)
+}
+
+func TestChocolateyCapabilityIsGatedByConfig(t *testing.T) {
+	contains := func(caps []string, want string) bool {
+		for _, c := range caps {
+			if c == want {
+				return true
+			}
+		}
+		return false
+	}
+	if contains(SupportedCapabilitiesWith(false), ChocolateyProviderCapabilityV1) {
+		t.Fatal("chocolatey capability must not be advertised when disabled")
+	}
+	if !contains(SupportedCapabilitiesWith(true), ChocolateyProviderCapabilityV1) {
+		t.Fatal("chocolatey capability must be advertised when enabled")
+	}
+	// The base package-management capability is present either way.
+	if !contains(SupportedCapabilitiesWith(false), PackageManagementCapabilityV1) {
+		t.Fatal("package-management capability must always be advertised")
+	}
+}
+
 func TestSupportedCapabilitiesReturnsFreshSlice(t *testing.T) {
 	first := SupportedCapabilities()
 	if len(first) == 0 {

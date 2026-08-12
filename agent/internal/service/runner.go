@@ -28,6 +28,7 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/executor"
 	"github.com/lcolon231/rmm/agent/internal/inventory"
 	"github.com/lcolon231/rmm/agent/internal/monitoring"
+	"github.com/lcolon231/rmm/agent/internal/packages"
 	"github.com/lcolon231/rmm/agent/internal/patching"
 	"github.com/lcolon231/rmm/agent/internal/power"
 	"github.com/lcolon231/rmm/agent/internal/protocol"
@@ -152,6 +153,9 @@ type session struct {
 	inventorySections []inventory.Section
 	monitoringStore   *monitoring.Store
 	monitoringEval    *monitoring.Evaluator
+	// packagesConfig carries the endpoint's opt-in package-provider settings
+	// (issue #55) so a Chocolatey command fails closed unless enabled here.
+	packagesConfig packages.Config
 }
 
 // Run enrolls if needed and then checks in until ctx is cancelled. On
@@ -317,6 +321,10 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	// keeps the same identity and credentials, so the heartbeat is the only
 	// signal that tells the server the stored enrollment-time version is stale.
 	api.SetAgentVersion(a.version)
+	// Advertise the Chocolatey capability only when this endpoint opted in
+	// (issue #55) so the server never dispatches a Chocolatey install to an
+	// agent that has not enabled it.
+	api.SetCapabilities(protocol.SupportedCapabilitiesWith(cfg.Packages.ChocolateyEnabled))
 	monitoringStore, err := monitoring.LoadStore(monitoring.StatePath(a.configPath))
 	if err != nil {
 		return nil, fatal(err)
@@ -332,6 +340,10 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 		seen:            seen,
 		monitoringStore: monitoringStore,
 		monitoringEval:  monitoring.NewEvaluator(monitoringStore, nil),
+		packagesConfig: packages.Config{
+			ChocolateyEnabled: cfg.Packages.ChocolateyEnabled,
+			ChocolateySources: cfg.Packages.ChocolateySources,
+		},
 	}, nil
 }
 
@@ -752,6 +764,10 @@ func (a *Agent) processCommand(ctx context.Context, s *session, cmd client.Comma
 		res = remediation.Execute(ctx, cmd.ID, cmd.Kind, cmd.Payload)
 	case executor.KindQueryEventLog:
 		res = eventlog.Execute(ctx, cmd.Kind, cmd.Payload)
+	case executor.KindScanPackages:
+		res = a.runPackageScan(ctx, s, cmd.Payload)
+	case executor.KindInstallPackages:
+		res = packages.ExecuteInstall(ctx, cmd.Kind, cmd.Payload, s.packagesConfig)
 	default:
 		script := extractScript(cmd.Payload)
 		res = a.run(ctx, cmd.Kind, script)
@@ -835,6 +851,46 @@ func updateScanCommandResult(summary patching.Summary, stderr string) executor.R
 			stderr += "; "
 		}
 		stderr += "windows update collection reported " + collectionError
+	}
+	return executor.Result{ExitCode: exitCode, Stdout: string(out), Stderr: stderr}
+}
+
+// runPackageScan handles the scan_packages typed command (issue #55): it runs a
+// bounded package-manager discovery, submits the normalized installed_packages
+// section through the ordinary inventory pipeline (so history/diff/views come
+// for free), and returns a small JSON summary as the command output. It mirrors
+// runUpdateScan so a discovery failure surfaces on stderr without being reported
+// as a successful command.
+func (a *Agent) runPackageScan(ctx context.Context, s *session, rawPayload json.RawMessage) executor.Result {
+	result, err := packages.Scan(ctx, rawPayload, s.packagesConfig)
+	if err != nil {
+		summary := packages.Summarize(result)
+		summary.Message = "package scan failed: " + err.Error()
+		out, _ := json.Marshal(summary)
+		return executor.Result{ExitCode: 1, Stdout: string(out), Stderr: summary.Message}
+	}
+
+	section := packages.BuildSection(result)
+	var stderr string
+	if _, subErr := s.api.SubmitInventory(ctx, inventory.Submission{
+		InventorySchemaVersion: inventory.SchemaVersion,
+		AgentVersion:           a.version,
+		Sections:               []inventory.Section{section},
+	}); subErr != nil {
+		a.log.Printf("scan_packages: inventory submission failed: %v", subErr)
+		stderr = "inventory submission rejected; this scan's data was discarded and " +
+			"the installed_packages inventory still shows the previous scan — " +
+			"re-run scan_packages once the cause is resolved: " + subErr.Error()
+	}
+
+	summary := packages.Summarize(result)
+	out, err := json.Marshal(summary)
+	if err != nil {
+		out = []byte(`{"status":"ok"}`)
+	}
+	exitCode := 0
+	if summary.ErrorCode != "" {
+		exitCode = 1
 	}
 	return executor.Result{ExitCode: exitCode, Stdout: string(out), Stderr: stderr}
 }
