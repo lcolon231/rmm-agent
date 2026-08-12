@@ -11,7 +11,7 @@
     "envelope_version": { "const": "command-v3" },
     "expires_at": { "$ref": "#/$defs/commandTime" },
     "issued_at": { "$ref": "#/$defs/commandTime" },
-    "kind": { "enum": ["powershell", "shell", "collect_inventory", "scan_updates", "install_updates", "file_upload", "file_download", "registry_read", "registry_write", "registry_delete", "remediation_rollback", "reboot", "shutdown", "cancel_power_action"] },
+    "kind": { "enum": ["powershell", "shell", "collect_inventory", "scan_updates", "install_updates", "file_upload", "file_download", "registry_read", "registry_write", "registry_delete", "remediation_rollback", "reboot", "shutdown", "cancel_power_action", "query_event_log"] },
     "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22,64}$" },
     "payload": { "$ref": "#/$defs/objectValue" },
     "schema_version": { "const": 1 },

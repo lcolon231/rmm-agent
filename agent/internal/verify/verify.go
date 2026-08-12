@@ -76,6 +76,7 @@ func canonicalCommandBytes(envelopeVersion string, schemaVersion int, commandID,
 		"file_upload", "file_download", "registry_read", "registry_write",
 		"registry_delete", "remediation_rollback":
 	case "reboot", "shutdown", "cancel_power_action":
+	case "query_event_log":
 	default:
 		return nil, fmt.Errorf("unsupported command kind %q", kind)
 	}
