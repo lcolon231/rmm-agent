@@ -274,7 +274,17 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   bounded transcript retention with the same redaction discipline as command
   output (transcripts can contain sensitive endpoint-user content).
 - Treat MeshCentral as a separate trust boundary; synchronize least-privilege
-  access and audit NodeLink's session authorization and launch.
+  access and audit NodeLink's session authorization and launch. **Integrated,
+  disabled by default (issue #62).** NodeLink identity-maps an agent to a
+  MeshCentral node, authorizes the launch (operator role **and** explicit
+  arbitrary-script scope, admin is not a bypass), audits the decision
+  (`meshcentral.launch_*`/`session_*`, metadata only), and mints a short-lived,
+  single-device, desktop-scoped access URL through MeshCentral's own API without
+  proxying the stream or persisting login material. Availability is fail-closed on
+  provider-enabled + non-stale active mapping + authorization; the admin
+  credential is environment-only. Automated tests run against a fake MeshCentral;
+  a live end-to-end verification (`MESHCENTRAL-INTEGRATION.md`) gates enabling it
+  in production.
 - Sign self-updates, stage rollout, enforce anti-rollback policy, and retain a
   recovery path. **Implemented (issue #63).** Release metadata is Ed25519-signed
   both on the wire (the `command-v3` envelope) and at rest (a domain-separated

@@ -178,6 +178,49 @@ class ShellSessionStatus(str, enum.Enum):
     failed = "failed"
 
 
+class MeshMappingState(str, enum.Enum):
+    """Whether a NodeLink agent's mapping to a MeshCentral node is usable (#62).
+
+    active   -> the node exists in MeshCentral and was seen recently; launches
+                may proceed if authorization also holds
+    stale    -> the mapping has not been reconciled within the staleness window,
+                or the node was not present in the last device-list sync; a
+                launch is refused (fail closed) until reconciliation refreshes it
+    unmapped -> the node was explicitly removed from MeshCentral; launches refuse
+    conflict -> more than one agent claims the same MeshCentral node id; refuse
+    """
+
+    active = "active"
+    stale = "stale"
+    unmapped = "unmapped"
+    conflict = "conflict"
+
+
+class MeshMappingOrigin(str, enum.Enum):
+    """How a mapping was created. v1 supports manual admin mapping only;
+    reconciliation never creates active mappings, it only ages/refreshes them."""
+
+    manual = "manual"
+    reconciled = "reconciled"
+
+
+class MeshLaunchStatus(str, enum.Enum):
+    """Lifecycle of a MeshCentral remote-desktop launch record (#62).
+
+    requested  -> authorized launch inserted, before minting access
+    authorized -> MeshCentral minted a scoped, short-lived access URL
+    denied     -> refused at the API boundary (authz/mapping/provider)
+    failed     -> MeshCentral was unavailable or rejected the mint (fail closed)
+    closed     -> operator ended the NodeLink-side record (best-effort revoke)
+    """
+
+    requested = "requested"
+    authorized = "authorized"
+    denied = "denied"
+    failed = "failed"
+    closed = "closed"
+
+
 class ScheduleTargetType(str, enum.Enum):
     agent = "agent"
     site = "site"
@@ -773,6 +816,107 @@ class ShellSession(Base):
     agent_last_seq: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default="0", nullable=False
     )
+
+    agent: Mapped["Agent"] = relationship()
+
+
+class AgentMeshMapping(Base):
+    """Maps a NodeLink agent to its MeshCentral node (issue #62).
+
+    MeshCentral is a separate trust boundary. This row is the identity bridge
+    NodeLink authorizes a launch against; it stores no MeshCentral credentials,
+    login cookies, or session payloads — only the opaque node/mesh identifiers
+    and reconciliation freshness. v1 mappings are created manually by an admin;
+    reconciliation only ages a mapping to ``stale``/``unmapped``/``conflict`` and
+    never creates an ``active`` mapping on its own.
+    """
+
+    __tablename__ = "meshcentral_mappings"
+    __table_args__ = (
+        # One mapping per agent. A node may transiently appear under two agents
+        # during a rename; that is surfaced as ``conflict`` rather than silently
+        # picking one, so a launch fails closed until an admin resolves it.
+        UniqueConstraint("agent_id", name="uq_meshcentral_mappings_agent"),
+        Index("ix_meshcentral_mappings_node", "meshcentral_node_id"),
+        Index("ix_meshcentral_mappings_agent_state", "agent_id", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    meshcentral_node_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    meshcentral_mesh_id: Mapped[str | None] = mapped_column(String(128))
+    state: Mapped[MeshMappingState] = mapped_column(
+        Enum(MeshMappingState),
+        default=MeshMappingState.active,
+        nullable=False,
+        index=True,
+    )
+    origin: Mapped[MeshMappingOrigin] = mapped_column(
+        Enum(MeshMappingOrigin), default=MeshMappingOrigin.manual, nullable=False
+    )
+    # Operator email that created a manual mapping; kept for accountability.
+    created_by: Mapped[str | None] = mapped_column(String(320))
+    # When reconciliation last confirmed the node; drives the staleness window.
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # MeshCentral's last-connect time for the node, if reported by the sync.
+    last_seen_in_mesh_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+    agent: Mapped["Agent"] = relationship()
+
+
+class MeshLaunchRecord(Base):
+    """Durable audit metadata for a MeshCentral remote-desktop launch (issue #62).
+
+    Like ``ShellSession`` this row stores lifecycle and evidence only. It never
+    holds the minted login URL, cookie, or MeshCentral admin credential — those
+    are returned once to the authorized operator and never persisted. NodeLink's
+    audit chain covers the *launch decision*, not MeshCentral's in-session
+    activity, which stays under MeshCentral's own logs.
+    """
+
+    __tablename__ = "meshcentral_launches"
+    __table_args__ = (
+        Index("ix_meshcentral_launches_agent_created", "agent_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    mapping_id: Mapped[str | None] = mapped_column(
+        ForeignKey("meshcentral_mappings.id", ondelete="SET NULL")
+    )
+    operator_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    actor_email: Mapped[str | None] = mapped_column(String(320))
+    # Denormalized so the record survives mapping deletion.
+    meshcentral_node_id: Mapped[str | None] = mapped_column(String(128))
+    status: Mapped[MeshLaunchStatus] = mapped_column(
+        Enum(MeshLaunchStatus),
+        default=MeshLaunchStatus.requested,
+        nullable=False,
+        index=True,
+    )
+    denied_reason: Mapped[str | None] = mapped_column(String(64))
+    # Minted access TTL. The login material itself is NEVER stored here.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Opaque, non-secret handle MeshCentral returns for correlation, if any.
+    meshcentral_session_ref: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     agent: Mapped["Agent"] = relationship()
 

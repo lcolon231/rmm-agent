@@ -181,6 +181,49 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "frames_in",
         "frames_out",
     ),
+    # MeshCentral remote-desktop launch lifecycle (issue #62). Metadata only —
+    # the minted login URL/cookie and MeshCentral admin credential are never
+    # recorded in an audit detail, a log line, or an error message. NodeLink's
+    # chain covers the launch *decision*, not MeshCentral's in-session activity.
+    "meshcentral.launch_requested": _schema(
+        "launch_id", "agent_id", "meshcentral_node_id", "mapping_id"
+    ),
+    "meshcentral.session_launched": _schema(
+        "launch_id",
+        "agent_id",
+        "meshcentral_node_id",
+        "mapping_id",
+        "expires_at",
+        "meshcentral_session_ref",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    "meshcentral.launch_denied": _schema(
+        "launch_id", "agent_id", "reason", "policy", "trust_state"
+    ),
+    "meshcentral.launch_failed": _schema(
+        "launch_id", "agent_id", "meshcentral_node_id", "reason"
+    ),
+    "meshcentral.session_closed": _schema(
+        "launch_id",
+        "agent_id",
+        "meshcentral_node_id",
+        "status",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    "meshcentral.mapping_created": _schema(
+        "mapping_id", "agent_id", "meshcentral_node_id", "origin"
+    ),
+    "meshcentral.mapping_deleted": _schema(
+        "mapping_id", "agent_id", "meshcentral_node_id"
+    ),
+    "meshcentral.mapping_synced": _schema(
+        "reconciled", "active", "stale", "unmapped", "conflict"
+    ),
+    "meshcentral.mapping_stale": _schema(
+        "mapping_id", "agent_id", "meshcentral_node_id", "previous_state", "state"
+    ),
     "audit.anchored": _schema("anchor_id", "merkle_root", "event_count"),
     # Reading the evidence is itself an auditable act, so the timeline and
     # single-event views record who looked and what they scoped the view to.

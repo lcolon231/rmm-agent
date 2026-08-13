@@ -57,6 +57,13 @@ from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
 from app.core.keyring import active_signing_key, load_keyring
 from app.core.redaction import AUDIT_DETAIL_SCHEMAS, scrub_text
+from app.core import meshcentral as meshcentral_provider
+from app.core import meshcentral_mapping
+from app.schemas.meshcentral import (
+    MeshMappingCreate,
+    MeshMappingOut,
+    MeshProviderStatusOut,
+)
 from app.schemas.inventory import (
     InventoryDiffOut,
     InventoryHistoryOut,
@@ -88,6 +95,9 @@ from app.core.script_authorization import (
 )
 from app.models.models import (
     Agent,
+    AgentMeshMapping,
+    MeshMappingOrigin,
+    MeshMappingState,
     Alert,
     AlertEmailAttempt,
     AlertEmailDelivery,
@@ -4721,3 +4731,162 @@ async def audit_anchor_receipt(anchor_id: str, db: AsyncSession = Depends(get_db
             "published_at": r.published_at,
         })
     return {"anchor_id": anchor_id, "merkle_root": a.merkle_root, "publications": out}
+
+
+# ---------------------------------------------------------------------------
+# MeshCentral remote-desktop administration (issue #62). Admin-only. Manages the
+# manual agent<->node identity mappings and reports provider status. Secrets
+# (admin credential, encryption key) are environment-only and rotated by deploy,
+# never through these endpoints.
+# ---------------------------------------------------------------------------
+@router.get("/remote-desktop/provider", response_model=MeshProviderStatusOut)
+async def get_remote_desktop_provider(
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    status_info = meshcentral_provider.provider_status(settings)
+    mappings = list((await db.execute(select(AgentMeshMapping))).scalars().all())
+    now = _now()
+    stale = sum(
+        1
+        for m in mappings
+        if m.state != MeshMappingState.active
+        or meshcentral_mapping.is_stale(m, settings, now)
+    )
+    return MeshProviderStatusOut(
+        **status_info,
+        mapping_count=len(mappings),
+        stale_mapping_count=stale,
+    )
+
+
+@router.get("/remote-desktop/mappings", response_model=list[MeshMappingOut])
+async def list_remote_desktop_mappings(
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = list(
+        (
+            await db.execute(
+                select(AgentMeshMapping).order_by(AgentMeshMapping.created_at.desc())
+            )
+        ).scalars().all()
+    )
+    return [MeshMappingOut.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/remote-desktop/mappings",
+    response_model=MeshMappingOut,
+    status_code=201,
+)
+async def create_remote_desktop_mapping(
+    body: MeshMappingCreate,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    agent = await db.get(Agent, body.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    existing = await db.scalar(
+        select(AgentMeshMapping).where(AgentMeshMapping.agent_id == body.agent_id)
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=409, detail={"code": "meshcentral_mapping_exists"}
+        )
+    row = AgentMeshMapping(
+        agent_id=body.agent_id,
+        meshcentral_node_id=body.meshcentral_node_id,
+        meshcentral_mesh_id=body.meshcentral_mesh_id,
+        state=MeshMappingState.active,
+        origin=MeshMappingOrigin.manual,
+        created_by=operator.email,
+        last_synced_at=None,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    db.add(row)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "meshcentral_mapping_exists"}
+        ) from exc
+    await audit.record(
+        db,
+        action="meshcentral.mapping_created",
+        **_alert_audit_context(request, operator),
+        agent_id=row.agent_id,
+        detail={
+            "mapping_id": row.id,
+            "agent_id": row.agent_id,
+            "meshcentral_node_id": row.meshcentral_node_id,
+            "origin": row.origin.value,
+        },
+    )
+    return MeshMappingOut.model_validate(row)
+
+
+@router.delete("/remote-desktop/mappings/{mapping_id}", status_code=204)
+async def delete_remote_desktop_mapping(
+    mapping_id: str,
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await db.get(AgentMeshMapping, mapping_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    detail = {
+        "mapping_id": row.id,
+        "agent_id": row.agent_id,
+        "meshcentral_node_id": row.meshcentral_node_id,
+    }
+    agent_id = row.agent_id
+    await db.delete(row)
+    await audit.record(
+        db,
+        action="meshcentral.mapping_deleted",
+        **_alert_audit_context(request, operator),
+        agent_id=agent_id,
+        detail=detail,
+    )
+    return None
+
+
+@router.post("/remote-desktop/mappings/sync")
+async def sync_remote_desktop_mappings(
+    request: Request,
+    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    client = meshcentral_provider.get_client(settings)
+    if client is None:
+        raise HTTPException(409, detail={"code": "remote_desktop_disabled"})
+    run = await meshcentral_mapping.reconcile_mappings(db, client, settings)
+    if run.unavailable:
+        raise HTTPException(503, detail={"code": "remote_desktop_unavailable"})
+    for mapping_id, agent_id, node_id, previous, new_state in run.transitions:
+        if new_state in ("stale", "unmapped", "conflict"):
+            await audit.record(
+                db,
+                action="meshcentral.mapping_stale",
+                **_alert_audit_context(request, operator),
+                agent_id=agent_id,
+                detail={
+                    "mapping_id": mapping_id,
+                    "agent_id": agent_id,
+                    "meshcentral_node_id": node_id,
+                    "previous_state": previous,
+                    "state": new_state,
+                },
+            )
+    await audit.record(
+        db,
+        action="meshcentral.mapping_synced",
+        **_alert_audit_context(request, operator),
+        detail=run.counts(),
+    )
+    return run.counts()

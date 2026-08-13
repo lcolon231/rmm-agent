@@ -886,14 +886,37 @@ bounded in-memory, sequence/ack relay; the agent runs one contained line-oriente
 shell; and the endpoint detail page exposes a polling terminal. The signed command
 poll path remains the compatibility fallback. See `docs/SHELL-SESSIONS.md`.
 
-### Remote desktop
+### Remote desktop (MeshCentral, issue #62)
 
-NodeLink will not invent a proprietary remote desktop protocol. Milestone 2
-plans a narrowly scoped MeshCentral integration. MeshCentral remains a separate
-security and operational boundary with its own agent, sessions, permissions,
-updates, logs, and failure modes. NodeLink must authorize and audit session
-launches without treating MeshCentral's activity as automatically covered by
-NodeLink's command signature or audit guarantees.
+NodeLink does not invent a proprietary remote desktop protocol. It integrates an
+external MeshCentral deployment as a **separate security and operational
+boundary** with its own agent, sessions, permissions, updates, logs, and failure
+modes. NodeLink's role is bounded to three things: it **identity-maps** a
+NodeLink agent to a MeshCentral node, **authorizes** a session launch at its own
+API boundary, and **audits** the launch decision. It then asks MeshCentral —
+through MeshCentral's own admin API — to mint a short-lived, single-device,
+desktop-scoped access URL, and returns that URL once to the authorized operator.
+NodeLink never proxies the desktop stream, never stores the minted login
+material or the MeshCentral admin credential, and never treats MeshCentral's
+in-session activity as covered by NodeLink's command signature or audit chain.
+
+Because MeshCentral runs a separate agent NodeLink does not control, availability
+is **not** gated on a NodeLink-agent capability (unlike interactive shell, which
+advertises `shell-session-v2`). It is gated on three server-side facts, all
+fail-closed: the provider is `enabled`, a non-stale `active` identity mapping
+exists, and the operator passes the same role + explicit arbitrary-script scope
+required for interactive shell. The provider is disabled by default; every launch
+is refused while disabled or while MeshCentral is unavailable (a 503 fail-closed
+state, not a silent fallback). Launch decisions record `meshcentral.launch_*`
+and `meshcentral.session_*` audit events (metadata only — never the login URL).
+Identity mappings are created manually by an administrator; a read-only
+reconciliation ages a mapping to `stale`/`unmapped`/`conflict` and never creates
+or promotes a mapping on its own. See `docs/MESHCENTRAL-INTEGRATION.md`.
+
+The persisted schema is two metadata-only tables (`meshcentral_mappings`,
+`meshcentral_launches`, Alembic revision `0036`); no NodeLink **agent** change is
+required, so a mixed-version fleet degrades to "remote desktop unavailable"
+rather than misbehaving.
 
 ## 10. Repository evolution
 

@@ -419,6 +419,9 @@ def test_forward_repair_restores_schema_skipped_by_incorrect_stamp(tmp_path: Pat
         "user_agent",
     } <= audit_columns
     assert "anchor_publications" in tables
+    # MeshCentral remote-desktop mapping + launch tables (issue #62, rev 0036).
+    assert "meshcentral_mappings" in tables
+    assert "meshcentral_launches" in tables
     assert {"ux_commands_agent_nonce", "ux_audit_events_seq"} <= indexes
     assert json.loads(agent_state[0]) == []
     assert agent_state[1] == "active"

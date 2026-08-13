@@ -151,6 +151,35 @@ class Settings(BaseSettings):
     shell_session_input_buffer_bytes: int = 64 * 1024
     shell_session_relay_max_frames: int = 128
 
+    # --- MeshCentral remote desktop integration (issue #62) ---
+    # MeshCentral is a separate security and operational boundary. NodeLink only
+    # authorizes, identity-maps, and audits a session *launch*; it mints a
+    # short-lived, single-device access URL through MeshCentral's own API and
+    # never proxies the desktop stream. "disabled" is the fail-closed default;
+    # every launch is refused while disabled. The admin credential is
+    # environment-only and is never persisted or returned by any API or audit
+    # detail. The login-material encryption key is a base64url-encoded 32-byte
+    # AES-GCM key used only if minted material must briefly survive a retry; a
+    # launch that needs it fails closed when it is absent or malformed.
+    meshcentral_provider: str = "disabled"  # disabled | enabled
+    meshcentral_base_url: str | None = None  # https:// MeshCentral server
+    meshcentral_admin_token: str | None = None  # env-only, never persisted
+    meshcentral_admin_username: str | None = None  # env-only, never persisted
+    meshcentral_login_cookie_encryption_key: str | None = None  # base64url 32B
+    meshcentral_tls_pin_sha256: str | None = None  # optional cert/SPKI pin
+    meshcentral_login_ttl_seconds: int = Field(default=120, ge=30, le=600)
+    meshcentral_request_timeout_seconds: int = Field(default=10, ge=1, le=30)
+    meshcentral_dns_timeout_seconds: int = Field(default=5, ge=1, le=30)
+    meshcentral_mapping_sync_interval_seconds: int = Field(
+        default=900, ge=60, le=86_400
+    )
+    meshcentral_mapping_stale_after_seconds: int = Field(
+        default=86_400, ge=300, le=604_800
+    )
+    meshcentral_max_launches_per_operator_per_minute: int = Field(
+        default=5, ge=1, le=60
+    )
+
     @property
     def offline_threshold_seconds(self) -> int:
         return self.heartbeat_interval_seconds * self.offline_after_missed
