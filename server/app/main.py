@@ -18,6 +18,7 @@ from app.api import (
     agents,
     auth,
     management,
+    meshcentral,
     scheduled_tasks,
     script_library,
     shell_sessions,
@@ -96,6 +97,7 @@ app.include_router(script_library.router, prefix="/api/v1")
 app.include_router(scheduled_tasks.router, prefix="/api/v1")
 app.include_router(shell_sessions.router, prefix="/api/v1")
 app.include_router(shell_sessions.agent_router, prefix="/api/v1")
+app.include_router(meshcentral.router, prefix="/api/v1")
 app.include_router(agent_updates.router, prefix="/api/v1")
 app.include_router(agent_updates.agent_router, prefix="/api/v1")
 

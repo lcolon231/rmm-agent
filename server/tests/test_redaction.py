@@ -931,6 +931,66 @@ PRODUCER_DETAILS = {
         "scheduled_for": "2026-08-07T00:00:00+00:00",
         "detected_at": "2026-08-08T12:00:00+00:00",
     },
+    "meshcentral.launch_requested": {
+        "launch_id": ID1,
+        "agent_id": ID2,
+        "meshcentral_node_id": "node//" + SENTINEL,
+        "mapping_id": ID3,
+    },
+    "meshcentral.session_launched": {
+        "launch_id": ID1,
+        "agent_id": ID2,
+        "meshcentral_node_id": "node//abc",
+        "mapping_id": ID3,
+        "expires_at": "2026-08-12T00:02:00+00:00",
+        "meshcentral_session_ref": "share-abc123",
+        "reason": SENTINEL,
+    },
+    "meshcentral.launch_denied": {
+        "launch_id": None,
+        "agent_id": ID2,
+        "reason": "not_authorized",
+        "policy": "script_permission",
+        "trust_state": "active",
+    },
+    "meshcentral.launch_failed": {
+        "launch_id": ID1,
+        "agent_id": ID2,
+        "meshcentral_node_id": "node//abc",
+        "reason": "meshcentral_unavailable",
+    },
+    "meshcentral.session_closed": {
+        "launch_id": ID1,
+        "agent_id": ID2,
+        "meshcentral_node_id": "node//abc",
+        "status": "closed",
+        "reason": SENTINEL,
+    },
+    "meshcentral.mapping_created": {
+        "mapping_id": ID1,
+        "agent_id": ID2,
+        "meshcentral_node_id": "node//abc",
+        "origin": "manual",
+    },
+    "meshcentral.mapping_deleted": {
+        "mapping_id": ID1,
+        "agent_id": ID2,
+        "meshcentral_node_id": "node//abc",
+    },
+    "meshcentral.mapping_synced": {
+        "reconciled": 3,
+        "active": 2,
+        "stale": 1,
+        "unmapped": 0,
+        "conflict": 0,
+    },
+    "meshcentral.mapping_stale": {
+        "mapping_id": ID1,
+        "agent_id": ID2,
+        "meshcentral_node_id": "node//abc",
+        "previous_state": "active",
+        "state": "stale",
+    },
 }
 
 

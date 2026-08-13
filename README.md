@@ -418,9 +418,16 @@ The repository does **not** currently contain:
   technician lifecycle actions, automatic recovery, maintenance-window
   suppression, email, and generic webhooks are implemented
   (`docs/ALERT-NOTIFICATIONS.md`, `docs/SIGNED-WEBHOOKS.md`).
-- General software deployment, unrestricted filesystem/registry access, or
-  remote desktop. Controlled bounded file and registry remediation is limited
-  to the policy described in `docs/CONTROLLED-REMEDIATION.md`.
+- General software deployment or unrestricted filesystem/registry access.
+  Controlled bounded file and registry remediation is limited to the policy
+  described in `docs/CONTROLLED-REMEDIATION.md`.
+- Remote desktop is **integrated but not yet enabled by default**. The authorized,
+  audited MeshCentral launch integration ships behind `MESHCENTRAL_PROVIDER`
+  (disabled by default) with server, dashboard, and migration support and full
+  automated tests against a fake MeshCentral (`docs/MESHCENTRAL-INTEGRATION.md`).
+  It is **not** marked implemented until the manual end-to-end verification
+  against a live MeshCentral in that document passes; NodeLink never proxies the
+  desktop stream and treats MeshCentral as a separate trust boundary.
 - A least-privilege agent service account.
 - Scheduled production backup and timed operator rollback-drill evidence
   (encrypted backup/restore tooling and the automated PostgreSQL rehearsal ship

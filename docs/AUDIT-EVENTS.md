@@ -46,6 +46,15 @@ and SHA-256/Merkle roots—remains readable.
 | `shell_session.closed` | `api/shell_sessions.py` operator close | `session_id`, `status`, `reason`, `output_bytes_total`, `frames_in`, `frames_out` |
 | `shell_session.timed_out` | `core/tasks.py` shell session sweep | `session_id`, `reason`, `output_bytes_total`, `frames_in`, `frames_out` |
 | `shell_session.failed` | `api/shell_sessions.py` fail-closed transport/process/output termination | `session_id`, `reason`, `output_bytes_total`, `output_bytes_limit`, `frames_in`, `frames_out` |
+| `meshcentral.launch_requested` | `api/meshcentral.py` authorized remote-desktop launch record created (issue #62) | `launch_id`, `agent_id`, `meshcentral_node_id`, `mapping_id` |
+| `meshcentral.session_launched` | `api/meshcentral.py` MeshCentral minted a scoped single-device access URL | `launch_id`, `agent_id`, `meshcentral_node_id`, `mapping_id`, `expires_at`, `meshcentral_session_ref`, `reason_sha256`, `reason_bytes` |
+| `meshcentral.launch_denied` | `api/meshcentral.py` fail-closed launch refusal | `launch_id`, `agent_id`, `reason`, `policy`, `trust_state` |
+| `meshcentral.launch_failed` | `api/meshcentral.py` MeshCentral unavailable/rejected the mint | `launch_id`, `agent_id`, `meshcentral_node_id`, `reason` |
+| `meshcentral.session_closed` | `api/meshcentral.py` operator close (best-effort MeshCentral revoke) | `launch_id`, `agent_id`, `meshcentral_node_id`, `status`, `reason_sha256`, `reason_bytes` |
+| `meshcentral.mapping_created` | `api/management.py` admin creates a manual agent-to-node mapping | `mapping_id`, `agent_id`, `meshcentral_node_id`, `origin` |
+| `meshcentral.mapping_deleted` | `api/management.py` admin deletes a mapping | `mapping_id`, `agent_id`, `meshcentral_node_id` |
+| `meshcentral.mapping_synced` | `api/management.py` reconciliation run summary (counts only) | `reconciled`, `active`, `stale`, `unmapped`, `conflict` |
+| `meshcentral.mapping_stale` | `api/management.py` reconciliation aged a mapping | `mapping_id`, `agent_id`, `meshcentral_node_id`, `previous_state`, `state` |
 | `audit.anchored` | `api/management.py` local anchor creation | `anchor_id`, `merkle_root`, `event_count` |
 | `audit_timeline.viewed` | `api/management.py` audit timeline list | `event_type`, `actor_filter`, `agent_id`, `organization_id`, `date_from`, `date_to`, `before_seq`, `page`, `page_size`, `result_count`, `total` |
 | `audit_event.viewed` | `api/management.py` audit event detail | `event_id`, `action`, `seq` |

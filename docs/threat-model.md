@@ -401,6 +401,33 @@ idempotent identical retries, acknowledgement bounds, frame/window/output caps,
 and owner-bound access. An active session fails closed if volatile relay state is
 lost during server restart.
 
+### (6) Operator → MeshCentral remote desktop (issue #62)
+
+MeshCentral is an **external, separate trust boundary** with its own agent,
+permissions, updates, sessions, and logs (`docs/MESHCENTRAL-INTEGRATION.md`).
+NodeLink does not proxy the desktop stream and does not extend its command
+signature or audit chain over MeshCentral's in-session activity. NodeLink's
+boundary is only the **launch**: it identity-maps an agent to a MeshCentral node,
+authorizes the launch (operator role **and** explicit arbitrary-script scope,
+same bar as the interactive shell; admin is not a bypass), and audits the
+decision (`meshcentral.launch_*`, `meshcentral.session_*`). Because MeshCentral
+runs a separate agent NodeLink does not control, availability is not gated on a
+NodeLink-agent capability but on three server-side facts, all fail-closed: the
+provider is `enabled`, a non-stale `active` identity mapping exists, and
+authorization holds. The provider is disabled by default; a disabled provider,
+an unauthorized operator, an untrusted agent, a missing/stale/conflicting
+mapping, and an unavailable MeshCentral all refuse (a launch never silently
+degrades). Mitigations that limit blast radius: the minted access is
+single-device, desktop-scoped, and TTL-bounded (`MESHCENTRAL_LOGIN_TTL_SECONDS`);
+the login URL is returned once and never persisted, never logged, and never
+entered into the audit chain; and the MeshCentral admin credential is
+environment-only. NodeLink cannot force-terminate a live MeshCentral session, so
+`close` is a NodeLink-side record plus a best-effort revoke — MeshCentral's own
+session limits and logs remain authoritative. Residual risk: any account with
+this launch authorization can obtain interactive desktop control of a mapped
+endpoint, and MeshCentral's own compromise or misconfiguration is outside
+NodeLink's audit guarantees.
+
 ## Audit log: tamper-evidence
 
 Every meaningful action appends an `AuditEvent` to a **hash chain**: each event

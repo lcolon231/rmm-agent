@@ -21,6 +21,7 @@ import type { DashboardOperator } from "@/lib/dashboard-auth-core";
 import type { EndpointDetailData, EndpointTelemetrySample } from "@/lib/endpoint-detail";
 import { SHELL_SESSION_CAPABILITY } from "@/lib/shell-session-core";
 import { ShellSessionPanel } from "@/components/shell-session-panel";
+import { RemoteDesktopPanel } from "@/components/remote-desktop-panel";
 import {
   buildMetricPath,
   formatAgentVersion,
@@ -198,6 +199,8 @@ export function EndpointDetailView({ endpoint, operator }: { endpoint: EndpointD
           capable={endpoint.supported_capabilities.includes(SHELL_SESSION_CAPABILITY)}
           canExecuteScripts={endpoint.script_execution_allowed}
         />
+
+        <RemoteDesktopPanel endpointId={endpoint.id} />
 
         <section className="telemetry-tape" aria-labelledby="telemetry-history-title">
           <header className="telemetry-tape-header">
