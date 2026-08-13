@@ -5,9 +5,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateDispatchInput } from "@/lib/command-console-core";
 import { dispatchCommand } from "@/lib/command-console";
 import { isSameOrigin, requestOrigin, sessionCookieName } from "@/lib/dashboard-auth-core";
+import { isMaintenanceWindowErrorCode } from "@/lib/maintenance-windows-core";
 import { NodelinkApiError } from "@/lib/nodelink-api";
 
 export const dynamic = "force-dynamic";
+
+/** Codes the console turns into a link to the maintenance-window workflow.
+ * Everything else stays a message, so the browser never learns a code the
+ * dashboard has no user-facing route for. */
+function navigableCode(error: NodelinkApiError): string | null {
+  return isMaintenanceWindowErrorCode(error.code) ? error.code : null;
+}
 
 function dispatchErrorMessage(error: NodelinkApiError): { message: string; status: number } {
   if (error.status === 401 || error.status === 403) {
@@ -101,7 +109,8 @@ export async function POST(
   } catch (error) {
     if (error instanceof NodelinkApiError) {
       const { message, status } = dispatchErrorMessage(error);
-      return NextResponse.json({ error: message }, { status });
+      const code = navigableCode(error);
+      return NextResponse.json({ error: message, ...(code ? { code } : {}) }, { status });
     }
     return NextResponse.json(
       { error: "The command could not be dispatched. Try again." },

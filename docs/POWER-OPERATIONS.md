@@ -59,6 +59,30 @@ command status is `succeeded` only for the first three outcomes; all others are
 - Power operations cannot be recurring scheduled tasks. Confirmation and live
   policy must be evaluated for each dispatch.
 
+## Establishing the maintenance window from the dashboard
+
+The window is a prerequisite the operator has to be able to satisfy, so the
+dashboard exposes the management service's maintenance-window resource at
+`/maintenance-windows` (issue #211):
+
+- The register lists every window with its live state — active, upcoming,
+  between weekly occurrences, or closed — its scope target, and when it closes.
+- Creation takes a name, a global/client/site/endpoint scope, a time zone, and
+  an absolute start and end. The dashboard proxy re-validates the request and
+  the management service still enforces RBAC, the window limit, scope-target
+  existence, and audit logging.
+- Ending a window requires typing its name, which is matched against the live
+  record before the delete is issued, because ending a window can revoke the
+  authorization an in-flight power action depends on.
+- The command console shows whether a window covers the endpoint for the delay
+  selected, names the covering window and its closing time in the dispatch
+  review, and links a refused restart or shutdown straight to a prefilled
+  endpoint-scoped window. The link opens in a new tab so the reviewed command,
+  its reason, and its typed confirmation survive the detour.
+
+None of this relaxes the server-side check: coverage is re-evaluated when the
+command is signed, and the dashboard's reading is advisory evidence only.
+
 ## Windows execution and durable evidence
 
 The agent invokes Windows `shutdown.exe /r` or `/s` with the validated delay,
@@ -113,7 +137,7 @@ place.
 - Dashboard tests cover typed request building and untrusted result parsing;
   `npm run build` checks the complete Next.js route/component graph.
 - Real-Windows release qualification must run on an owned disposable VM: open a
-  maintenance window, schedule a 60-second restart, confirm the dispatch audit
+  maintenance window from the dashboard, schedule a 60-second restart, confirm the dispatch audit
   exists before pickup, cancel it, verify `cancelled`; repeat without cancel,
   verify result persistence before disconnect and result recovery after boot.
   Also verify signed-in-user refusal, no-action cancellation, offline expiry,

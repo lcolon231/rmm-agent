@@ -4,6 +4,8 @@ import { CommandConsoleView } from "@/components/command-console-view";
 import { getCommandHistory } from "@/lib/command-console";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import { getEndpointDetail } from "@/lib/endpoint-detail";
+import { getMaintenanceWindows } from "@/lib/maintenance-windows";
+import type { MaintenanceWindow } from "@/lib/maintenance-windows-core";
 import { NodelinkApiError } from "@/lib/nodelink-api";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -51,5 +53,24 @@ export default async function EndpointCommandsPage({
     );
   }
 
-  return <CommandConsoleView endpoint={endpoint} history={history} operator={session.operator} />;
+  // Coverage is advisory here — the console must still load when the window
+  // inventory does not, so a failure degrades to "unverified" rather than an error.
+  let maintenanceWindows: MaintenanceWindow[] | null = null;
+  const windowResult = await Promise.allSettled([getMaintenanceWindows(session.sessionToken)]);
+  if (windowResult[0].status === "fulfilled") maintenanceWindows = windowResult[0].value;
+
+  // Serialized into the client component as the hydration-stable "now" for
+  // maintenance-window coverage; the browser takes over from there.
+  // eslint-disable-next-line react-hooks/purity
+  const renderedAt = Date.now();
+
+  return (
+    <CommandConsoleView
+      endpoint={endpoint}
+      history={history}
+      maintenanceWindows={maintenanceWindows}
+      operator={session.operator}
+      serverNowMs={renderedAt}
+    />
+  );
 }
