@@ -219,6 +219,7 @@ class PinnedHTTPSMeshCentralClient:
         server. Import is lazy so the module has no hard websocket dependency at
         import time.
         """
+        import asyncio
         import json
         import ssl
 
@@ -247,9 +248,38 @@ class PinnedHTTPSMeshCentralClient:
                 if self._pin:
                     _verify_pin(ws, self._pin)
                 for message in requests:
+                    # MeshCentral pushes several unsolicited control messages as
+                    # soon as the socket authenticates, so a bare send/recv reads
+                    # the wrong frame. Tag the request with a responseid (as
+                    # meshctrl does) and read until the matching reply arrives,
+                    # skipping unrelated server pushes.
+                    rid = message.get("responseid") or secrets.token_hex(8)
+                    message = {**message, "responseid": rid}
+                    expected = message.get("action")
                     await ws.send(json.dumps(message))
-                    raw = await ws.recv()
-                    replies.append(json.loads(raw))
+                    reply = None
+                    for _ in range(64):
+                        data = json.loads(
+                            await asyncio.wait_for(
+                                ws.recv(),
+                                timeout=self._config.meshcentral_request_timeout_seconds,
+                            )
+                        )
+                        # Prefer a responseid match; fall back to the action for
+                        # replies MeshCentral does not echo the responseid on
+                        # (e.g. serverinfo). Unsolicited pushes carry a different
+                        # action, so this does not mis-match command replies.
+                        if data.get("responseid") == rid or (
+                            data.get("responseid") is None
+                            and data.get("action") == expected
+                        ):
+                            reply = data
+                            break
+                    if reply is None:
+                        raise MeshCentralError(
+                            "meshcentral_no_response", state="unavailable", retryable=True
+                        )
+                    replies.append(reply)
         except MeshCentralError:
             raise
         except Exception as exc:  # noqa: BLE001 - fail closed
@@ -300,8 +330,10 @@ class PinnedHTTPSMeshCentralClient:
                     "action": "createDeviceShareLink",
                     "nodeid": node_id,
                     "guestname": f"nodelink:{operator_ref}"[:64],
-                    # p=8 is the desktop-only permission bitmask in MeshCentral.
-                    "p": 8,
+                    # MeshCentral share permission bitmask: 1=terminal, 2=desktop,
+                    # 4=files, 8=http, 16=https. Desktop-only is 2 (8 is an HTTP
+                    # relay share, not the remote desktop).
+                    "p": 2,
                     "start": start,
                     "end": end,
                     "consent": 0,
