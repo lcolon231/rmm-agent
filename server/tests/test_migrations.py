@@ -160,11 +160,13 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "script_version_reviews",
         "script_parameter_definitions",
         "script_parameter_value_sets",
+        "operator_client_memberships",
     } <= tables
     assert "agent_completed_at" in command_columns
     assert {
         "script_execution_scope",
         "script_execution_scope_id",
+        "is_platform_admin",
     } <= operator_columns
     assert {
         "assigned_to_operator_id",
@@ -231,6 +233,8 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
         "ux_clients_name_normalized",
         "ux_sites_client_name_normalized",
         "ux_monitoring_policies_scope_name_normalized",
+        "ix_audit_events_org_ts_id",
+        "ix_operator_client_memberships_operator_client",
     } <= indexes
 
 

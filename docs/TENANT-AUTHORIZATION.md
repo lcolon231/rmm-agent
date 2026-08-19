@@ -1,7 +1,11 @@
 # Tenant-scoped authorization (issue #66)
 
-Status: **design / not yet implemented.** This document is the design NodeLink
-will build against; it describes a control designed for regulated multi-tenant
+Status: **phase 1 of 5 implemented (data model only); the tenant boundary is
+not yet enforced.** Revision `0037` adds memberships, the platform-admin flag,
+and the audit anchoring they need, and backfills them so applying it preserves
+today's access exactly. No read, write, or dispatch path consults them yet, so
+NodeLink is still not multi-tenant — see *Implementation phases* below for what
+remains. This document describes a control designed for regulated multi-tenant
 operation and is not itself a claim of compliance or completeness.
 
 NodeLink today has **no tenant boundary**. An `Operator` has a global role
@@ -140,8 +144,15 @@ idempotent (`checkfirst=True`) enum/table pattern of
 4. **Backfill authorization to preserve current access** (recommended): existing
    global `admin` operators become `is_platform_admin = true`; existing
    `operator`/`readonly` operators receive a membership to **every currently
-   existing client** with the equivalent `client_role`, recorded as a one-time
-   audited migration event. New clients and new operators are default-deny.
+   existing client** with the equivalent `client_role`.
+
+   As implemented, the provenance of that one-time grant is recorded on the
+   rows themselves (`granted_by = 'migration:0037'` plus a fixed `reason`),
+   not as an audit event: the chain's hashing and serialized-append logic lives
+   in the application, and reproducing it inside a migration risks forking the
+   chain. Every backfilled grant is therefore findable and revocable with one
+   query, and the audited grant/revoke events begin with the membership admin
+   API in phase 4. New clients and new operators are default-deny.
 
    The stricter alternative — promote only the bootstrap admin and require every
    other grant to be re-issued (the default-deny choice made for arbitrary-script
@@ -196,8 +207,12 @@ The implementing PR updates:
 
 ## Implementation phases
 
-1. **Data model + migration `0037`** — membership table, `is_platform_admin`,
-   audit `organization_id` backfill and index.
+1. ~~**Data model + migration `0037`** — membership table, `is_platform_admin`,
+   audit `organization_id` backfill and index.~~ **Done.** Landed with the
+   `OperatorClientMembership` model and `ClientRole` enum
+   (`server/app/models/models.py`), revision
+   `0037_tenant_scoped_authorization.py`, and
+   `server/tests/test_tenant_authorization.py` (SQLite and PostgreSQL).
 2. **`tenant_scope` core + read boundary** — the helper module, wired into every
    list/detail read with default-deny and `404` semantics.
 3. **Mutations/dispatch boundary** — `assert_client_visible` on all writes and

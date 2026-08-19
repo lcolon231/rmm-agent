@@ -31,6 +31,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     JSON,
+    false,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -64,6 +65,21 @@ class ScriptExecutionScope(str, enum.Enum):
     global_ = "global"
     site = "site"
     agent = "agent"
+
+
+class ClientRole(str, enum.Enum):
+    """What an operator may do *within one tenant* (one client).
+
+    Mirrors the global :class:`OperatorRole` tiers, but scoped to the single
+    client named by the membership that grants it. Tenant membership is an
+    outer gate: it decides which client's data is reachable at all, and the
+    existing global role and script-execution scope still narrow what may be
+    done once inside. See docs/TENANT-AUTHORIZATION.md.
+    """
+
+    client_readonly = "client_readonly"
+    client_operator = "client_operator"
+    client_admin = "client_admin"
 
 
 class AgentStatus(str, enum.Enum):
@@ -403,6 +419,12 @@ class Operator(Base):
     script_execution_scope_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True
     )
+    # Deployment-wide superuser: sees and administers every tenant, and is the
+    # only role that may grant or revoke memberships. Default false, so a new
+    # operator with no membership sees nothing (default deny).
+    is_platform_admin: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=false()
+    )
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # Monotonic token version. Every JWT carries the generation it was minted
     # under; bumping this immediately invalidates all outstanding tokens for
@@ -440,6 +462,54 @@ Index(
     Site.client_id,
     func.lower(func.trim(Site.name)),
     unique=True,
+)
+
+
+class OperatorClientMembership(Base):
+    """A grant of one tenant role over one client to one operator.
+
+    Membership is the tenant boundary: an operator that is not a platform admin
+    reaches exactly the clients it has a membership row for, and nothing else.
+    Absence of a row is a denial, never a fallback to global visibility.
+
+    ``granted_by`` and ``reason`` carry the operator-visible provenance for the
+    grant. Rows written by the 0037 backfill record the migration itself as the
+    grantor so a broad, one-time grant is never mistaken for a deliberate one.
+    """
+
+    __tablename__ = "operator_client_memberships"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[ClientRole] = mapped_column(
+        Enum(ClientRole), nullable=False
+    )
+    # Email of the granting operator, or "migration:0037" for backfilled rows.
+    granted_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    # Mandatory justification; the membership admin API refuses an empty one.
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "operator_id",
+            "client_id",
+            name="uq_operator_client_memberships_operator_client",
+        ),
+    )
+
+
+Index(
+    "ix_operator_client_memberships_operator_client",
+    OperatorClientMembership.operator_id,
+    OperatorClientMembership.client_id,
 )
 
 
@@ -958,6 +1028,19 @@ class AuditEvent(Base):
 
     prev_hash: Mapped[str] = mapped_column(String(64), default="")
     event_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+
+
+# Tenant-filtered timeline reads scan a single client's events in chain order,
+# so organization_id leads and (ts, id) supplies the ordering the audit views
+# already page by. organization_id is deliberately NOT part of the hashed
+# document (app/core/audit.py), so adding this index leaves every existing
+# chain and anchor verifiable unchanged.
+Index(
+    "ix_audit_events_org_ts_id",
+    AuditEvent.organization_id,
+    AuditEvent.ts,
+    AuditEvent.id,
+)
 
 
 class AuditAnchor(Base):

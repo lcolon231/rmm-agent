@@ -17,6 +17,21 @@ backup discards later definitions and prepared values and requires explicit
 data-loss approval; never rotate/discard the key as a substitute for the
 incident decision record.
 
+Tenant-authorization note: revision `0037` is additive — the
+`operator_client_memberships` table, the `operators.is_platform_admin` column,
+an `audit_events(organization_id, ts, id)` index, and backfills that stamp
+`audit_events.organization_id` and preserve every existing operator's current
+visibility. The revision changes no behavior on its own; an older application
+ignores the table and column entirely, so a component rollback across `0037`
+degrades to "no tenant boundary" — exactly the pre-`0037` behavior — rather than
+misbehaving. `organization_id` is not part of the hashed audit document, so the
+backfill leaves every chain and anchor verifiable. The new `clientrole`
+PostgreSQL enum type cannot be removed in place: crossing back before `0037`
+requires the exact-revision restore procedure below, not an Alembic downgrade.
+Memberships written by the backfill are stamped `granted_by = 'migration:0037'`
+and are broad by design; a platform admin should review and tighten them after
+the upgrade. See [`TENANT-AUTHORIZATION.md`](TENANT-AUTHORIZATION.md).
+
 Agent self-update note: revision `0035` is additive — two new tables
 (`agent_update_releases`, `agent_update_attempts`), a nullable
 `agents.update_channel` column, and new PostgreSQL enum values. An older
