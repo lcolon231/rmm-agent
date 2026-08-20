@@ -27,6 +27,7 @@ import pytest_asyncio  # noqa: E402
 from app.main import app  # noqa: E402
 from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
     Operator,
     OperatorRole,
@@ -157,6 +158,7 @@ async def test_endpoint_detail_returns_bounded_telemetry_and_audits(client):
                     logged_in_user="NODELINK\\technician",
                 )
             )
+        await grant_all_memberships(db)
         await db.commit()
 
     readonly_token = (await _login(client, "viewer@nodelink.test", "read-only-pass")).json()["access_token"]
@@ -211,6 +213,9 @@ async def test_readonly_client_navigation_lists_details_and_audits(client):
             headers=operator_auth,
         )
     ).json()
+    async with AsyncSessionLocal() as db:
+        await grant_all_memberships(db)
+        await db.commit()
     readonly_token = (await _login(client, "viewer@nodelink.test", "read-only-pass")).json()["access_token"]
     readonly_auth = {"Authorization": f"Bearer {readonly_token}"}
 
@@ -248,6 +253,9 @@ async def test_readonly_can_read_but_not_dispatch(client):
             json={"enrollment_token": et["token"], "hostname": "H", "os": "windows", "supported_command_envelope_versions": ["command-v2"]},
         )
     ).json()
+    async with AsyncSessionLocal() as db:
+        await grant_all_memberships(db)
+        await db.commit()
 
     # Now act as the read-only operator.
     ro_tok = (await _login(client, "viewer@nodelink.test", "read-only-pass")).json()["access_token"]

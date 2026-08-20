@@ -66,6 +66,20 @@ class ScriptExecutionScope(str, enum.Enum):
     agent = "agent"
 
 
+class ClientRole(str, enum.Enum):
+    """Per-client (tenant) role granted through OperatorClientMembership (#66).
+
+    Mirrors the global OperatorRole tiers, scoped to one client:
+    client_readonly -> view that client's sites, agents, history, audit
+    client_operator -> everything readonly can, plus provisioning/dispatch
+    client_admin    -> everything, within that client
+    """
+
+    client_admin = "client_admin"
+    client_operator = "client_operator"
+    client_readonly = "client_readonly"
+
+
 class AgentStatus(str, enum.Enum):
     pending = "pending"      # enrolled, no heartbeat yet
     online = "online"
@@ -394,6 +408,13 @@ class Operator(Base):
     role: Mapped[OperatorRole] = mapped_column(
         Enum(OperatorRole), default=OperatorRole.readonly, nullable=False
     )
+    # Deployment-wide superuser (issue #66). A platform admin sees and
+    # administers every client/tenant and manages operator-client memberships;
+    # it is the only principal that crosses the tenant boundary. Everyone else is
+    # authorized per client through OperatorClientMembership (default deny).
+    is_platform_admin: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     # Arbitrary PowerShell/shell execution is independently default-denied,
     # including for admins. A non-NULL scope is an explicit permission grant;
     # scope_id is required for site/agent scopes and NULL for global.
@@ -409,6 +430,51 @@ class Operator(Base):
     # this operator (logout-everywhere / revocation after a suspected leak).
     token_generation: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    client_memberships: Mapped[list["OperatorClientMembership"]] = relationship(
+        back_populates="operator", cascade="all, delete-orphan"
+    )
+
+
+class OperatorClientMembership(Base):
+    """A grant of one role over one client/tenant (issue #66).
+
+    Tenant authorization is default deny: an operator can see and act on a client
+    only through a membership here, or by being a platform admin. Granting or
+    revoking a membership is audited and bumps the operator's ``token_generation``
+    so outstanding tokens are immediately re-evaluated. Client-level for v1; the
+    existing ``script_execution_scope`` still narrows command targets within a
+    client the operator already belongs to.
+    """
+
+    __tablename__ = "operator_client_memberships"
+    __table_args__ = (
+        # One role per (operator, client). Re-granting replaces the row.
+        UniqueConstraint(
+            "operator_id", "client_id", name="uq_operator_client_membership"
+        ),
+        Index("ix_operator_client_memberships_operator", "operator_id"),
+        Index("ix_operator_client_memberships_client", "client_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[ClientRole] = mapped_column(Enum(ClientRole), nullable=False)
+    # Accountability for the grant: the acting platform admin's email and the
+    # mandatory reason recorded when the membership was created.
+    granted_by: Mapped[str | None] = mapped_column(String(320))
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+    operator: Mapped["Operator"] = relationship(back_populates="client_memberships")
+    client: Mapped["Client"] = relationship()
 
 
 class Site(Base):

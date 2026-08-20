@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
 from app.core import audit
+from app.core.tenant_scope import assert_agent_visible
 from app.core.clientip import client_ip
 from app.core.config import settings
 from app.core.database import get_db
@@ -31,6 +32,7 @@ from app.core.script_authorization import authorize_command
 from app.models.models import (
     Agent,
     AgentTrustState,
+    ClientRole,
     CommandKind,
     MeshLaunchRecord,
     MeshLaunchStatus,
@@ -141,6 +143,7 @@ async def remote_desktop_availability(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(404, detail="Agent not found")
+    await assert_agent_visible(operator, agent, db, detail="Agent not found")
     if agent.trust_state != AgentTrustState.active:
         return MeshAvailabilityOut(
             available=False, reason="agent_not_trusted", provider_enabled=True
@@ -185,10 +188,14 @@ async def launch_remote_desktop(
             )
         raise HTTPException(409, detail={"code": "remote_desktop_disabled"})
 
-    # 2. Agent must exist.
+    # 2. Agent must exist and be in the operator's tenant (cross-tenant -> 404).
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(404, detail="Agent not found")
+    await assert_agent_visible(
+        operator, agent, db,
+        minimum=ClientRole.client_operator, detail="Agent not found",
+    )
 
     # 3. Authorization: operator role + explicit arbitrary-script scope, exactly
     # like an interactive shell. Admin is not a bypass.

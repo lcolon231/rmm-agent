@@ -81,6 +81,14 @@ accept an action. It currently contains:
 - Global `readonly`, `operator`, and `admin` roles. Arbitrary script execution
   is a separate default-deny permission with one admin-granted `global`, `site`,
   or `agent` scope; admin does not bypass it.
+- Tenant-scoped authorization (issue #66): on top of the global role, an operator
+  is scoped to the clients it holds an `OperatorClientMembership` for (per-client
+  `client_readonly`/`client_operator`/`client_admin` role), and a *platform admin*
+  is the only principal that crosses the tenant boundary. The boundary is
+  default-deny and centralized in `app/core/tenant_scope.py`; a cross-tenant
+  resource is indistinguishable from a missing one (404). Membership grant/revoke
+  and the platform-admin flag are platform-admin-only, audited, and bump the
+  target's token generation. See [`TENANT-AUTHORIZATION.md`](TENANT-AUTHORIZATION.md).
 - Enrollment-token and agent-token issuance; only token hashes are stored on
   the server.
 - A single deployment-wide Ed25519 command-signing keypair.
@@ -101,7 +109,9 @@ Signing-key rotation is an operator-run workflow (`scripts/rotate_command_key.py
 with the `docs/KEY-ROTATION.md` runbook): staged active/overlap/retired
 transitions, a compromise fast path, and rollback, each written atomically to
 the registry and appended to a rotation journal. Known gaps include
-MFA/federation, tenant-scoped authorization, and certificate pinning.
+MFA/federation and certificate pinning. Tenant-scoped authorization is
+implemented server side (issue #66); a dashboard membership-management UI is a
+follow-up.
 
 ### 3.2 Operations plane
 

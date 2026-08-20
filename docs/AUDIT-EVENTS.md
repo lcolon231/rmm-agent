@@ -132,6 +132,10 @@ and SHA-256/Merkle roots—remains readable.
 | `operator.role_changed` | `api/auth.py` global-role change | `operator_id`, `previous_role`, `new_role`, `script_permission_revoked`, `reason_sha256`, `reason_bytes` |
 | `operator.status_changed` | `api/auth.py` disable/re-enable | `operator_id`, `previous_disabled`, `new_disabled`, `reason_sha256`, `reason_bytes` |
 | `operator.tokens_revoked` | `api/auth.py` token-generation bump | `operator_id`, `by` |
+| `operator.tenant_membership_granted` | `api/auth.py` client-membership grant (#66) | `operator_id`, `client_id`, `previous_role`, `new_role`, `reason_sha256`, `reason_bytes` |
+| `operator.tenant_membership_revoked` | `api/auth.py` client-membership revoke (#66) | `operator_id`, `client_id`, `previous_role`, `reason_sha256`, `reason_bytes` |
+| `operator.platform_admin_changed` | `api/auth.py` platform-admin toggle (#66) | `operator_id`, `previous`, `new`, `reason_sha256`, `reason_bytes` |
+| `tenant.access_denied` | `api/management.py` cross-tenant dispatch attempt (#66) | `operator_id`, `resource`, `agent_id`, `client_id` |
 | `scheduled_task.created` | `api/scheduled_tasks.py` task schedule creation | `scheduled_task_id`, `name_sha256`, `name_bytes`, `target_type`, `target_id`, `cron_expression`, `timezone`, `next_run_at`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
 | `scheduled_task.updated` | `api/scheduled_tasks.py` task schedule update | `scheduled_task_id`, `name_sha256`, `name_bytes`, `enabled`, `next_run_at`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
 | `scheduled_task.deleted` | `api/scheduled_tasks.py` task schedule deletion | `scheduled_task_id`, `name_sha256`, `name_bytes`, `target_type`, `target_id`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |

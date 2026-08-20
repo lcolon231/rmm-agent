@@ -36,11 +36,13 @@ async def administration():
                 email="primary-admin@nodelink.test",
                 password_hash=hash_password("primary-password"),
                 role=OperatorRole.admin,
+                is_platform_admin=True,
             ),
             Operator(
                 email="backup-admin@nodelink.test",
                 password_hash=hash_password("backup-password"),
                 role=OperatorRole.admin,
+                is_platform_admin=True,
             ),
             Operator(
                 email="technician@nodelink.test",

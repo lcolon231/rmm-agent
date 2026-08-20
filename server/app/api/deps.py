@@ -157,3 +157,22 @@ def require_role(minimum: OperatorRole):
         return operator
 
     return checker
+
+
+async def require_platform_admin(
+    operator: Operator = Depends(get_current_operator),
+) -> Operator:
+    """AuthZ: the deployment-wide superuser gate (issue #66).
+
+    Platform admin is the only principal that crosses the tenant boundary and
+    the only one that may grant/revoke client memberships or toggle the flag
+    itself. It is independent of the global role: a global ``admin`` is not a
+    platform admin unless explicitly flagged (the 0037 migration promotes
+    pre-tenancy admins once, on upgrade). Fails closed with 403.
+    """
+    if not operator.is_platform_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Requires platform administrator",
+        )
+    return operator

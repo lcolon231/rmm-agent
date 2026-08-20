@@ -22,7 +22,8 @@ os.environ.setdefault("COMMAND_SIGNING_KEY_PATH", "command_signing_key.pem")
 import httpx  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
-from app.main import app  # noqa: E402
+from app.main import app
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.core import inventory as inventory_core  # noqa: E402
 from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.command_envelope import COMMAND_ENVELOPE_V3  # noqa: E402
@@ -83,6 +84,7 @@ async def operator_client():
                 script_execution_scope=ScriptExecutionScope.global_,
             )
         )
+        await grant_all_memberships(db)
         await db.commit()
 
     transport = httpx.ASGITransport(app=app)

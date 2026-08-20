@@ -299,8 +299,15 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
 
 ## Milestone 3 — productize regulated-environment controls
 
-- Introduce tenant-scoped authorization and isolation tests before describing
-  client/site boundaries as tenants.
+- **In progress (issue #66).** Tenant-scoped authorization is implemented server
+  side: a default-deny operator→client membership boundary with a platform-admin
+  superuser, 404 anti-oracle semantics, an audited membership-administration API,
+  audit anchoring via `organization_id`, and the forward-only `0037` migration.
+  Isolation is verified by `server/tests/test_tenant_authorization.py`
+  (cross-tenant IDOR, list exclusion, membership lifecycle with token
+  revocation). See [`TENANT-AUTHORIZATION.md`](TENANT-AUTHORIZATION.md). The
+  dashboard membership-management UI is a follow-up (backend already filters
+  responses per tenant).
 - Add MFA, WebAuthn, federation, break-glass accounts, and administrative
   session policy.
 - Implement approval and two-person authorization for sensitive operations;

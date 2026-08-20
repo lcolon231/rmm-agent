@@ -32,7 +32,8 @@ import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
-from app.main import app  # noqa: E402
+from app.main import app
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.core.command_envelope import COMMAND_ENVELOPE_V2  # noqa: E402
@@ -85,6 +86,7 @@ async def env(monkeypatch):
             password_hash=hash_password("viewer-pass"),
             role=OperatorRole.readonly,
         ))
+        await grant_all_memberships(db)
         await db.commit()
 
     # Provider enabled + a Fake client injected for every test; individual tests
@@ -118,6 +120,9 @@ async def _enroll(c, op_auth) -> str:
         "supported_capabilities": [],
     })
     assert r.status_code == 200, r.text
+    async with AsyncSessionLocal() as db:
+        await grant_all_memberships(db)
+        await db.commit()
     return r.json()["agent_id"]
 
 

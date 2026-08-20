@@ -24,6 +24,7 @@ from pydantic import (
 from app.models.models import (
     AgentStatus,
     AgentTrustState,
+    ClientRole,
     CommandKind,
     CommandStatus,
     EnrollmentTokenStatus,
@@ -71,10 +72,48 @@ class OperatorOut(BaseModel):
     id: str
     email: str
     role: OperatorRole
+    is_platform_admin: bool
     script_execution_scope: ScriptExecutionScope | None
     script_execution_scope_id: str | None
     disabled: bool
     created_at: datetime
+
+
+# --------------------------------------------------------------------------- #
+# Tenant (client) memberships — issue #66
+# --------------------------------------------------------------------------- #
+class ClientMembershipGrant(BaseModel):
+    """Grant one per-client role to an operator (platform-admin only)."""
+
+    client_id: Annotated[str, StringConstraints(min_length=1, max_length=36)]
+    role: ClientRole
+    reason: Annotated[
+        str, StringConstraints(min_length=3, max_length=500, strip_whitespace=True)
+    ]
+
+
+class ClientMembershipRevoke(BaseModel):
+    reason: Annotated[
+        str, StringConstraints(min_length=3, max_length=500, strip_whitespace=True)
+    ]
+
+
+class ClientMembershipOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    operator_id: str
+    client_id: str
+    role: ClientRole
+    granted_by: str | None
+    reason: str | None
+    created_at: datetime
+
+
+class PlatformAdminChange(BaseModel):
+    is_platform_admin: bool
+    reason: Annotated[
+        str, StringConstraints(min_length=3, max_length=500, strip_whitespace=True)
+    ]
 
 
 class ScriptExecutionPermissionChange(BaseModel):

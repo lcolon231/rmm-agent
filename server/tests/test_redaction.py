@@ -865,6 +865,31 @@ PRODUCER_DETAILS = {
         "new_disabled": True,
         "reason": SENTINEL,
     },
+    "operator.tenant_membership_granted": {
+        "operator_id": ID1,
+        "client_id": ID2,
+        "previous_role": None,
+        "new_role": "client_operator",
+        "reason": SENTINEL,
+    },
+    "operator.tenant_membership_revoked": {
+        "operator_id": ID1,
+        "client_id": ID2,
+        "previous_role": "client_operator",
+        "reason": SENTINEL,
+    },
+    "operator.platform_admin_changed": {
+        "operator_id": ID1,
+        "previous": False,
+        "new": True,
+        "reason": SENTINEL,
+    },
+    "tenant.access_denied": {
+        "operator_id": ID1,
+        "resource": "command",
+        "agent_id": ID2,
+        "client_id": ID3,
+    },
     "operator.tokens_revoked": {"operator_id": ID1, "by": "admin"},
     "scheduled_task.created": {
         "scheduled_task_id": ID1,

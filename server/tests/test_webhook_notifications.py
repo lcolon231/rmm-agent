@@ -361,6 +361,7 @@ async def test_endpoint_api_authorization_rotation_masking_and_audit(
                     email="webhook-admin@example.test",
                     password_hash=hash_password("admin-password"),
                     role=OperatorRole.admin,
+                    is_platform_admin=True,
                 ),
                 Operator(
                     email="webhook-viewer@example.test",

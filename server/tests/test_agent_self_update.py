@@ -27,7 +27,8 @@ from app.core import agent_updates as updates  # noqa: E402
 from app.core.command_envelope import COMMAND_ENVELOPE_V3  # noqa: E402
 from app.core.database import AsyncSessionLocal, Base, engine  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
-from app.main import app  # noqa: E402
+from app.main import app
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
     AuditEvent,
     Command,
@@ -52,6 +53,7 @@ async def client():
                     email="upd-admin@nodelink.test",
                     password_hash=hash_password(_ADMIN_LOGIN),
                     role=OperatorRole.admin,
+                    is_platform_admin=True,
                 ),
                 Operator(
                     email="upd-op@nodelink.test",
@@ -60,6 +62,7 @@ async def client():
                 ),
             ]
         )
+        await grant_all_memberships(db)
         await db.commit()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -115,6 +118,9 @@ async def enroll(
     enrollment = await client.post("/enroll", json=body)
     assert enrollment.status_code == 200, enrollment.text
     payload = enrollment.json()
+    async with AsyncSessionLocal() as db:
+        await grant_all_memberships(db)
+        await db.commit()
     return payload["agent_id"], payload["agent_token"]
 
 

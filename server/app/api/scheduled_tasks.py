@@ -14,8 +14,10 @@ from app.core import audit
 from app.core.clientip import client_ip
 from app.core.database import get_db
 from app.core.scheduler import compute_next_run, dispatch_scheduled_tasks_once
+from app.core.tenant_scope import assert_agent_visible, assert_client_action
 from app.models.models import (
     Agent,
+    ClientRole,
     Operator,
     OperatorRole,
     ScheduleTargetType,
@@ -101,21 +103,37 @@ async def create_scheduled_task(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new recurring task schedule."""
-    # Verify target existence
+    # Verify target existence and tenant membership. A cross-tenant target is
+    # indistinguishable from a missing one (404), so an operator cannot schedule
+    # a task against another tenant's agent or site.
     if body.target_type == ScheduleTargetType.agent:
-        agent_res = await db.execute(select(Agent).where(Agent.id == body.target_id))
-        if agent_res.scalar_one_or_none() is None:
+        agent = (
+            await db.execute(select(Agent).where(Agent.id == body.target_id))
+        ).scalar_one_or_none()
+        if agent is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Target agent {body.target_id} not found",
             )
+        await assert_agent_visible(
+            operator, agent, db,
+            minimum=ClientRole.client_operator,
+            detail=f"Target agent {body.target_id} not found",
+        )
     elif body.target_type == ScheduleTargetType.site:
-        site_res = await db.execute(select(Site).where(Site.id == body.target_id))
-        if site_res.scalar_one_or_none() is None:
+        site = (
+            await db.execute(select(Site).where(Site.id == body.target_id))
+        ).scalar_one_or_none()
+        if site is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Target site {body.target_id} not found",
             )
+        await assert_client_action(
+            operator, site.client_id, db,
+            minimum=ClientRole.client_operator,
+            detail=f"Target site {body.target_id} not found",
+        )
 
     now = _now()
     try:

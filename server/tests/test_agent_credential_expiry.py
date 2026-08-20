@@ -24,7 +24,8 @@ os.environ.setdefault("COMMAND_SIGNING_KEY_PATH", "command_signing_key.pem")
 import httpx  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
-from app.main import app  # noqa: E402
+from app.main import app
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.core.config import settings  # noqa: E402
 from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
@@ -49,8 +50,10 @@ async def client():
                 email="creds@nodelink.test",
                 password_hash=hash_password("creds-password"),
                 role=OperatorRole.admin,
+                is_platform_admin=True,
             )
         )
+        await grant_all_memberships(db)
         await db.commit()
 
     transport = httpx.ASGITransport(app=app)

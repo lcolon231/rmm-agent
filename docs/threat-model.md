@@ -34,6 +34,16 @@ authentication and role-based authorization:
   returns 403. Arbitrary PowerShell/shell execution is additionally
   default-deny, including for admins, and requires an explicit global, site, or
   agent scope matching the target. Typed inventory is authorized separately.
+- **Tenant isolation (issue #66).** On top of the global role, every operator is
+  scoped to the clients they hold an `OperatorClientMembership` for; a *platform
+  admin* is the only principal that crosses the tenant boundary. The boundary is
+  default-deny and centralized in `app/core/tenant_scope.py`: tenant-scoped reads
+  AND in a membership filter, and by-id detail/mutation/dispatch handlers assert
+  visibility. A resource in another tenant (or a nonexistent one) returns **404**,
+  never 403 — a foreign tenant cannot be used as an existence oracle. A cross-
+  tenant command-dispatch attempt is additionally recorded as
+  `tenant.access_denied`. Membership grant/revoke and the platform-admin flag are
+  platform-admin-only, audited, and bump `token_generation`.
 - **Accountability.** The acting operator's email is recorded as the `actor` on
   each `command.dispatched` audit event. Allowed and denied authorization
   decisions are also audited before signing/queueing without payload values.

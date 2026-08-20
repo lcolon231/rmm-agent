@@ -17,6 +17,7 @@ from app.core.clientip import client_ip
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.script_authorization import authorize_command
+from app.core.tenant_scope import assert_agent_visible
 from app.core.shell_relay import (
     Backpressure,
     CursorExpired,
@@ -28,6 +29,7 @@ from app.core.shell_relay import (
 from app.models.models import (
     Agent,
     AgentTrustState,
+    ClientRole,
     CommandKind,
     Operator,
     OperatorRole,
@@ -213,6 +215,10 @@ async def open_shell_session(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(404, detail="Agent not found")
+    await assert_agent_visible(
+        operator, agent, db,
+        minimum=ClientRole.client_operator, detail="Agent not found",
+    )
     evidence = _request_evidence(request, operator)
     authorization = authorize_command(operator, agent, CommandKind.powershell)
     if not authorization.allowed:

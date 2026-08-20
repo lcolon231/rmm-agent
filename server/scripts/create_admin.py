@@ -5,8 +5,13 @@ Solves the bootstrap chicken-and-egg: the /auth/operators endpoint is admin-only
 so the very first admin has to be created out-of-band. Run this once after
 setting up the database.
 
+Under tenant-scoped authorization (issue #66), a fresh deployment is default
+deny: no operator can see any client until a *platform admin* grants memberships
+(or promotes another platform admin). Bootstrap that first tenant-crossing
+superuser with ``--platform-admin``.
+
 Usage:
-    python scripts/create_admin.py admin@nodelink.example --role admin
+    python scripts/create_admin.py admin@nodelink.example --role admin --platform-admin
     # prompts for a password (hidden)
 """
 import argparse
@@ -24,7 +29,9 @@ from app.core.security import hash_password  # noqa: E402
 from app.models.models import Operator, OperatorRole  # noqa: E402
 
 
-async def main(email: str, role: str, password: str) -> None:
+async def main(
+    email: str, role: str, password: str, platform_admin: bool = False
+) -> None:
     # Make sure tables exist (harmless if they already do).
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -39,10 +46,12 @@ async def main(email: str, role: str, password: str) -> None:
                 email=email,
                 password_hash=hash_password(password),
                 role=OperatorRole(role),
+                is_platform_admin=platform_admin,
             )
         )
         await db.commit()
-    print(f"Created {role} operator: {email}")
+    suffix = " (platform admin)" if platform_admin else ""
+    print(f"Created {role} operator: {email}{suffix}")
 
 
 if __name__ == "__main__":
@@ -53,6 +62,11 @@ if __name__ == "__main__":
         default="admin",
         choices=[r.value for r in OperatorRole],
         help="operator role (default: admin)",
+    )
+    parser.add_argument(
+        "--platform-admin",
+        action="store_true",
+        help="grant deployment-wide platform admin (crosses the tenant boundary)",
     )
     args = parser.parse_args()
 
@@ -65,4 +79,4 @@ if __name__ == "__main__":
         print("Password must be at least 8 characters.")
         sys.exit(1)
 
-    asyncio.run(main(args.email, args.role, pw))
+    asyncio.run(main(args.email, args.role, pw, args.platform_admin))

@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_role
+from app.api.deps import require_platform_admin, require_role
 from app.core import audit
 from app.core.clientip import client_ip
 from app.core.database import get_db
@@ -24,17 +24,24 @@ from app.core.security import (
 )
 from app.models.models import (
     Agent,
+    Client,
+    ClientRole,
     Operator,
+    OperatorClientMembership,
     OperatorRole,
     ScriptExecutionScope,
     Site,
 )
 from app.schemas.schemas import (
+    ClientMembershipGrant,
+    ClientMembershipOut,
+    ClientMembershipRevoke,
     LoginRequest,
     OperatorCreate,
     OperatorOut,
     OperatorRoleChange,
     OperatorStatusChange,
+    PlatformAdminChange,
     ScriptExecutionPermissionChange,
     ScriptExecutionPermissionRevoke,
     TokenResponse,
@@ -422,3 +429,206 @@ async def revoke_operator_tokens(
         actor=admin.email,
         detail={"operator_id": target.id, "by": "admin"},
     )
+
+
+# --------------------------------------------------------------------------- #
+# Tenant (client) memberships and platform-admin — issue #66
+#
+# Membership administration is the sole way a non-platform-admin operator gains
+# visibility of a client, so it is itself gated on platform admin (not merely
+# the global admin role). Every grant/revoke and every platform-admin toggle is
+# audited with a mandatory reason and bumps the target's ``token_generation`` so
+# outstanding tokens are re-evaluated against the new authorization immediately.
+# --------------------------------------------------------------------------- #
+def _request_evidence(request: Request, actor: Operator) -> dict:
+    return {
+        "actor": actor.email,
+        "actor_user_id": actor.id,
+        "source_ip": client_ip(request),
+        "user_agent": request.headers.get("user-agent", "")[:500] or None,
+    }
+
+
+@router.get(
+    "/auth/operators/{operator_id}/client-memberships",
+    response_model=list[ClientMembershipOut],
+)
+async def list_operator_client_memberships(
+    operator_id: str,
+    _admin: Operator = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """List one operator's per-client memberships. Platform-admin only."""
+    await _operator_or_404(db, operator_id)
+    result = await db.execute(
+        select(OperatorClientMembership)
+        .where(OperatorClientMembership.operator_id == operator_id)
+        .order_by(OperatorClientMembership.created_at, OperatorClientMembership.id)
+    )
+    return list(result.scalars().all())
+
+
+@router.post(
+    "/auth/operators/{operator_id}/client-memberships",
+    response_model=ClientMembershipOut,
+    status_code=201,
+)
+async def grant_client_membership(
+    operator_id: str,
+    body: ClientMembershipGrant,
+    request: Request,
+    admin: Operator = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Grant (or replace) an operator's role over one client. Platform-admin only.
+
+    Re-granting for the same (operator, client) replaces the role rather than
+    erroring, so the unique constraint is never hit and the operation is
+    idempotent for the caller.
+    """
+    target = await _operator_or_404(db, operator_id)
+    client = await db.get(Client, body.client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    existing = (
+        await db.execute(
+            select(OperatorClientMembership).where(
+                OperatorClientMembership.operator_id == operator_id,
+                OperatorClientMembership.client_id == body.client_id,
+            )
+        )
+    ).scalar_one_or_none()
+    previous_role = existing.role.value if existing is not None else None
+    if existing is not None:
+        existing.role = body.role
+        existing.granted_by = admin.email
+        existing.reason = body.reason
+        membership = existing
+    else:
+        membership = OperatorClientMembership(
+            operator_id=operator_id,
+            client_id=body.client_id,
+            role=body.role,
+            granted_by=admin.email,
+            reason=body.reason,
+        )
+        db.add(membership)
+    # Re-evaluate the grantee's outstanding tokens against the new authorization.
+    target.token_generation += 1
+    await db.flush()
+    await audit.record(
+        db,
+        action="operator.tenant_membership_granted",
+        organization_id=body.client_id,
+        detail={
+            "operator_id": operator_id,
+            "client_id": body.client_id,
+            "previous_role": previous_role,
+            "new_role": body.role.value,
+            "reason": body.reason,
+        },
+        **_request_evidence(request, admin),
+    )
+    return membership
+
+
+@router.post(
+    "/auth/operators/{operator_id}/client-memberships/{client_id}/revoke",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_client_membership(
+    operator_id: str,
+    client_id: str,
+    body: ClientMembershipRevoke,
+    request: Request,
+    admin: Operator = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove an operator's role over one client. Platform-admin only."""
+    target = await _operator_or_404(db, operator_id)
+    membership = (
+        await db.execute(
+            select(OperatorClientMembership).where(
+                OperatorClientMembership.operator_id == operator_id,
+                OperatorClientMembership.client_id == client_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(
+            status_code=404, detail="Client membership not found"
+        )
+    previous_role = membership.role.value
+    await db.delete(membership)
+    target.token_generation += 1
+    await audit.record(
+        db,
+        action="operator.tenant_membership_revoked",
+        organization_id=client_id,
+        detail={
+            "operator_id": operator_id,
+            "client_id": client_id,
+            "previous_role": previous_role,
+            "reason": body.reason,
+        },
+        **_request_evidence(request, admin),
+    )
+
+
+@router.put(
+    "/auth/operators/{operator_id}/platform-admin",
+    response_model=OperatorOut,
+)
+async def change_platform_admin(
+    operator_id: str,
+    body: PlatformAdminChange,
+    request: Request,
+    admin: Operator = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Grant or revoke deployment-wide platform-admin. Platform-admin only.
+
+    Refuses to remove the last remaining platform admin so a deployment cannot
+    lock itself out of the only principal able to administer tenants.
+    """
+    target = await _operator_or_404(db, operator_id)
+    if target.is_platform_admin == body.is_platform_admin:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "platform_admin_unchanged"},
+        )
+    if not body.is_platform_admin:
+        remaining = list(
+            (
+                await db.execute(
+                    select(Operator.id)
+                    .where(
+                        Operator.is_platform_admin.is_(True),
+                        Operator.disabled.is_(False),
+                    )
+                    .with_for_update()
+                )
+            ).scalars()
+        )
+        if set(remaining) <= {target.id}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "last_platform_admin_required"},
+            )
+
+    previous = target.is_platform_admin
+    target.is_platform_admin = body.is_platform_admin
+    target.token_generation += 1
+    await audit.record(
+        db,
+        action="operator.platform_admin_changed",
+        detail={
+            "operator_id": target.id,
+            "previous": previous,
+            "new": target.is_platform_admin,
+            "reason": body.reason,
+        },
+        **_request_evidence(request, admin),
+    )
+    return target
