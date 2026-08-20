@@ -866,18 +866,25 @@ are deliberately kept out of the hash chain so publishing does not itself force
 perpetual re-anchoring. See `docs/AUDIT-ANCHORING.md`.
 
 The audit system is tamper-evident and, once an external anchor destination is
-configured, externally verifiable against immutable storage. It does not yet
-provide a signed, exportable evidence bundle (a Milestone 3 compliance
-deliverable).
+configured, externally verifiable against immutable storage. Issue #79 adds a
+read-only tenant evidence projection in `app/core/evidence_bundles.py` and
+`api/evidence.py`: canonical JSON and normalized CSV carry a content-addressed
+version-1 manifest, safe actor/tenant/endpoint/policy/action/result metadata,
+the exact sanitized tenant audit events, a global hash-only prefix, the newest
+applicable anchor/receipts, and public verification keys. The exporter verifies
+the covered chain, anchor, and receipts before returning data and refuses
+tampered or over-limit artifacts. `scripts/verify_evidence_bundle.py` verifies
+the artifact without database access. Payload and output content stay outside
+the bundle. See [`EVIDENCE-BUNDLES.md`](EVIDENCE-BUNDLES.md).
 
 ## 8. Tenant isolation roadmap
 
-Today, `Client` and `Site` provide navigation scope only. Milestone 1 may use
-them to organize the dashboard, but must not describe them as security tenants.
-Milestone 3 introduces an explicit tenant boundary: tenant IDs on relevant
-records, tenant-scoped queries, tenant-aware roles, isolation tests, per-tenant
-retention, and administrative break-glass rules. Any schema transition needs a
-migration and a documented strategy for existing rows.
+`Client` is the authorization tenant. Issue #66 implements a default-deny
+operator-client membership boundary, per-client roles, platform-admin bypass,
+404 anti-oracle behavior, tenant-scoped queries, and audit anchoring, with an
+access-preserving migration and isolation tests. Evidence export (#79) is
+single-tenant and reuses the same visibility boundary. Per-tenant retention and
+administrative break-glass rules remain Milestone 3 work.
 
 ## 9. Remote access boundary
 

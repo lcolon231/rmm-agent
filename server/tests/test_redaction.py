@@ -560,6 +560,15 @@ PRODUCER_DETAILS = {
         "format": "csv",
         "row_count": 5,
     },
+    "evidence_bundle.exported": {
+        "bundle_id": "e" * 64,
+        "tenant_id": ID1,
+        "format": "json",
+        "from_seq": 1,
+        "through_seq": 42,
+        "record_count": 120,
+        "content_sha256": "f" * 64,
+    },
     "monitoring_alert.acknowledged": {
         "alert_id": ID1,
         "generation": 1,
