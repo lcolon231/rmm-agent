@@ -444,6 +444,15 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     "patch_compliance.exported": _schema(
         "client_id", "site_id", "state", "format", "row_count",
     ),
+    "evidence_bundle.exported": _schema(
+        "bundle_id",
+        "tenant_id",
+        "format",
+        "from_seq",
+        "through_seq",
+        "record_count",
+        "content_sha256",
+    ),
     "monitoring_alert.acknowledged": _schema(
         "alert_id", "generation", "request_id", "from_state", "to_state",
         "comment", "comment_redacted", digest_fields=("comment",),

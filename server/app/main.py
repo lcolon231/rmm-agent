@@ -17,6 +17,7 @@ from app.api import (
     agent_updates,
     agents,
     auth,
+    evidence,
     management,
     meshcentral,
     scheduled_tasks,
@@ -92,6 +93,7 @@ app = FastAPI(
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(agents.router, prefix="/api/v1")
+app.include_router(evidence.router, prefix="/api/v1")
 app.include_router(management.router, prefix="/api/v1")
 app.include_router(script_library.router, prefix="/api/v1")
 app.include_router(scheduled_tasks.router, prefix="/api/v1")

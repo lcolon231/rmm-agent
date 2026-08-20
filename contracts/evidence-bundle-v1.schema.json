@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nodelink.example/contracts/evidence-bundle-v1.schema.json",
+  "title": "NodeLink deterministic evidence bundle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "manifest", "records"],
+  "properties": {
+    "format": {"const": "nodelink-evidence-bundle"},
+    "version": {"const": 1},
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "version", "bundle_id", "scope", "sections", "verification"],
+      "properties": {
+        "format": {"const": "nodelink-evidence-bundle"},
+        "version": {"const": 1},
+        "bundle_id": {"$ref": "#/$defs/sha256"},
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tenant_id", "from_seq", "through_seq", "snapshot_event_hash", "snapshot_at"],
+          "properties": {
+            "tenant_id": {"type": "string", "minLength": 1, "maxLength": 36},
+            "from_seq": {"type": "integer", "minimum": 1},
+            "through_seq": {"type": "integer", "minimum": 0},
+            "snapshot_event_hash": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+            "snapshot_at": {"type": ["string", "null"]}
+          }
+        },
+        "sections": {
+          "type": "array",
+          "minItems": 11,
+          "maxItems": 11,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "record_count", "sha256"],
+            "properties": {
+              "name": {"enum": ["tenant", "actors", "sites", "endpoints", "policies", "signed_actions", "results", "audit_events", "audit_hashes", "anchors", "verification_keys"]},
+              "record_count": {"type": "integer", "minimum": 0},
+              "sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        },
+        "verification": {"type": "object"}
+      }
+    },
+    "records": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant", "actors", "sites", "endpoints", "policies", "signed_actions", "results", "audit_events", "audit_hashes", "anchors", "verification_keys"],
+      "properties": {
+        "tenant": {"type": "array", "maxItems": 1, "items": {"type": "object"}},
+        "actors": {"type": "array", "items": {"type": "object"}},
+        "sites": {"type": "array", "items": {"type": "object"}},
+        "endpoints": {"type": "array", "items": {"type": "object"}},
+        "policies": {"type": "array", "items": {"type": "object"}},
+        "signed_actions": {"type": "array", "items": {"type": "object"}},
+        "results": {"type": "array", "items": {"type": "object"}},
+        "audit_events": {"type": "array", "items": {"type": "object"}},
+        "audit_hashes": {"type": "array", "items": {"type": "object"}},
+        "anchors": {"type": "array", "maxItems": 1, "items": {"type": "object"}},
+        "verification_keys": {"type": "array", "items": {"type": "object"}}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

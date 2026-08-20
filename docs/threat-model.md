@@ -47,6 +47,15 @@ authentication and role-based authorization:
 - **Accountability.** The acting operator's email is recorded as the `actor` on
   each `command.dispatched` audit event. Allowed and denied authorization
   decisions are also audited before signing/queueing without payload values.
+- **Bulk evidence export (issue #79).** `GET /api/v1/evidence/bundles/export` requires
+  global readonly access plus visibility of exactly one tenant. Foreign and
+  missing tenants are the same 404. The response is bounded, content-addressed,
+  and `no-store`; every download is audited. The server verifies the selected
+  audit prefix, applicable anchor, and publication receipts before release.
+  Other-tenant event metadata is excluded; only opaque `(seq, event_id,
+  event_hash)` values from the global prefix cross the boundary so a tenant can
+  reproduce the shared Merkle root. Command payloads and stdout/stderr are
+  withheld because they can contain credentials or endpoint-user data.
 - **Bootstrap.** The first admin is created out-of-band via
   `scripts/create_admin.py` (the create-operator endpoint is admin-only, so it
   can't mint the first admin itself).
@@ -523,4 +532,4 @@ warning in production when unconfigured. See `docs/AUDIT-ANCHORING.md`.
 | 10 | Audit ordering is not monotonic and anchors remain local | High | **Closed** — every event carries a unique monotonic seq assigned under a serialized append (advisory lock + unique constraint) and bound into its hash; verification/anchoring walk seq order and detect gaps/reorders; anchors are published to external immutable storage with receipts and clean-room verification (`docs/AUDIT-ANCHORING.md`) |
 | 11 | No production migrations, automated restore, or rollback rehearsal | High | **Mostly closed** — Alembic startup guard; encrypted backup/isolated restore; and a fail-closed planner requiring rollout pause, named compatible components/schema, matching backup, and explicit data-loss approval. PostgreSQL CI rehearses N→bad N+1→N and verifies operators, agents, commands, audit chain, and anchors (`docs/ROLLBACK.md`). Production schedule evidence and a timed operator drill remain |
 | 12 | Windows artifacts are unsigned and release evidence lacks SBOM/provenance | High | Partial — releases publish an SPDX SBOM (Go + Python), signed SLSA build-provenance attestations, and checksums for every artifact; Authenticode signing remains open (needs a paid certificate) |
-| 13 | Client/site records are not authorization tenants | High | Open — roles and management access are global |
+| 13 | Client/site records are not authorization tenants | High | **Closed** — `Client` is the authorization tenant; default-deny operator memberships, per-client roles, platform-admin bypass, 404 anti-oracle behavior, scoped queries, and isolation tests landed in issue #66 |

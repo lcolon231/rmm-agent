@@ -1,0 +1,117 @@
+{
+  "format": "nodelink-evidence-bundle",
+  "version": 1,
+  "manifest": {
+    "format": "nodelink-evidence-bundle",
+    "version": 1,
+    "scope": {
+      "tenant_id": "00000000-0000-0000-0000-000000000079",
+      "from_seq": 1,
+      "through_seq": 0,
+      "snapshot_event_hash": null,
+      "snapshot_at": null
+    },
+    "sections": [
+      {
+        "name": "tenant",
+        "record_count": 1,
+        "sha256": "1adaa38f1cc4a8358477ec5abcf3096bfda8f76361c78afc8a6e8c1428831abc"
+      },
+      {
+        "name": "actors",
+        "record_count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "name": "sites",
+        "record_count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "name": "endpoints",
+        "record_count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "name": "policies",
+        "record_count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "name": "signed_actions",
+        "record_count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "name": "results",
+        "record_count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "name": "audit_events",
+        "record_count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "name": "audit_hashes",
+        "record_count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "name": "anchors",
+        "record_count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "name": "verification_keys",
+        "record_count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    ],
+    "verification": {
+      "audit_chain": {
+        "state": "intact",
+        "through_seq": 0,
+        "selected_event_count": 0
+      },
+      "anchor": {
+        "state": "unavailable",
+        "coverage_through_seq": 0,
+        "unanchored_event_count": 0,
+        "publication_state": "unavailable"
+      },
+      "command_signatures": {
+        "state": "available",
+        "missing_key_ids": [],
+        "legacy_unkeyed_count": 0,
+        "payload_verification": "metadata_only_payload_withheld"
+      },
+      "redaction": {
+        "audit_details": "stored_sanitized_representation",
+        "command_payloads": "withheld_sensitive",
+        "command_outputs": "withheld_sensitive",
+        "policy_free_text": "digest_only"
+      }
+    },
+    "bundle_id": "4acf1ab45c501a24e72bd6b329a4d806f106f7b26fd742e1401bc4c09f8871ed"
+  },
+  "records": {
+    "tenant": [
+      {
+        "tenant_id": "00000000-0000-0000-0000-000000000079",
+        "name": "Example Tenant",
+        "created_at": "2026-08-20T00:00:00Z"
+      }
+    ],
+    "actors": [],
+    "sites": [],
+    "endpoints": [],
+    "policies": [],
+    "signed_actions": [],
+    "results": [],
+    "audit_events": [],
+    "audit_hashes": [],
+    "anchors": [],
+    "verification_keys": []
+  }
+}

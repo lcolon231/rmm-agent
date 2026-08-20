@@ -299,7 +299,7 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
 
 ## Milestone 3 — productize regulated-environment controls
 
-- **In progress (issue #66).** Tenant-scoped authorization is implemented server
+- **Implemented (issue #66).** Tenant-scoped authorization is implemented server
   side: a default-deny operator→client membership boundary with a platform-admin
   superuser, 404 anti-oracle semantics, an audited membership-administration API,
   audit anchoring via `organization_id`, and the forward-only `0037` migration.
@@ -312,8 +312,13 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   session policy.
 - Implement approval and two-person authorization for sensitive operations;
   emergency override must require justification and produce prominent evidence.
-- Export deterministic evidence bundles in JSON, CSV, PDF, and signed ZIP forms
-  with schemas, signatures, manifests, and independent verification.
+- **Implemented for JSON/CSV (issue #79).** A single-tenant, versioned,
+  deterministic manifest exports safe actor/endpoint/policy/signed-action/result
+  metadata, sanitized audit events, hash-only chain material, anchors/receipts,
+  and public keys. Canonical JSON and normalized CSV reproduce the same bundle
+  ID and a standard-library verifier checks either without database access.
+  PDF and signed-ZIP packaging remain issue #80. See
+  [`EVIDENCE-BUNDLES.md`](EVIDENCE-BUNDLES.md).
 - Add immutable evidence storage, tenant-specific retention, deletion controls,
   and legal hold with conflict tests.
 - Ship a standalone verification CLI and a customer-facing read-only portal.

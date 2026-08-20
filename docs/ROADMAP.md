@@ -176,8 +176,9 @@ where appropriate, complete audit coverage, and Windows end-to-end evidence.
 
 Workstreams:
 
-- JSON, CSV, PDF, and signed-ZIP evidence bundles with documented schemas and
-  verification instructions.
+- Versioned deterministic JSON/CSV evidence bundles with documented schemas and
+  clean-room verification are implemented (#79). Accessible PDF and signed-ZIP
+  packaging remain #80.
 - Approval workflow, two-person authorization for sensitive actions, and
   justified emergency override.
 - Explicit tenant IDs, tenant-scoped authorization, tenant-specific roles and

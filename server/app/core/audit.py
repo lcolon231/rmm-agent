@@ -145,7 +145,9 @@ async def record(
     return event
 
 
-async def verify_chain(db: AsyncSession) -> tuple[bool, str | None]:
+async def verify_chain(
+    db: AsyncSession, *, through_seq: int | None = None
+) -> tuple[bool, str | None]:
     """Walk the chain in sequence order and confirm every link. Returns
     (ok, first_broken_event_id).
 
@@ -153,9 +155,10 @@ async def verify_chain(db: AsyncSession) -> tuple[bool, str | None]:
     renumbering (sequence gap/duplicate/reorder), a missing sequence, and a
     legacy-schema event appearing after the sequenced cutover.
     """
-    result = await db.execute(
-        select(AuditEvent).order_by(AuditEvent.seq.asc())
-    )
+    stmt = select(AuditEvent)
+    if through_seq is not None:
+        stmt = stmt.where(AuditEvent.seq <= through_seq)
+    result = await db.execute(stmt.order_by(AuditEvent.seq.asc()))
     events = result.scalars().all()
     prev = _GENESIS
     expected_seq = 1
