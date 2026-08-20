@@ -369,10 +369,10 @@ regenerated backup and rollback evidence. Building on `v0.1.2`, it has:
 - completed interactive shell sessions (#61): an owner-bound, audited,
   capability-negotiated terminal with bounded long-poll streaming, protected
   agent PowerShell execution, reconnect semantics, and fail-closed limits;
-- added deterministic tenant evidence bundles (#79): versioned canonical JSON
-  and normalized CSV manifests for actors, tenants, endpoints, policies,
-  signed-action/result metadata, audit sequence, anchors, receipts, and public
-  verification keys, with an independent standard-library verifier;
+- added deterministic tenant evidence bundles (#79/#80): versioned canonical
+  JSON and normalized CSV, tagged PDF summaries, and domain-separated
+  Ed25519-signed deterministic ZIP packages with fixed manifests, anchors,
+  receipts, public verification keys, and independent clean-room verifiers;
 - landed the Phase-1 Windows Update scan (#51): a typed `scan_updates` command
   and a normalized missing/installed update inventory section, with update
   installation/deployment explicitly out of scope; and
@@ -396,8 +396,8 @@ and redeployed Windows agent before `install_updates` can be used. Other current
   MeshCentral integration. Signed, staged agent self-update with automatic
   rollback is implemented (`docs/AGENT-SELF-UPDATE.md`).
 - **Milestone 3 — Compliance Productization:** tenant-scoped authorization and
-  deterministic JSON/CSV evidence bundles are implemented; approval workflows,
-  stronger identity controls, signed/PDF packaging, immutable retention, a
+  deterministic JSON/CSV/PDF/signed-ZIP evidence exports are implemented;
+  approval workflows, stronger identity controls, immutable retention, a
   packaged audit verification tool, and a customer audit portal remain planned.
 - **Milestone 4 — Scale and Ecosystem:** shared infrastructure, distributed
   execution, high availability, public APIs, integrations, signed extensions,
@@ -407,10 +407,10 @@ and redeployed Windows agent before `install_updates` can be used. Other current
 
 The repository does **not** currently contain:
 
-- PDF or signed-ZIP evidence packages, immutable bundle retention/legal hold,
-  or the packaged cross-platform verification CLI. The server-side versioned
-  JSON/CSV contract and reference clean-room verifier are implemented in
-  `docs/EVIDENCE-BUNDLES.md`.
+- Immutable bundle retention/legal hold or the packaged cross-platform
+  verification CLI. The server-side JSON/CSV contract, tagged PDF, deterministic
+  signed ZIP, and reference clean-room verifiers are implemented in
+  `docs/EVIDENCE-BUNDLES.md` and `docs/EVIDENCE-PACKAGES.md`.
 
 - A general live audit UI or production-ready dashboard. Client/site
   navigation, endpoint inventory, endpoint telemetry detail, endpoint command

@@ -1,0 +1,51 @@
+{
+  "format": "nodelink-evidence-package",
+  "version": 1,
+  "package_id": "be010c14b5dda5478b5bc20a3a4a677bdb330dfed7f987c964659ba941b807ad",
+  "evidence": {
+    "bundle_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "tenant_id": "00000000-0000-0000-0000-000000000080",
+    "from_seq": 1,
+    "through_seq": 42
+  },
+  "files": [
+    {
+      "path": "evidence/evidence.json",
+      "media_type": "application/vnd.nodelink.evidence+json",
+      "size_bytes": 4096,
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "path": "reports/evidence-summary.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 2048,
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "path": "receipts/anchor-receipts.json",
+      "media_type": "application/json",
+      "size_bytes": 512,
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "path": "keys/evidence-signing-key.pem",
+      "media_type": "application/x-pem-file",
+      "size_bytes": 113,
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "path": "VERIFY.txt",
+      "media_type": "text/plain; charset=utf-8",
+      "size_bytes": 640,
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+    }
+  ],
+  "signing": {
+    "algorithm": "Ed25519",
+    "context": "nodelink-evidence-package:v1",
+    "key_id": "test-evidence-2026",
+    "public_key_path": "keys/evidence-signing-key.pem",
+    "public_key_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "public_key_fingerprint_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+  }
+}

@@ -312,13 +312,17 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   session policy.
 - Implement approval and two-person authorization for sensitive operations;
   emergency override must require justification and produce prominent evidence.
-- **Implemented for JSON/CSV (issue #79).** A single-tenant, versioned,
+- **Implemented (issues #79/#80).** A single-tenant, versioned,
   deterministic manifest exports safe actor/endpoint/policy/signed-action/result
   metadata, sanitized audit events, hash-only chain material, anchors/receipts,
   and public keys. Canonical JSON and normalized CSV reproduce the same bundle
   ID and a standard-library verifier checks either without database access.
-  PDF and signed-ZIP packaging remain issue #80. See
-  [`EVIDENCE-BUNDLES.md`](EVIDENCE-BUNDLES.md).
+  Tagged PDF summaries and fixed-path ZIPs bind the same document, receipts,
+  public key, and instructions under a deterministic domain-separated Ed25519
+  signature; verification requires an externally trusted key and refuses
+  traversal, tamper, or over-limit archives. See
+  [`EVIDENCE-BUNDLES.md`](EVIDENCE-BUNDLES.md) and
+  [`EVIDENCE-PACKAGES.md`](EVIDENCE-PACKAGES.md).
 - Add immutable evidence storage, tenant-specific retention, deletion controls,
   and legal hold with conflict tests.
 - Ship a standalone verification CLI and a customer-facing read-only portal.

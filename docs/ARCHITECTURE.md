@@ -875,7 +875,14 @@ applicable anchor/receipts, and public verification keys. The exporter verifies
 the covered chain, anchor, and receipts before returning data and refuses
 tampered or over-limit artifacts. `scripts/verify_evidence_bundle.py` verifies
 the artifact without database access. Payload and output content stay outside
-the bundle. See [`EVIDENCE-BUNDLES.md`](EVIDENCE-BUNDLES.md).
+the bundle. Issue #80 adds `app/core/evidence_packages.py`: a deterministic
+tagged PDF summary and fixed-path stored ZIP whose canonical member manifest is
+signed with the active issue #14 Ed25519 key under an evidence-only domain.
+Verification requires a separately trusted public key; the included key is not
+self-authenticating. The server self-verifies the package before release and
+rejects unsafe paths, noncanonical archive metadata, signature/key mismatch,
+tamper, and size excess. See [`EVIDENCE-BUNDLES.md`](EVIDENCE-BUNDLES.md) and
+[`EVIDENCE-PACKAGES.md`](EVIDENCE-PACKAGES.md).
 
 ## 8. Tenant isolation roadmap
 

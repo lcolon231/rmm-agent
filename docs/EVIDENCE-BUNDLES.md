@@ -2,7 +2,8 @@
 
 Status: **implemented server side and verified by automated tests.** NodeLink
 exports one tenant at a time as canonical JSON or normalized CSV through a
-versioned manifest. This is a compliance-supporting evidence capability; it is
+versioned manifest. Issue #80 also renders that same document as a tagged PDF
+or deterministic signed ZIP. This is a compliance-supporting evidence capability; it is
 not a compliance certification or a claim that an export is complete for a
 customer's particular legal or regulatory purpose.
 
@@ -16,7 +17,8 @@ membership boundary. Required query parameter:
 
 Optional parameters:
 
-- `format=json|csv` (default `json`);
+- `format=json|csv|pdf|zip` (default `json`); PDF/ZIP packaging is specified in
+  [`EVIDENCE-PACKAGES.md`](EVIDENCE-PACKAGES.md);
 - `from_seq` (default `1`), the first tenant audit sequence included;
 - `through_seq`, the pinned global audit prefix. When omitted, NodeLink resolves
   the current tail before appending the download event; and
@@ -156,7 +158,8 @@ canonical ordering, pinned reproducibility, a 2,500-record artifact, central
 redaction, cross-tenant denial, limit/unavailable states, chain/anchor tamper,
 JSON/CSV reconstruction, and clean-room verification.
 
-Issue #80 adds accessible PDF and deterministic signed-ZIP packaging. Issue #81
-adds immutable bundle storage, retention, and legal hold. Issue #82 packages a
-standalone cross-platform verification product. Those capabilities are not
-implied by this server-side JSON/CSV implementation.
+Issue #80 implements tagged PDF and deterministic signed-ZIP packaging over
+this document. Issue #81 adds immutable bundle storage, retention, and legal
+hold. Issue #82 packages a standalone cross-platform verification product.
+Those persistence and productized-CLI capabilities are not implied by this
+computed export.

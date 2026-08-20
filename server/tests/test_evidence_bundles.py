@@ -22,10 +22,21 @@ _OTHER_PW = os.environ.setdefault("NODELINK_TEST_EVIDENCE_OTHER_PW", "other-pw")
 import httpx  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
+from cryptography.hazmat.primitives import serialization  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # noqa: E402
+    Ed25519PrivateKey,
+)
 from sqlalchemy import select  # noqa: E402
 
-from app.core import anchor, anchor_publish, audit, evidence_bundles  # noqa: E402
+from app.core import (  # noqa: E402
+    anchor,
+    anchor_publish,
+    audit,
+    evidence_bundles,
+    evidence_packages,
+)
 from app.core.database import AsyncSessionLocal, Base, engine  # noqa: E402
+from app.core.keyring import active_signing_key  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.models import (  # noqa: E402
@@ -55,6 +66,29 @@ _CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "contracts"
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _trusted_public_key() -> bytes:
+    return active_signing_key().public_key_pem.encode("ascii")
+
+
+def _rewrite_package(
+    payload: bytes,
+    *,
+    replacements: dict[str, bytes] | None = None,
+    renamed_path: tuple[str, str] | None = None,
+) -> bytes:
+    members = evidence_packages.read_archive(payload)
+    replacements = replacements or {}
+    entries = []
+    for path in evidence_packages.ARCHIVE_PATHS:
+        output_path = (
+            renamed_path[1]
+            if renamed_path is not None and path == renamed_path[0]
+            else path
+        )
+        entries.append((output_path, replacements.get(path, members[path])))
+    return evidence_packages.serialize_archive(entries)
 
 
 @pytest_asyncio.fixture
@@ -520,10 +554,29 @@ def test_large_logical_export_has_stable_bytes_and_digests():
         snapshot_at="2026-08-20T04:00:00+00:00",
         records=records,
         verification={
-            "audit_chain": {"state": "intact"},
-            "anchor": {"state": "unavailable"},
-            "command_signatures": {"state": "not_applicable"},
-            "redaction": {"state": "enforced"},
+            "audit_chain": {
+                "state": "intact",
+                "through_seq": 2500,
+                "selected_event_count": 0,
+            },
+            "anchor": {
+                "state": "unavailable",
+                "coverage_through_seq": 0,
+                "unanchored_event_count": 2500,
+                "publication_state": "unavailable",
+            },
+            "command_signatures": {
+                "state": "available",
+                "missing_key_ids": [],
+                "legacy_unkeyed_count": 0,
+                "payload_verification": "metadata_only_payload_withheld",
+            },
+            "redaction": {
+                "audit_details": "stored_sanitized_representation",
+                "command_payloads": "withheld_sensitive",
+                "command_outputs": "withheld_sensitive",
+                "policy_free_text": "digest_only",
+            },
         },
     )
     first = evidence_bundles.serialize_json(artifact)
@@ -531,6 +584,21 @@ def test_large_logical_export_has_stable_bytes_and_digests():
     assert first == second
     assert len(first) > 250_000
     evidence_bundles.verify_bundle_document(artifact.document)
+
+    pdf = evidence_packages.render_pdf(artifact)
+    evidence_packages.verify_pdf(pdf, expected_bundle_id=artifact.bundle_id)
+    package = evidence_packages.build_signed_package(artifact)
+    verified = evidence_packages.verify_signed_package(
+        package.content,
+        trusted_public_key_pem=_trusted_public_key(),
+    )
+    assert verified.package_id == package.package_id
+    assert evidence_packages.build_signed_package(artifact).content == package.content
+    with pytest.raises(
+        evidence_packages.EvidencePackageError,
+        match="evidence_package_size_exceeded",
+    ):
+        evidence_packages.build_signed_package(artifact, max_archive_bytes=1024)
 
 
 def test_golden_v1_contract_vector_and_schema_are_stable():
@@ -552,3 +620,298 @@ def test_golden_v1_contract_vector_and_schema_are_stable():
     assert set(schema["properties"]["records"]["required"]) == set(
         evidence_bundles.SECTION_ORDER
     )
+
+    package_vector = json.loads(
+        (_CONTRACT_ROOT / "test-vectors" / "evidence-package-v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    package_schema = json.loads(
+        (_CONTRACT_ROOT / "evidence-package-v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    package_base = {
+        key: value for key, value in package_vector.items() if key != "package_id"
+    }
+    assert package_vector["package_id"] == hashlib.sha256(
+        evidence_bundles.canonical_json(package_base)
+    ).hexdigest()
+    assert package_vector["package_id"] == (
+        "be010c14b5dda5478b5bc20a3a4a677bdb330dfed7f987c964659ba941b807ad"
+    )
+    assert package_schema["properties"]["version"]["const"] == (
+        evidence_packages.PACKAGE_VERSION
+    )
+    assert [item["path"] for item in package_vector["files"]] == list(
+        evidence_packages.CONTENT_PATHS
+    )
+
+
+@pytest.mark.asyncio
+async def test_pdf_export_is_accessible_redacted_and_pinned(evidence_tenancy):
+    client, ids, tokens = evidence_tenancy
+    first = await client.get(
+        "/evidence/bundles/export",
+        params={"organization_id": ids["tenant_a"], "format": "pdf"},
+        headers=_auth(tokens["reader"]),
+    )
+    assert first.status_code == 200, first.text
+    assert first.headers["content-type"].startswith(evidence_packages.PDF_MEDIA_TYPE)
+    bundle_id = first.headers["x-nodelink-evidence-bundle-id"]
+    evidence_packages.verify_pdf(first.content, expected_bundle_id=bundle_id)
+    assert b"/StructTreeRoot" in first.content
+    assert b"/MarkInfo << /Marked true >>" in first.content
+    assert b"/Lang (en-US)" in first.content
+    assert b"Alpha Evidence" in first.content
+    assert _SENTINEL.encode() not in first.content
+    assert ids["tenant_b"].encode() not in first.content
+
+    pinned = await client.get(
+        "/evidence/bundles/export",
+        params={
+            "organization_id": ids["tenant_a"],
+            "format": "pdf",
+            "through_seq": first.headers["x-nodelink-audit-through-seq"],
+        },
+        headers=_auth(tokens["reader"]),
+    )
+    assert pinned.status_code == 200, pinned.text
+    assert pinned.content == first.content
+
+
+@pytest.mark.asyncio
+async def test_signed_zip_is_complete_deterministic_and_clean_room_verifiable(
+    evidence_tenancy, tmp_path: Path
+):
+    client, ids, tokens = evidence_tenancy
+    first = await client.get(
+        "/evidence/bundles/export",
+        params={"organization_id": ids["tenant_a"], "format": "zip"},
+        headers=_auth(tokens["reader"]),
+    )
+    assert first.status_code == 200, first.text
+    assert first.headers["content-type"].startswith(evidence_packages.ZIP_MEDIA_TYPE)
+    package_id = first.headers["x-nodelink-evidence-package-id"]
+    verified = evidence_packages.verify_signed_package(
+        first.content,
+        trusted_public_key_pem=_trusted_public_key(),
+    )
+    assert verified.package_id == package_id
+    assert verified.bundle_id == first.headers["x-nodelink-evidence-bundle-id"]
+    assert verified.trusted_key_matched is True
+    assert _SENTINEL.encode() not in first.content
+    assert ids["tenant_b"].encode() not in first.content
+
+    members = evidence_packages.read_archive(first.content)
+    assert tuple(members) == evidence_packages.ARCHIVE_PATHS
+    manifest = json.loads(members[evidence_packages.MANIFEST_PATH])
+    assert [item["path"] for item in manifest["files"]] == list(
+        evidence_packages.CONTENT_PATHS
+    )
+    assert manifest["signing"]["context"] == evidence_packages.SIGNING_CONTEXT_NAME
+
+    pinned = await client.get(
+        "/evidence/bundles/export",
+        params={
+            "organization_id": ids["tenant_a"],
+            "format": "zip",
+            "through_seq": first.headers["x-nodelink-audit-through-seq"],
+        },
+        headers=_auth(tokens["reader"]),
+    )
+    assert pinned.status_code == 200, pinned.text
+    assert pinned.content == first.content
+
+    archive_path = tmp_path / "evidence.zip"
+    public_key_path = tmp_path / "trusted-public.pem"
+    archive_path.write_bytes(first.content)
+    public_key_path.write_bytes(_trusted_public_key())
+    verifier = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "verify_evidence_package.py"
+    )
+    checked = subprocess.run(
+        [
+            sys.executable,
+            str(verifier),
+            str(archive_path),
+            "--trusted-public-key",
+            str(public_key_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert checked.returncode == 0, checked.stderr
+    assert "trusted-key=matched" in checked.stdout
+
+    async with AsyncSessionLocal() as db:
+        export_events = list(
+            (
+                await db.execute(
+                    select(AuditEvent)
+                    .where(AuditEvent.action == "evidence_bundle.exported")
+                    .order_by(AuditEvent.seq)
+                )
+            ).scalars().all()
+        )
+    assert export_events[-1].detail["format"] == "zip"
+    assert export_events[-1].detail["package_id"] == package_id
+    assert export_events[-1].detail["signing_key_id"] == verified.signing_key_id
+
+
+@pytest.mark.asyncio
+async def test_signed_zip_tamper_traversal_and_trust_fail_closed(evidence_tenancy):
+    client, ids, tokens = evidence_tenancy
+    response = await client.get(
+        "/evidence/bundles/export",
+        params={"organization_id": ids["tenant_a"], "format": "zip"},
+        headers=_auth(tokens["reader"]),
+    )
+    assert response.status_code == 200, response.text
+    members = evidence_packages.read_archive(response.content)
+
+    tampered_evidence = _rewrite_package(
+        response.content,
+        replacements={
+            evidence_packages.EVIDENCE_PATH: members[evidence_packages.EVIDENCE_PATH]
+            + b" "
+        },
+    )
+    with pytest.raises(
+        evidence_packages.PackageVerificationError,
+        match="digest or size mismatch",
+    ):
+        evidence_packages.verify_signed_package(
+            tampered_evidence,
+            trusted_public_key_pem=_trusted_public_key(),
+        )
+
+    incomplete_manifest = json.loads(members[evidence_packages.MANIFEST_PATH])
+    incomplete_manifest["files"] = incomplete_manifest["files"][:-1]
+    incomplete = _rewrite_package(
+        response.content,
+        replacements={
+            evidence_packages.MANIFEST_PATH: evidence_bundles.canonical_json(
+                incomplete_manifest
+            )
+        },
+    )
+    with pytest.raises(
+        evidence_packages.PackageVerificationError,
+        match="incomplete or unordered",
+    ):
+        evidence_packages.verify_signed_package(
+            incomplete,
+            trusted_public_key_pem=_trusted_public_key(),
+        )
+
+    signature = json.loads(members[evidence_packages.SIGNATURE_PATH])
+    signature["signature"] = (
+        "A" if signature["signature"][0] != "A" else "B"
+    ) + signature["signature"][1:]
+    tampered_signature = _rewrite_package(
+        response.content,
+        replacements={
+            evidence_packages.SIGNATURE_PATH: evidence_bundles.canonical_json(signature)
+        },
+    )
+    with pytest.raises(
+        evidence_packages.PackageVerificationError,
+        match="signature is invalid",
+    ):
+        evidence_packages.verify_signed_package(
+            tampered_signature,
+            trusted_public_key_pem=_trusted_public_key(),
+        )
+
+    traversal = _rewrite_package(
+        response.content,
+        renamed_path=(evidence_packages.REPORT_PATH, "../report.pdf"),
+    )
+    with pytest.raises(
+        evidence_packages.PackageVerificationError,
+        match="archive paths or ordering",
+    ):
+        evidence_packages.verify_signed_package(
+            traversal,
+            trusted_public_key_pem=_trusted_public_key(),
+        )
+
+    wrong_public = Ed25519PrivateKey.generate().public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    with pytest.raises(
+        evidence_packages.PackageVerificationError,
+        match="not the trusted key",
+    ):
+        evidence_packages.verify_signed_package(
+            response.content,
+            trusted_public_key_pem=wrong_public,
+        )
+
+
+@pytest.mark.asyncio
+async def test_zip_signing_outage_and_unsupported_format_are_explicit(
+    evidence_tenancy, monkeypatch
+):
+    client, ids, tokens = evidence_tenancy
+
+    def signing_unavailable():
+        raise ValueError("test signing outage")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(evidence_packages, "active_signing_key", signing_unavailable)
+        unavailable = await client.get(
+            "/evidence/bundles/export",
+            params={"organization_id": ids["tenant_a"], "format": "zip"},
+            headers=_auth(tokens["reader"]),
+        )
+    assert unavailable.status_code == 503
+    assert unavailable.json()["detail"] == {
+        "code": "evidence_package_signing_unavailable",
+        "state": "unavailable",
+    }
+
+    with monkeypatch.context() as patch:
+        patch.setattr(evidence_packages, "render_pdf", lambda _artifact: b"not-pdf")
+        invalid_pdf = await client.get(
+            "/evidence/bundles/export",
+            params={"organization_id": ids["tenant_a"], "format": "pdf"},
+            headers=_auth(tokens["reader"]),
+        )
+    assert invalid_pdf.status_code == 500
+    assert invalid_pdf.json()["detail"] == {
+        "code": "evidence_pdf_render_failed",
+        "state": "invalid",
+    }
+
+    def package_verification_failed(*_args, **_kwargs):
+        raise evidence_packages.PackageVerificationError("test package failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            evidence_packages,
+            "verify_signed_package",
+            package_verification_failed,
+        )
+        invalid_package = await client.get(
+            "/evidence/bundles/export",
+            params={"organization_id": ids["tenant_a"], "format": "zip"},
+            headers=_auth(tokens["reader"]),
+        )
+    assert invalid_package.status_code == 500
+    assert invalid_package.json()["detail"] == {
+        "code": "evidence_package_verification_failed",
+        "state": "invalid",
+    }
+
+    unsupported = await client.get(
+        "/evidence/bundles/export",
+        params={"organization_id": ids["tenant_a"], "format": "tar"},
+        headers=_auth(tokens["reader"]),
+    )
+    assert unsupported.status_code == 422
