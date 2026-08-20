@@ -43,6 +43,7 @@ async def client():
                 email="rl-admin@nodelink.test",
                 password_hash=hash_password("admin-pass"),
                 role=OperatorRole.admin,
+                is_platform_admin=True,
             )
         )
         db.add(

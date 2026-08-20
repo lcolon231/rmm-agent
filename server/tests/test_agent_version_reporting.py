@@ -38,7 +38,8 @@ import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
-from app.main import app  # noqa: E402
+from app.main import app
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.core.command_envelope import COMMAND_ENVELOPE_V2  # noqa: E402
@@ -64,9 +65,11 @@ async def client():
                 email="version-admin@nodelink.test",
                 password_hash=hash_password("admin-pass"),
                 role=OperatorRole.admin,
+                is_platform_admin=True,
                 script_execution_scope=ScriptExecutionScope.global_,
             )
         )
+        await grant_all_memberships(db)
         await db.commit()
 
     transport = httpx.ASGITransport(app=app)

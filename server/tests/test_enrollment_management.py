@@ -20,7 +20,8 @@ os.environ.setdefault("COMMAND_SIGNING_KEY_PATH", "command_signing_key.pem")
 from app.core.database import AsyncSessionLocal, Base, engine  # noqa: E402
 from app.core.ratelimit import enrollment_limiter  # noqa: E402
 from app.core.security import generate_token, hash_password, hash_token  # noqa: E402
-from app.main import app  # noqa: E402
+from app.main import app
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
     Agent,
     AuditEvent,
@@ -43,6 +44,7 @@ async def clients():
                     email="admin@enrollment.test",
                     password_hash=hash_password("admin-password"),
                     role=OperatorRole.admin,
+                    is_platform_admin=True,
                 ),
                 Operator(
                     email="viewer@enrollment.test",
@@ -51,6 +53,7 @@ async def clients():
                 ),
             ]
         )
+        await grant_all_memberships(db)
         await db.commit()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test/api/v1") as admin:
@@ -88,6 +91,9 @@ async def provision(admin: httpx.AsyncClient, **token_overrides):
         **token_overrides,
     }
     token = (await admin.post("/enrollment-tokens", json=payload)).json()
+    async with AsyncSessionLocal() as db:
+        await grant_all_memberships(db)
+        await db.commit()
     return organization, site, token
 
 

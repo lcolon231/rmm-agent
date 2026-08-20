@@ -1,15 +1,21 @@
 # Tenant-scoped authorization (issue #66)
 
-Status: **design / not yet implemented.** This document is the design NodeLink
-will build against; it describes a control designed for regulated multi-tenant
-operation and is not itself a claim of compliance or completeness.
+Status: **implemented (server side), verified by automated tests.** The
+default-deny boundary, per-client roles, membership administration API, audit
+anchoring, and the forward-only `0037` migration are in place and covered by
+`server/tests/test_tenant_authorization.py` (cross-tenant IDOR, list exclusion,
+platform-admin bypass, membership lifecycle with token revocation, tenant-scoped
+audit timeline, and the last-platform-admin guard). A dashboard UI for managing
+memberships is delivered API-first and tracked separately. This document
+describes a control designed for regulated multi-tenant operation and is not
+itself a claim of compliance or completeness.
 
-NodeLink today has **no tenant boundary**. An `Operator` has a global role
-(`readonly`/`operator`/`admin`) and can see every client, site, and agent in the
-deployment: `GET /clients`, `GET /agents`, and `GET /endpoints` in
-`server/app/api/management.py` return all rows and only filter by an *optional*
-`client_id` query parameter that the caller supplies and the server never checks.
-Internal tracking records this as ENR-013
+Before this change NodeLink had **no tenant boundary**. An `Operator` had a
+global role (`readonly`/`operator`/`admin`) and could see every client, site, and
+agent in the deployment: `GET /clients`, `GET /agents`, and `GET /endpoints` in
+`server/app/api/management.py` returned all rows and only filtered by an
+*optional* `client_id` query parameter that the caller supplied and the server
+never checked. Internal tracking recorded this as ENR-013
 (`docs/agent-enrollment/open-issues.md`): *"Clients/sites are not authorization
 tenants; roles are global … a non-admin operator can access all customers. Add
 operator-client memberships and mandatory server-side scoping before calling the
@@ -240,3 +246,48 @@ multi-client fixtures extended from `server/tests/test_administration.py` and
 | Automated tests + reproducible evidence, not aspirational docs | *Test and verification plan* |
 | Cross-tenant IDOR/list/filter, background job, export, admin/break-glass, migration, PostgreSQL isolation | *Test and verification plan* (all enumerated) |
 | Docs: ARCHITECTURE, threat-model, security-roadmap, runbooks | *Threat model and companion docs* |
+
+## As-built notes
+
+The boundary is implemented in `server/app/core/tenant_scope.py` and applied at:
+
+- **Reads** — `client_id_filter` / `agent_client_filter` AND-ed into `GET`
+  `/clients`, `/clients/navigation`, `/agents`, `/endpoints`, `/enrollment-tokens`,
+  `/task-runs`, `/monitoring/alerts`, `/patch-compliance*`, `/audit/events`,
+  `/remote-desktop/mappings`, `/enrollment-dashboard`; `assert_client_visible` /
+  `assert_agent_visible` on every by-id detail read (client, site, agent,
+  endpoint, command, inventory, alert, effective policy, audit event).
+- **Mutations / dispatch** — `assert_client_action` (with the required per-client
+  role) on site/enrollment/installer provisioning, agent trust changes, command
+  dispatch, shell-session open, remote-desktop launch, remote-desktop mappings,
+  scheduled-task targets, and monitoring/patch policy scope targets. Cross-tenant
+  command dispatch also emits a `tenant.access_denied` audit event.
+- **Membership administration** — grant/revoke/list and the platform-admin toggle
+  live in `server/app/api/auth.py`, gated by `require_platform_admin`, audited
+  (`operator.tenant_membership_granted` / `_revoked`,
+  `operator.platform_admin_changed`), and each bumps the target's
+  `token_generation`.
+
+### Per-client role gate
+
+v1 enforces both **visibility** (membership required to see a client at all;
+cross-tenant is `404`) and the **per-client role tier**
+(`client_readonly < client_operator < client_admin`, mirroring the global tiers)
+for the action. Provisioning and dispatch require `client_operator`; agent
+revocation and remote-desktop mapping require `client_admin`. The pre-existing
+global `require_role` gate still runs first, so a readonly operator is `403` at
+the role gate before any tenant check.
+
+### Known v1 boundaries (follow-ups, not gaps in the tenant data boundary)
+
+- **Global-scoped monitoring/patch policies** are deployment-wide configuration
+  authored under the existing global role; their *list/get* enumeration is not
+  yet tenant-filtered (client/site/agent-scoped policy **creation and mutation**
+  are tenant-gated, which is the write-side IDOR that matters). Per-tenant
+  enumeration of policies is a follow-up.
+- **Webhook/email delivery configuration** endpoints remain deployment-level
+  config gated by the global role; they expose alert linkage, not per-tenant
+  endpoint data.
+- The **dashboard membership-management UI** is delivered API-first; the backend
+  already filters every response so existing dashboard views show only authorized
+  tenants automatically.

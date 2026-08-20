@@ -165,7 +165,9 @@ def test_fresh_database_upgrades_to_head(tmp_path: Path):
     assert {
         "script_execution_scope",
         "script_execution_scope_id",
+        "is_platform_admin",
     } <= operator_columns
+    assert "operator_client_memberships" in tables
     assert {
         "assigned_to_operator_id",
         "assigned_to_email",
@@ -751,6 +753,97 @@ def test_script_permission_is_default_deny_after_upgrade(tmp_path: Path):
         ).fetchone()
     assert initial == (None, None)
     assert granted == ("site", "site-1")
+
+
+def test_0037_backfill_preserves_access_and_promotes_admins(tmp_path: Path):
+    """Upgrading across 0037 must preserve every operator's prior visibility.
+
+    Pre-tenancy admins become platform admins; each existing operator/readonly
+    gets a membership to every existing client with the equivalent client role;
+    and audit events resolve their client through agent -> site -> client.
+    New clients created after upgrade are not auto-granted (default deny).
+    """
+    db_path = tmp_path / "backfill.db"
+    url = sqlite_url(db_path)
+    config = migration_config(url)
+    command.upgrade(config, "0036")
+
+    now = "2026-08-18T12:00:00+00:00"
+    with sqlite3.connect(db_path) as connection:
+        connection.executemany(
+            "INSERT INTO clients (id, name, created_at) VALUES (?, ?, ?)",
+            [("client-a", "Alpha", now), ("client-b", "Bravo", now)],
+        )
+        connection.execute(
+            "INSERT INTO sites (id, client_id, name, created_at) VALUES (?, ?, ?, ?)",
+            ("site-a", "client-a", "A-HQ", now),
+        )
+        connection.execute(
+            """INSERT INTO agents
+               (id, site_id, token_hash, hostname, os, os_version,
+                agent_version, status, enrolled_at, trust_state)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("agent-a", "site-a", "h", "A1", "windows", "11", "0.3", "online", now, "active"),
+        )
+        connection.executemany(
+            """INSERT INTO operators
+               (id, email, password_hash, role, disabled, token_generation, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [
+                ("op-admin", "admin@t", "h", "admin", 0, 0, now),
+                ("op-tech", "tech@t", "h", "operator", 0, 0, now),
+                ("op-view", "view@t", "h", "readonly", 0, 0, now),
+            ],
+        )
+        # An audit event with a resolvable agent, and a system event without one.
+        connection.executemany(
+            """INSERT INTO audit_events
+               (id, ts, ts_iso, actor, action, agent_id, detail, prev_hash, event_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                ("ev-agent", now, now, "system", "x", "agent-a", "{}", "0" * 64, "1" * 64),
+                ("ev-system", now, now, "system", "y", None, "{}", "1" * 64, "2" * 64),
+            ],
+        )
+        connection.commit()
+
+    command.upgrade(config, "head")
+
+    with sqlite3.connect(db_path) as connection:
+        admin_flag = connection.execute(
+            "SELECT is_platform_admin FROM operators WHERE id = 'op-admin'"
+        ).fetchone()[0]
+        tech_flag = connection.execute(
+            "SELECT is_platform_admin FROM operators WHERE id = 'op-tech'"
+        ).fetchone()[0]
+        memberships = {
+            (row[0], row[1], row[2])
+            for row in connection.execute(
+                "SELECT operator_id, client_id, role FROM operator_client_memberships"
+            )
+        }
+        agent_event_org = connection.execute(
+            "SELECT organization_id FROM audit_events WHERE id = 'ev-agent'"
+        ).fetchone()[0]
+        system_event_org = connection.execute(
+            "SELECT organization_id FROM audit_events WHERE id = 'ev-system'"
+        ).fetchone()[0]
+
+    # Admin promoted to platform admin; non-admins are not.
+    assert admin_flag == 1
+    assert tech_flag == 0
+    # The admin crosses tenants via the flag, so it gets no per-client rows.
+    assert not any(op == "op-admin" for op, _, _ in memberships)
+    # operator/readonly each get a membership to BOTH clients, equivalent role.
+    assert memberships == {
+        ("op-tech", "client-a", "client_operator"),
+        ("op-tech", "client-b", "client_operator"),
+        ("op-view", "client-a", "client_readonly"),
+        ("op-view", "client-b", "client_readonly"),
+    }
+    # Audit anchoring: agent event resolved to its client; system event stays NULL.
+    assert agent_event_org == "client-a"
+    assert system_event_org is None
 
 
 def test_unversioned_database_fails_startup_revision_check(tmp_path: Path):

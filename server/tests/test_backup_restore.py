@@ -167,7 +167,7 @@ async def _seed(asyncpg_url: str) -> None:
     try:
         async with maker() as db:
             db.add(Operator(email="backup@nodelink.test",
-                            password_hash=hash_password("pw"), role=OperatorRole.admin))
+                            password_hash=hash_password("pw"), role=OperatorRole.admin, is_platform_admin=True))
             client = Client(name="Backup Clinic")
             db.add(client)
             await db.flush()

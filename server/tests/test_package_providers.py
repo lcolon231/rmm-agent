@@ -22,7 +22,8 @@ from sqlalchemy import select  # noqa: E402
 from app.core.command_envelope import COMMAND_ENVELOPE_V3  # noqa: E402
 from app.core.database import AsyncSessionLocal, Base, engine  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
-from app.main import app  # noqa: E402
+from app.main import app
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
     AuditEvent,
     Operator,
@@ -42,11 +43,12 @@ async def client():
     async with AsyncSessionLocal() as db:
         db.add_all(
             [
-                Operator(email="pkg-admin@nodelink.test", password_hash=hash_password(_ADMIN_LOGIN), role=OperatorRole.admin),
+                Operator(email="pkg-admin@nodelink.test", password_hash=hash_password(_ADMIN_LOGIN), role=OperatorRole.admin, is_platform_admin=True),
                 Operator(email="pkg-op@nodelink.test", password_hash=hash_password(_OP_LOGIN), role=OperatorRole.operator),
                 Operator(email="pkg-view@nodelink.test", password_hash=hash_password(_VIEW_LOGIN), role=OperatorRole.readonly),
             ]
         )
+        await grant_all_memberships(db)
         await db.commit()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test/api/v1") as value:
@@ -76,6 +78,9 @@ async def enroll(client, headers, capabilities=(_PACKAGE_CAP,)):
             },
         )
     ).json()
+    async with AsyncSessionLocal() as db:
+        await grant_all_memberships(db)
+        await db.commit()
     return enrollment["agent_id"]
 
 

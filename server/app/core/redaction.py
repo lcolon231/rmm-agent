@@ -684,6 +684,38 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "reason",
         digest_fields=("reason",),
     ),
+    # Tenant authorization (issue #66). ``reason`` is operator prose, kept
+    # digest-only; the remaining fields are ids and coded role/flag strings.
+    "operator.tenant_membership_granted": _schema(
+        "operator_id",
+        "client_id",
+        "previous_role",
+        "new_role",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    "operator.tenant_membership_revoked": _schema(
+        "operator_id",
+        "client_id",
+        "previous_role",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    "operator.platform_admin_changed": _schema(
+        "operator_id",
+        "previous",
+        "new",
+        "reason",
+        digest_fields=("reason",),
+    ),
+    # A cross-tenant mutation/dispatch attempt that failed closed. ``resource``
+    # is a coded string (e.g. "command"); ids are opaque.
+    "tenant.access_denied": _schema(
+        "operator_id",
+        "resource",
+        "agent_id",
+        "client_id",
+    ),
     "operator.tokens_revoked": _schema("operator_id", "by"),
     "scheduled_task.created": _schema(
         "scheduled_task_id",

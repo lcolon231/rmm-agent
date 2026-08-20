@@ -23,7 +23,8 @@ from app.core import monitoring as monitoring_core  # noqa: E402
 from app.core.command_envelope import COMMAND_ENVELOPE_V3  # noqa: E402
 from app.core.database import AsyncSessionLocal, Base, engine  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
-from app.main import app  # noqa: E402
+from app.main import app
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
     Agent,
     Alert,
@@ -124,6 +125,7 @@ async def operator_client():
                 ),
             ]
         )
+        await grant_all_memberships(db)
         await db.commit()
 
     transport = httpx.ASGITransport(app=app)

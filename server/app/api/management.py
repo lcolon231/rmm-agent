@@ -29,6 +29,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_role
+from app.core import tenant_scope
+from app.core.tenant_scope import (
+    agent_client_filter,
+    assert_agent_visible,
+    assert_client_action,
+    assert_client_visible,
+    client_id_filter,
+)
 from app.core import (
     anchor,
     anchor_publish,
@@ -114,6 +122,7 @@ from app.models.models import (
     AuditEvent,
     AuditAnchor,
     Client,
+    ClientRole,
     Command,
     CommandKind,
     CommandStatus,
@@ -131,6 +140,7 @@ from app.models.models import (
     PatchApprovalPolicyRevision,
     MonitoringScope,
     Operator,
+    OperatorClientMembership,
     OperatorRole,
     ScriptParameterValueSet,
     ScriptVersion,
@@ -460,9 +470,20 @@ MAX_NAVIGATION_CLIENTS = 200
 
 
 async def _require_monitoring_scope_target(
-    db: AsyncSession, scope: MonitoringScope, scope_id: str | None
+    db: AsyncSession,
+    operator: Operator,
+    scope: MonitoringScope,
+    scope_id: str | None,
 ) -> None:
-    """Verify the polymorphic monitoring scope target before persisting it."""
+    """Verify the polymorphic scope target exists *and* is in the operator's
+    tenant before persisting a monitoring or patch policy against it.
+
+    A global-scoped policy is deployment-wide config gated by the operator's
+    global role (unchanged). A client/site/agent scope resolves to a client and
+    must pass the tenant action gate: a cross-tenant target is a 404 with the
+    same code as a missing one (anti-oracle); a visible target the operator's
+    per-client role may not manage is a 403.
+    """
     if scope == MonitoringScope.global_:
         return
     model = {
@@ -470,11 +491,23 @@ async def _require_monitoring_scope_target(
         MonitoringScope.site: Site,
         MonitoringScope.agent: Agent,
     }[scope]
-    if scope_id is None or await db.get(model, scope_id) is None:
+    target = await db.get(model, scope_id) if scope_id is not None else None
+    if target is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "monitoring_scope_target_not_found"},
         )
+    if scope == MonitoringScope.client:
+        resolved_client_id = target.id
+    elif scope == MonitoringScope.site:
+        resolved_client_id = target.client_id
+    else:  # agent
+        resolved_client_id = await tenant_scope.agent_client_id(target, db)
+    await assert_client_action(
+        operator, resolved_client_id, db,
+        minimum=ClientRole.client_operator,
+        detail={"code": "monitoring_scope_target_not_found"},
+    )
 
 
 def _require_monitoring_check_bounds(checks) -> None:
@@ -600,6 +633,21 @@ async def create_client(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "client_name_exists"},
         ) from exc
+    # The creator becomes the new tenant's admin (issue #66). Without this an
+    # operator could create a client under default-deny and then be unable to
+    # see or provision it. A platform admin already crosses every tenant, so it
+    # needs no membership row. Memberships are read per-request, so the grant is
+    # effective immediately for this same token — no generation bump needed.
+    if not operator.is_platform_admin:
+        db.add(
+            OperatorClientMembership(
+                operator_id=operator.id,
+                client_id=client.id,
+                role=ClientRole.client_admin,
+                granted_by=operator.email,
+                reason="client creator",
+            )
+        )
     await audit.record(
         db,
         action="client.created",
@@ -614,8 +662,18 @@ async def create_client(
 
 
 @router.get("/clients", response_model=list[ClientOut])
-async def list_clients(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Client).order_by(Client.created_at))
+async def list_clients(
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    # Default-deny tenant boundary: a non-platform-admin sees only clients it
+    # holds a membership for. The filter is the always-true clause for a
+    # platform admin.
+    result = await db.execute(
+        select(Client)
+        .where(client_id_filter(operator, Client.id))
+        .order_by(Client.created_at)
+    )
     return list(result.scalars().all())
 
 
@@ -626,6 +684,7 @@ async def list_client_navigation(
 ):
     result = await db.execute(
         select(Client)
+        .where(client_id_filter(operator, Client.id))
         .options(selectinload(Client.sites))
         .order_by(Client.created_at, Client.id)
         .limit(MAX_NAVIGATION_CLIENTS + 1)
@@ -667,6 +726,8 @@ async def get_client_navigation(
     client = result.scalar_one_or_none()
     if client is None:
         raise HTTPException(status_code=404, detail="Client not found")
+    # Cross-tenant client is indistinguishable from a missing one (404).
+    await assert_client_visible(operator, client.id, db, detail="Client not found")
     await audit.record(
         db,
         action="client_navigation.client_viewed",
@@ -685,6 +746,12 @@ async def create_site(
 ):
     if not await db.get(Client, body.client_id):
         raise HTTPException(status_code=404, detail="Client not found")
+    # Provisioning under a client requires client_operator on that tenant; a
+    # cross-tenant client id is a 404, not a 403.
+    await assert_client_action(
+        operator, body.client_id, db,
+        minimum=ClientRole.client_operator, detail="Client not found",
+    )
     duplicate = await db.scalar(
         select(Site.id).where(
             Site.client_id == body.client_id,
@@ -738,6 +805,7 @@ async def get_site_navigation(
     if row is None:
         raise HTTPException(status_code=404, detail="Site not found")
     site, endpoint_count = row
+    await assert_client_visible(operator, site.client_id, db, detail="Site not found")
     await audit.record(
         db,
         action="client_navigation.site_viewed",
@@ -816,6 +884,12 @@ async def create_enrollment_token(
     site = await db.get(Site, body.site_id)
     if site is None:
         raise HTTPException(status_code=404, detail="Site not found")
+    # Minting enrollment credentials for a site is provisioning: requires
+    # client_operator on the site's tenant (cross-tenant -> 404).
+    await assert_client_action(
+        operator, site.client_id, db,
+        minimum=ClientRole.client_operator, detail="Site not found",
+    )
     if body.assigned_user_id and not await db.get(Operator, body.assigned_user_id):
         raise HTTPException(status_code=404, detail="Assigned user not found")
 
@@ -949,6 +1023,12 @@ async def create_installer_package(
     site = await db.get(Site, site_id)
     if site is None:
         raise HTTPException(status_code=404, detail="Site not found")
+    # Site-scoped authorization: operator must hold client_operator on the
+    # site's tenant. Cross-tenant site is indistinguishable from missing (404).
+    await assert_client_action(
+        operator, site.client_id, db,
+        minimum=ClientRole.client_operator, detail="Site not found",
+    )
 
     try:
         artifact, artifact_sha256 = _load_installer_artifact()
@@ -1042,9 +1122,15 @@ async def list_enrollment_tokens(
     direction: str = Query(default="desc", pattern="^(asc|desc)$"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(EnrollmentToken).join(Site).join(Client)
+    stmt = (
+        select(EnrollmentToken)
+        .join(Site)
+        .join(Client)
+        .where(client_id_filter(operator, Client.id))
+    )
     if organization_id:
         stmt = stmt.where(Client.id == organization_id)
     if site_id:
@@ -1082,11 +1168,17 @@ async def list_enrollment_tokens(
 @router.get("/enrollment-tokens/{token_id}", response_model=EnrollmentTokenMetadataOut)
 async def get_enrollment_token(
     token_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
     token = await db.get(EnrollmentToken, token_id)
     if token is None:
         raise HTTPException(status_code=404, detail="Enrollment token not found")
+    site = await db.get(Site, token.site_id)
+    await assert_client_visible(
+        operator, site.client_id if site else None, db,
+        detail="Enrollment token not found",
+    )
     return await _enrollment_token_metadata(db, token)
 
 
@@ -1101,6 +1193,11 @@ async def revoke_enrollment_token(
     token = await db.get(EnrollmentToken, token_id)
     if token is None:
         raise HTTPException(status_code=404, detail="Enrollment token not found")
+    revoke_site = await db.get(Site, token.site_id)
+    await assert_client_action(
+        operator, revoke_site.client_id if revoke_site else None, db,
+        minimum=ClientRole.client_operator, detail="Enrollment token not found",
+    )
     if not token.revoked:
         now = _now()
         token.revoked = True
@@ -1126,8 +1223,15 @@ async def revoke_enrollment_token(
 # Agents
 # --------------------------------------------------------------------------- #
 @router.get("/agents", response_model=list[AgentOut])
-async def list_agents(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Agent).order_by(Agent.enrolled_at))
+async def list_agents(
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Agent)
+        .where(agent_client_filter(operator))
+        .order_by(Agent.enrolled_at)
+    )
     return list(result.scalars().all())
 
 
@@ -1152,7 +1256,10 @@ async def list_endpoints(
         .limit(1)
         .scalar_subquery()
     )
-    filters = [Agent.trust_state != AgentTrustState.revoked]
+    filters = [
+        Agent.trust_state != AgentTrustState.revoked,
+        agent_client_filter(operator),
+    ]
 
     if client_id:
         filters.append(Client.id == client_id)
@@ -1238,6 +1345,7 @@ async def get_endpoint_detail(
         raise HTTPException(status_code=404, detail="Endpoint not found")
 
     agent, client, site = endpoint_row
+    await assert_client_visible(operator, client.id, db, detail="Endpoint not found")
     latest_heartbeat = await db.scalar(
         select(Heartbeat)
         .where(Heartbeat.agent_id == agent.id)
@@ -1322,10 +1430,15 @@ async def get_endpoint_detail(
 
 
 @router.get("/agents/{agent_id}", response_model=AgentOut)
-async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
+async def get_agent(
+    agent_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(operator, agent, db, detail="Agent not found")
     return agent
 
 
@@ -1389,6 +1502,10 @@ async def quarantine_agent(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(
+        operator, agent, db,
+        minimum=ClientRole.client_operator, detail="Agent not found",
+    )
     if agent.trust_state != AgentTrustState.active:
         raise _trust_conflict(agent, AgentTrustState.quarantined.value)
     return await _apply_trust_change(
@@ -1408,6 +1525,10 @@ async def restore_agent(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(
+        operator, agent, db,
+        minimum=ClientRole.client_operator, detail="Agent not found",
+    )
     if agent.trust_state != AgentTrustState.quarantined:
         raise _trust_conflict(agent, AgentTrustState.active.value)
     return await _apply_trust_change(
@@ -1431,6 +1552,10 @@ async def revoke_agent(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(
+        operator, agent, db,
+        minimum=ClientRole.client_admin, detail="Agent not found",
+    )
     if agent.trust_state == AgentTrustState.revoked:
         raise _trust_conflict(agent, AgentTrustState.revoked.value)
 
@@ -1534,6 +1659,27 @@ async def dispatch_command(
     """
     agent = await db.get(Agent, agent_id)
     if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    # Outer tenant gate: the agent's client must be visible to this operator.
+    # Command-*kind* authorization (role + arbitrary-script scope) is applied
+    # separately below; this only decides reachability. A cross-tenant agent is
+    # a 404 (anti-oracle) and the attempt is audited as an abuse signal.
+    agent_client = await tenant_scope.agent_client_id(agent, db)
+    if not await tenant_scope.is_client_visible(operator, agent_client, db):
+        await audit.record(
+            db,
+            action="tenant.access_denied",
+            actor=operator.email,
+            actor_user_id=operator.id,
+            agent_id=agent_id,
+            detail={
+                "operator_id": operator.id,
+                "resource": "command",
+                "agent_id": agent_id,
+                "client_id": agent_client,
+            },
+        )
+        await db.commit()
         raise HTTPException(status_code=404, detail="Agent not found")
     if body.kind == CommandKind.agent_self_update:
         # An update must be attributable to a published, signed release and
@@ -1935,11 +2081,14 @@ async def list_commands(
     agent_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated command history for one endpoint, newest first."""
-    if await db.get(Agent, agent_id) is None:
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(operator, agent, db, detail="Agent not found")
     total = (
         await db.execute(
             select(func.count()).select_from(Command).where(Command.agent_id == agent_id)
@@ -2000,6 +2149,10 @@ async def get_command(
     which can contain sensitive endpoint data, so the record must show who
     read it.
     """
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Command not found")
+    await assert_agent_visible(operator, agent, db, detail="Command not found")
     cmd = (
         await db.execute(
             select(Command).where(
@@ -2058,6 +2211,7 @@ async def list_task_runs(
     script_version_id: str | None = Query(None),
     created_from: datetime | None = Query(None, alias="from"),
     created_to: datetime | None = Query(None, alias="to"),
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
     """Complete cross-endpoint task-run history, newest first (issue #50).
@@ -2072,7 +2226,12 @@ async def list_task_runs(
     expiry still reports as expired in the response via
     :func:`_effective_command_status`, matching what operators see elsewhere.
     """
-    filters = []
+    # Tenant boundary: only task runs on agents in the operator's clients.
+    # Expressed against Command.agent_id so the count query (no Agent join)
+    # stays correct; the always-true clause for a platform admin is a no-op.
+    filters = [
+        Command.agent_id.in_(select(Agent.id).where(agent_client_filter(operator)))
+    ]
     if agent_id is not None:
         filters.append(Command.agent_id == agent_id)
     if status is not None:
@@ -2125,7 +2284,7 @@ async def create_monitoring_policy(
     operator: Operator = Depends(require_role(OperatorRole.operator)),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_monitoring_scope_target(db, body.scope, body.scope_id)
+    await _require_monitoring_scope_target(db, operator, body.scope, body.scope_id)
     policy_count = (
         await db.execute(select(func.count()).select_from(MonitoringPolicy))
     ).scalar_one()
@@ -2349,11 +2508,14 @@ async def list_monitoring_policy_revisions(
     response_model=EffectivePolicyOut,
 )
 async def get_agent_effective_monitoring_policy(
-    agent_id: str, db: AsyncSession = Depends(get_db)
+    agent_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
 ):
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(operator, agent, db, detail="Agent not found")
     checks = await monitoring_core.resolve_effective_policy(db, agent)
     return EffectivePolicyOut(
         agent_id=agent.id,
@@ -2381,7 +2543,7 @@ async def create_maintenance_window(
     operator: Operator = Depends(require_role(OperatorRole.operator)),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_monitoring_scope_target(db, body.scope, body.scope_id)
+    await _require_monitoring_scope_target(db, operator, body.scope, body.scope_id)
     window_count = (
         await db.execute(select(func.count()).select_from(MaintenanceWindow))
     ).scalar_one()
@@ -2530,7 +2692,7 @@ async def create_patch_policy(
     operator: Operator = Depends(require_role(OperatorRole.operator)),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_monitoring_scope_target(db, body.scope, body.scope_id)
+    await _require_monitoring_scope_target(db, operator, body.scope, body.scope_id)
     duplicate = await db.scalar(
         select(PatchApprovalPolicy.id).where(
             PatchApprovalPolicy.scope == body.scope,
@@ -2720,6 +2882,7 @@ async def get_agent_effective_patch_policy(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(operator, agent, db, detail="Agent not found")
     effective = await patch_core.resolve_effective_patch_policy(db, agent)
     missing = await patch_core.latest_missing_updates(db, agent_id)
     if effective is None:
@@ -2774,10 +2937,14 @@ async def get_agent_effective_patch_policy(
 
 async def _compliance_agents(
     db: AsyncSession,
+    operator: Operator,
     client_id: str | None,
     site_id: str | None,
 ) -> tuple[list[Agent], bool]:
-    filters = [Agent.trust_state != AgentTrustState.revoked]
+    filters = [
+        Agent.trust_state != AgentTrustState.revoked,
+        agent_client_filter(operator),
+    ]
     if client_id:
         filters.append(Client.id == client_id)
     if site_id:
@@ -2829,7 +2996,7 @@ async def get_patch_compliance_summary(
     site_id: str | None = Query(default=None, max_length=36),
     db: AsyncSession = Depends(get_db),
 ):
-    agents, truncated = await _compliance_agents(db, client_id, site_id)
+    agents, truncated = await _compliance_agents(db, operator, client_id, site_id)
     rows = await _compliance_rows(db, agents, _now())
     summary = compliance_core.summarize(rows, truncated=truncated)
     await audit.record(
@@ -2869,7 +3036,7 @@ async def list_patch_compliance(
     db: AsyncSession = Depends(get_db),
 ):
     _validate_compliance_state(state)
-    agents, truncated = await _compliance_agents(db, client_id, site_id)
+    agents, truncated = await _compliance_agents(db, operator, client_id, site_id)
     rows = await _compliance_rows(db, agents, _now())
     if state is not None:
         rows = [row for row in rows if row.state == state]
@@ -2928,6 +3095,7 @@ async def get_agent_patch_compliance(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(operator, agent, db, detail="Agent not found")
     now = _now()
     compliance = await compliance_core.endpoint_compliance(
         db,
@@ -2985,6 +3153,7 @@ async def get_agent_patch_compliance_history(
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(operator, agent, db, detail="Agent not found")
     points = await compliance_core.endpoint_history(db, agent, _now(), limit)
     effective = await patch_core.resolve_effective_patch_policy(db, agent)
     return ComplianceHistoryOut(
@@ -3006,7 +3175,7 @@ async def export_patch_compliance(
     db: AsyncSession = Depends(get_db),
 ):
     _validate_compliance_state(state)
-    agents, truncated = await _compliance_agents(db, client_id, site_id)
+    agents, truncated = await _compliance_agents(db, operator, client_id, site_id)
     now = _now()
     rows = await _compliance_rows(db, agents, now)
     if state is not None:
@@ -3098,10 +3267,13 @@ async def list_agent_monitoring_results(
     agent_id: str,
     check_key: str | None = Query(default=None, max_length=64),
     limit: int = Query(default=100, ge=1, le=500),
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
-    if await db.get(Agent, agent_id) is None:
+    agent = await db.get(Agent, agent_id)
+    if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(operator, agent, db, detail="Agent not found")
     conditions = [CheckResult.agent_id == agent_id]
     if check_key is not None:
         conditions.append(CheckResult.check_key == check_key)
@@ -3126,9 +3298,13 @@ async def list_monitoring_alerts(
     state: AlertState | None = Query(default=None),
     result_status: CheckResultStatus | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
-    conditions = []
+    # Tenant boundary: only alerts on agents in the operator's clients.
+    conditions = [
+        Alert.agent_id.in_(select(Agent.id).where(agent_client_filter(operator)))
+    ]
     if agent_id is not None:
         conditions.append(Alert.agent_id == agent_id)
     if policy_id is not None:
@@ -3150,6 +3326,23 @@ async def list_monitoring_alerts(
         ).scalars().all()
     )
     return AlertListOut(items=rows)
+
+
+async def _assert_alert_visible(
+    operator: Operator,
+    alert: Alert,
+    db: AsyncSession,
+    *,
+    minimum: ClientRole | None = None,
+) -> None:
+    """Tenant gate for an alert via its agent. 404 if the agent's client is not
+    visible (anti-oracle for a guessed alert id)."""
+    agent = await db.get(Agent, alert.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Monitoring alert not found")
+    await assert_agent_visible(
+        operator, agent, db, minimum=minimum, detail="Monitoring alert not found"
+    )
 
 
 async def _alert_detail(db: AsyncSession, alert: Alert) -> AlertDetailOut:
@@ -3187,11 +3380,14 @@ async def _alert_detail(db: AsyncSession, alert: Alert) -> AlertDetailOut:
 
 @router.get("/monitoring/alerts/{alert_id}", response_model=AlertDetailOut)
 async def get_monitoring_alert(
-    alert_id: str, db: AsyncSession = Depends(get_db)
+    alert_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
 ):
     alert = await db.get(Alert, alert_id)
     if alert is None:
         raise HTTPException(status_code=404, detail="Monitoring alert not found")
+    await _assert_alert_visible(operator, alert, db)
     return await _alert_detail(db, alert)
 
 
@@ -3306,6 +3502,11 @@ async def acknowledge_monitoring_alert(
         db, alert_id, request_id=body.request_id,
         expected_version=body.expected_version,
     )
+    # Tenant gate before any state change or replay response: a cross-tenant
+    # alert id is a 404, indistinguishable from a missing one.
+    await _assert_alert_visible(
+        operator, alert, db, minimum=ClientRole.client_operator
+    )
     if replay:
         return await _alert_detail(db, alert)
     if alert.state != AlertState.open:
@@ -3350,6 +3551,11 @@ async def assign_monitoring_alert(
     alert, replay = await _lock_alert_action(
         db, alert_id, request_id=body.request_id,
         expected_version=body.expected_version,
+    )
+    # Tenant gate before any state change or replay response: a cross-tenant
+    # alert id is a 404, indistinguishable from a missing one.
+    await _assert_alert_visible(
+        operator, alert, db, minimum=ClientRole.client_operator
     )
     if replay:
         return await _alert_detail(db, alert)
@@ -3397,6 +3603,11 @@ async def comment_on_monitoring_alert(
         db, alert_id, request_id=body.request_id,
         expected_version=body.expected_version,
     )
+    # Tenant gate before any state change or replay response: a cross-tenant
+    # alert id is a 404, indistinguishable from a missing one.
+    await _assert_alert_visible(
+        operator, alert, db, minimum=ClientRole.client_operator
+    )
     if replay:
         return await _alert_detail(db, alert)
     alert.version += 1
@@ -3431,6 +3642,11 @@ async def resolve_monitoring_alert(
     alert, replay = await _lock_alert_action(
         db, alert_id, request_id=body.request_id,
         expected_version=body.expected_version,
+    )
+    # Tenant gate before any state change or replay response: a cross-tenant
+    # alert id is a 404, indistinguishable from a missing one.
+    await _assert_alert_visible(
+        operator, alert, db, minimum=ClientRole.client_operator
     )
     if replay:
         return await _alert_detail(db, alert)
@@ -4230,13 +4446,29 @@ async def retry_monitoring_alert_webhook_delivery(
 # Audit
 # --------------------------------------------------------------------------- #
 @router.get("/enrollment-dashboard", response_model=EnrollmentDashboardOut)
-async def enrollment_dashboard(db: AsyncSession = Depends(get_db)):
-    agents = list((await db.execute(select(Agent))).scalars().all())
-    tokens = list((await db.execute(select(EnrollmentToken))).scalars().all())
+async def enrollment_dashboard(
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
+):
+    # Every aggregate is tenant-scoped: a non-platform-admin's dashboard reflects
+    # only agents/tokens in their clients. Token scoping goes through the site.
+    agent_filter = agent_client_filter(operator)
+    token_filter = EnrollmentToken.site_id.in_(
+        select(Site.id).where(client_id_filter(operator, Site.client_id))
+    )
+    agents = list(
+        (await db.execute(select(Agent).where(agent_filter))).scalars().all()
+    )
+    tokens = list(
+        (
+            await db.execute(select(EnrollmentToken).where(token_filter))
+        ).scalars().all()
+    )
     recent_agents = list(
         (
             await db.execute(
                 select(Agent)
+                .where(agent_filter)
                 .order_by(Agent.enrolled_at.desc(), Agent.id.desc())
                 .limit(8)
             )
@@ -4250,6 +4482,7 @@ async def enrollment_dashboard(db: AsyncSession = Depends(get_db)):
             .where(
                 AuditEvent.action == "agent.enrollment_failed",
                 AuditEvent.ts >= failure_cutoff,
+                client_id_filter(operator, AuditEvent.organization_id),
             )
         )
     ).scalar_one()
@@ -4293,6 +4526,7 @@ async def get_endpoint_inventory(
     agent = await db.get(Agent, endpoint_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Endpoint not found")
+    await assert_agent_visible(operator, agent, db, detail="Endpoint not found")
 
     latest = await inventory.latest_sections(db, endpoint_id)
     items = [
@@ -4338,6 +4572,7 @@ async def get_inventory_history(
     agent = await db.get(Agent, endpoint_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Endpoint not found")
+    await assert_agent_visible(operator, agent, db, detail="Endpoint not found")
 
     filters = [
         AgentInventorySnapshot.agent_id == endpoint_id,
@@ -4394,6 +4629,7 @@ async def get_inventory_diff(
     agent = await db.get(Agent, endpoint_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Endpoint not found")
+    await assert_agent_visible(operator, agent, db, detail="Endpoint not found")
 
     async def _load(snapshot_id: str) -> AgentInventorySnapshot:
         row = await db.get(AgentInventorySnapshot, snapshot_id)
@@ -4512,7 +4748,11 @@ async def list_audit_events(
         before_seq = (
             await db.execute(select(func.max(AuditEvent.seq)))
         ).scalar_one_or_none()
-    filters = []
+    # Tenant boundary: a non-platform-admin sees only events anchored to one of
+    # their clients. System/deployment events (organization_id NULL) and other
+    # tenants' events are excluded by the IN-subquery for everyone but a
+    # platform admin, whose filter is the always-true clause.
+    filters = [client_id_filter(operator, AuditEvent.organization_id)]
     if before_seq is not None:
         # Legacy pre-sequence rows have no ceiling to compare against and sort
         # last; excluding them here would drop them from every snapshot.
@@ -4603,6 +4843,11 @@ async def get_audit_event(
     event = await db.get(AuditEvent, event_id)
     if event is None:
         raise HTTPException(status_code=404, detail="Audit event not found")
+    # An event outside the operator's tenants (or a system event with no client
+    # anchor) is indistinguishable from a missing one.
+    await assert_client_visible(
+        operator, event.organization_id, db, detail="Audit event not found"
+    )
     out = AuditEventOut.model_validate(event)
     await audit.record(
         db,
@@ -4768,7 +5013,13 @@ async def list_remote_desktop_mappings(
     rows = list(
         (
             await db.execute(
-                select(AgentMeshMapping).order_by(AgentMeshMapping.created_at.desc())
+                select(AgentMeshMapping)
+                .where(
+                    AgentMeshMapping.agent_id.in_(
+                        select(Agent.id).where(agent_client_filter(operator))
+                    )
+                )
+                .order_by(AgentMeshMapping.created_at.desc())
             )
         ).scalars().all()
     )
@@ -4789,6 +5040,10 @@ async def create_remote_desktop_mapping(
     agent = await db.get(Agent, body.agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    await assert_agent_visible(
+        operator, agent, db,
+        minimum=ClientRole.client_admin, detail="Agent not found",
+    )
     existing = await db.scalar(
         select(AgentMeshMapping).where(AgentMeshMapping.agent_id == body.agent_id)
     )
@@ -4839,6 +5094,13 @@ async def delete_remote_desktop_mapping(
     row = await db.get(AgentMeshMapping, mapping_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Mapping not found")
+    mapped_agent = await db.get(Agent, row.agent_id)
+    if mapped_agent is None:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    await assert_agent_visible(
+        operator, mapped_agent, db,
+        minimum=ClientRole.client_admin, detail="Mapping not found",
+    )
     detail = {
         "mapping_id": row.id,
         "agent_id": row.agent_id,

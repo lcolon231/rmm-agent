@@ -21,7 +21,8 @@ from app.core import monitoring as monitoring_core  # noqa: E402
 from app.core.config import Settings  # noqa: E402
 from app.core.database import AsyncSessionLocal, Base, engine  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
-from app.main import app  # noqa: E402
+from app.main import app
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
     Alert,
     AlertEmailAttempt,
@@ -139,6 +140,7 @@ async def test_state_transition_enqueues_once_per_recipient(clean_db, monkeypatc
             from_state=AlertState.resolved, to_state=AlertState.open,
             source_result_id="result-2", at=NOW + timedelta(seconds=1),
         )
+        await grant_all_memberships(db)
         await db.commit()
     async with AsyncSessionLocal() as db:
         deliveries = list((await db.execute(select(AlertEmailDelivery))).scalars().all())

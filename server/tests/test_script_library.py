@@ -54,6 +54,7 @@ async def clients(monkeypatch):
                     email="library-admin@nodelink.test",
                     password_hash=hash_password("admin-password"),
                     role=OperatorRole.admin,
+                    is_platform_admin=True,
                 ),
                 Operator(
                     email="library-operator@nodelink.test",

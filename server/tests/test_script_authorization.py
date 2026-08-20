@@ -29,6 +29,7 @@ from app.models.models import (  # noqa: E402
     OperatorRole,
     Site,
 )
+from tests._tenancy import grant_all_memberships  # noqa: E402
 
 
 @pytest_asyncio.fixture
@@ -42,6 +43,7 @@ async def policy():
             email="policy-admin@nodelink.test",
             password_hash=hash_password("admin-password"),
             role=OperatorRole.admin,
+            is_platform_admin=True,
         )
         operator = Operator(
             email="policy-operator@nodelink.test",
@@ -75,6 +77,7 @@ async def policy():
             command_envelope_versions=[COMMAND_ENVELOPE_V2],
         )
         db.add_all([agent_one, agent_two])
+        await grant_all_memberships(db)
         await db.commit()
         ids = {
             "admin": admin.id,
