@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nodelink.example/contracts/evidence-package-v1.schema.json",
+  "title": "NodeLink signed evidence package manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "package_id", "evidence", "files", "signing"],
+  "properties": {
+    "format": {"const": "nodelink-evidence-package"},
+    "version": {"const": 1},
+    "package_id": {"$ref": "#/$defs/sha256"},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundle_id", "tenant_id", "from_seq", "through_seq"],
+      "properties": {
+        "bundle_id": {"$ref": "#/$defs/sha256"},
+        "tenant_id": {"type": "string", "minLength": 1, "maxLength": 36},
+        "from_seq": {"type": "integer", "minimum": 1},
+        "through_seq": {"type": "integer", "minimum": 0}
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "media_type", "size_bytes", "sha256"],
+        "properties": {
+          "path": {
+            "enum": [
+              "evidence/evidence.json",
+              "reports/evidence-summary.pdf",
+              "receipts/anchor-receipts.json",
+              "keys/evidence-signing-key.pem",
+              "VERIFY.txt"
+            ]
+          },
+          "media_type": {"type": "string", "minLength": 1},
+          "size_bytes": {"type": "integer", "minimum": 0, "maximum": 50331648},
+          "sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "signing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "context",
+        "key_id",
+        "public_key_path",
+        "public_key_sha256",
+        "public_key_fingerprint_sha256"
+      ],
+      "properties": {
+        "algorithm": {"const": "Ed25519"},
+        "context": {"const": "nodelink-evidence-package:v1"},
+        "key_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"},
+        "public_key_path": {"const": "keys/evidence-signing-key.pem"},
+        "public_key_sha256": {"$ref": "#/$defs/sha256"},
+        "public_key_fingerprint_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

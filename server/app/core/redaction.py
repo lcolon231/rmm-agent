@@ -446,6 +446,8 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     ),
     "evidence_bundle.exported": _schema(
         "bundle_id",
+        "package_id",
+        "signing_key_id",
         "tenant_id",
         "format",
         "from_seq",

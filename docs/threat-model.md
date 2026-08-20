@@ -56,6 +56,13 @@ authentication and role-based authorization:
   event_hash)` values from the global prefix cross the boundary so a tenant can
   reproduce the shared Merkle root. Command payloads and stdout/stderr are
   withheld because they can contain credentials or endpoint-user data.
+- **Signed evidence packaging (issue #80).** The tagged PDF summarizes only the
+  sanitized logical bundle. The deterministic ZIP uses fixed safe paths and
+  stored entries with strict count/size bounds, and an evidence-domain Ed25519
+  signature binds every member digest. Verification rejects traversal,
+  symlinks, compression bombs, duplicate/unexpected paths, signature or receipt
+  tamper, and a public key that differs from the separately trusted deployment
+  key. A public key inside its own archive is never accepted as a trust anchor.
 - **Bootstrap.** The first admin is created out-of-band via
   `scripts/create_admin.py` (the create-operator endpoint is admin-only, so it
   can't mint the first admin itself).

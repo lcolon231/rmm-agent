@@ -562,6 +562,8 @@ PRODUCER_DETAILS = {
     },
     "evidence_bundle.exported": {
         "bundle_id": "e" * 64,
+        "package_id": None,
+        "signing_key_id": None,
         "tenant_id": ID1,
         "format": "json",
         "from_seq": 1,

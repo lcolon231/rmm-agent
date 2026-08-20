@@ -78,7 +78,7 @@ and SHA-256/Merkle roots—remains readable.
 | `patch_install.reboot_authorized` | `api/management.py` signed reboot evidence injected into an approved install (issue #53) | `policy_id`, `reboot_policy`, `delay_seconds`, `requires_no_user`, `window_present`, `user_present` |
 | `patch_compliance.viewed` | `api/management.py` patch compliance summary or list view (issue #54) | `client_id`, `site_id`, `state`, `view`, `result_count` |
 | `patch_compliance.exported` | `api/management.py` patch compliance CSV/JSON export (issue #54) | `client_id`, `site_id`, `state`, `format`, `row_count` |
-| `evidence_bundle.exported` | `api/evidence.py` tenant evidence JSON/CSV download (issue #79) | `bundle_id`, `tenant_id`, `format`, `from_seq`, `through_seq`, `record_count`, `content_sha256` |
+| `evidence_bundle.exported` | `api/evidence.py` tenant evidence JSON/CSV/PDF/signed-ZIP download (issues #79/#80) | `bundle_id`, `package_id`, `signing_key_id`, `tenant_id`, `format`, `from_seq`, `through_seq`, `record_count`, `content_sha256` |
 | `package_install.gated` | `api/management.py` package install/upgrade gate (issue #55) | `provider`, `operation`, `requested`, `source_present`, `source_digest`, `signer_present` |
 | `package_scan.dispatched` | `api/management.py` package discovery dispatch (issue #55) | `provider` |
 | `software_deployment.dispatched` | `api/management.py` MSI/EXE deployment dispatch (issue #56) | `installer_type`, `sha256`, `url_sha256`, `argument_count`, `timeout_seconds`, `signer_pinned`, `success_code_override`, `reboot_policy` |
