@@ -46,7 +46,7 @@ Three new concepts. The tenant boundary is the existing `Client`, per #66.
 |---|---|
 | **Evidence artifact** | One durably recorded export. Identified by its existing `package_id` (signed ZIP) or `bundle_id`, and bound to the exact bytes by `content_sha256`. Carries the tenant, the pinned audit range, the storage location, and a lifecycle state. New table `EvidenceArtifact`. |
 | **Retention rule** | The minimum period an artifact must be kept, resolved when the artifact is created and then frozen onto the row. A deployment default plus an optional per-tenant override (the override is where #88 later plugs in). Frozen, not resolved at deletion time, so shortening a policy tomorrow cannot retroactively expose yesterday's artifact to deletion. |
-| **Legal hold** | A named, reasoned, operator-created suspension of deletion over a scope (one artifact, one tenant, or global). While any hold covers an artifact, no automated or manual deletion may proceed. New table `EvidenceLegalHold`. |
+| **Legal hold** | A named, reasoned, operator-created suspension of deletion over a scope (one artifact, one tenant, or global). While any hold covers an artifact, no automated or manual deletion may proceed. Artifact- and tenant-scoped holds may be open-ended; a **global hold must carry an expiry** (see below). New table `EvidenceLegalHold`. |
 
 ### Lifecycle states
 
@@ -65,6 +65,27 @@ stored facts rather than being independently writable:
 `held` outranks `expired`: a hold placed after expiry but before the pruner runs
 still blocks deletion. The pruner re-evaluates hold coverage inside the same
 transaction as the delete, so a hold created concurrently cannot be raced.
+
+### Bounded global holds
+
+A `global` hold freezes every tenant's artifacts at once, including tenants
+created after it was placed. That reach is occasionally exactly right and is
+also the easiest thing in this design to leave switched on by accident, so it is
+the one scope that **must** carry an `expires_at`:
+
+- `artifact` and `tenant` holds may be open-ended, matching how a legal hold
+  actually works — it lasts until counsel releases it.
+- `global` holds are rejected without an expiry
+  (`400 evidence_hold_expiry_required`), and the expiry is bounded by
+  `evidence_global_hold_max_days` (default 365).
+- A global hold that needs to outlive its expiry is **renewed by creating a new
+  hold**, not by extending the old one. An expired hold stops covering anything
+  and is never silently revived, so the register reads as a sequence of dated
+  decisions rather than one indefinite flag.
+
+An expired hold and a released hold both stop covering artifacts; they are
+distinguished in the register (`expired` vs `released`) because "counsel let it
+lapse" and "counsel released it" are different facts.
 
 ## Storage contract
 
@@ -128,7 +149,7 @@ All routes are tenant-scoped through the existing `assert_client_visible` /
 | GET | `/evidence/artifacts` | tenant `client_readonly` | List stored artifacts for one tenant: id, package/bundle id, digests, state, `retain_until`, covering holds, destination URI. Never returns content. |
 | GET | `/evidence/artifacts/{id}` | tenant `client_readonly` | One artifact, plus receipt verification (`verified` / `mismatch` / `unknown`, never a bare boolean). |
 | GET | `/evidence/artifacts/{id}/content` | tenant `client_admin` | Re-download the stored bytes from the destination, digest-checked against `content_sha256` before a byte is returned. A mismatch is `409 evidence_artifact_corrupt`, not a silent pass-through. |
-| POST | `/evidence/legal-holds` | platform admin | Create a hold: scope (`artifact`/`tenant`/`global`), scope id, name, mandatory reason, optional expiry. |
+| POST | `/evidence/legal-holds` | platform admin | Create a hold: scope (`artifact`/`tenant`/`global`), scope id, name, mandatory reason, and an expiry that is optional for `artifact`/`tenant` and **mandatory for `global`**. |
 | GET | `/evidence/legal-holds` | tenant `client_readonly` (scoped) / platform admin (all) | List holds and what each currently covers. |
 | POST | `/evidence/legal-holds/{id}/release` | platform admin | Release a hold with a mandatory reason. Terminal and idempotent — a released hold never returns to active; re-holding creates a new row, so the history reads as a sequence of decisions rather than a toggled flag. |
 | DELETE | `/evidence/artifacts/{id}` | platform admin | Explicit deletion of an `expired` artifact with a mandatory reason. Refuses while held (`409 evidence_artifact_held`) or before expiry (`409 evidence_retention_active`). |
@@ -141,6 +162,7 @@ Failure states follow the existing convention (`valid` / `invalid` /
 | unsupported | immutable store not configured | `409 evidence_store_disabled` |
 | unsupported | `retain=true` with `format != zip` | `400 evidence_retain_unsupported_format` |
 | invalid | hold scope id does not resolve | `404` (anti-oracle, same as tenant 404) |
+| invalid | `global` hold without an expiry, or beyond the maximum | `400 evidence_hold_expiry_required` |
 | invalid | delete while held or before expiry | `409` as above |
 | unavailable | destination unreachable / rejected | `503 evidence_store_unavailable` |
 | invalid | stored bytes fail their digest | `409 evidence_artifact_corrupt` |
@@ -255,6 +277,7 @@ Mirroring the `anchor_*` block in `server/app/core/config.py`:
 | `evidence_retention_days` | `2555` (7 years) | deployment default minimum retention |
 | `evidence_retain_daily_limit` | `24` | per-tenant retained exports per day |
 | `evidence_auto_delete_expired` | `false` | opt-in deletion of expired artifacts |
+| `evidence_global_hold_max_days` | `365` | upper bound on a global hold's expiry |
 | `evidence_retention_sweep_interval_seconds` | `3600` | sweeper cadence |
 
 Production startup validation rejects `evidence_store_backend=s3` without a
@@ -294,6 +317,9 @@ Automated, against the filesystem backend and a fake S3 client, mirroring how
 - **Hold conflict**: a hold created after expiry still blocks deletion; a hold
   created concurrently with a sweep blocks it (same-transaction re-check).
 - **Hold release**: release is terminal and idempotent; a re-hold is a new row.
+- **Global hold bounds**: a `global` hold without an expiry is refused; one past
+  `evidence_global_hold_max_days` is refused; an expired global hold stops
+  covering artifacts and is not revived by a later sweep.
 - **Deletion denial**: delete before expiry → `409`; delete while held → `409`;
   delete of an audit table → impossible by construction (the sweeper's query
   set is asserted).
@@ -331,17 +357,34 @@ real destination enforces immutability:
 | Resource limits, retry/idempotency, compatibility, migration, rollback | daily cap, content-addressed idempotent writes, additive `0038`, default-off rollback |
 | Objective automated tests and reproducible verification evidence | test plan above, automated plus the manual Object Lock run |
 
-## Open questions for review
+## Settled decisions
 
-1. **Auto-delete default.** This design says default `false` — accumulate and
-   report rather than destroy. The alternative reading of "retention
-   enforcement" is that expiry *should* delete. Worth confirming before phase 6.
-2. **Global holds.** A `global` scope hold freezes every tenant's artifacts at
-   once. Powerful and occasionally exactly right, but easy to leave on. Should
-   it require an expiry, unlike tenant and artifact holds?
-3. **Retaining non-ZIP formats.** Restricting storage to the signed ZIP is a
-   deliberate narrowing. If an auditor demands the CSV as delivered, that
-   becomes a follow-up rather than a change here.
+These three were open when this design was first written and were decided by the
+repository owner before implementation began. They are recorded here because
+each one is a policy choice a reviewer would otherwise reasonably question.
+
+**Expiry never deletes by default.** The sweeper transitions `stored → expired`
+and reports it; removal happens only when an operator explicitly calls `DELETE`
+on an expired artifact, or opts in with `evidence_auto_delete_expired=true`. The
+strict reading of "retention enforcement" would have expiry delete, but a
+misconfigured short retention would then silently destroy compliance evidence,
+and under `COMPLIANCE`-mode Object Lock the destination would refuse the delete
+anyway and leave the row and the object disagreeing. Accumulate and report is the
+safer failure mode; the cost is that an operator must act to reclaim storage, and
+`storage_status` surfaces the expired-but-undeleted backlog so that cost is
+visible rather than silent.
+
+**Global holds are time-bounded; other scopes are not.** See *Bounded global
+holds* above. Artifact and tenant holds stay open-ended because that is how a
+legal hold genuinely behaves; the global scope gets an expiry because its blast
+radius is every tenant, including ones that do not exist yet.
+
+**Only the signed ZIP may be retained.** JSON and CSV are byte-reproducible from
+a pinned `through_seq`, and the PDF is unsigned — the signed package is the one
+artifact whose authenticity is self-contained, so it is the only one that earns
+irreversible storage. If an auditor later demands the CSV exactly as delivered,
+widening this is an additive follow-up (a new permitted format on the same
+`retain=true` path), not a change to anything specified here.
 
 ## As-built notes
 
