@@ -13,12 +13,13 @@ HIPAA-supporting controls and defensible compliance evidence.
 
 | Area | Current state |
 | --- | --- |
-| Latest tagged release | `v0.1.5` |
+| Latest tagged release | `v0.1.7` (server schema `0035`) |
+| Schema on `main` | Alembic revision `0037` (`0036` MeshCentral, `0037` tenant-scoped authorization) |
 | Primary support target | Windows agent and Windows service |
 | Server | FastAPI management and agent APIs with PostgreSQL; SQLite is limited to development and tests |
-| Dashboard | Authenticated Next.js interface with live enrollment, endpoint, command, inventory, monitoring-policy, audit-evidence, and administrator workflows; the aggregate operations overview remains fixture-backed |
+| Dashboard | Authenticated Next.js interface backed entirely by live API data: operations overview, endpoints, inventory, command console, interactive shell, alerts, monitoring policies, maintenance windows, scheduled tasks, script library, patch policies and compliance, enrollment, audit evidence, and operator administration. No panel is fixture-backed |
 | Deployment | Self-hosted Caddy topology and a Render Docker Blueprint for a stateless backend using external PostgreSQL |
-| Current milestone | Milestone 0 pilot gates plus the implemented portion of Milestone 1 |
+| Current milestone | Milestone 0 and Milestone 1 delivered; most of Milestone 2 implemented; Milestone 3 started (tenant-scoped authorization and evidence bundles/packages) |
 | Pilot blockers | Authenticode signing and a recorded multi-day soak run on the intended pilot topology |
 | Production status | Not approved for production or regulated endpoints |
 
@@ -208,7 +209,38 @@ The code in this repository currently provides:
 - Immutable typed script parameters (`string`, `number`, `boolean`, `choice`,
   `secret`) with strict defaults/bounds, encrypted expiring per-run value sets,
   keyed idempotency, safe PowerShell/POSIX variable binding, and secret-redacted
-  API/dashboard/audit evidence. Live scheduling/dispatch remains issue #49.
+  API/dashboard/audit evidence.
+- Recurring task scheduling (issue #49): cron-based schedules with concurrency
+  and misfire policies, dispatched through the signed command pipeline with
+  per-run history and a live dashboard. Scheduled patch installs pass through
+  the patch-approval and maintenance-window gate.
+- Interactive shell sessions (issue #61): an owner-bound, audited,
+  capability-negotiated terminal with bounded long-poll frame streaming, a
+  contained agent PowerShell process, reconnect semantics, and fail-closed
+  limits. This is a separate transport from signed command polling, which
+  remains the compatibility path. See `docs/SHELL-SESSIONS.md`.
+- Loss-safe agent credential renewal: server-enforced credential expiry with a
+  bounded rotation overlap, so a dropped renewal never strands an endpoint.
+- Authorized, audited MeshCentral remote desktop (issue #62): an admin-owned
+  NodeLink-agent-to-MeshCentral-node mapping, role- and scope-gated launch
+  authorization, per-operator rate limiting, and a short-lived single-device
+  desktop-scoped login URL minted through MeshCentral's admin API and returned
+  once. NodeLink never proxies the desktop stream and never persists the minted
+  login material. Shipped behind `MESHCENTRAL_PROVIDER`, disabled by default,
+  pending the live end-to-end verification in `docs/MESHCENTRAL-INTEGRATION.md`.
+- Tenant-scoped authorization (issue #66, schema `0037`): a client is the
+  tenant boundary, with a deployment-wide platform-admin flag, per-client
+  memberships (`client_admin`/`client_operator`/`client_readonly`), and a
+  default-deny query boundary — an operator with no membership sees nothing.
+  Membership administration is audited, token-revoking, and guarded against
+  removing the last platform admin. Server-side and API-first; the membership
+  management UI is deferred. See `docs/TENANT-AUTHORIZATION.md`.
+- Deterministic tenant evidence bundles and signed evidence packages
+  (issues #79/#80): versioned canonical JSON and normalized CSV, tagged PDF
+  summaries, and domain-separated Ed25519-signed deterministic ZIP packages
+  carrying fixed manifests, anchors, receipts, and public verification keys,
+  with independent clean-room verifiers. See `docs/EVIDENCE-BUNDLES.md` and
+  `docs/EVIDENCE-PACKAGES.md`.
 - Fail-closed production startup validation (`ENVIRONMENT=production` rejects
   debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
   URLs) with explicit opt-in proxy trust for client IPs.
@@ -232,7 +264,8 @@ The code in this repository currently provides:
   anchors, plus a scheduled publisher that writes anchor roots to external
   immutable storage (S3 Object Lock or a WORM filesystem) with receipts and
   clean-room verification (opt-in; `docs/AUDIT-ANCHORING.md`).
-- Forward-only Alembic migrations through revision `0031`, with exact revision
+- Forward-only Alembic migrations through revision `0037` (`v0.1.7` ships
+  `0035`), with exact revision
   enforcement on non-debug startup, legacy debug-schema repair, and a
   disposable PostgreSQL migration test in CI.
 - Encrypted PostgreSQL backup/isolated restore plus a fail-closed release
@@ -278,7 +311,11 @@ The code in this repository currently provides:
   handlers. Operator deletion, password reset/change, forced initial-password
   rotation, and list pagination are not implemented.
 
-Aggregate operations and general audit panels remain fixture-backed.
+Every dashboard panel, including the aggregate operations overview, now renders
+live API data; the repository contains no dashboard fixtures. Some implemented
+server features are still API-only: package management, software deployment,
+service and process management, agent self-update, tenant membership
+administration, and evidence bundle/package export have no dashboard UI yet.
 
 The [architecture document](docs/ARCHITECTURE.md) is the source of truth for
 the implementation and its security boundaries.
@@ -286,10 +323,11 @@ the implementation and its security boundaries.
 ## Dashboard preview
 
 The technician dashboard combines authenticated live endpoint inventory,
-telemetry detail, command console, enrollment, and administrator/operator
-management flows with fixture-backed aggregate operations and general audit
-panels. The screenshots illustrate the current visual direction; they are not
-production or compliance evidence.
+telemetry detail, command console, interactive shell, alerts and monitoring
+policies, maintenance windows, scheduled tasks, script library, patch policies
+and compliance, enrollment, audit evidence, and administrator/operator
+management flows. The screenshots illustrate the current visual direction; they
+are not production or compliance evidence.
 
 ![NodeLink dashboard operations overview](docs/images/nodelink-dashboard-overview.png)
 
@@ -297,108 +335,74 @@ production or compliance evidence.
 
 ## In progress
 
-Milestone 0, Deployment Safety, is nearly complete. Remaining items are an
-Authenticode code signing (needs a paid certificate) and running the multi-day
-soak test (the harness and runbook ship in `deploy/soak/` and
+Milestone 0, Deployment Safety, is nearly complete. The two remaining items are
+Authenticode code signing (needs a paid certificate) and a recorded multi-day
+soak run (the harness and runbook ship in `deploy/soak/` and
 `docs/SOAK-TEST.md`) before a controlled non-production pilot.
+
+Also open on `main`: live end-to-end verification of the MeshCentral remote
+desktop integration against a real MeshCentral deployment before it can be
+enabled by default, and the dashboard surfaces for the server features that are
+still API-only (tenant memberships, evidence export, package management,
+software deployment, service and process management, agent self-update).
 
 ### Recent progress on `main`
 
-The `v0.1.2` release consolidated the secure enrollment work: limited-use
-tokens, agent identity and revocation workflows, the live enrollment dashboard,
-PostgreSQL migration/rollback evidence, and release verification.
+Releases `v0.1.2` through `v0.1.5` (schema `0028`, then `0029`) delivered the
+Milestone-1 body of work: limited-use enrollment tokens and agent identity
+management, operator administration and explicit arbitrary-script permission,
+same-origin authenticated dashboard sessions, live audit timeline and anchor
+verification views, bounded Windows hardware/software/security inventory with
+hash-negotiated upload and snapshot history, the monitoring foundation and its
+first checks, deterministic alert state and the technician alert lifecycle,
+email and signed generic-webhook notification delivery, the immutable script
+library and typed script parameters, recurring task scheduling, loss-safe agent
+credential renewal, the Dockerized Render deployment path, and the Phase-1
+Windows Update scan.
 
-The `v0.1.3` release (schema `0028`, cut from `main`) then delivered the
-Milestone-1 body of work below on top of `v0.1.2`, as a pilot-only release with
-regenerated backup and rollback evidence. Building on `v0.1.2`, it has:
+`v0.1.6` (schema `0035`) was the Milestone-2 release. On top of `v0.1.5` it
+added Windows Update installation, administrator-only controlled file and
+registry remediation, audited restart/shutdown power operations, bounded
+metadata-only event log access, scoped patch approval/installation/reboot
+policies and patch compliance reporting, package management through Winget with
+opt-in Chocolatey, MSI/EXE software deployment, Windows service and process
+management, signed staged agent self-update with automatic rollback, interactive
+remote shell sessions, and a dashboard rebuilt on live backend data.
 
-- shipped administrator-only operator identity management and explicit
-  arbitrary-script permission controls in the dashboard, then completed
-  audited role/status changes and last-active-administrator protection;
-- added audited first-run client/site creation with normalized duplicate-name
-  enforcement and a guided enrollment setup flow;
-- hardened the dashboard login flow so credentials use same-origin POST
-  requests, legacy credential query parameters are stripped, and protected
-  pages render from server-validated HTTP-only sessions;
-- replaced the fixture-backed audit panel with live timeline, event-detail, and
-  anchor/receipt verification views, and made audit reads auditable;
-- added bounded Windows hardware inventory with hash-negotiated upload,
-  per-section snapshot history, and observable storage growth, replacing an
-  unvalidated free-form inventory field that no released agent ever wrote;
-- added a Dockerized Render deployment path for the FastAPI backend, including
-  pre-deploy migrations, health checks, proxy-aware production configuration,
-  external PostgreSQL configuration, and secret-file signing-key support;
-- added read-only local Administrators inventory (#39): a locale-independent
-  collector that resolves the built-in group by its well-known SID and
-  classifies each member's identity type (local, domain, or Entra ID),
-  validated and stored as a bounded inventory section;
-- added the phase-1 monitoring foundation (#41): append-only scoped policy
-  revisions, typed check definitions, deterministic inheritance, maintenance
-  windows, bounded check-result history, role-gated audited APIs, and read-only
-  dashboard policy views;
-- implemented the first monitoring checks (#42): server-owned offline
-  evaluation plus agent CPU, memory, disk, service, pending-reboot, and retained
-  uptime evaluation with bounded cadence, hysteresis, durable idempotent
-  delivery, explicit unknown states, and revision-pinned ingestion;
-- added deterministic alert state (#43): one policy/endpoint/check identity,
-  exactly-once bounded observations, automatic recovery/reopen, concurrent
-  deduplication, policy cleanup, and maintenance suppression metadata;
-- added the technician alert lifecycle (#44): role-gated acknowledgement,
-  assignment, comments, manual resolution, automatic recovery/reopen,
-  optimistic-concurrency and idempotency protection, immutable actor history,
-  redacted audit evidence, and live dashboard controls;
-- added alert email delivery (#45): environment-owned Resend configuration,
-  escaped/redacted transition templates, transactionally durable recipient
-  queues, provider idempotency, bounded retry/backoff, maintenance suppression,
-  delivery history, audited manual retry, and live dashboard visibility;
-- added signed generic webhook delivery (#46): versioned canonical payloads,
-  per-destination encrypted rotating secrets, HMAC-SHA256 verification,
-  SSRF- and DNS-rebinding-resistant HTTPS delivery, durable bounded retries,
-  audited operations, and a live destination and attempt ledger;
-- added the immutable script library (#47): canonical content digests,
-  append-only versions and final reviews, terminal deprecation, bounded
-  role-gated API/dashboard workflows, and recovery documentation;
-- added typed script parameters (#48): version-bound definitions, encrypted
-  expiring value preparation, strict validation/default/choice behavior,
-  cross-platform quoting, and secret-redacted evidence;
-- added recurring task scheduling (#49): cron-based schedules with concurrency
-  and misfire policies dispatched through the signed command pipeline;
-- added loss-safe agent credential renewal (#125): server-enforced credential
-  expiry with a bounded rotation overlap, so a dropped renewal never strands an
-  endpoint;
-- completed interactive shell sessions (#61): an owner-bound, audited,
-  capability-negotiated terminal with bounded long-poll streaming, protected
-  agent PowerShell execution, reconnect semantics, and fail-closed limits;
-- added deterministic tenant evidence bundles (#79/#80): versioned canonical
-  JSON and normalized CSV, tagged PDF summaries, and domain-separated
-  Ed25519-signed deterministic ZIP packages with fixed manifests, anchors,
-  receipts, public verification keys, and independent clean-room verifiers;
-- landed the Phase-1 Windows Update scan (#51): a typed `scan_updates` command
-  and a normalized missing/installed update inventory section, with update
-  installation/deployment explicitly out of scope; and
-- kept the merged branch green across license, Go, Windows, Python, dashboard,
-  migration, installer, and release-target checks.
+`v0.1.7` is a single-defect patch release on top of `v0.1.6`: the agent
+installed exactly the operator-selected updates and then failed to parse its own
+result, reporting a failed command for work that had already succeeded. No
+schema, command-kind, protocol, or authorization change — a `v0.1.6` and a
+`v0.1.7` agent are protocol-identical.
 
-The tagged `v0.1.3` agent remains scan-only. Current `main` contains the Phase-2
-Windows Update installation work and requires server schema `0029` plus a rebuilt
-and redeployed Windows agent before `install_updates` can be used. Other current
-  work includes tenant-aware authorization design.
+Since `v0.1.7`, `main` has added dashboard management of the maintenance windows
+that power actions require, the MeshCentral remote desktop integration (#62,
+schema `0036`, disabled by default pending live end-to-end verification), and
+the first Milestone-3 work: tenant-scoped authorization with per-tenant roles
+(#66, schema `0037`) and deterministic tenant evidence bundles and signed
+evidence packages (#79/#80). Running `main` therefore requires `alembic upgrade
+head` to `0037` and a rebuilt Windows agent; the tagged `v0.1.7` release remains
+at `0035`.
 
 ## Planned
 
-- **Milestone 1 — Windows RMM MVP:** authenticated Next.js dashboard, complete
-  Windows inventory, monitoring and alerts, notification delivery, script
-  library, and recurring tasks.
-- **Milestone 2 — Patch and Remediation:** Windows Update policies and
-  installation, software deployment, endpoint operations, interactive shell,
-  streaming output, technician-to-end-user chat (a chat window on the endpoint
-  so the machine's user can talk to the technician from their computer), and
-  MeshCentral integration. Signed, staged agent self-update with automatic
-  rollback is implemented (`docs/AGENT-SELF-UPDATE.md`).
-- **Milestone 3 — Compliance Productization:** tenant-scoped authorization and
-  deterministic JSON/CSV/PDF/signed-ZIP evidence exports are implemented;
-  approval workflows, stronger identity controls, immutable retention, a
-  packaged audit verification tool, and a customer audit portal remain planned.
+- **Milestone 1 — Windows RMM MVP:** delivered — authenticated Next.js
+  dashboard, Windows inventory, monitoring and alerts, notification delivery,
+  script library, and recurring tasks.
+- **Milestone 2 — Patch and Remediation:** largely delivered — Windows Update
+  policies and installation, software deployment, endpoint operations,
+  interactive shell, signed staged agent self-update with automatic rollback
+  (`docs/AGENT-SELF-UPDATE.md`), and the MeshCentral integration (shipped
+  disabled by default, pending live end-to-end verification). Remaining:
+  technician-to-end-user chat (a chat window on the endpoint so the machine's
+  user can talk to the technician from their computer) and command
+  cancellation.
+- **Milestone 3 — Compliance Productization:** started — tenant-scoped
+  authorization (#66) and deterministic JSON/CSV/PDF/signed-ZIP evidence
+  bundles and packages (#79/#80) are implemented server side. Tenant membership
+  UI, tenant-specific retention, approval workflows, stronger identity controls
+  (MFA, WebAuthn, OIDC/SAML), immutable retention and legal hold, a packaged
+  audit verification tool, and a customer audit portal remain planned.
 - **Milestone 4 — Scale and Ecosystem:** shared infrastructure, distributed
   execution, high availability, public APIs, integrations, signed extensions,
   and later Linux/macOS support.
@@ -411,13 +415,12 @@ The repository does **not** currently contain:
   verification CLI. The server-side JSON/CSV contract, tagged PDF, deterministic
   signed ZIP, and reference clean-room verifiers are implemented in
   `docs/EVIDENCE-BUNDLES.md` and `docs/EVIDENCE-PACKAGES.md`.
-
-- A general live audit UI or production-ready dashboard. Client/site
-  navigation, endpoint inventory, endpoint telemetry detail, endpoint command
-  console, enrollment administration/audit, and operator administration use
-  live API data; aggregate overview and general audit panels remain
-  fixture-backed.
-- Technician-to-end-user chat or command cancellation. Signed command polling
+- A production-ready dashboard. Every panel now renders live API data, but
+  package management, software deployment, service and process management,
+  agent self-update, tenant membership administration, and evidence
+  bundle/package export are still API-only with no UI.
+- Technician-to-end-user chat, streaming command output, or command
+  cancellation. Signed command polling
   remains the compatibility path; interactive PowerShell now uses its own
   bounded long-poll transport, contained agent process, and endpoint terminal
   (`docs/SHELL-SESSIONS.md`).
@@ -446,8 +449,11 @@ The repository does **not** currently contain:
   certificate-based signing is
   missing). External audit-anchor publication ships (`docs/AUDIT-ANCHORING.md`)
   but the operator must configure and operate the destination.
-- Tenant-scoped authorization, tenant-specific roles or retention, MFA,
-  WebAuthn, OIDC/SAML, legal hold, or compliance evidence exports.
+- Tenant-specific retention, MFA, WebAuthn, OIDC/SAML, or legal hold.
+  Tenant-scoped authorization with per-tenant roles
+  (`docs/TENANT-AUTHORIZATION.md`) and signed compliance evidence exports
+  (`docs/EVIDENCE-PACKAGES.md`) are implemented server side; the membership
+  administration UI is not.
 
 ## Architecture at a glance
 
