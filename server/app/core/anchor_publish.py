@@ -5,14 +5,13 @@ The local hash chain and the `AuditAnchor` rows prove internal consistency but
 nothing against an attacker who owns this database — they can rewrite the
 events and the anchors together. The root only becomes un-rewritable once a
 copy exists somewhere the operator cannot alter. This module carries the root
-out: it computes a canonical anchor document, publishes it to a configured
-backend, and records a tamper-evident receipt of that publication.
+out: it computes a canonical anchor document, publishes it through the shared
+write-once store, and records a tamper-evident receipt of that publication.
 
-Backends (see build_publisher):
-  filesystem  append-only directory; real immutability only on a WORM /
-              object-lock mount. Always available; the CI test vehicle.
-  s3          S3-compatible bucket with Object Lock (AWS S3, MinIO, Backblaze
-              B2, ...). The receipt is the object version-id + ETag.
+The destination backends themselves live in :mod:`app.core.immutable_store`,
+which audit anchors share with compliance evidence artifacts; `PublishError`
+and `PublishResult` are re-exported here so existing callers keep working.
+`build_publisher` maps the deployment's ``anchor_*`` settings onto that store.
 
 Publication is idempotent: the destination key is deterministic in the
 anchor's content, so a retry after a crash re-writes identical bytes rather
@@ -28,27 +27,37 @@ import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, settings
+from app.core.immutable_store import (  # re-exported for existing callers
+    PublishError,
+    PublishResult,
+    StoreConfig,
+    build_backend,
+)
 from app.models.models import AnchorPublication, AuditAnchor, AuditEvent
+
+__all__ = [
+    "ANCHOR_DOCUMENT_FORMAT",
+    "ANCHOR_DOCUMENT_VERSION",
+    "PublicationStatus",
+    "PublishError",
+    "PublishResult",
+    "build_publisher",
+    "canonical_anchor_document",
+    "ensure_current_anchor",
+    "publication_status",
+    "publish_pending",
+    "receipt_digest",
+    "verify_receipt",
+]
 
 ANCHOR_DOCUMENT_FORMAT = "nodelink-audit-anchor"
 ANCHOR_DOCUMENT_VERSION = 1
-
-
-class PublishError(RuntimeError):
-    """A backend failed to publish. The scheduler records it and retries."""
-
-
-@dataclass
-class PublishResult:
-    uri: str
-    receipt: dict  # JSON-serializable, MUST NOT contain secrets
 
 
 def canonical_anchor_document(anchor: AuditAnchor) -> bytes:
@@ -77,118 +86,51 @@ def receipt_digest(receipt: dict) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-def _object_key(anchor: AuditAnchor, prefix: str = "") -> str:
-    # Zero-padded event_count keeps lexical order == chain order; the root makes
-    # it content-addressed and collision-free.
-    name = f"anchor-{anchor.event_count:012d}-{anchor.merkle_root}.json"
-    return f"{prefix.rstrip('/')}/{name}" if prefix else name
+def _object_name(anchor: AuditAnchor) -> str:
+    """The anchor's file name at the destination. Zero-padded event_count keeps
+    lexical order == chain order; the root makes it content-addressed and
+    collision-free. The backend adds its own prefix, if any."""
+    return f"anchor-{anchor.event_count:012d}-{anchor.merkle_root}.json"
 
 
-# --------------------------------------------------------------------------- #
-# Backends
-# --------------------------------------------------------------------------- #
-class FilesystemBackend:
-    name = "filesystem"
+class AnchorPublisher:
+    """Binds an anchor to a destination: names the object and writes it.
 
-    def __init__(self, directory: str):
-        self.directory = Path(directory)
+    The store knows nothing about anchors, so this adapter owns the anchor's
+    key derivation and leaves the bytes-to-destination step to the backend.
+    """
 
-    def object_key(self, anchor: AuditAnchor) -> str:
-        return _object_key(anchor)
+    def __init__(self, backend):
+        self._backend = backend
 
-    def publish(self, key: str, payload: bytes) -> PublishResult:
-        self.directory.mkdir(parents=True, exist_ok=True)
-        path = self.directory / key
-        sha = hashlib.sha256(payload).hexdigest()
-        if path.exists():
-            # Idempotent re-publish only if the content matches; a differing
-            # file at the same content-addressed key means corruption or a WORM
-            # violation, and we fail closed rather than overwrite evidence.
-            existing = path.read_bytes()
-            if existing != payload:
-                raise PublishError(f"existing anchor artifact differs at {path}")
-        else:
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            tmp.write_bytes(payload)
-            tmp.replace(path)
-            try:
-                path.chmod(0o444)  # best-effort read-only; real WORM is the mount
-            except OSError:
-                pass
-        return PublishResult(
-            uri=f"file://{path}",
-            receipt={"backend": self.name, "path": str(path), "sha256": sha,
-                     "bytes": len(payload)},
-        )
-
-
-class S3Backend:
-    name = "s3"
-
-    def __init__(self, s: Settings):
-        if not s.anchor_s3_bucket:
-            raise PublishError("anchor_s3_bucket is required for the s3 backend")
-        self.bucket = s.anchor_s3_bucket
-        self.prefix = s.anchor_s3_prefix
-        self.region = s.anchor_s3_region
-        self.endpoint_url = s.anchor_s3_endpoint_url
-        self.lock_mode = s.anchor_s3_object_lock_mode
-        self.retain_days = s.anchor_s3_retain_days
-        self._client = None
-
-    def _get_client(self):
-        if self._client is None:
-            import boto3  # lazy: only deployments using s3 need boto3 installed
-
-            self._client = boto3.client(
-                "s3", region_name=self.region, endpoint_url=self.endpoint_url
-            )
-        return self._client
+    @property
+    def name(self) -> str:
+        return self._backend.name
 
     def object_key(self, anchor: AuditAnchor) -> str:
-        return _object_key(anchor, self.prefix)
+        return self._backend.object_key(_object_name(anchor))
 
     def publish(self, key: str, payload: bytes) -> PublishResult:
-        client = self._get_client()
-        args = {
-            "Bucket": self.bucket,
-            "Key": key,
-            "Body": payload,
-            "ContentType": "application/json",
-        }
-        retain_until = None
-        if self.retain_days > 0:
-            retain_until = datetime.now(timezone.utc) + timedelta(days=self.retain_days)
-            args["ObjectLockMode"] = self.lock_mode
-            args["ObjectLockRetainUntilDate"] = retain_until
-        try:
-            resp = client.put_object(**args)
-        except Exception as exc:  # boto/network/permission error
-            raise PublishError(f"s3 put_object failed: {exc}") from exc
-        receipt = {
-            "backend": self.name,
-            "bucket": self.bucket,
-            "key": key,
-            "version_id": resp.get("VersionId"),
-            "etag": (resp.get("ETag") or "").strip('"'),
-            "sha256": hashlib.sha256(payload).hexdigest(),
-        }
-        if retain_until is not None:
-            receipt["object_lock_mode"] = self.lock_mode
-            receipt["retain_until"] = retain_until.isoformat()
-        return PublishResult(uri=f"s3://{self.bucket}/{key}", receipt=receipt)
+        return self._backend.publish(key, payload, content_type="application/json")
 
 
 def build_publisher(s: Settings = settings):
-    """Construct the configured backend, or None when publication is disabled."""
-    backend = (s.anchor_publish_backend or "none").strip().lower()
-    if backend == "none":
-        return None
-    if backend == "filesystem":
-        return FilesystemBackend(s.anchor_publish_dir)
-    if backend == "s3":
-        return S3Backend(s)
-    raise PublishError(f"unknown anchor_publish_backend {backend!r}")
+    """Construct the configured anchor publisher, or None when publication is
+    disabled. Maps the deployment's ``anchor_*`` settings onto the shared
+    write-once store."""
+    backend = build_backend(
+        StoreConfig(
+            backend=s.anchor_publish_backend,
+            directory=s.anchor_publish_dir,
+            bucket=s.anchor_s3_bucket,
+            prefix=s.anchor_s3_prefix,
+            region=s.anchor_s3_region,
+            endpoint_url=s.anchor_s3_endpoint_url,
+            object_lock_mode=s.anchor_s3_object_lock_mode,
+            retain_days=s.anchor_s3_retain_days,
+        )
+    )
+    return None if backend is None else AnchorPublisher(backend)
 
 
 # --------------------------------------------------------------------------- #
