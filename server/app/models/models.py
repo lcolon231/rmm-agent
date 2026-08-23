@@ -2235,3 +2235,127 @@ class AgentUpdateAttempt(Base):
     reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     release: Mapped["AgentUpdateRelease"] = relationship(back_populates="attempts")
+
+
+class EvidenceArtifact(Base):
+    """One compliance evidence export durably written to write-once storage
+    (issue #81).
+
+    Signed evidence packages are otherwise built in memory and streamed to the
+    caller, so the bytes an auditor was handed exist only in that auditor's
+    download folder. A row here is NodeLink's own record that a specific export
+    was produced, what it covered, and where the immutable copy lives.
+
+    `content_sha256` binds the row to the exact bytes and is also what makes the
+    destination key content-addressed, so a retry after a crash rewrites
+    identical bytes at the same key instead of forking.
+
+    `retain_until` is **frozen at creation**, not resolved at deletion time:
+    shortening a retention policy tomorrow must not retroactively expose an
+    artifact stored today. It is also the Object Lock retain-until sent to the
+    destination.
+
+    The row outlives the object. After a legal deletion the state becomes
+    `deleted` and the digests stay, so the export remains provable-to-have-
+    existed even once the bytes are gone.
+    """
+
+    __tablename__ = "evidence_artifacts"
+    __table_args__ = (
+        # One row per (tenant, package). Re-retaining the same export reconciles
+        # onto this row rather than forking a second record of the same bytes.
+        UniqueConstraint("tenant_id", "package_id", name="uq_evidence_artifact_package"),
+        # The retention sweeper scans exactly this pair.
+        Index("ix_evidence_artifacts_state_retain", "state", "retain_until"),
+        Index("ix_evidence_artifacts_tenant", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    # Identities the export already carries: the signed package and the logical
+    # bundle it renders. Both are recorded so an auditor holding either can be
+    # matched back to this row.
+    package_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    bundle_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The pinned append-only audit prefix this export covered; repeating the
+    # request with through_seq reproduces the same bytes.
+    from_seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    through_seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    signing_key_id: Mapped[str | None] = mapped_column(String(64))
+    # Destination: which backend, where, and its own proof of the write. The
+    # receipt carries no credentials, and receipt_sha256 detects a later edit of
+    # the stored receipt — the same contract as AnchorPublication.
+    backend: Mapped[str] = mapped_column(String(32), nullable=False)
+    uri: Mapped[str | None] = mapped_column(String(1024))
+    receipt: Mapped[dict | None] = mapped_column(JSON)
+    receipt_sha256: Mapped[str | None] = mapped_column(String(64))
+    # pending -> stored -> expired -> deleted, or -> failed / held. Derived from
+    # stored facts by the sweeper rather than being independently writable.
+    state: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    retain_until: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_by: Mapped[str | None] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    stored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+
+    tenant: Mapped["Client"] = relationship()
+
+
+class EvidenceLegalHold(Base):
+    """A named, reasoned suspension of evidence deletion (issue #81).
+
+    While an active hold covers an artifact, no automated sweep and no manual
+    delete may remove it, regardless of whether its retention has expired.
+
+    Release is terminal: a released hold never returns to active, and re-holding
+    creates a new row. The register therefore reads as a sequence of dated
+    decisions rather than one toggled flag, which is what an auditor needs to
+    reconstruct who suspended deletion and when.
+
+    A `global` hold covers every tenant, including tenants created after it was
+    placed, so it is the one scope required to carry an expiry — a forgotten
+    global hold would otherwise freeze all deletion indefinitely. Artifact- and
+    tenant-scoped holds may be open-ended, which is how a legal hold actually
+    behaves: it lasts until counsel releases it.
+    """
+
+    __tablename__ = "evidence_legal_holds"
+    __table_args__ = (
+        # Coverage resolution reads active holds by scope.
+        Index("ix_evidence_legal_holds_scope", "scope", "scope_id"),
+        Index("ix_evidence_legal_holds_active", "released_at", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # artifact | tenant | global. scope_id is the artifact or tenant id, and is
+    # NULL for a global hold.
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_id: Mapped[str | None] = mapped_column(String(36))
+    # Denormalized for tenant-scoped listing without resolving the artifact.
+    # NULL for a global hold.
+    tenant_id: Mapped[str | None] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    # Mandatory for a global hold, optional otherwise. An expired hold stops
+    # covering artifacts and is never silently revived.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    released_by: Mapped[str | None] = mapped_column(String(320))
+    release_reason: Mapped[str | None] = mapped_column(Text)
+
+    tenant: Mapped["Client | None"] = relationship()

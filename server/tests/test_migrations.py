@@ -846,6 +846,76 @@ def test_0037_backfill_preserves_access_and_promotes_admins(tmp_path: Path):
     assert system_event_org is None
 
 
+def test_0038_adds_evidence_tables_without_touching_existing_rows(tmp_path: Path):
+    """0038 is purely additive. An existing deployment's rows must survive it
+    untouched, and the two new tables must arrive empty — a deployment that
+    never retains an export sees no behavior change at all."""
+    db_path = tmp_path / "evidence-additive.db"
+    config = migration_config(sqlite_url(db_path))
+    command.upgrade(config, "0037")
+
+    now = "2026-08-23T12:00:00+00:00"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO clients (id, name, created_at) VALUES (?, ?, ?)",
+            ("client-e", "Evidence Client", now),
+        )
+        connection.execute(
+            """INSERT INTO operators
+               (id, email, password_hash, role, disabled, token_generation,
+                created_at, is_platform_admin)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("op-e", "e@nodelink.test", "hash", "admin", 0, 0, now, 1),
+        )
+
+    command.upgrade(config, "0038")
+
+    with sqlite3.connect(db_path) as connection:
+        # Pre-existing rows are untouched.
+        assert connection.execute(
+            "SELECT name FROM clients WHERE id = 'client-e'"
+        ).fetchone() == ("Evidence Client",)
+        assert connection.execute(
+            "SELECT is_platform_admin FROM operators WHERE id = 'op-e'"
+        ).fetchone() == (1,)
+        # The new tables exist and are empty.
+        assert connection.execute(
+            "SELECT COUNT(*) FROM evidence_artifacts"
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM evidence_legal_holds"
+        ).fetchone() == (0,)
+        indexes = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            ).fetchall()
+        }
+    # The sweeper scans (state, retain_until); hold coverage reads (scope, scope_id).
+    assert "ix_evidence_artifacts_state_retain" in indexes
+    assert "ix_evidence_legal_holds_scope" in indexes
+
+
+def test_0038_tables_match_the_orm_models(tmp_path: Path):
+    """Migration and model must not drift: a column added to one and not the
+    other is the classic way a fresh install and an upgraded one diverge."""
+    from app.models.models import EvidenceArtifact, EvidenceLegalHold
+
+    db_path = tmp_path / "evidence-parity.db"
+    command.upgrade(migration_config(sqlite_url(db_path)), "head")
+
+    with sqlite3.connect(db_path) as connection:
+        for model in (EvidenceArtifact, EvidenceLegalHold):
+            migrated = {
+                row[1]
+                for row in connection.execute(
+                    f"PRAGMA table_info({model.__tablename__})"
+                ).fetchall()
+            }
+            declared = {column.name for column in model.__table__.columns}
+            assert migrated == declared, model.__tablename__
+
+
 def test_unversioned_database_fails_startup_revision_check(tmp_path: Path):
     url = sqlite_url(tmp_path / "unversioned.db")
     with pytest.raises(SchemaRevisionMismatch, match="current=unversioned"):
