@@ -137,6 +137,16 @@ and SHA-256/Merkle roots—remains readable.
 | `operator.tenant_membership_revoked` | `api/auth.py` client-membership revoke (#66) | `operator_id`, `client_id`, `previous_role`, `reason_sha256`, `reason_bytes` |
 | `operator.platform_admin_changed` | `api/auth.py` platform-admin toggle (#66) | `operator_id`, `previous`, `new`, `reason_sha256`, `reason_bytes` |
 | `tenant.access_denied` | `api/management.py` cross-tenant dispatch attempt (#66) | `operator_id`, `resource`, `agent_id`, `client_id` |
+| `mfa.second_factor_required` | `api/auth.py` login that stopped at the password step | `operator_id`, `enrollment_required`, `methods` |
+| `mfa.credential_registered` | `api/mfa.py` WebAuthn enrolment | `operator_id`, `credential_id`, `name_sha256`, `name_bytes`, `algorithm`, `aaguid`, `attestation_format`, `backup_eligible` |
+| `mfa.credential_renamed` | `api/mfa.py` device rename | `operator_id`, `credential_id`, `previous_name_sha256`, `previous_name_bytes`, `new_name_sha256`, `new_name_bytes` |
+| `mfa.credential_revoked` | `api/mfa.py` device revoke | `operator_id`, `credential_id`, `name_sha256`, `name_bytes`, `reason_sha256`, `reason_bytes`, `by` |
+| `mfa.authentication_failed` | `api/mfa.py` refused ceremony; `reason` is a coded rule name, never a submitted value | `operator_id`, `method`, `reason` |
+| `mfa.authentication_succeeded` | `api/mfa.py` accepted assertion | `operator_id`, `credential_id`, `method`, `purpose` |
+| `mfa.step_up_succeeded` | `api/mfa.py` re-assertion for a sensitive operation | `operator_id`, `credential_id` |
+| `mfa.recovery_codes_generated` | `api/mfa.py` recovery batch mint; the codes themselves are never recorded | `operator_id`, `batch_id`, `code_count` |
+| `mfa.recovery_code_used` | `api/mfa.py` recovery login; which code was spent is deliberately not recorded | `operator_id`, `codes_remaining` |
+| `mfa.reset` | `api/mfa.py` administrative MFA reset after device loss | `operator_id`, `credentials_revoked`, `recovery_codes_invalidated`, `reason_sha256`, `reason_bytes`, `by` |
 | `scheduled_task.created` | `api/scheduled_tasks.py` task schedule creation | `scheduled_task_id`, `name_sha256`, `name_bytes`, `target_type`, `target_id`, `cron_expression`, `timezone`, `next_run_at`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
 | `scheduled_task.updated` | `api/scheduled_tasks.py` task schedule update | `scheduled_task_id`, `name_sha256`, `name_bytes`, `enabled`, `next_run_at`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
 | `scheduled_task.deleted` | `api/scheduled_tasks.py` task schedule deletion | `scheduled_task_id`, `name_sha256`, `name_bytes`, `target_type`, `target_id`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |

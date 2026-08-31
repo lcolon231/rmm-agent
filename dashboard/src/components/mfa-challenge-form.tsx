@@ -1,0 +1,264 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+"use client";
+
+import { ArrowRight, KeyRound, LifeBuoy, ShieldCheck } from "lucide-react";
+import type { FormEvent } from "react";
+import { useCallback, useState } from "react";
+
+import {
+  mfaErrorMessage,
+  toAssertionPayload,
+  toCreationOptions,
+  toRegistrationPayload,
+  toRequestOptions,
+  type MfaMethod,
+} from "@/lib/mfa-core";
+import { useWebAuthnSupport } from "@/lib/use-webauthn-support";
+
+type MfaChallengeFormProps = {
+  enrollmentRequired: boolean;
+  methods: MfaMethod[];
+};
+
+/**
+ * The second step of signing in (issue #67).
+ *
+ * Three states, chosen by what the server said the operator may do:
+ *
+ * - **enrol** — policy requires a second factor and they have none yet, so the
+ *   only thing on offer is registering one.
+ * - **assert** — the normal path: touch the security key.
+ * - **recovery** — the fallback, shown only when the server listed it, so the
+ *   page never advertises an option that would fail.
+ *
+ * The component decides nothing about whether a ceremony passed. It hands bytes
+ * to the browser's authenticator, posts what comes back, and renders the
+ * server's verdict.
+ */
+export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFormProps) {
+  const [error, setError] = useState("");
+  const [isBusy, setIsBusy] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
+
+  const recoveryAvailable = methods.includes("recovery_code");
+
+  const supported = useWebAuthnSupport();
+
+  const failFromResponse = useCallback(async (response: Response) => {
+    const body = await response.json().catch(() => null) as
+      | { error?: string; code?: string }
+      | null;
+    setError(
+      body?.error
+        ?? mfaErrorMessage(body?.code)
+        ?? "Multi-factor authentication is unavailable. Try again later.",
+    );
+  }, []);
+
+  async function runAssertion() {
+    setError("");
+    setIsBusy(true);
+    try {
+      const optionsResponse = await fetch("/api/auth/mfa/login/options", {
+        method: "POST",
+      });
+      if (!optionsResponse.ok) {
+        await failFromResponse(optionsResponse);
+        return;
+      }
+      const credential = await navigator.credentials.get({
+        publicKey: toRequestOptions(await optionsResponse.json()),
+      }) as PublicKeyCredential | null;
+      if (!credential) {
+        setError(mfaErrorMessage("cancelled") ?? "");
+        return;
+      }
+
+      const verifyResponse = await fetch("/api/auth/mfa/login/verify", {
+        body: JSON.stringify(toAssertionPayload(credential)),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (verifyResponse.ok) {
+        window.location.replace("/");
+        return;
+      }
+      await failFromResponse(verifyResponse);
+    } catch {
+      // A DOMException here is almost always the user dismissing the prompt or
+      // a timeout, neither of which is a security signal worth alarming about.
+      setError(mfaErrorMessage("cancelled") ?? "");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function runEnrollment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = String(new FormData(event.currentTarget).get("name") ?? "").trim();
+    setError("");
+    setIsBusy(true);
+    try {
+      const optionsResponse = await fetch("/api/auth/mfa/credentials/options", {
+        method: "POST",
+      });
+      if (!optionsResponse.ok) {
+        await failFromResponse(optionsResponse);
+        return;
+      }
+      const credential = await navigator.credentials.create({
+        publicKey: toCreationOptions(await optionsResponse.json()),
+      }) as PublicKeyCredential | null;
+      if (!credential) {
+        setError(mfaErrorMessage("cancelled") ?? "");
+        return;
+      }
+
+      const registerResponse = await fetch("/api/auth/mfa/credentials", {
+        body: JSON.stringify(toRegistrationPayload(credential, name)),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (registerResponse.ok) {
+        // Registration does not itself produce a session — the operator now
+        // signs in with the factor they just created, which also proves it
+        // works before they depend on it.
+        await runAssertion();
+        return;
+      }
+      await failFromResponse(registerResponse);
+    } catch {
+      setError(mfaErrorMessage("cancelled") ?? "");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function submitRecoveryCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const code = String(new FormData(event.currentTarget).get("code") ?? "");
+    setError("");
+    setIsBusy(true);
+    try {
+      const response = await fetch("/api/auth/mfa/login/recovery-code", {
+        body: JSON.stringify({ code }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (response.ok) {
+        window.location.replace("/security");
+        return;
+      }
+      await failFromResponse(response);
+    } catch {
+      setError("Multi-factor authentication is unavailable. Try again later.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  return (
+    <main className="login-page">
+      <section className="login-panel" aria-labelledby="mfa-title">
+        <div className="login-brand">
+          <span className="brand-mark"><span /><span /><span /></span>
+          <strong>NodeLink</strong>
+        </div>
+        <span className="login-eyebrow"><ShieldCheck size={15} /> Second factor</span>
+
+        {enrollmentRequired ? (
+          <>
+            <h1 id="mfa-title">Register a security key</h1>
+            <p>
+              Your account is required to hold a phishing-resistant second factor.
+              Register a security key or your device&apos;s built-in authenticator to
+              finish signing in. Nothing else is available until you do.
+            </p>
+            <form onSubmit={runEnrollment}>
+              <label htmlFor="name">Device name</label>
+              <input
+                autoComplete="off"
+                defaultValue=""
+                id="name"
+                maxLength={64}
+                name="name"
+                placeholder="Work laptop"
+                required
+                type="text"
+              />
+              {error ? <p className="login-error" role="alert">{error}</p> : null}
+              <button disabled={isBusy || !supported} type="submit">
+                <KeyRound size={16} /> {isBusy ? "Waiting for your key…" : "Register and continue"} <ArrowRight size={16} />
+              </button>
+            </form>
+          </>
+        ) : showRecovery ? (
+          <>
+            <h1 id="mfa-title">Use a recovery code</h1>
+            <p>
+              Enter one of the codes you saved when you set up your security key. Each
+              code works once. Signing in this way lets you register a replacement key,
+              but not change your security settings until you do.
+            </p>
+            <form onSubmit={submitRecoveryCode}>
+              <label htmlFor="code">Recovery code</label>
+              <input
+                autoComplete="one-time-code"
+                id="code"
+                maxLength={64}
+                name="code"
+                placeholder="ABCDE-FGHIJ-KLMNP-QRSTU"
+                required
+                spellCheck={false}
+                type="text"
+              />
+              {error ? <p className="login-error" role="alert">{error}</p> : null}
+              <button disabled={isBusy} type="submit">
+                <LifeBuoy size={16} /> {isBusy ? "Checking…" : "Sign in with recovery code"} <ArrowRight size={16} />
+              </button>
+            </form>
+            <button
+              className="login-secondary"
+              onClick={() => { setShowRecovery(false); setError(""); }}
+              type="button"
+            >
+              Use my security key instead
+            </button>
+          </>
+        ) : (
+          <>
+            <h1 id="mfa-title">Confirm it&apos;s you</h1>
+            <p>
+              Touch your security key, or approve the prompt from your device&apos;s
+              built-in authenticator, to finish signing in.
+            </p>
+            {!supported ? (
+              <p className="login-error" role="alert">
+                {mfaErrorMessage("unsupported-browser")}
+              </p>
+            ) : null}
+            {error ? <p className="login-error" role="alert">{error}</p> : null}
+            <button disabled={isBusy || !supported} onClick={runAssertion} type="button">
+              <KeyRound size={16} /> {isBusy ? "Waiting for your key…" : "Use security key"} <ArrowRight size={16} />
+            </button>
+            {recoveryAvailable ? (
+              <button
+                className="login-secondary"
+                onClick={() => { setShowRecovery(true); setError(""); }}
+                type="button"
+              >
+                Lost your key? Use a recovery code
+              </button>
+            ) : null}
+          </>
+        )}
+
+        <small>
+          Signing in from a different site will not work: your key is bound to this
+          domain, which is what makes it resistant to phishing.
+        </small>
+      </section>
+    </main>
+  );
+}

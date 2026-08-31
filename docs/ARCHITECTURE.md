@@ -109,9 +109,26 @@ Signing-key rotation is an operator-run workflow (`scripts/rotate_command_key.py
 with the `docs/KEY-ROTATION.md` runbook): staged active/overlap/retired
 transitions, a compromise fast path, and rollback, each written atomically to
 the registry and appended to a rotation journal. Known gaps include
-MFA/federation and certificate pinning. Tenant-scoped authorization is
+OIDC/SAML federation and certificate pinning. Tenant-scoped authorization is
 implemented server side (issue #66); a dashboard membership-management UI is a
 follow-up.
+
+Operator authentication supports a phishing-resistant WebAuthn second factor
+(issue #67, `docs/MFA.md`). A correct password alone yields a restricted
+`mfa_pending` token accepted only by the MFA completion endpoints; every other
+operator route resolves identity through one dependency that refuses that type.
+Sessions carry signed `amr` and step-up claims, so authorization can distinguish
+a password-only session from one that recently proved possession of a registered
+authenticator. Step-up is required to change another operator's role or status,
+revoke their sessions, reset their MFA, grant or revoke tenant membership,
+toggle platform-admin, or reconfigure the caller's own factors —
+and is vacuous for operators holding no credential, which is what keeps
+pre-adoption deployments behaving exactly as before. Recovery codes restore
+access and permit enrolling a replacement authenticator but never satisfy
+step-up. Enforcement has three staged positions (`off`, `optional`, `required`);
+rollback is a configuration change, not a schema change. Registered credentials
+are public keys and recovery codes are bcrypt hashes, so a database disclosure
+yields no replayable second factor.
 
 ### 3.2 Operations plane
 

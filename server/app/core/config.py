@@ -90,6 +90,60 @@ class Settings(BaseSettings):
     agent_credential_lifetime_seconds: int = 86_400  # 24h
     agent_credential_overlap_seconds: int = 600  # 10 min
 
+    # --- Multi-factor authentication (issue #67) ---
+    # Enforcement is a three-position lever, and the three positions exist so a
+    # fleet can be migrated without locking anyone out:
+    #   off      -> MFA endpoints refuse; login is password-only. The rollback
+    #               position: flipping back here restores password-only login
+    #               without touching the schema or deleting a credential.
+    #   optional -> operators may enrol, and anyone who HAS a credential must
+    #               use it. This is the staging position: enrolment happens
+    #               under real enforcement for the enrolled, with no lockout
+    #               risk for the not-yet-enrolled.
+    #   required -> operators at or above mfa_required_minimum_role must hold a
+    #               credential. An unenrolled operator can still authenticate
+    #               with a password but receives a session restricted to
+    #               enrolment, so the requirement cannot strand them.
+    mfa_enforcement: str = "optional"  # off | optional | required
+    # Which roles the "required" mode applies to, by privilege floor. Admins are
+    # the default because they are the accounts whose compromise is unbounded.
+    mfa_required_minimum_role: str = "admin"  # readonly | operator | admin
+    # WebAuthn Relying Party ID: the registrable domain credentials are scoped
+    # to. Unset derives it from public_base_url's host, which is what a single
+    # deployment wants. Set it explicitly only to scope credentials to a parent
+    # domain. It cannot be changed without invalidating every credential
+    # registered under the old value, so it is treated as immutable in practice.
+    mfa_rp_id: str | None = None
+    # Human-readable RP name shown in the browser's authenticator prompt.
+    mfa_rp_name: str | None = None  # defaults to app_name
+    # Exact origins accepted in clientDataJSON, comma-separated. Unset derives
+    # the single origin from public_base_url. This is the phishing-resistance
+    # boundary: every entry here is a site allowed to complete a ceremony, so it
+    # is an exact-match allow-list with no wildcards.
+    mfa_allowed_origins: str = ""
+    # A challenge is single-use and expires this quickly. Long enough for a user
+    # to find a security key, short enough to bound a stolen challenge.
+    mfa_challenge_ttl_seconds: int = 300
+    # Lifetime of the restricted token issued after a correct password but
+    # before the second factor. Only the MFA completion endpoints accept it.
+    mfa_pending_token_ttl_seconds: int = 600
+    # How recently a session must have proven possession of an authenticator to
+    # perform a step-up-gated operation. Past this, the operation is refused
+    # until the session re-asserts.
+    mfa_step_up_max_age_seconds: int = 900
+    # Recovery codes minted per batch. Generating a batch invalidates the last.
+    mfa_recovery_code_count: int = 10
+    # Ceiling on registered authenticators per operator, so enrolment cannot be
+    # used to grow a table without bound.
+    mfa_max_credentials_per_operator: int = 10
+    # Failed second-factor attempts allowed per (client IP, operator) in the
+    # window. Shares the process-local limiter caveat documented in ratelimit.py.
+    mfa_max_failures: int = 5
+    mfa_window_seconds: int = 300
+    # Require the authenticator to report user verification (PIN/biometric), not
+    # merely user presence. This is what makes the factor two-factor on its own.
+    mfa_require_user_verification: bool = True
+
     # --- Personalized agent installer downloads (issue #9) ---
     # Path to the pre-built, signed stock Windows installer the server bundles
     # into a personalized download. The server never rebuilds or re-signs it — it

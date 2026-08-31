@@ -88,6 +88,48 @@ Two hardening layers on top of that:
   multiple workers the effective limit multiplies by the worker count; move
   them to a shared store before scaling out.
 
+**Second-factor boundary (issue #67).** A password is no longer sufficient to
+obtain a session for an operator who holds a registered authenticator. The
+control that matters here is *phishing resistance*, and it rests on two values
+the caller cannot forge: the browser-bound `origin` in `clientDataJSON`, checked
+against an exact-match allow-list, and the authenticator-bound RP-ID hash,
+checked against the scope recorded when the challenge was minted. An operator
+lured to a look-alike domain cannot produce a signature this server accepts,
+however willing they are.
+
+- **The half-authenticated state is inert.** A correct password yields a token
+  typed `mfa_pending`, accepted only by the MFA completion endpoints. Every
+  other operator route resolves identity through `get_current_operator`, which
+  refuses that type — one choke point rather than a per-route opt-in.
+- **Replay is refused by the database, not the cryptography.** A signed
+  assertion stays valid forever, so challenges are single-use rows bound to one
+  operator and one purpose (registration / authentication / step-up), claimed by
+  a conditional UPDATE and committed even when verification then fails. Purpose
+  binding stops a registration challenge from completing a login, which would
+  otherwise let the weakest ceremony set the bar for all three.
+- **Session strength is a signed claim.** Tokens carry `amr` and a step-up
+  timestamp decided by the server from a verified ceremony, so a client cannot
+  assert a stronger authentication state than it reached. Changing another
+  operator's role or status, revoking their sessions, resetting their MFA,
+  granting or revoking tenant membership, toggling platform-admin, and
+  reconfiguring the caller's own factors all require a recent WebAuthn
+  assertion — the operations by which a stolen session would entrench itself.
+- **Recovery is bounded on purpose.** Recovery codes are bcrypt-hashed,
+  single-use, invalidated as a batch on regeneration, and never written to the
+  audit chain in any form. A recovery session can enrol a replacement
+  authenticator but can never satisfy step-up, so stolen printed codes do not
+  confer the ability to lock the real owner out.
+- **Failures are one message.** Unknown credential, bad signature, wrong origin,
+  spent challenge, and regressed counter are indistinguishable to the caller;
+  the coded reason goes only to the audit chain.
+- **Residual risk.** Attestation is *not* verified — registration requests
+  `attestation: "none"` — so authenticator make, model, and certification are
+  unestablished and no hardware-provenance claim rests on this. The
+  second-factor rate limiter is process-local, with the same multi-worker caveat
+  as login. An administrator remains able to reset another operator's MFA to
+  password-only; that path is admin-only, step-up gated, reason-bearing, and
+  audited, but it is the intended residual authority. See [`MFA.md`](MFA.md).
+
 **Dashboard telemetry read boundary.** The browser never receives the operator
 bearer token; server-side dashboard code forwards it from an HTTP-only,
 same-site cookie only after revalidating the operator. Endpoint inventory and
@@ -540,3 +582,4 @@ warning in production when unconfigured. See `docs/AUDIT-ANCHORING.md`.
 | 11 | No production migrations, automated restore, or rollback rehearsal | High | **Mostly closed** — Alembic startup guard; encrypted backup/isolated restore; and a fail-closed planner requiring rollout pause, named compatible components/schema, matching backup, and explicit data-loss approval. PostgreSQL CI rehearses N→bad N+1→N and verifies operators, agents, commands, audit chain, and anchors (`docs/ROLLBACK.md`). Production schedule evidence and a timed operator drill remain |
 | 12 | Windows artifacts are unsigned and release evidence lacks SBOM/provenance | High | Partial — releases publish an SPDX SBOM (Go + Python), signed SLSA build-provenance attestations, and checksums for every artifact; Authenticode signing remains open (needs a paid certificate) |
 | 13 | Client/site records are not authorization tenants | High | **Closed** — `Client` is the authorization tenant; default-deny operator memberships, per-client roles, platform-admin bypass, 404 anti-oracle behavior, scoped queries, and isolation tests landed in issue #66 |
+| 14 | Operator authentication is single-factor | High | **Mostly closed (issue #67)** — phishing-resistant WebAuthn second factor with single-use purpose-bound challenges, signed `amr`/step-up session claims gating operator-management and factor reconfiguration, bcrypt-hashed single-use recovery codes that never satisfy step-up, and an admin-only step-up-gated reset for device loss. Enforcement stages `off`/`optional`/`required` with configuration-only rollback. Attestation is not verified, so authenticator provenance is unestablished; the second-factor rate limiter is process-local (`docs/MFA.md`) |

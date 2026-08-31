@@ -8,8 +8,17 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import mfa
 from app.core.database import get_db
-from app.core.security import decode_access_token, hash_token
+from app.core.security import (
+    TOKEN_TYPE_ACCESS,
+    TOKEN_TYPE_MFA_PENDING,
+    decode_access_token,
+    hash_token,
+    token_amr,
+    token_step_up_at,
+    token_type,
+)
 from app.models.models import Agent, AgentTrustState, Operator, OperatorRole
 
 
@@ -85,18 +94,13 @@ async def get_current_agent(
 # --------------------------------------------------------------------------- #
 # Operator authentication (authN) and authorization (authZ)
 # --------------------------------------------------------------------------- #
-async def get_current_operator(
-    authorization: str | None = Header(default=None, description="Bearer <operator_jwt>"),
-    db: AsyncSession = Depends(get_db),
-) -> Operator:
-    """AuthN: resolve the operator from a JWT bearer token.
+def _bearer_claims(authorization: str | None) -> dict:
+    """Extract and verify the JWT claims from an Authorization header.
 
-    This proves *who* the caller is. It does not decide what they may do — that
-    is authorization, handled by require_role below.
-
-    The header is declared Optional so that a *missing* token produces a 401
-    (an auth failure we raise) rather than FastAPI's 422 request-validation
-    error. A missing credential is "unauthenticated", not "malformed request".
+    The header is declared Optional by callers so that a *missing* token
+    produces a 401 (an auth failure we raise) rather than FastAPI's 422
+    request-validation error. A missing credential is "unauthenticated", not
+    "malformed request".
     """
     if not authorization:
         raise HTTPException(
@@ -115,7 +119,10 @@ async def get_current_operator(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )
+    return claims
 
+
+async def _operator_for_claims(db: AsyncSession, claims: dict) -> Operator:
     operator = await db.get(Operator, claims.get("sub"))
     if operator is None or operator.disabled:
         raise HTTPException(
@@ -127,7 +134,131 @@ async def get_current_operator(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )
+    # Transient markers (never persisted), mirroring Agent.credential_matched:
+    # they carry how this session authenticated to the authorization helpers
+    # below, so an MFA decision never has to re-parse the token.
+    operator.session_amr = token_amr(claims)
+    operator.session_step_up_at = token_step_up_at(claims)
     return operator
+
+
+async def get_current_operator(
+    authorization: str | None = Header(default=None, description="Bearer <operator_jwt>"),
+    db: AsyncSession = Depends(get_db),
+) -> Operator:
+    """AuthN: resolve the operator from a full-access JWT bearer token.
+
+    This proves *who* the caller is. It does not decide what they may do — that
+    is authorization, handled by require_role below.
+
+    This is also the single choke point that refuses the half-authenticated
+    ``mfa_pending`` token (issue #67). Every operator-facing route in the app
+    resolves identity through here, so rejecting the restricted type once means
+    a correct password with no second factor buys access to nothing but the MFA
+    completion endpoints, which resolve it deliberately and separately.
+    """
+    claims = _bearer_claims(authorization)
+    if token_type(claims) != TOKEN_TYPE_ACCESS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+    return await _operator_for_claims(db, claims)
+
+
+async def get_mfa_pending_operator(
+    authorization: str | None = Header(default=None, description="Bearer <mfa_token>"),
+    db: AsyncSession = Depends(get_db),
+) -> Operator:
+    """Resolve the operator behind a restricted, post-password MFA token.
+
+    Accepts *only* the restricted type. A full access token is refused here on
+    purpose: an already-complete session has no business replaying the login
+    ceremony, and allowing it would create a second path to mint a session that
+    skips the checks the login endpoint performs.
+    """
+    claims = _bearer_claims(authorization)
+    if token_type(claims) != TOKEN_TYPE_MFA_PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+    return await _operator_for_claims(db, claims)
+
+
+def _session_amr(operator: Operator) -> frozenset[str]:
+    return getattr(operator, "session_amr", None) or frozenset()
+
+
+async def require_step_up(
+    operator: Operator = Depends(get_current_operator),
+    db: AsyncSession = Depends(get_db),
+) -> Operator:
+    """AuthZ: require a recent proof of possession of a registered authenticator.
+
+    Applied to the operations whose abuse would let a stolen session entrench
+    itself or widen its reach: changing another operator's role or status,
+    revoking someone's sessions, resetting someone's MFA, and reconfiguring the
+    caller's own factors.
+
+    The gate is *vacuous for operators who have no second factor to present*.
+    That is not a loophole, it is the compatibility contract: a deployment that
+    has not adopted MFA behaves exactly as it did before, and an operator part
+    way through enrolment is never locked out of the account management they
+    already had. The moment an operator holds an active credential, the gate
+    becomes real for them, with no configuration change required.
+
+    A recovery-code session never satisfies this, however recently it
+    authenticated — see :func:`app.core.mfa.step_up_is_fresh`.
+    """
+    # ``off`` disables the gate outright, and it has to: with MFA off no
+    # ceremony can be started, so a gate that still demanded one would be
+    # unsatisfiable and would lock every enrolled administrator out of operator
+    # management. Rollback must actually restore the previous behaviour.
+    if mfa.enforcement_mode() == mfa.ENFORCEMENT_OFF:
+        return operator
+    if not await mfa.has_active_credential(db, operator.id):
+        return operator
+    if mfa.step_up_is_fresh(
+        _session_amr(operator), getattr(operator, "session_step_up_at", None)
+    ):
+        return operator
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "code": "step_up_required",
+            "message": (
+                "Re-authenticate with your security key to perform this operation."
+            ),
+        },
+    )
+
+
+async def require_mfa_verified(
+    operator: Operator = Depends(get_current_operator),
+    db: AsyncSession = Depends(get_db),
+) -> Operator:
+    """AuthZ: require that the session presented *some* second factor at login.
+
+    Weaker than :func:`require_step_up` by design, and used for the one
+    operation that must stay reachable after device loss: enrolling a
+    replacement authenticator. A recovery code satisfies this, which is what
+    makes the codes worth having; it does not satisfy step-up, which is what
+    stops them from being a full account takeover.
+    """
+    if mfa.enforcement_mode() == mfa.ENFORCEMENT_OFF:
+        return operator
+    if not await mfa.has_active_credential(db, operator.id):
+        return operator
+    if mfa.session_is_mfa_verified(_session_amr(operator)):
+        return operator
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "code": "mfa_verification_required",
+            "message": "Complete multi-factor authentication to perform this operation.",
+        },
+    )
 
 
 # Privilege ordering: a higher role satisfies any requirement at or below it.

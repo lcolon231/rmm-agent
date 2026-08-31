@@ -171,7 +171,17 @@ async def _provision(client: httpx.AsyncClient, cfg: SoakConfig, state: SoakStat
         json={"email": cfg.admin_email, "password": cfg.admin_password},
     )
     r.raise_for_status()
-    client.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
+    login = r.json()
+    if login.get("mfa_required"):
+        # The soak account must not require a second factor: the harness has no
+        # authenticator to present, and silently sending "Bearer None" would
+        # surface as a confusing 401 much later in the run (issue #67).
+        raise RuntimeError(
+            "The soak admin requires multi-factor authentication, which this "
+            "harness cannot complete. Use a synthetic account with no "
+            "registered authenticator, or run with MFA_ENFORCEMENT=off."
+        )
+    client.headers["Authorization"] = f"Bearer {login['access_token']}"
 
     # The workload deliberately exercises arbitrary shell execution. Role alone
     # is insufficient, so the dedicated synthetic admin explicitly grants its

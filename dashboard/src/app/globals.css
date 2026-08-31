@@ -3451,3 +3451,42 @@ textarea:focus-visible,
 .power-window-link { display: inline-flex; min-height: 30px; align-items: center; gap: 6px; padding: 0 11px; color: var(--blue); font-size: 9px; font-weight: 800; text-decoration: none; white-space: nowrap; background: #fff; border: 1px solid var(--line-strong); border-radius: 4px; }
 .power-window-link:hover { border-color: #9eb8d4; }
 .power-window-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* Multi-factor authentication: challenge and self-service key management (issue #67) */
+.login-secondary { display: block; width: 100%; margin-top: 10px; padding: 9px; color: var(--slate); font-size: 9px; font-weight: 700; background: transparent; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+.login-secondary:hover, .login-secondary:focus-visible { color: var(--ink); background: var(--paper); }
+.login-panel > button { display: inline-flex; width: 100%; min-height: 40px; align-items: center; justify-content: center; gap: 7px; color: white; font-size: 10px; font-weight: 800; background: var(--teal); border: 0; border-radius: 4px; cursor: pointer; }
+.login-panel > button:disabled { opacity: .55; cursor: not-allowed; }
+
+.mfa-settings { width: min(820px, 100%); padding: 23px; color: var(--ink); background: white; border: 1px solid var(--line); border-radius: 5px; box-shadow: var(--shadow); }
+.mfa-settings > header h1 { margin: 0 0 6px; font-size: 23px; letter-spacing: -.03em; }
+.mfa-settings > header p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.mfa-settings h2 { margin: 24px 0 8px; font-size: 11px; font-weight: 850; letter-spacing: .09em; text-transform: uppercase; color: var(--slate); }
+.mfa-settings > p { margin: 0 0 10px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.mfa-settings form { display: grid; gap: 6px; max-width: 380px; }
+.mfa-settings label { color: var(--slate); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.mfa-settings input { min-height: 36px; padding: 0 10px; font: inherit; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; }
+.mfa-settings button { display: inline-flex; min-height: 34px; align-items: center; gap: 6px; padding: 0 12px; color: white; font-size: 9px; font-weight: 800; background: var(--teal); border: 0; border-radius: 4px; cursor: pointer; }
+.mfa-settings button:disabled { opacity: .5; cursor: not-allowed; }
+
+.mfa-banner { display: flex; align-items: center; gap: 9px; margin: 12px 0; padding: 11px 13px; color: var(--slate); font-size: 10px; line-height: 1.6; background: var(--paper); border-left: 3px solid var(--slate); border-radius: 4px; }
+/* Amber, not red: every state that raises this banner is recoverable by the
+   operator on the same page, so it is a prompt, not a failure. */
+.mfa-banner-warning { display: block; color: #8a590f; background: var(--amber-soft); border-left-color: var(--amber); }
+.mfa-banner-warning p { margin: 0 0 9px; }
+.mfa-banner-warning button { background: var(--amber); }
+
+.mfa-credential-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.mfa-credential-list li { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 4px; }
+.mfa-credential-list strong { display: block; font-size: 12px; }
+.mfa-credential-list small { color: var(--muted); font-size: 9px; }
+.mfa-credential-actions { display: flex; flex-shrink: 0; gap: 6px; }
+.mfa-credential-actions button { color: var(--slate); background: white; border: 1px solid var(--line); }
+
+.mfa-recovery-codes { margin: 10px 0; padding: 14px; background: var(--ink-deep); border-radius: 5px; }
+.mfa-recovery-codes p { margin: 0 0 10px; color: #d8d3e6; font-size: 10px; line-height: 1.6; }
+.mfa-recovery-codes ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.mfa-recovery-codes code { display: block; padding: 7px; color: white; font-family: var(--mono, ui-monospace, monospace); font-size: 11px; letter-spacing: .06em; text-align: center; background: rgba(255, 255, 255, .08); border-radius: 3px; }
+
+@media (max-width: 640px) {
+  .mfa-credential-list li { flex-direction: column; align-items: stretch; }
+}

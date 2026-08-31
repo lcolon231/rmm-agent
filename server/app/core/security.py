@@ -93,8 +93,29 @@ def verify_token(token: str, token_hash: str) -> bool:
 # --------------------------------------------------------------------------- #
 # Dashboard JWTs (for human operators, Phase 2)
 # --------------------------------------------------------------------------- #
+# Token types. A token is only ever accepted by the surface that matches its
+# type, which is what keeps the half-authenticated state from being useful
+# anywhere except finishing the login it belongs to.
+TOKEN_TYPE_ACCESS = "access"
+TOKEN_TYPE_MFA_PENDING = "mfa_pending"
+
+# Authentication methods recorded in the `amr` claim (RFC 8176 spirit, not its
+# exact registry). These are the facts an authorization decision may rest on:
+# a password alone is not a second factor, a WebAuthn assertion is, and a
+# recovery code is a second factor that deliberately does not confer the
+# ability to reconfigure security settings (see app.core.mfa).
+AMR_PASSWORD = "pwd"
+AMR_WEBAUTHN = "webauthn"
+AMR_RECOVERY_CODE = "recovery_code"
+
+
 def create_access_token(
-    subject: str, generation: int = 0, expires_minutes: int | None = None
+    subject: str,
+    generation: int = 0,
+    expires_minutes: int | None = None,
+    *,
+    amr: tuple[str, ...] = (AMR_PASSWORD,),
+    step_up_at: datetime | None = None,
 ) -> str:
     """Mint a signed JWT for `subject`.
 
@@ -102,11 +123,47 @@ def create_access_token(
     compares it against the current DB value, so bumping the DB counter
     revokes every previously issued token at once (JWTs themselves are
     stateless and cannot be recalled individually).
+
+    `amr` records how the holder authenticated and `step_up_at` when they last
+    proved possession of a registered authenticator. Both are *signed* claims:
+    the server decides them at mint time from a verified ceremony, so a client
+    cannot assert a stronger authentication state than it actually reached.
     """
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=expires_minutes or settings.access_token_expire_minutes
     )
-    payload = {"sub": subject, "gen": generation, "exp": expire}
+    payload: dict = {
+        "sub": subject,
+        "gen": generation,
+        "exp": expire,
+        "typ": TOKEN_TYPE_ACCESS,
+        "amr": list(amr),
+    }
+    if step_up_at is not None:
+        payload["sua"] = int(step_up_at.timestamp())
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+
+
+def create_mfa_pending_token(
+    subject: str, generation: int = 0, expires_seconds: int | None = None
+) -> str:
+    """Mint the restricted token issued between password and second factor.
+
+    It carries a correct password and nothing more, so it is accepted *only* by
+    the MFA completion endpoints. Everything else in the app resolves an
+    operator through ``get_current_operator``, which refuses this type — that is
+    the single choke point that prevents a half-finished login from reading or
+    changing anything.
+    """
+    seconds = expires_seconds or settings.mfa_pending_token_ttl_seconds
+    expire = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    payload = {
+        "sub": subject,
+        "gen": generation,
+        "exp": expire,
+        "typ": TOKEN_TYPE_MFA_PENDING,
+        "amr": [AMR_PASSWORD],
+    }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
@@ -116,12 +173,47 @@ def decode_access_token(token: str) -> dict | None:
     Callers read `sub` (operator id) and `gen` (token generation). Tokens
     minted before the generation claim existed decode with gen defaulting to
     0, matching the column default, so they stay valid until the first bump.
+    Likewise a token minted before MFA existed carries no `typ` or `amr`;
+    :func:`token_type` and :func:`token_amr` supply the password-only defaults
+    that keep such a session valid until it expires on its own.
     """
     try:
         return jwt.decode(
             token, settings.secret_key, algorithms=[settings.jwt_algorithm]
         )
     except JWTError:
+        return None
+
+
+def token_type(claims: dict) -> str:
+    """Read the token type, defaulting to a full access token.
+
+    The default is what makes this change backward compatible: sessions issued
+    by the previous build have no `typ` and must keep working. It is safe
+    because the restricted type is the *new* one, so it is always explicit —
+    an attacker cannot gain privilege by omitting the claim, only by forging a
+    signature, which the JWT verification already prevents.
+    """
+    value = claims.get("typ")
+    return value if isinstance(value, str) else TOKEN_TYPE_ACCESS
+
+
+def token_amr(claims: dict) -> frozenset[str]:
+    """Read the authentication methods, defaulting to password-only."""
+    value = claims.get("amr")
+    if not isinstance(value, list):
+        return frozenset({AMR_PASSWORD})
+    return frozenset(item for item in value if isinstance(item, str))
+
+
+def token_step_up_at(claims: dict) -> datetime | None:
+    """Read when the session last proved possession of an authenticator."""
+    value = claims.get("sua")
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    try:
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
         return None
 
 
