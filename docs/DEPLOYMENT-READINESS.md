@@ -18,6 +18,7 @@ Statuses are:
 |---|---|---|
 | Outbound-only polling | Implemented | Agent initiates enroll, heartbeat/poll, and result requests |
 | Operator API authentication/RBAC | Implemented | Auth and authorization integration tests |
+| Operator multi-factor authentication | Implemented | Phishing-resistant WebAuthn with single-use purpose-bound challenges, signed `amr`/step-up session claims gating operator management and factor reconfiguration, bcrypt-hashed single-use recovery codes, and an admin-only step-up-gated device-loss reset. Staged `off`/`optional`/`required` enforcement with configuration-only rollback; 52 server tests drive real ES256/Ed25519 ceremonies (`docs/MFA.md`). Attestation is not verified, so authenticator provenance is unestablished; the second-factor rate limiter is process-local |
 | Signed command verification | Implemented | `command-v3`, negotiation, downgrade rejection, signed schema/time/nonce/key ID, and shared vectors; staged key rotation, compromise, and rollback via `scripts/rotate_command_key.py` with a rehearsed test suite and `docs/KEY-ROTATION.md` runbook |
 | Agent replay/expiry checks | Implemented | Signed time-window validation plus durable command-ID and nonce replay state |
 | Production TLS | Partial | Caddy topology documented; ENVIRONMENT=production fails startup on debug/placeholder-secret/missing-key/non-HTTPS-URL config and proxy trust is explicit opt-in; certificate lifecycle monitoring remains operator evidence |
@@ -42,6 +43,17 @@ link to reproducible evidence in the release or pilot record.
       signing keys, and non-HTTPS public URLs (ENVIRONMENT=production fails
       startup with every violation listed; covered by a configuration-matrix
       test).
+- [x] `PUBLIC_BASE_URL` is set and correct before any operator enrols a security
+      key. WebAuthn credentials are cryptographically scoped to the relying-party
+      ID derived from it, so changing the host afterwards silently invalidates
+      every registered credential and forces an administrative reset for every
+      operator. Set `MFA_RP_ID` explicitly to a registrable parent domain if the
+      deployment may later move between subdomains. An unresolvable relying party
+      fails closed (`503 mfa_not_configured`) rather than running under a guessed
+      scope (`docs/MFA.md`).
+- [x] `MFA_ALLOWED_ORIGINS` lists every origin the dashboard is served from and
+      nothing else. It is an exact-match allow-list with no wildcards, and it is
+      the boundary that makes the second factor phishing-resistant.
 - [ ] uvicorn is reachable only through the intended loopback/private proxy
       boundary.
 - [ ] TLS certificate issuance, renewal, expiration monitoring, and emergency

@@ -164,12 +164,20 @@ async def _publish_once() -> None:
 async def _retention_once() -> None:
     """Prune expired telemetry and command output, then log a warning if any
     storage class has breached its observability threshold (issue #114)."""
-    from app.core import retention
+    from app.core import mfa, retention
 
     async with AsyncSessionLocal() as db:
         result = await retention.prune_expired(db, settings)
+        # Spent and expired WebAuthn challenges (issue #67) carry no
+        # accountability value once they cannot be spent -- the audit chain
+        # already records every ceremony -- so unlike audit data they are
+        # deleted outright. Bounded per pass so one sweep cannot hold a long
+        # transaction open on a large backlog.
+        challenges_purged = await mfa.purge_expired_challenges(db)
         await db.commit()
         status = await retention.storage_status(db, settings)
+    if challenges_purged:
+        print(f"[retention] purged {challenges_purged} expired MFA challenge(s)")
     if result.heartbeats_deleted or result.command_outputs_cleared:
         print(
             f"[retention] pruned {result.heartbeats_deleted} heartbeat(s), "

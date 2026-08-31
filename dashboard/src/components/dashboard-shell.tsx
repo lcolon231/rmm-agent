@@ -73,6 +73,7 @@ const navItems = [
   { label: "Audit", icon: ShieldCheck, count: null, href: "/audit" },
   { label: "Administration", icon: Settings, count: null, href: "/enrollment" },
   { label: "Operators", icon: Users, count: null, href: "/operators", adminOnly: true },
+  { label: "Security keys", icon: KeyRound, count: null, href: "/security" },
 ];
 
 const statusLabels: Record<EndpointStatus, string> = {

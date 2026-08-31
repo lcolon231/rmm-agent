@@ -252,6 +252,17 @@ The code in this repository currently provides:
 - Operator password authentication, JWT sessions, three global roles, complete
   enrollment-token lifecycle management, transactional limited-use redemption,
   token/agent revocation, and in-process login/enrollment throttling.
+- Phishing-resistant WebAuthn multi-factor authentication for operators
+  (`docs/MFA.md`). A correct password alone yields a restricted token accepted
+  only by the MFA completion endpoints; challenges are single-use and bound to
+  one operator and one ceremony; sessions carry signed authentication-method and
+  step-up claims that gate operator management and any change to the caller's
+  own factors. Device naming and revocation, bcrypt-hashed single-use recovery
+  codes that restore access and permit re-enrolment but never satisfy step-up,
+  and an admin-only step-up-gated reset for device loss are all audited.
+  Enforcement stages through `off`/`optional`/`required`, and rolling back is a
+  configuration change rather than a migration. Attestation is deliberately not
+  verified, so this establishes no authenticator provenance.
 - Client and site records, agent listing, command dispatch/history APIs, and an
   offline-status sweeper.
 - Agent quarantine/restore (operator) and terminal revocation (admin) with
@@ -449,11 +460,17 @@ The repository does **not** currently contain:
   certificate-based signing is
   missing). External audit-anchor publication ships (`docs/AUDIT-ANCHORING.md`)
   but the operator must configure and operate the destination.
-- Tenant-specific retention, MFA, WebAuthn, OIDC/SAML, or legal hold.
+- Tenant-specific retention, OIDC/SAML federation, or legal hold.
   Tenant-scoped authorization with per-tenant roles
   (`docs/TENANT-AUTHORIZATION.md`) and signed compliance evidence exports
   (`docs/EVIDENCE-PACKAGES.md`) are implemented server side; the membership
   administration UI is not.
+- Authenticator attestation or FIDO metadata verification. Phishing-resistant
+  WebAuthn multi-factor authentication for dashboard operators *is* implemented
+  — enrolment, single-use challenges, device naming and revocation, step-up for
+  sensitive operations, and audited recovery (`docs/MFA.md`) — but registration
+  requests `attestation: "none"`, so the server binds a credential to its
+  ceremony without establishing authenticator make, model, or certification.
 
 ## Architecture at a glance
 

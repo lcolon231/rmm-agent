@@ -308,7 +308,18 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   revocation). See [`TENANT-AUTHORIZATION.md`](TENANT-AUTHORIZATION.md). The
   dashboard membership-management UI is a follow-up (backend already filters
   responses per tenant).
-- Add MFA, WebAuthn, federation, break-glass accounts, and administrative
+- **Delivered (issue #67):** phishing-resistant WebAuthn multi-factor
+  authentication. A correct password yields only a restricted token accepted by
+  the MFA completion endpoints; challenges are single-use and purpose-bound;
+  sessions carry signed authentication-method and step-up claims that gate
+  operator-management and factor-reconfiguration operations; recovery codes
+  restore access and permit re-enrolment but never satisfy step-up; enforcement
+  stages through `off`/`optional`/`required` with configuration-only rollback.
+  The trust boundary this does *not* move: registration requests
+  `attestation: "none"`, so authenticator make, model, and certification are not
+  established and no hardware-provenance claim rests on it. See
+  [`MFA.md`](MFA.md).
+- Add OIDC/SAML federation, break-glass accounts, and administrative
   session policy.
 - Implement approval and two-person authorization for sensitive operations;
   emergency override must require justification and produce prominent evidence.

@@ -429,8 +429,18 @@ class Operator(Base):
     # under; bumping this immediately invalidates all outstanding tokens for
     # this operator (logout-everywhere / revocation after a suspected leak).
     token_generation: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # When this operator last generated a recovery-code batch (issue #67).
+    # Enrollment state itself is not duplicated here — it is derived from the
+    # operator's un-revoked webauthn_credentials rows, so there is exactly one
+    # source of truth for "does this person have a second factor".
+    mfa_recovery_codes_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
+    webauthn_credentials: Mapped[list["WebAuthnCredential"]] = relationship(
+        back_populates="operator", cascade="all, delete-orphan"
+    )
     client_memberships: Mapped[list["OperatorClientMembership"]] = relationship(
         back_populates="operator", cascade="all, delete-orphan"
     )
@@ -2235,3 +2245,148 @@ class AgentUpdateAttempt(Base):
     reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     release: Mapped["AgentUpdateRelease"] = relationship(back_populates="attempts")
+
+
+# --------------------------------------------------------------------------- #
+# Multi-factor authentication (issue #67)
+# --------------------------------------------------------------------------- #
+class WebAuthnChallengePurpose(str, enum.Enum):
+    """Which ceremony a challenge was minted for.
+
+    The purpose is bound to the stored row and re-checked on consumption, so a
+    challenge issued to add a device can never be spent to complete a login or
+    to satisfy a step-up. Without this, the three ceremonies would share one
+    replay pool and the weakest entry point would set the bar for all of them.
+    """
+
+    registration = "registration"
+    authentication = "authentication"
+    step_up = "step_up"
+
+
+class WebAuthnCredential(Base):
+    """One registered authenticator belonging to one operator.
+
+    Nothing here is a secret: a WebAuthn credential is a public key, and the
+    private half never leaves the authenticator. That is the property that makes
+    this factor phishing-resistant and also means a database disclosure cannot
+    be replayed as a login, unlike a shared TOTP seed.
+
+    Revocation is a tombstone (``revoked_at``) rather than a delete so the audit
+    trail keeps pointing at a row that still exists. A revoked credential is
+    excluded from every authentication path by the same predicate everywhere:
+    ``revoked_at IS NULL``.
+    """
+
+    __tablename__ = "webauthn_credentials"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # base64url of the raw credential ID. Unique across all operators: an
+    # authenticator must never resolve to two identities.
+    credential_id: Mapped[str] = mapped_column(
+        String(1400), nullable=False, unique=True, index=True
+    )
+    # base64url of the COSE-encoded public key, stored exactly as the
+    # authenticator emitted it so verification is byte-reproducible.
+    public_key_cose: Mapped[str] = mapped_column(Text, nullable=False)
+    algorithm: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Authenticator signature counter. BigInteger because the field is a 32-bit
+    # unsigned value and Integer is signed on some backends.
+    sign_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    aaguid: Mapped[str] = mapped_column(String(36), nullable=False, default="")
+    # Operator-supplied label ("YubiKey 5C", "work laptop"). Free text, so it is
+    # digested rather than stored verbatim in audit detail.
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    transports: Mapped[str | None] = mapped_column(String(120))
+    attestation_format: Mapped[str] = mapped_column(String(32), nullable=False, default="none")
+    # Whether the credential may be, and currently is, backed up (synced
+    # passkey). Recorded because a synced credential has a different recovery
+    # and blast-radius story than a hardware-bound one, and reviewers ask.
+    backup_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    backup_state: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Coded, non-secret reason (e.g. operator_revoked, admin_reset).
+    revoked_reason: Mapped[str | None] = mapped_column(String(64))
+
+    operator: Mapped["Operator"] = relationship(back_populates="webauthn_credentials")
+
+    __table_args__ = (
+        Index("ix_webauthn_credentials_operator_active", "operator_id", "revoked_at"),
+    )
+
+
+class WebAuthnChallenge(Base):
+    """A single-use, expiring challenge for one operator and one ceremony.
+
+    Replay protection lives here rather than in the verification module: the
+    challenge row is the only thing that can distinguish a first use from a
+    second, and only the database can make that decision atomically. Consumption
+    marks ``consumed_at`` in the same transaction that verifies the ceremony, so
+    a replayed response finds a spent row and is refused.
+    """
+
+    __tablename__ = "webauthn_challenges"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    purpose: Mapped[WebAuthnChallengePurpose] = mapped_column(
+        Enum(
+            WebAuthnChallengePurpose,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    # base64url of the 32 random bytes. Unique so a collision, however
+    # improbable, is a database error rather than an ambiguous lookup.
+    challenge: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # The RP ID and origin in force when the challenge was minted. Re-checked at
+    # consumption so a mid-ceremony configuration change cannot be used to widen
+    # the scope a response is accepted under.
+    rp_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_webauthn_challenges_operator_purpose", "operator_id", "purpose"),
+        Index("ix_webauthn_challenges_expires_at", "expires_at"),
+    )
+
+
+class MfaRecoveryCode(Base):
+    """One single-use recovery code, stored only as a hash.
+
+    Recovery codes are the deliberate weak point of any MFA design: they are
+    bearer secrets a human can copy, so they get the strong storage treatment
+    (bcrypt, like passwords — not the single SHA-256 pass used for high-entropy
+    machine tokens) and the loudest audit trail. ``batch_id`` exists so
+    regenerating codes invalidates the previous set as one reviewable unit.
+    """
+
+    __tablename__ = "mfa_recovery_codes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_mfa_recovery_codes_operator_used", "operator_id", "used_at"),
+    )

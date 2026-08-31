@@ -47,6 +47,8 @@ config.json
 *.sqlite
 *.sqlite3
 *.db
+# SQLite rollback journals from interrupted test runs.
+*.db-journal
 
 # ---- IDE / OS ----
 .idea/

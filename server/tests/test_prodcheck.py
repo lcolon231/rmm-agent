@@ -153,10 +153,46 @@ def test_all_violations_collected_in_one_error(tmp_path):
     )
     with pytest.raises(ProductionConfigError) as exc:
         ensure_safe_production_config(s)
-    assert len(exc.value.problems) == 4
+    # Five, not four: a plain-HTTP public URL is also an unsafe WebAuthn origin
+    # (issue #67), and it is reported separately because the fix is different --
+    # the origin allow-list is what makes the second factor phishing-resistant.
+    assert len(exc.value.problems) == 5
     # The message an operator sees lists every problem at once.
-    for fragment in ("DEBUG", "SECRET_KEY", "PUBLIC_BASE_URL", "COMMAND_SIGNING_KEY_PATH"):
+    for fragment in (
+        "DEBUG",
+        "SECRET_KEY",
+        "PUBLIC_BASE_URL",
+        "COMMAND_SIGNING_KEY_PATH",
+        "MFA_ALLOWED_ORIGINS",
+    ):
         assert fragment in str(exc.value)
+
+
+def test_production_refuses_to_start_with_mfa_enabled_and_no_relying_party(tmp_path):
+    """A deployment that intends to run MFA must be able to state its scope.
+
+    Caught at startup rather than at the first ceremony, so a misconfiguration
+    is a refused boot instead of credentials registered under a guessed scope.
+    """
+    s = make_settings(tmp_path, public_base_url=None, mfa_enforcement="required")
+    found = production_config_problems(s)
+    assert any("MFA is enabled but misconfigured" in p for p in found)
+
+    # Naming the relying party explicitly satisfies it without a public base URL.
+    s = make_settings(
+        tmp_path,
+        public_base_url=None,
+        mfa_enforcement="required",
+        mfa_rp_id="rmm.example.com",
+        mfa_allowed_origins="https://rmm.example.com",
+    )
+    assert not any("MFA" in p for p in production_config_problems(s))
+
+
+def test_turning_mfa_off_removes_its_startup_requirement(tmp_path):
+    """`off` is the documented rollback position and must not block a boot."""
+    s = make_settings(tmp_path, public_base_url=None, mfa_enforcement="off")
+    assert not any("MFA" in p for p in production_config_problems(s))
 
 
 # --------------------------------------------------------------------------- #

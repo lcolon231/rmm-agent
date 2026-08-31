@@ -728,6 +728,66 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "client_id",
     ),
     "operator.tokens_revoked": _schema("operator_id", "by"),
+    # --- Multi-factor authentication (issue #67) ---
+    # Nothing in this group may carry a credential. Device names are
+    # operator-controlled prose and are digested; recovery codes never appear at
+    # all, not even as a digest, because a digest of a low-cardinality human
+    # secret is itself an offline attack surface. ``credential_id`` throughout
+    # is the credential *row* id (a UUID we mint), never the WebAuthn credential
+    # identifier the authenticator produced.
+    "mfa.second_factor_required": _schema(
+        "operator_id", "enrollment_required", "methods"
+    ),
+    "mfa.credential_registered": _schema(
+        "operator_id",
+        "credential_id",
+        "name",
+        "algorithm",
+        "aaguid",
+        "attestation_format",
+        "backup_eligible",
+        digest_fields=("name",),
+    ),
+    "mfa.credential_renamed": _schema(
+        "operator_id",
+        "credential_id",
+        "previous_name",
+        "new_name",
+        digest_fields=("previous_name", "new_name"),
+    ),
+    "mfa.credential_revoked": _schema(
+        "operator_id",
+        "credential_id",
+        "name",
+        "reason",
+        "by",
+        digest_fields=("name", "reason"),
+    ),
+    # Coded, non-secret ceremony outcome. ``reason`` is a WebAuthnError code
+    # (e.g. origin_mismatch, sign_count_regressed) — it names the rule that
+    # refused the ceremony and never the value that failed it.
+    "mfa.authentication_failed": _schema("operator_id", "method", "reason"),
+    "mfa.authentication_succeeded": _schema(
+        "operator_id", "credential_id", "method", "purpose"
+    ),
+    "mfa.step_up_succeeded": _schema("operator_id", "credential_id"),
+    # The batch id correlates a generation with the codes later spent from it.
+    # It is a server-minted identifier, not derived from any code.
+    "mfa.recovery_codes_generated": _schema(
+        "operator_id", "batch_id", "code_count"
+    ),
+    # Deliberately records only that a code was spent and how many remain. Which
+    # code was used is not recorded: it would narrow the search space for the
+    # remaining ones if the audit log were ever disclosed.
+    "mfa.recovery_code_used": _schema("operator_id", "codes_remaining"),
+    "mfa.reset": _schema(
+        "operator_id",
+        "credentials_revoked",
+        "recovery_codes_invalidated",
+        "reason",
+        "by",
+        digest_fields=("reason",),
+    ),
     "scheduled_task.created": _schema(
         "scheduled_task_id",
         "name",
