@@ -103,7 +103,13 @@ fail authentication with the same response as an unknown token; terminal —
 the endpoint must re-enroll as a new identity). Quarantine/restore require the
 operator role; revocation requires admin. Every transition demands a reason
 and is audited, and revocation expires the agent's outstanding queued and
-dispatched commands.
+dispatched commands. Finite agent bearers rotate at their lifetime midpoint.
+An active agent powered off across expiry may rotate through a dedicated,
+configurably bounded reattach path while the expired bearer still matches its
+current token slot. That path takes a row lock, refuses quarantined/revoked
+agents with the same 401 as unknown or too-old credentials, and records
+`agent.credential_reattached` rather than enrollment or routine-renewal audit
+evidence.
 
 Signing-key rotation is an operator-run workflow (`scripts/rotate_command_key.py`
 with the `docs/KEY-ROTATION.md` runbook): staged active/overlap/retired
@@ -531,6 +537,8 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/auth/revoke-tokens` | Revoke caller sessions | Readonly+ |
 | POST | `/auth/operators/{id}/revoke-tokens` | Revoke operator sessions | Admin |
 | POST | `/enroll` | Enroll with site token | Enrollment token |
+| POST | `/agents/credentials/renew` | Rotate a live agent bearer with response-loss overlap | Agent token |
+| POST | `/agents/credentials/reattach` | Bounded active-only recovery of a still-current expired bearer | Lapsed agent token within configured window |
 | POST | `/heartbeat` | Store telemetry, report the running agent version, advertise inventory hashes, poll commands | Agent token |
 | POST | `/agents/me/inventory` | Submit requested inventory sections | Agent token |
 | POST | `/agents/me/monitoring/results` | Submit revision-pinned idempotent check results | Agent token |

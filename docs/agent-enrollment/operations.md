@@ -11,6 +11,9 @@ Existing server variables remain required. Enrollment adds:
 | `ENROLLMENT_TOKEN_DEFAULT_EXPIRY_HOURS` | `24` | API default expiry |
 | `ENROLLMENT_TOKEN_MAX_EXPIRY_DAYS` | `30` | Administrator cap |
 | `ENROLLMENT_TOKEN_MAX_USES` | `100` | Reusable-token cap |
+| `AGENT_CREDENTIAL_LIFETIME_SECONDS` | `86400` | Lifetime of an issued agent bearer |
+| `AGENT_CREDENTIAL_OVERLAP_SECONDS` | `600` | Response-loss retry window after rotation/reattach |
+| `AGENT_CREDENTIAL_REATTACH_WINDOW_SECONDS` | `2592000` | Maximum lapse after expiry in which an active agent's still-current bearer may reattach; `0` disables, hard maximum one year |
 
 Also configure `ENVIRONMENT`, `DEBUG`, `DATABASE_URL`, `SECRET_KEY`,
 `PUBLIC_BASE_URL`, command signing key/keyring, heartbeat policy, and optional
@@ -102,7 +105,7 @@ Alert on:
 - sustained enrollment failures/rate limiting;
 - unexpected reusable token creation;
 - active tokens near maximum expiry;
-- repeated agent revocation/renewal;
+- repeated agent revocation, renewal, or credential reattachment;
 - readiness failures;
 - external audit-anchor lag;
 - sudden offline-agent increase.

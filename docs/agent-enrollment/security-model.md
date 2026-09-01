@@ -69,11 +69,24 @@ credential. The database stores:
 The plaintext is returned only in enrollment or renewal response and persisted
 by the agent's protected identity layer. It is never shared across agents.
 
-Bearer credentials remain an interim architecture decision. Current
-credentials have no configured expiry, and automatic renewal is disabled until
-loss-safe proof-of-possession renewal exists. The target is an agent-generated
-private key with server-signed short-lived credentials; private keys must never
-leave endpoints.
+Bearer credentials remain an interim architecture decision. They have a finite
+configured lifetime and the agent normally rotates at the midpoint. Rotation
+keeps the just-superseded bearer in a short overlap slot, allowing a lost
+response or failed local persist to retry before the agent adopts the new token.
+
+An active endpoint powered off across expiry can use a dedicated bounded
+reattach endpoint while its expired bearer still matches the current token
+slot. The default window is 30 days, is configurable down to zero, and has a
+one-year configuration ceiling. Ordinary endpoints continue to reject the
+expired bearer. Reattach rotates immediately, uses the same response-loss
+overlap, and is audited as `agent.credential_reattached`, distinct from
+enrollment and routine `agent.credential_renewed` events.
+
+The bearer is still the endpoint's only proof of possession; command public
+keys in `identity.json` belong to the server and cannot authenticate the
+endpoint. A future agent-generated private key with server-signed short-lived
+credentials would strengthen this boundary, but is not part of bounded
+reattach.
 
 ## Revocation and rotation
 
@@ -81,9 +94,13 @@ Token revocation prevents future redemption but does not affect agents already
 issued unique credentials. Agent revocation makes its credential authenticate
 the same as an unknown credential and expires outstanding commands.
 
-The renewal endpoint replaces the stored verifier atomically; the old bearer
-credential immediately fails. This endpoint is a server foundation, not yet an
-automatic agent workflow.
+Renewal and reattach replace the stored verifier atomically and retain the held
+bearer only for the short response-loss overlap. Revoked agents authenticate
+identically to unknown credentials. Quarantined agents may continue their
+existing bare-heartbeat behavior while a credential is valid, but cannot obtain
+a credential through reattach. Unknown, outside-window, quarantined, revoked,
+and overlapped-out reattach attempts all return the same `401 Invalid agent
+token`; the endpoint is not a credential-state oracle.
 
 ## Rate limiting
 
@@ -104,7 +121,7 @@ application port is reachable exclusively from the trusted proxy.
 ## Audit and redaction
 
 Recorded events include token creation/revocation, enrollment success/failure,
-credential renewal, and agent revocation. Query columns are duplicated into
+credential renewal/reattachment, and agent revocation. Query columns are duplicated into
 hash-bound event detail so changing actor/token/organization/source references
 breaks verification.
 
@@ -152,10 +169,11 @@ client-visible configuration.
 See `open-issues.md`. The highest-priority residual risks are:
 
 - global roles and no tenant membership;
-- bearer credentials without expiry/proof-of-possession;
+- bearer credentials without independent device proof-of-possession;
 - process-local rate limiting/metrics;
 - unsupported native keychain on Linux/macOS;
 - unsigned Windows installer;
 - no device attestation or duplicate-hostname identity policy;
-- no loss-safe automatic renewal;
+- bounded reattach still treats possession of the endpoint bearer as possession
+  of the enrolled identity;
 - operational TLS/backup/anchor configuration remains administrator-owned.
