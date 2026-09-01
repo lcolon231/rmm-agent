@@ -471,6 +471,17 @@ The repository does **not** currently contain:
   sensitive operations, and audited recovery (`docs/MFA.md`) — but registration
   requests `attestation: "none"`, so the server binds a credential to its
   ceremony without establishing authenticator make, model, or certification.
+- Server-side operator sessions with inventory, individual revocation, device
+  context, and independent idle and absolute lifetimes, plus pre-provisioned
+  break-glass emergency credentials (`docs/ADMIN-SESSIONS.md`). A session is a
+  row bound to a signed claim, so revoking one takes effect on its next request
+  instead of when its token would have expired. Break-glass is the deliberate
+  MFA exception for the case where the authentication controls fail closed on
+  the operator: an offline-usable sealed credential bound to a dedicated
+  identity, opening a short marked session that is audited and must be reviewed,
+  and that cannot provision further emergency access. A stolen envelope is a
+  full compromise, bounded by time, noise, and rotation rather than by a second
+  factor.
 
 ## Architecture at a glance
 

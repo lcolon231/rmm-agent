@@ -319,8 +319,18 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   `attestation: "none"`, so authenticator make, model, and certification are not
   established and no hardware-provenance claim rests on it. See
   [`MFA.md`](MFA.md).
-- Add OIDC/SAML federation, break-glass accounts, and administrative
-  session policy.
+- **Delivered (issue #69):** administrative session management and break-glass
+  access. Sessions are server-side rows bound to a signed `sid` claim, so they
+  can be inventoried with device context and revoked individually; absolute and
+  idle ceilings bound each one and a lapsed session is refused on read rather
+  than by a sweeper. Break-glass provides pre-provisioned, offline-usable
+  emergency credentials bound to dedicated identities, opening short marked
+  sessions that are audited and must be reviewed, and that cannot provision
+  further emergency access. The trust boundary this does *not* move: a stolen
+  sealed envelope is a full compromise, bounded by time, noise, and rotation
+  rather than by a second factor -- which is precisely what it exists to
+  survive. See [`ADMIN-SESSIONS.md`](ADMIN-SESSIONS.md).
+- Add OIDC/SAML federation.
 - Implement approval and two-person authorization for sensitive operations;
   emergency override must require justification and produce prominent evidence.
 - **Implemented (issues #79/#80).** A single-tenant, versioned,

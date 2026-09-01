@@ -728,6 +728,64 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "client_id",
     ),
     "operator.tokens_revoked": _schema("operator_id", "by"),
+    # --- Administrative sessions and break-glass (issue #69) ---
+    # `session_id` throughout is the session row id, which the owner already
+    # holds; it is not a credential and cannot be presented as one. Free-form
+    # reasons and review notes are digest-only. Break-glass credentials never
+    # appear in any form -- only the domain-separated, non-authenticating
+    # fingerprint, which is what lets a reviewer match an event to a sealed
+    # envelope without the event carrying anything that could open it.
+    "operator.session_started": _schema(
+        "operator_id", "session_id", "auth_methods", "break_glass"
+    ),
+    "operator.session_revoked": _schema(
+        "operator_id",
+        "session_id",
+        "by",
+        "reason",
+        "session_count",
+        digest_fields=("reason",),
+    ),
+    "break_glass.account_created": _schema(
+        "account_id",
+        "operator_id",
+        "label",
+        "credential_fingerprint",
+        "reason",
+        digest_fields=("label", "reason"),
+    ),
+    "break_glass.credential_rotated": _schema(
+        "account_id",
+        "label",
+        "previous_fingerprint",
+        "credential_fingerprint",
+        "reason",
+        digest_fields=("label", "reason"),
+    ),
+    "break_glass.account_state_changed": _schema(
+        "account_id",
+        "label",
+        "disabled",
+        "reason",
+        digest_fields=("label", "reason"),
+    ),
+    # The loudest event in the system. Everything needed to investigate is
+    # here; nothing that could be replayed to repeat the activation is.
+    "break_glass.activated": _schema(
+        "account_id",
+        "activation_id",
+        "operator_id",
+        "session_id",
+        "label",
+        "credential_fingerprint",
+        "reason",
+        digest_fields=("label", "reason"),
+    ),
+    # Coded, non-secret refusal. Never echoes the submitted credential.
+    "break_glass.activation_failed": _schema("reason"),
+    "break_glass.activation_reviewed": _schema(
+        "activation_id", "account_id", "note", digest_fields=("note",)
+    ),
     # --- Multi-factor authentication (issue #67) ---
     # Nothing in this group may carry a credential. Device names are
     # operator-controlled prose and are digested; recovery codes never appear at

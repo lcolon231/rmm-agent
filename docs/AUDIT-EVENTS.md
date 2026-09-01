@@ -133,6 +133,14 @@ and SHA-256/Merkle roots—remains readable.
 | `operator.role_changed` | `api/auth.py` global-role change | `operator_id`, `previous_role`, `new_role`, `script_permission_revoked`, `reason_sha256`, `reason_bytes` |
 | `operator.status_changed` | `api/auth.py` disable/re-enable | `operator_id`, `previous_disabled`, `new_disabled`, `reason_sha256`, `reason_bytes` |
 | `operator.tokens_revoked` | `api/auth.py` token-generation bump | `operator_id`, `by` |
+| `operator.session_started` | `api/auth.py` sign-in opening a tracked session (#69) | `operator_id`, `session_id`, `auth_methods`, `break_glass` |
+| `operator.session_revoked` | `api/admin_sessions.py` self, other-devices, or administrative session revocation (#69) | `operator_id`, `session_id`, `by`, `reason_sha256`, `reason_bytes`, `session_count` |
+| `break_glass.account_created` | `api/admin_sessions.py` emergency credential provisioned (#69); the credential itself is never recorded | `account_id`, `operator_id`, `label_sha256`, `label_bytes`, `credential_fingerprint`, `reason_sha256`, `reason_bytes` |
+| `break_glass.credential_rotated` | `api/admin_sessions.py` emergency credential rotated (#69) | `account_id`, `label_sha256`, `label_bytes`, `previous_fingerprint`, `credential_fingerprint`, `reason_sha256`, `reason_bytes` |
+| `break_glass.account_state_changed` | `api/admin_sessions.py` emergency credential disabled or re-enabled (#69) | `account_id`, `label_sha256`, `label_bytes`, `disabled`, `reason_sha256`, `reason_bytes` |
+| `break_glass.activated` | `api/admin_sessions.py` emergency access used (#69) — the loudest event in the system | `account_id`, `activation_id`, `operator_id`, `session_id`, `label_sha256`, `label_bytes`, `credential_fingerprint`, `reason_sha256`, `reason_bytes` |
+| `break_glass.activation_failed` | `api/admin_sessions.py` refused activation (#69); `reason` is a coded value, never the submitted credential | `reason` |
+| `break_glass.activation_reviewed` | `api/admin_sessions.py` activation signed off (#69) | `activation_id`, `account_id`, `note_sha256`, `note_bytes` |
 | `operator.tenant_membership_granted` | `api/auth.py` client-membership grant (#66) | `operator_id`, `client_id`, `previous_role`, `new_role`, `reason_sha256`, `reason_bytes` |
 | `operator.tenant_membership_revoked` | `api/auth.py` client-membership revoke (#66) | `operator_id`, `client_id`, `previous_role`, `reason_sha256`, `reason_bytes` |
 | `operator.platform_admin_changed` | `api/auth.py` platform-admin toggle (#66) | `operator_id`, `previous`, `new`, `reason_sha256`, `reason_bytes` |

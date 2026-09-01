@@ -8,7 +8,8 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import mfa
+from app.core import mfa, sessions
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import (
     TOKEN_TYPE_ACCESS,
@@ -16,6 +17,7 @@ from app.core.security import (
     decode_access_token,
     hash_token,
     token_amr,
+    token_session_id,
     token_step_up_at,
     token_type,
 )
@@ -139,6 +141,53 @@ async def _operator_for_claims(db: AsyncSession, claims: dict) -> Operator:
     # below, so an MFA decision never has to re-parse the token.
     operator.session_amr = token_amr(claims)
     operator.session_step_up_at = token_step_up_at(claims)
+    operator.session_record = None
+    return operator
+
+
+async def _bind_session(
+    db: AsyncSession, operator: Operator, claims: dict
+) -> Operator:
+    """Attach and validate the server-side session behind an access token (#69).
+
+    Three cases, and the middle one is the compatibility decision worth reading:
+
+    1. **A `sid` that resolves to a live session.** The normal path. Revocation,
+       idle timeout, and the absolute ceiling are all enforced here, so they
+       take effect on the very next request rather than whenever a token
+       happens to expire.
+    2. **No `sid` at all.** The token predates server-side sessions. Accepted
+       while ``ADMIN_SESSION_ACCEPT_LEGACY_TOKENS`` is on, so deploying this
+       does not sign the whole fleet out mid-shift. Such a session is
+       *unmanaged*: it never appears in an inventory and cannot be revoked
+       individually. It is still bounded -- the JWT expiry caps it within the
+       access-token lifetime, and a ``token_generation`` bump still kills it --
+       and the flag exists so a deployment that would rather force
+       re-authentication can refuse them outright.
+    3. **A `sid` that does not resolve.** Revoked, expired, idle, or simply not
+       this operator's. Always the same opaque 401: a coded reason would tell a
+       holder of a stale token which of those it was.
+    """
+    session_id = token_session_id(claims)
+    if session_id is None:
+        if settings.admin_session_accept_legacy_tokens:
+            return operator
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
+    session, rejection = await sessions.resolve(db, session_id, operator)
+    if session is None:
+        # Commit the terminal marking sessions.resolve may have written, so the
+        # inventory records why this session ended even though the request that
+        # discovered it is about to fail.
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+    operator.session_record = session
     return operator
 
 
@@ -163,7 +212,8 @@ async def get_current_operator(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         )
-    return await _operator_for_claims(db, claims)
+    operator = await _operator_for_claims(db, claims)
+    return await _bind_session(db, operator, claims)
 
 
 async def get_mfa_pending_operator(

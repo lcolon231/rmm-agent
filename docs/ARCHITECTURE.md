@@ -130,6 +130,20 @@ rollback is a configuration change, not a schema change. Registered credentials
 are public keys and recovery codes are bcrypt hashes, so a database disclosure
 yields no replayable second factor.
 
+Operator sessions are tracked server side (issue #69, `docs/ADMIN-SESSIONS.md`).
+A token carries its session id in a signed `sid` claim and every authenticated
+request re-checks the row, so revocation is immediate and individual rather than
+only in bulk, and an operator can see where their account is signed in from. Two
+independent ceilings bound a session -- an absolute wall set at sign-in that
+refresh can never move, and an idle timeout evaluated against a
+bounded-write `last_seen_at` -- and a lapsed session is refused by the request
+that presents it rather than by a sweeper. Break-glass credentials are the
+deliberate exception to MFA: a pre-provisioned, offline-usable secret bound to a
+dedicated identity with an unusable password hash, opening a one-hour marked
+session that is audited and must be reviewed. An emergency session may act but
+may not create or rotate break-glass credentials, so one stolen envelope cannot
+become a permanent foothold.
+
 ### 3.2 Operations plane
 
 The operations plane delivers endpoint state and actions. It currently contains

@@ -107,6 +107,10 @@ TOKEN_TYPE_MFA_PENDING = "mfa_pending"
 AMR_PASSWORD = "pwd"
 AMR_WEBAUTHN = "webauthn"
 AMR_RECOVERY_CODE = "recovery_code"
+#: A session opened by activating a break-glass credential (issue #69). It is
+#: deliberately NOT a second factor: it bypassed MFA, which is the whole point,
+#: so it satisfies neither `session_is_mfa_verified` nor `step_up_is_fresh`.
+AMR_BREAK_GLASS = "break_glass"
 
 
 def create_access_token(
@@ -116,6 +120,7 @@ def create_access_token(
     *,
     amr: tuple[str, ...] = (AMR_PASSWORD,),
     step_up_at: datetime | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Mint a signed JWT for `subject`.
 
@@ -128,6 +133,11 @@ def create_access_token(
     proved possession of a registered authenticator. Both are *signed* claims:
     the server decides them at mint time from a verified ceremony, so a client
     cannot assert a stronger authentication state than it actually reached.
+
+    `session_id` binds the token to a server-side session row (issue #69), which
+    is what makes a session inventoryable and individually revocable. It is
+    signed for the same reason as the rest: a client that could choose its own
+    `sid` could point at somebody else's session.
     """
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=expires_minutes or settings.access_token_expire_minutes
@@ -139,6 +149,8 @@ def create_access_token(
         "typ": TOKEN_TYPE_ACCESS,
         "amr": list(amr),
     }
+    if session_id is not None:
+        payload["sid"] = session_id
     if step_up_at is not None:
         payload["sua"] = int(step_up_at.timestamp())
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
@@ -204,6 +216,17 @@ def token_amr(claims: dict) -> frozenset[str]:
     if not isinstance(value, list):
         return frozenset({AMR_PASSWORD})
     return frozenset(item for item in value if isinstance(item, str))
+
+
+def token_session_id(claims: dict) -> str | None:
+    """Read the bound session id, or None for a pre-#69 token.
+
+    None is not an error: it means the token predates server-side sessions and
+    is handled by the legacy path in ``app.api.deps``, which decides whether an
+    unmanaged session is still acceptable.
+    """
+    value = claims.get("sid")
+    return value if isinstance(value, str) and value else None
 
 
 def token_step_up_at(claims: dict) -> datetime | None:
