@@ -728,6 +728,16 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "client_id",
     ),
     "operator.tokens_revoked": _schema("operator_id", "by"),
+    # Out-of-band reset from scripts/reset_password.py. Counts only: the new
+    # credential, and whether the old one was ever known, are never recorded.
+    "operator.password_reset": _schema(
+        "operator_id",
+        "sessions_revoked",
+        "mfa_reset",
+        "credentials_revoked",
+        "recovery_codes_invalidated",
+        "by",
+    ),
     # --- Administrative sessions and break-glass (issue #69) ---
     # `session_id` throughout is the session row id, which the owner already
     # holds; it is not a credential and cannot be presented as one. Free-form

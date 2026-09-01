@@ -133,6 +133,7 @@ and SHA-256/Merkle roots—remains readable.
 | `operator.role_changed` | `api/auth.py` global-role change | `operator_id`, `previous_role`, `new_role`, `script_permission_revoked`, `reason_sha256`, `reason_bytes` |
 | `operator.status_changed` | `api/auth.py` disable/re-enable | `operator_id`, `previous_disabled`, `new_disabled`, `reason_sha256`, `reason_bytes` |
 | `operator.tokens_revoked` | `api/auth.py` token-generation bump | `operator_id`, `by` |
+| `operator.password_reset` | `core/password_reset.py` out-of-band reset via `scripts/reset_password.py` | `operator_id`, `sessions_revoked`, `mfa_reset`, `credentials_revoked`, `recovery_codes_invalidated`, `by` |
 | `operator.session_started` | `api/auth.py` sign-in opening a tracked session (#69) | `operator_id`, `session_id`, `auth_methods`, `break_glass` |
 | `operator.session_revoked` | `api/admin_sessions.py` self, other-devices, or administrative session revocation (#69) | `operator_id`, `session_id`, `by`, `reason_sha256`, `reason_bytes`, `session_count` |
 | `break_glass.account_created` | `api/admin_sessions.py` emergency credential provisioned (#69); the credential itself is never recorded | `account_id`, `operator_id`, `label_sha256`, `label_bytes`, `credential_fingerprint`, `reason_sha256`, `reason_bytes` |

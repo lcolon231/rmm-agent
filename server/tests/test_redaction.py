@@ -902,6 +902,14 @@ PRODUCER_DETAILS = {
         "client_id": ID3,
     },
     "operator.tokens_revoked": {"operator_id": ID1, "by": "admin"},
+    "operator.password_reset": {
+        "operator_id": ID1,
+        "sessions_revoked": 2,
+        "mfa_reset": True,
+        "credentials_revoked": 1,
+        "recovery_codes_invalidated": 10,
+        "by": "cli",
+    },
     # --- Administrative sessions and break-glass (issue #69) ---
     "operator.session_started": {
         "operator_id": ID1,

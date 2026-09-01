@@ -47,6 +47,17 @@ python scripts/create_admin.py admin@example.com --role admin
 python -m uvicorn app.main:app --reload
 ```
 
+There is no self-service password reset. An operator who is locked out is
+recovered out-of-band by someone with database access:
+
+```bash
+python scripts/reset_password.py admin@example.com            # prompts, hidden
+python scripts/reset_password.py admin@example.com --clear-mfa  # lost the key too
+```
+
+The reset bumps the token generation and closes every live session for the
+account, and is recorded on the audit chain as `operator.password_reset`.
+
 Interactive API documentation is at `/docs`; health is at `/healthz`.
 Signed monitoring-webhook setup, receiver verification, limits, and recovery
 are documented in [`SIGNED-WEBHOOKS.md`](../docs/SIGNED-WEBHOOKS.md).
