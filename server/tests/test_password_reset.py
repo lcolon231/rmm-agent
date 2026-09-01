@@ -10,6 +10,7 @@ asked for, and the whole thing is on the audit chain.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_password_reset.db")
 os.environ.setdefault("DEBUG", "false")
@@ -204,3 +205,57 @@ async def test_unknown_operator_and_short_password_are_refused_before_any_change
     assert verify_password(OLD_PASSWORD, operator.password_hash)
     assert operator.token_generation == 0
     assert (await db.execute(select(AuditEvent))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_reset_works_on_a_database_that_predates_session_tracking(db):
+    """The regression this guards is not hypothetical.
+
+    A locked-out administrator ran this against production while the schema was
+    still at 0038; the tool reached for ``operator_sessions``, PostgreSQL
+    aborted the transaction, and the reset that was supposed to rescue them
+    failed. A recovery tool has to work on the database it finds.
+    """
+    from sqlalchemy import text
+
+    # Drop the table to reproduce a pre-0039 database exactly.
+    await db.execute(text("DROP TABLE IF EXISTS operator_sessions"))
+    await db.commit()
+
+    outcome = await reset_password(db, EMAIL, new_password=NEW_PASSWORD)
+    await db.commit()
+
+    # The reset is complete: the password changed and every outstanding token is
+    # invalidated by the generation bump, which needs no new table.
+    operator = (
+        await db.execute(select(Operator).where(Operator.email == EMAIL))
+    ).scalars().one()
+    assert verify_password(NEW_PASSWORD, operator.password_hash)
+    assert not verify_password(OLD_PASSWORD, operator.password_hash)
+    assert operator.token_generation == 1
+
+    # The skipped half is reported rather than silently counted as done.
+    assert outcome.sessions_tracked is False
+    assert outcome.sessions_revoked == 0
+
+
+@pytest.mark.asyncio
+async def test_session_rows_are_closed_when_the_table_is_present(db):
+    """The other side of the same branch: on a current schema, nothing is skipped."""
+    operator = (
+        await db.execute(select(Operator).where(Operator.email == EMAIL))
+    ).scalars().one()
+    db.add(
+        OperatorSession(
+            operator_id=operator.id,
+            token_generation=operator.token_generation,
+            absolute_expires_at=datetime.now(timezone.utc) + timedelta(hours=8),
+        )
+    )
+    await db.flush()
+
+    outcome = await reset_password(db, EMAIL, new_password=NEW_PASSWORD)
+    await db.commit()
+
+    assert outcome.sessions_tracked is True
+    assert outcome.sessions_revoked == 1

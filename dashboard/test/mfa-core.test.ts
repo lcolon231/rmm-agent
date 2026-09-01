@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   base64UrlToBytes,
+  ceremonyErrorCode,
   bytesToBase64Url,
   mfaCookieName,
   mfaCookieOptions,
@@ -186,6 +187,41 @@ test("refusals collapse to one message so the dashboard adds no oracle", () => {
   assert.equal(mfaErrorCodeForStatus(503, "mfa_disabled"), "mfa-disabled");
   assert.equal(mfaErrorCodeForStatus(500), "unavailable");
   assert.equal(mfaErrorMessage("not-a-code"), undefined);
+});
+
+test("a relying-party mismatch is reported as configuration, not as a dismissal", () => {
+  // The regression this guards: the API and the dashboard on different domains
+  // makes the browser raise SecurityError, which used to surface as "the prompt
+  // was dismissed" and sent the reader looking at their security key instead of
+  // at MFA_RP_ID.
+  const securityError = Object.assign(new Error("rp id"), { name: "SecurityError" });
+  assert.equal(ceremonyErrorCode(securityError), "relying-party-mismatch");
+  const message = mfaErrorMessage("relying-party-mismatch") ?? "";
+  assert.match(message, /MFA_RP_ID/);
+  assert.match(message, /administrator/i);
+  // It must not read as something the user did.
+  assert.equal(/dismiss/i.test(message), false);
+});
+
+test("only a genuine refusal is reported as a dismissal", () => {
+  for (const name of ["NotAllowedError", "AbortError"]) {
+    assert.equal(ceremonyErrorCode(Object.assign(new Error(name), { name })), "cancelled");
+  }
+  // A non-DOMException, or anything unrecognised, degrades to the same.
+  assert.equal(ceremonyErrorCode(new Error("boom")), "cancelled");
+  assert.equal(ceremonyErrorCode(null), "cancelled");
+  assert.equal(ceremonyErrorCode("nonsense"), "cancelled");
+});
+
+test("re-registering the same authenticator is named accurately", () => {
+  const error = Object.assign(new Error("dup"), { name: "InvalidStateError" });
+  assert.equal(ceremonyErrorCode(error), "already-registered");
+  assert.match(mfaErrorMessage("already-registered") ?? "", /already registered/i);
+});
+
+test("an unsupported algorithm is reported as a browser limitation", () => {
+  const error = Object.assign(new Error("alg"), { name: "NotSupportedError" });
+  assert.equal(ceremonyErrorCode(error), "unsupported-browser");
 });
 
 // --------------------------------------------------------------------------- //

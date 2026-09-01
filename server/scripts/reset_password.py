@@ -14,6 +14,11 @@ Usage:
     python scripts/reset_password.py admin@nodelink.example --clear-mfa
     # prompts for the new password (hidden, twice)
 
+Works against a database that has not reached revision 0039: the tracked-session
+table simply is not there yet, so the row-closing half is skipped and reported
+as such. The reset is still complete, because the token-generation bump is what
+actually invalidates outstanding tokens.
+
 ``--clear-mfa`` also revokes the operator's authenticators and recovery codes.
 Use it when the second factor was lost too -- with MFA enforced, a correct
 password on its own will not sign anyone in. It leaves the account
@@ -47,7 +52,17 @@ async def main(email: str, password: str, clear_mfa: bool) -> None:
         await db.commit()
 
     print(f"Reset password for {outcome.email}")
-    print(f"  sessions revoked: {outcome.sessions_revoked}")
+    if outcome.sessions_tracked:
+        print(f"  sessions revoked: {outcome.sessions_revoked}")
+    else:
+        # Do not let a skipped step look like a completed one.
+        print(
+            "  sessions revoked: n/a -- this database predates revision 0039 and "
+            "has no session table."
+        )
+        print(
+            "  Existing tokens are still invalidated by the token-generation bump."
+        )
     if outcome.mfa_reset:
         print(f"  authenticators revoked: {outcome.credentials_revoked}")
         print(f"  recovery codes invalidated: {outcome.recovery_codes_invalidated}")

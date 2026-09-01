@@ -66,6 +66,30 @@ registered under a guessed scope. Outside production, and for any configuration
 that changes after startup, every ceremony returns
 `503 {"code": "mfa_not_configured"}`.
 
+### When the dashboard and the API are on different domains
+
+This is the case that bites first, and the defaults do not cover it. A WebAuthn
+ceremony happens in the **browser**, at the dashboard's origin -- not at the
+API's. The browser refuses any relying-party ID that is not the page's own
+domain or a registrable suffix of it.
+
+So a split deployment (dashboard on one host, API on another) **must** set both
+values explicitly to the *dashboard's* domain:
+
+```
+MFA_RP_ID           = dashboard.example.com
+MFA_ALLOWED_ORIGINS = https://dashboard.example.com
+```
+
+Left unset, both derive from `PUBLIC_BASE_URL`, which on such a deployment is
+the API's own host. Registration then fails in the browser before anything
+reaches the server, with a `SecurityError` the dashboard reports as *"This site
+is not configured for security keys"*.
+
+Use a **stable** domain, never a per-deployment preview URL: credentials are
+bound to the relying-party ID, so changing it invalidates every registered key
+and forces an administrative reset for every operator.
+
 ### Origins are an exact-match allow-list
 
 `MFA_ALLOWED_ORIGINS` is the phishing-resistance boundary. There are no

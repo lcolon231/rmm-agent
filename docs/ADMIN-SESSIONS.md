@@ -236,6 +236,20 @@ cannot-entrench rule, and review-exactly-once.
 mapping, input bounds, origin enforcement, credential handling, and the
 activation cookie flow.
 
+### Recovering a password on an older schema
+
+`scripts/reset_password.py` works against a database that has not reached
+revision `0039`. It probes for the tracked-session table first rather than
+reaching for it and catching the failure -- on PostgreSQL a failed statement
+poisons the surrounding transaction, so there would be nothing useful left to
+catch, and the reset meant to rescue a locked-out administrator would fail
+precisely when it is needed.
+
+On such a database the reset is still complete: bumping `token_generation`
+invalidates every outstanding token regardless of schema. Only the cosmetic
+row-closing is skipped, and the CLI says so rather than reporting a revocation
+count that did not happen.
+
 ### Known limitations
 
 - **The activation rate limiter is process-local**, the same multi-worker caveat

@@ -7,6 +7,7 @@ import type { FormEvent } from "react";
 import { useCallback, useState } from "react";
 
 import {
+  ceremonyErrorCode,
   mfaErrorMessage,
   toAssertionPayload,
   toCreationOptions,
@@ -96,8 +97,8 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
       form.reset();
       setNotice(`Registered "${name}".`);
       await refresh();
-    } catch {
-      setError(mfaErrorMessage("cancelled") ?? "");
+    } catch (error) {
+      setError(mfaErrorMessage(ceremonyErrorCode(error)) ?? "");
     } finally {
       setIsBusy(false);
     }
@@ -138,8 +139,8 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
       }
       setNotice("Confirmed. You can now change your security settings.");
       await refresh();
-    } catch {
-      setError(mfaErrorMessage("cancelled") ?? "");
+    } catch (error) {
+      setError(mfaErrorMessage(ceremonyErrorCode(error)) ?? "");
     } finally {
       setIsBusy(false);
     }
