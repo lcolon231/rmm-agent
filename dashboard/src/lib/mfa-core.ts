@@ -57,6 +57,9 @@ export type MfaErrorCode =
   | "mfa-disabled"
   | "unsupported-browser"
   | "cancelled"
+  | "relying-party-mismatch"
+  | "insecure-context"
+  | "already-registered"
   | "unavailable";
 
 const mfaErrorMessages: Record<MfaErrorCode, string> = {
@@ -70,7 +73,17 @@ const mfaErrorMessages: Record<MfaErrorCode, string> = {
   "step-up-required": "Re-authenticate with your security key to continue.",
   "mfa-disabled": "Multi-factor authentication is turned off for this deployment.",
   "unsupported-browser": "This browser does not support security keys.",
-  "cancelled": "The security key prompt was dismissed.",
+  "cancelled": "The security key prompt was dismissed or timed out.",
+  // A configuration fault, not a user action. Says so plainly, because the
+  // person seeing it usually cannot fix it and needs to know who can.
+  "relying-party-mismatch":
+    "This site is not configured for security keys: the server's relying-party"
+    + " domain does not match the address in your browser. An administrator"
+    + " needs to set MFA_RP_ID and MFA_ALLOWED_ORIGINS to this site's domain.",
+  "insecure-context":
+    "Security keys require a secure (HTTPS) connection to this site.",
+  "already-registered":
+    "That security key is already registered on this account.",
   unavailable: "Multi-factor authentication is unavailable. Try again later.",
 };
 
@@ -106,6 +119,47 @@ export function mfaErrorCodeForStatus(status: number, code?: string | null): Mfa
     return "request-rejected";
   }
   return "unavailable";
+}
+
+/**
+ * Classify a `navigator.credentials` failure.
+ *
+ * Every one of these arrives as a DOMException, and lumping them together is
+ * how a deployment fault ends up being reported to the user as "you dismissed
+ * the prompt" -- which sends them looking in the wrong place entirely.
+ *
+ * The distinction that matters most is `SecurityError`: the browser raises it
+ * when the relying-party ID is not a registrable suffix of the page's origin,
+ * which is exactly what happens when the API and the dashboard are served from
+ * different domains and `MFA_RP_ID` was left to derive from the API's own URL.
+ * That is a configuration bug an administrator must fix, and the message says
+ * so rather than blaming whoever was standing at the keyboard.
+ */
+export function ceremonyErrorCode(error: unknown): MfaErrorCode {
+  const name = (error as { name?: unknown } | null)?.name;
+  if (typeof name !== "string") {
+    return "cancelled";
+  }
+  switch (name) {
+    case "SecurityError":
+      // Also covers an insecure context, but the RP-ID mismatch is by far the
+      // likelier cause on a deployment that has HTTPS everywhere.
+      return typeof window !== "undefined" && window.isSecureContext === false
+        ? "insecure-context"
+        : "relying-party-mismatch";
+    case "InvalidStateError":
+      // The authenticator already holds a credential for this account -- the
+      // excludeCredentials list did its job.
+      return "already-registered";
+    case "NotSupportedError":
+      return "unsupported-browser";
+    case "NotAllowedError":
+    case "AbortError":
+    default:
+      // NotAllowedError is genuinely "dismissed, timed out, or refused", and
+      // is the only one the user themselves caused.
+      return "cancelled";
+  }
 }
 
 // --------------------------------------------------------------------------- //

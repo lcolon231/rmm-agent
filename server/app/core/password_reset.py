@@ -29,13 +29,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import inspect as sa_inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import audit, mfa, sessions
 from app.core.break_glass import UNUSABLE_PASSWORD_HASH
 from app.core.security import hash_password
-from app.models.models import Operator, OperatorSessionEndReason
+from app.models.models import (
+    Operator,
+    OperatorSession,
+    OperatorSessionEndReason,
+)
 
 # Matches the floor enforced by scripts/create_admin.py.
 MIN_PASSWORD_LENGTH = 8
@@ -55,6 +59,33 @@ class ResetOutcome:
     mfa_reset: bool
     credentials_revoked: int
     recovery_codes_invalidated: int
+    #: False when the database predates revision 0039 and has no session table.
+    #: The reset is still complete -- bumping token_generation invalidates every
+    #: outstanding token -- but no session rows were closed.
+    sessions_tracked: bool = True
+
+
+async def _session_table_exists(db: AsyncSession) -> bool:
+    """Whether this database has the tracked-session table from revision 0039.
+
+    A recovery tool has to work on the database it finds, not the one the
+    newest migration assumes. Before 0039 there is no ``operator_sessions``
+    table, and reaching for it would abort the whole transaction on PostgreSQL
+    -- so the reset that was supposed to rescue a locked-out administrator would
+    fail precisely when it is needed.
+
+    Probing beforehand rather than catching afterwards is deliberate: a failed
+    statement poisons the surrounding PostgreSQL transaction, so there is
+    nothing useful left to catch. The bumped ``token_generation`` invalidates
+    every outstanding token either way, so on an older schema the reset is still
+    complete -- only the cosmetic row-closing is skipped.
+    """
+    connection = await db.connection()
+    return await connection.run_sync(
+        lambda sync_connection: sa_inspect(sync_connection).has_table(
+            OperatorSession.__tablename__
+        )
+    )
 
 
 async def reset_password(
@@ -87,13 +118,18 @@ async def reset_password(
 
     operator.password_hash = hash_password(new_password)
     # Every token and session that existed a moment ago proved knowledge of the
-    # *old* password. None of them survive the reset.
+    # *old* password. None of them survive the reset. Bumping the generation is
+    # what actually invalidates them, and it works on any schema; closing the
+    # session rows is the cosmetic half that needs revision 0039.
     operator.token_generation += 1
-    sessions_revoked = await sessions.revoke_all_for_operator(
-        db,
-        operator.id,
-        reason=OperatorSessionEndReason.revoked_by_admin,
-    )
+    sessions_revoked = 0
+    sessions_tracked = await _session_table_exists(db)
+    if sessions_tracked:
+        sessions_revoked = await sessions.revoke_all_for_operator(
+            db,
+            operator.id,
+            reason=OperatorSessionEndReason.revoked_by_admin,
+        )
 
     credentials_revoked = 0
     codes_invalidated = 0
@@ -119,6 +155,7 @@ async def reset_password(
         operator_id=operator.id,
         email=operator.email,
         sessions_revoked=sessions_revoked,
+        sessions_tracked=sessions_tracked,
         mfa_reset=clear_mfa,
         credentials_revoked=credentials_revoked,
         recovery_codes_invalidated=codes_invalidated,

@@ -7,6 +7,7 @@ import type { FormEvent } from "react";
 import { useCallback, useState } from "react";
 
 import {
+  ceremonyErrorCode,
   mfaErrorMessage,
   toAssertionPayload,
   toCreationOptions,
@@ -85,10 +86,11 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
         return;
       }
       await failFromResponse(verifyResponse);
-    } catch {
-      // A DOMException here is almost always the user dismissing the prompt or
-      // a timeout, neither of which is a security signal worth alarming about.
-      setError(mfaErrorMessage("cancelled") ?? "");
+    } catch (error) {
+      // Classify rather than assume: a relying-party mismatch is a deployment
+      // fault, and reporting it as a dismissed prompt sends the reader looking
+      // in the wrong place.
+      setError(mfaErrorMessage(ceremonyErrorCode(error)) ?? "");
     } finally {
       setIsBusy(false);
     }
@@ -128,8 +130,8 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
         return;
       }
       await failFromResponse(registerResponse);
-    } catch {
-      setError(mfaErrorMessage("cancelled") ?? "");
+    } catch (error) {
+      setError(mfaErrorMessage(ceremonyErrorCode(error)) ?? "");
     } finally {
       setIsBusy(false);
     }
