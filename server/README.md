@@ -159,8 +159,9 @@ their identity, grant/revoke script permission, and revoke sessions. Creation,
 role, status, permission, and revocation mutations are audited. Role and status
 changes invalidate sessions; a transition to `readonly` clears script
 permission, and the final active administrator cannot be demoted or disabled.
-Operator deletion, password reset/change, forced initial-password rotation, and
-list pagination are not implemented.
+Operator deletion, in-product password reset/change, forced initial-password
+rotation, and list pagination are not implemented; lockout recovery is the
+out-of-band `scripts/reset_password.py` described above.
 
 Technicians and administrators can create the first client and site used by
 enrollment. Names are trimmed and normalized for uniqueness: clients are unique
