@@ -90,6 +90,43 @@ class Settings(BaseSettings):
     agent_credential_lifetime_seconds: int = 86_400  # 24h
     agent_credential_overlap_seconds: int = 600  # 10 min
 
+    # --- Administrative session management (issue #69) ---
+    # Sessions are tracked server side so they can be inventoried and revoked
+    # individually. Two independent ceilings bound one:
+    #   absolute -> a hard wall set at sign-in that refresh can never move, so a
+    #               session cannot be renewed indefinitely.
+    #   idle     -> ends a session that stops being used, which is what limits
+    #               the value of an unattended logged-in browser.
+    admin_session_absolute_lifetime_seconds: int = 28_800  # 8h
+    admin_session_idle_timeout_seconds: int = 1_800  # 30 min
+    # `last_seen_at` is only written when the stored value is already older than
+    # this, so idle tracking costs a bounded number of writes rather than one
+    # per request. Keep it well below the idle timeout or the timeout becomes
+    # imprecise in the operator's favour.
+    admin_session_last_seen_write_interval_seconds: int = 60
+    # Ceiling on concurrent live sessions per operator. Reaching it ends the
+    # oldest rather than refusing the new sign-in: locking someone out of their
+    # own account is a worse failure than closing a stale tab.
+    admin_session_max_concurrent: int = 10
+    # Sessions minted before this feature carry no `sid`. They are accepted
+    # until they expire on their own so upgrading does not sign the whole fleet
+    # out, but they are unmanaged: absent from the inventory and revocable only
+    # in bulk. Set false to refuse them outright and force re-authentication.
+    admin_session_accept_legacy_tokens: bool = True
+
+    # --- Break-glass emergency access (issue #69) ---
+    # Break-glass deliberately bypasses MFA -- it is the escape hatch for the
+    # case where MFA itself is what locked the operator out -- so its blast
+    # radius is bounded by time and by noise rather than by another factor.
+    break_glass_enabled: bool = True
+    # Break-glass sessions get their own, much shorter absolute lifetime.
+    break_glass_session_lifetime_seconds: int = 3_600  # 1h
+    # Activation attempts allowed per source IP in the window. Tighter than
+    # login: this endpoint is unauthenticated by necessity and guards the most
+    # privileged credential in the deployment.
+    break_glass_max_attempts: int = 5
+    break_glass_window_seconds: int = 900
+
     # --- Multi-factor authentication (issue #67) ---
     # Enforcement is a three-position lever, and the three positions exist so a
     # fleet can be migrated without locking anyone out:

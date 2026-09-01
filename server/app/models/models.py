@@ -444,6 +444,9 @@ class Operator(Base):
     client_memberships: Mapped[list["OperatorClientMembership"]] = relationship(
         back_populates="operator", cascade="all, delete-orphan"
     )
+    sessions: Mapped[list["OperatorSession"]] = relationship(
+        back_populates="operator", cascade="all, delete-orphan"
+    )
 
 
 class OperatorClientMembership(Base):
@@ -2389,4 +2392,201 @@ class MfaRecoveryCode(Base):
 
     __table_args__ = (
         Index("ix_mfa_recovery_codes_operator_used", "operator_id", "used_at"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Administrative session management and break-glass access (issue #69)
+# --------------------------------------------------------------------------- #
+class OperatorSessionEndReason(str, enum.Enum):
+    """Why a session stopped being usable. Terminal in every case.
+
+    Distinguishing these matters for review: an idle timeout is routine, an
+    administrator revoking someone else's session is an intervention worth
+    explaining, and a break-glass session closing tells a reviewer the emergency
+    window is shut.
+    """
+
+    revoked_by_self = "revoked_by_self"
+    revoked_by_admin = "revoked_by_admin"
+    idle_timeout = "idle_timeout"
+    absolute_timeout = "absolute_timeout"
+    superseded = "superseded"
+    operator_disabled = "operator_disabled"
+
+
+class OperatorSession(Base):
+    """One issued dashboard session, tracked server side (issue #69).
+
+    Before this, operator sessions were pure JWTs: stateless, invisible, and
+    revocable only in bulk by bumping ``Operator.token_generation``. That is
+    enough to end an incident but not to *investigate* one - you could not
+    answer "where is this account signed in from" or end one suspicious session
+    without logging the person out everywhere.
+
+    Each row is the authoritative record for one session; the token carries its
+    id in the ``sid`` claim and every request re-checks the row. Revocation is
+    therefore immediate and individual, and the inventory is real rather than
+    inferred.
+
+    The cost of that authority is one indexed read on every authenticated
+    request, plus a bounded write to keep ``last_seen_at`` fresh. The write is
+    skipped unless the stored value is already stale (see
+    ``admin_session_last_seen_write_interval_seconds``), so a busy session does
+    not generate a database write per request.
+    """
+
+    __tablename__ = "operator_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The generation the session was minted under. Kept on the row as well as in
+    # the token so a bulk revocation is visible in the inventory, not only in
+    # the token check.
+    token_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # How the operator authenticated, as a sorted comma-separated `amr` list.
+    # Display and review only - authorization always reads the signed claim.
+    auth_methods: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    # Context captured at sign-in, for "is this me?" review. Both are
+    # attacker-influenced strings, so they are bounded here and digested before
+    # they reach the audit chain.
+    source_ip: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    # A session opened by activating a break-glass credential. These bypass MFA
+    # by design, so they are marked, short-lived, and surfaced for review.
+    is_break_glass: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    # Hard ceiling set at creation. A refresh can move the token's expiry but
+    # never this, so a session cannot be renewed indefinitely.
+    absolute_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_reason: Mapped[OperatorSessionEndReason | None] = mapped_column(
+        Enum(
+            OperatorSessionEndReason,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        )
+    )
+    # Who ended it, when an administrator did.
+    ended_by_operator_id: Mapped[str | None] = mapped_column(String(36))
+
+    operator: Mapped["Operator"] = relationship(back_populates="sessions")
+
+    __table_args__ = (
+        # The hot path: "the live sessions for this operator".
+        Index("ix_operator_sessions_operator_active", "operator_id", "ended_at"),
+        Index("ix_operator_sessions_absolute_expires", "absolute_expires_at"),
+    )
+
+
+class BreakGlassAccount(Base):
+    """A pre-provisioned emergency identity with an offline-usable credential.
+
+    This is the deliberate exception to every authentication control the system
+    otherwise enforces, and it exists because those controls can fail closed on
+    the operator: an administrator whose only authenticator is lost, or a
+    federation outage, would otherwise have no way back into a deployment that
+    manages their whole fleet.
+
+    The trade is stated plainly rather than hidden. A break-glass credential is
+    a single high-entropy secret, so it is:
+
+    * **Offline usable.** It depends on nothing but the printed value - no
+      second factor, no email, no hardware. That is the point, and it is also
+      exactly why it is dangerous.
+    * **Stored only as a bcrypt hash**, shown once at creation or rotation, with
+      a non-secret fingerprint retained so an administrator can tell two sealed
+      envelopes apart without opening either.
+    * **Bound to a dedicated operator row** whose password hash is unusable, so
+      the identity can never be reached by ordinary password login.
+    * **Loud.** Every activation writes an audit event, opens a marked
+      short-lived session, and creates a review row that stays open until a
+      human closes it.
+    """
+
+    __tablename__ = "break_glass_accounts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # The identity this credential activates. Dedicated, never a real person's
+    # account, so disabling break-glass never disturbs someone's own login.
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    # Operator-facing name for the sealed envelope ("safe, London office").
+    label: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    # bcrypt, like a password: this is a human-held bearer secret, not a
+    # machine token, so it gets password-grade storage.
+    credential_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Non-authenticating, domain-separated digest, safe to display so an
+    # administrator can tell two sealed envelopes apart without opening either.
+    credential_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    created_by_email: Mapped[str | None] = mapped_column(String(320))
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Disabling is reversible and preferred over deletion: the activation
+    # history must keep pointing at a row that still exists.
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled_reason: Mapped[str | None] = mapped_column(String(200))
+
+    operator: Mapped["Operator"] = relationship()
+    activations: Mapped[list["BreakGlassActivation"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+
+
+class BreakGlassActivation(Base):
+    """One use of a break-glass credential, and its mandatory review.
+
+    An activation is an incident record, not a log line. It stays unreviewed
+    until a human explicitly closes it, so "was every emergency access accounted
+    for?" is answerable from data rather than from memory.
+    """
+
+    __tablename__ = "break_glass_activations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("break_glass_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # The session the activation opened. SET NULL rather than CASCADE: the
+    # activation record must outlive the session it created.
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operator_sessions.id", ondelete="SET NULL")
+    )
+    activated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    source_ip: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    # The justification given at activation. Free-form prose, so it is stored
+    # here for the reviewer but only ever digested into the audit chain.
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by_email: Mapped[str | None] = mapped_column(String(320))
+    review_note: Mapped[str | None] = mapped_column(Text)
+
+    account: Mapped["BreakGlassAccount"] = relationship(back_populates="activations")
+
+    __table_args__ = (
+        # Drives the "what still needs review" queue.
+        Index("ix_break_glass_activations_unreviewed", "reviewed_at", "activated_at"),
     )

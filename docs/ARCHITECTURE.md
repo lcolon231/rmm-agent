@@ -130,6 +130,20 @@ rollback is a configuration change, not a schema change. Registered credentials
 are public keys and recovery codes are bcrypt hashes, so a database disclosure
 yields no replayable second factor.
 
+Operator sessions are tracked server side (issue #69, `docs/ADMIN-SESSIONS.md`).
+A token carries its session id in a signed `sid` claim and every authenticated
+request re-checks the row, so revocation is immediate and individual rather than
+only in bulk, and an operator can see where their account is signed in from. Two
+independent ceilings bound a session -- an absolute wall set at sign-in that
+refresh can never move, and an idle timeout evaluated against a
+bounded-write `last_seen_at` -- and a lapsed session is refused by the request
+that presents it rather than by a sweeper. Break-glass credentials are the
+deliberate exception to MFA: a pre-provisioned, offline-usable secret bound to a
+dedicated identity with an unusable password hash, opening a one-hour marked
+session that is audited and must be reviewed. An emergency session may act but
+may not create or rotate break-glass credentials, so one stolen envelope cannot
+become a permanent foothold.
+
 ### 3.2 Operations plane
 
 The operations plane delivers endpoint state and actions. It currently contains
@@ -983,12 +997,17 @@ moved merely to match an aspirational tree.
   fixture-backed; beyond the endpoint telemetry and command console views,
   live audit UI, complete inventory, monitoring alerts, scheduling, patching,
   remediation and remote desktop are not implemented.
-- Operator administration has no delete endpoint, password change/reset or
-  forced-rotation flow, server-enforced password complexity, or pagination.
-  The dashboard omits those controls rather than simulating them.
-  Administrator-chosen initial passwords without forced rotation remain a
-  security weakness; a future server change should add a one-time activation or
-  forced-change flow with authorization, audit events, tests, and documentation.
+- Operator administration has no delete endpoint, no in-product password
+  change/reset flow, no forced rotation, no server-enforced password
+  complexity, and no pagination. The dashboard omits those controls rather than
+  simulating them. A locked-out operator is recovered out-of-band by someone
+  with database access (`scripts/reset_password.py`), which bumps the token
+  generation, closes every live session, optionally clears a lost second factor,
+  and is audited as `operator.password_reset`; it is a recovery path, not a
+  self-service one. Administrator-chosen initial passwords without forced
+  rotation remain a security weakness; a future server change should add a
+  one-time activation or forced-change flow with authorization, audit events,
+  tests, and documentation.
 - TLS termination itself remains an operator-run topology, but production
   mode (ENVIRONMENT=production) now fails startup on debug mode, placeholder
   or short secrets, missing signing keys, and a missing/non-HTTPS/loopback

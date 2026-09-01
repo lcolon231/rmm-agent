@@ -19,6 +19,7 @@ Statuses are:
 | Outbound-only polling | Implemented | Agent initiates enroll, heartbeat/poll, and result requests |
 | Operator API authentication/RBAC | Implemented | Auth and authorization integration tests |
 | Operator multi-factor authentication | Implemented | Phishing-resistant WebAuthn with single-use purpose-bound challenges, signed `amr`/step-up session claims gating operator management and factor reconfiguration, bcrypt-hashed single-use recovery codes, and an admin-only step-up-gated device-loss reset. Staged `off`/`optional`/`required` enforcement with configuration-only rollback; 52 server tests drive real ES256/Ed25519 ceremonies (`docs/MFA.md`). Attestation is not verified, so authenticator provenance is unestablished; the second-factor rate limiter is process-local |
+| Administrative sessions and break-glass | Implemented | Server-side session rows bound to a signed `sid`: inventory with device context, individual revocation effective on the next request, and independent absolute/idle ceilings enforced on read. Break-glass supplies pre-provisioned offline-usable emergency credentials on dedicated identities, opening short marked sessions that are audited and must be reviewed and that cannot provision more emergency access; 33 server tests (`docs/ADMIN-SESSIONS.md`). Provision at least one credential before enforcing MFA: without one, a total authenticator loss is recoverable only out-of-band with database access (`scripts/reset_password.py --clear-mfa`). Activation rate limiting is process-local |
 | Signed command verification | Implemented | `command-v3`, negotiation, downgrade rejection, signed schema/time/nonce/key ID, and shared vectors; staged key rotation, compromise, and rollback via `scripts/rotate_command_key.py` with a rehearsed test suite and `docs/KEY-ROTATION.md` runbook |
 | Agent replay/expiry checks | Implemented | Signed time-window validation plus durable command-ID and nonce replay state |
 | Production TLS | Partial | Caddy topology documented; ENVIRONMENT=production fails startup on debug/placeholder-secret/missing-key/non-HTTPS-URL config and proxy trust is explicit opt-in; certificate lifecycle monitoring remains operator evidence |
@@ -279,6 +280,9 @@ link to reproducible evidence in the release or pilot record.
       the pilot.
 - [ ] Incident contacts, credential rotation, agent quarantine, server shutdown,
       restore, rollback, and evidence preservation procedures are rehearsed.
+- [ ] Operator lockout recovery is rehearsed: who holds database access, and
+      the out-of-band reset (`scripts/reset_password.py`, `--clear-mfa` after
+      authenticator loss) alongside break-glass activation.
 
 ## Backup, restore, and rollback evidence
 

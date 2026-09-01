@@ -3490,3 +3490,20 @@ textarea:focus-visible,
 @media (max-width: 640px) {
   .mfa-credential-list li { flex-direction: column; align-items: stretch; }
 }
+
+/* Session inventory and break-glass (issue #69) */
+.session-inventory, .break-glass { margin-top: 16px; }
+.session-list { display: grid; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.session-list li { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 4px; }
+.session-list strong { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.session-list small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.session-list button { display: inline-flex; flex-shrink: 0; min-height: 30px; align-items: center; gap: 5px; padding: 0 10px; color: var(--slate); font-size: 9px; font-weight: 800; background: white; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+.session-list button:disabled { opacity: .45; cursor: not-allowed; }
+/* The session you are using is the one you must not end by accident. */
+.session-current { border-left: 3px solid var(--teal); }
+.session-list-ended li { opacity: .62; }
+.session-badge { padding: 2px 6px; color: var(--slate); font-size: 8px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; background: var(--paper); border-radius: 999px; }
+.session-badge-warn { color: #8a590f; background: var(--amber-soft); }
+.session-badge-alarm { color: var(--red); background: var(--red-soft); }
+.break-glass .mfa-recovery-codes ul { grid-template-columns: 1fr; }
+.break-glass .mfa-recovery-codes code { font-size: 12px; letter-spacing: .04em; word-break: break-all; }

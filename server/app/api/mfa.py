@@ -37,7 +37,7 @@ from app.api.deps import (
     require_role,
     require_step_up,
 )
-from app.core import audit, mfa
+from app.core import audit, mfa, sessions
 from app.core.clientip import client_ip
 from app.core.database import get_db
 from app.core.security import (
@@ -772,11 +772,19 @@ async def complete_login_with_webauthn(
     )
     # A fresh assertion *is* a step-up, so the session starts able to perform
     # sensitive operations without immediately asserting again.
+    session = await sessions.create(
+        db,
+        operator,
+        auth_methods=(AMR_PASSWORD, AMR_WEBAUTHN),
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
     token = create_access_token(
         subject=operator.id,
         generation=operator.token_generation,
         amr=(AMR_PASSWORD, AMR_WEBAUTHN),
         step_up_at=now,
+        session_id=session.id,
     )
     return LoginResponse(access_token=token)
 
@@ -820,10 +828,18 @@ async def complete_login_with_recovery_code(
         user_agent=request.headers.get("user-agent", "")[:500] or None,
         detail={"operator_id": operator.id, "codes_remaining": remaining},
     )
+    session = await sessions.create(
+        db,
+        operator,
+        auth_methods=(AMR_PASSWORD, AMR_RECOVERY_CODE),
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
     token = create_access_token(
         subject=operator.id,
         generation=operator.token_generation,
         amr=(AMR_PASSWORD, AMR_RECOVERY_CODE),
+        session_id=session.id,
     )
     return LoginResponse(access_token=token)
 
@@ -861,11 +877,16 @@ async def complete_step_up(
     )
     amr = set(getattr(operator, "session_amr", None) or set())
     amr.update({AMR_PASSWORD, AMR_WEBAUTHN})
+    # Re-asserting strengthens the session the caller already holds; it must not
+    # open a second one, or every step-up would leave a stale entry in the
+    # operator's own inventory.
+    existing = getattr(operator, "session_record", None)
     token = create_access_token(
         subject=operator.id,
         generation=operator.token_generation,
         amr=tuple(sorted(amr)),
         step_up_at=now,
+        session_id=existing.id if existing is not None else None,
     )
     return LoginResponse(access_token=token)
 

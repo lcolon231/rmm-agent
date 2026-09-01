@@ -66,6 +66,18 @@ authentication and role-based authorization:
 - **Bootstrap.** The first admin is created out-of-band via
   `scripts/create_admin.py` (the create-operator endpoint is admin-only, so it
   can't mint the first admin itself).
+- **Lockout recovery.** There is deliberately no self-service password reset:
+  no mail sender is trusted, and no reset-token flow exists to aim at an
+  administrator's inbox. A forgotten password is repaired out-of-band by
+  `scripts/reset_password.py`, which requires database access — the same trust
+  level that mints the first admin, and one that already implies full control,
+  so the script grants no authority an attacker would not already hold. It is
+  not a quiet path: the reset bumps the token generation, closes every live
+  session, refuses break-glass identities so their unusable password hash stays
+  unusable, and is audited as `operator.password_reset`. Clearing a lost second
+  factor is opt-in (`--clear-mfa`) because it demotes the account to
+  password-only; that is the same residual authority as the admin MFA reset
+  above, reached without a signed-in administrator.
 
 Login hardening: unknown-email and wrong-password both return an identical 401,
 and a dummy hash verification runs on unknown emails to avoid a timing
@@ -583,3 +595,4 @@ warning in production when unconfigured. See `docs/AUDIT-ANCHORING.md`.
 | 12 | Windows artifacts are unsigned and release evidence lacks SBOM/provenance | High | Partial — releases publish an SPDX SBOM (Go + Python), signed SLSA build-provenance attestations, and checksums for every artifact; Authenticode signing remains open (needs a paid certificate) |
 | 13 | Client/site records are not authorization tenants | High | **Closed** — `Client` is the authorization tenant; default-deny operator memberships, per-client roles, platform-admin bypass, 404 anti-oracle behavior, scoped queries, and isolation tests landed in issue #66 |
 | 14 | Operator authentication is single-factor | High | **Mostly closed (issue #67)** — phishing-resistant WebAuthn second factor with single-use purpose-bound challenges, signed `amr`/step-up session claims gating operator-management and factor reconfiguration, bcrypt-hashed single-use recovery codes that never satisfy step-up, and an admin-only step-up-gated reset for device loss. Enforcement stages `off`/`optional`/`required` with configuration-only rollback. Attestation is not verified, so authenticator provenance is unestablished; the second-factor rate limiter is process-local (`docs/MFA.md`) |
+| 15 | Operator sessions are opaque and revocable only in bulk | Medium | **Closed (issue #69)** — sessions are server-side rows bound to a signed `sid`; inventory shows device context, revocation is individual and takes effect on the next request, and absolute/idle ceilings are enforced on read. Break-glass supplies audited, reviewed, time-bounded emergency access that cannot provision more of itself. Activation rate limiting is process-local (`docs/ADMIN-SESSIONS.md`) |

@@ -164,7 +164,7 @@ async def _publish_once() -> None:
 async def _retention_once() -> None:
     """Prune expired telemetry and command output, then log a warning if any
     storage class has breached its observability threshold (issue #114)."""
-    from app.core import mfa, retention
+    from app.core import mfa, retention, sessions
 
     async with AsyncSessionLocal() as db:
         result = await retention.prune_expired(db, settings)
@@ -174,10 +174,23 @@ async def _retention_once() -> None:
         # deleted outright. Bounded per pass so one sweep cannot hold a long
         # transaction open on a large backlog.
         challenges_purged = await mfa.purge_expired_challenges(db)
+        # Mark lapsed sessions terminal and drop long-dead rows (issue #69).
+        # Neither is a security control -- `sessions.resolve` already refuses an
+        # expired session on the request that presents it -- so this only keeps
+        # the operator-visible inventory honest and bounds table growth.
+        sessions_expired = await sessions.expire_lapsed(db)
+        sessions_purged = await sessions.purge_ended(
+            db, older_than_days=settings.command_output_retention_days
+        )
         await db.commit()
         status = await retention.storage_status(db, settings)
     if challenges_purged:
         print(f"[retention] purged {challenges_purged} expired MFA challenge(s)")
+    if sessions_expired or sessions_purged:
+        print(
+            f"[retention] expired {sessions_expired} session(s), "
+            f"purged {sessions_purged} ended session row(s)"
+        )
     if result.heartbeats_deleted or result.command_outputs_cleared:
         print(
             f"[retention] pruned {result.heartbeats_deleted} heartbeat(s), "

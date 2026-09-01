@@ -902,6 +902,63 @@ PRODUCER_DETAILS = {
         "client_id": ID3,
     },
     "operator.tokens_revoked": {"operator_id": ID1, "by": "admin"},
+    "operator.password_reset": {
+        "operator_id": ID1,
+        "sessions_revoked": 2,
+        "mfa_reset": True,
+        "credentials_revoked": 1,
+        "recovery_codes_invalidated": 10,
+        "by": "cli",
+    },
+    # --- Administrative sessions and break-glass (issue #69) ---
+    "operator.session_started": {
+        "operator_id": ID1,
+        "session_id": ID2,
+        "auth_methods": ["pwd", "webauthn"],
+        "break_glass": False,
+    },
+    "operator.session_revoked": {
+        "operator_id": ID1,
+        "session_id": ID2,
+        "by": "self",
+        "reason": SENTINEL,
+        "session_count": 3,
+    },
+    "break_glass.account_created": {
+        "account_id": ID1,
+        "operator_id": ID2,
+        "label": SENTINEL,
+        "credential_fingerprint": "f" * 32,
+        "reason": SENTINEL,
+    },
+    "break_glass.credential_rotated": {
+        "account_id": ID1,
+        "label": SENTINEL,
+        "previous_fingerprint": "a" * 32,
+        "credential_fingerprint": "b" * 32,
+        "reason": SENTINEL,
+    },
+    "break_glass.account_state_changed": {
+        "account_id": ID1,
+        "label": SENTINEL,
+        "disabled": True,
+        "reason": SENTINEL,
+    },
+    "break_glass.activated": {
+        "account_id": ID1,
+        "activation_id": ID2,
+        "operator_id": ID3,
+        "session_id": ID1,
+        "label": SENTINEL,
+        "credential_fingerprint": "c" * 32,
+        "reason": SENTINEL,
+    },
+    "break_glass.activation_failed": {"reason": "invalid_credential"},
+    "break_glass.activation_reviewed": {
+        "activation_id": ID1,
+        "account_id": ID2,
+        "note": SENTINEL,
+    },
     # --- Multi-factor authentication (issue #67) ---
     "mfa.second_factor_required": {
         "operator_id": ID1,
