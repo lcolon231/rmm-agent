@@ -66,6 +66,18 @@ authentication and role-based authorization:
 - **Bootstrap.** The first admin is created out-of-band via
   `scripts/create_admin.py` (the create-operator endpoint is admin-only, so it
   can't mint the first admin itself).
+- **Lockout recovery.** There is deliberately no self-service password reset:
+  no mail sender is trusted, and no reset-token flow exists to aim at an
+  administrator's inbox. A forgotten password is repaired out-of-band by
+  `scripts/reset_password.py`, which requires database access — the same trust
+  level that mints the first admin, and one that already implies full control,
+  so the script grants no authority an attacker would not already hold. It is
+  not a quiet path: the reset bumps the token generation, closes every live
+  session, refuses break-glass identities so their unusable password hash stays
+  unusable, and is audited as `operator.password_reset`. Clearing a lost second
+  factor is opt-in (`--clear-mfa`) because it demotes the account to
+  password-only; that is the same residual authority as the admin MFA reset
+  above, reached without a signed-in administrator.
 
 Login hardening: unknown-email and wrong-password both return an identical 401,
 and a dummy hash verification runs on unknown emails to avoid a timing

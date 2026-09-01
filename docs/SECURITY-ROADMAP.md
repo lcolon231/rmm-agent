@@ -6,7 +6,9 @@ defines the controls and evidence required to strengthen them.
 
 ## Current security baseline
 
-Implemented controls include operator password authentication, global RBAC,
+Implemented controls include operator password authentication (with no
+self-service reset: lockout recovery is an audited out-of-band script requiring
+database access), global RBAC,
 JWT generation revocation, in-process login throttling, hashed server-side agent
 tokens, outbound-only polling, negotiated `command-v3` Ed25519 verification
 with shared cross-language vectors and downgrade rejection, signed schema/time

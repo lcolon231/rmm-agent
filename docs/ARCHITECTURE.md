@@ -997,12 +997,17 @@ moved merely to match an aspirational tree.
   fixture-backed; beyond the endpoint telemetry and command console views,
   live audit UI, complete inventory, monitoring alerts, scheduling, patching,
   remediation and remote desktop are not implemented.
-- Operator administration has no delete endpoint, password change/reset or
-  forced-rotation flow, server-enforced password complexity, or pagination.
-  The dashboard omits those controls rather than simulating them.
-  Administrator-chosen initial passwords without forced rotation remain a
-  security weakness; a future server change should add a one-time activation or
-  forced-change flow with authorization, audit events, tests, and documentation.
+- Operator administration has no delete endpoint, no in-product password
+  change/reset flow, no forced rotation, no server-enforced password
+  complexity, and no pagination. The dashboard omits those controls rather than
+  simulating them. A locked-out operator is recovered out-of-band by someone
+  with database access (`scripts/reset_password.py`), which bumps the token
+  generation, closes every live session, optionally clears a lost second factor,
+  and is audited as `operator.password_reset`; it is a recovery path, not a
+  self-service one. Administrator-chosen initial passwords without forced
+  rotation remain a security weakness; a future server change should add a
+  one-time activation or forced-change flow with authorization, audit events,
+  tests, and documentation.
 - TLS termination itself remains an operator-run topology, but production
   mode (ENVIRONMENT=production) now fails startup on debug mode, placeholder
   or short secrets, missing signing keys, and a missing/non-HTTPS/loopback

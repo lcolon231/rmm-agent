@@ -319,8 +319,11 @@ The code in this repository currently provides:
   Operator creation and every privilege/state mutation are audited, and the API
   preserves at least one active administrator. The API bearer token remains
   server-side in an HTTP-only cookie, and browser requests use same-origin route
-  handlers. Operator deletion, password reset/change, forced initial-password
-  rotation, and list pagination are not implemented.
+  handlers. Operator deletion, in-product password reset/change, forced
+  initial-password rotation, and list pagination are not implemented; a
+  locked-out operator is recovered out-of-band with
+  `server/scripts/reset_password.py`, which closes every live session and is
+  audited.
 
 Every dashboard panel, including the aggregate operations overview, now renders
 live API data; the repository contains no dashboard fixtures. Some implemented
