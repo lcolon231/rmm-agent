@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     # overlap well below the lifetime — it only needs to cover a renewal retry.
     agent_credential_lifetime_seconds: int = 86_400  # 24h
     agent_credential_overlap_seconds: int = 600  # 10 min
+    # An endpoint powered off across the normal lifetime may reattach with the
+    # still-current expired bearer for this long. Zero disables reattach. The
+    # hard ceiling prevents a configuration typo from making recovery
+    # effectively unbounded; 30 days covers ordinary extended shutdowns.
+    agent_credential_reattach_window_seconds: int = Field(
+        default=2_592_000, ge=0, le=31_536_000
+    )
 
     # --- Administrative session management (issue #69) ---
     # Sessions are tracked server side so they can be inventoried and revoked

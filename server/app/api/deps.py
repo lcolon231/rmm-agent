@@ -2,7 +2,7 @@
 """Shared API dependencies."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import or_, select
@@ -80,6 +80,70 @@ async def get_current_agent(
             expires_at = _as_utc(agent.credential_expires_at)
             if expires_at is None or expires_at > now:
                 matched = "current"
+        elif agent.previous_token_hash == presented:
+            overlap_until = _as_utc(agent.previous_token_expires_at)
+            if overlap_until is not None and overlap_until > now:
+                matched = "overlap"
+
+    if agent is None or matched is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token"
+        )
+    agent.credential_matched = matched
+    return agent
+
+
+async def get_agent_for_credential_reattach(
+    authorization: str | None = Header(default=None, description="Bearer <agent_token>"),
+    db: AsyncSession = Depends(get_db),
+) -> Agent:
+    """Resolve only a bearer eligible for bounded credential reattachment.
+
+    This deliberately does not relax :func:`get_current_agent`. An active
+    agent's expired *current* bearer is accepted here only until the configured
+    lapse deadline. The overlap slot is accepted solely to make a lost
+    reattach response retryable, just like ordinary rotation. Unknown,
+    not-yet-expired, outside-window, quarantined, revoked, and overlapped-out
+    credentials all receive the same opaque 401.
+    """
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization header",
+        )
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or malformed Authorization header",
+        )
+
+    presented = hash_token(token)
+    result = await db.execute(
+        select(Agent)
+        .where(
+            or_(
+                Agent.token_hash == presented,
+                Agent.previous_token_hash == presented,
+            )
+        )
+        # Serialize recovery with concurrent recovery/revocation. PostgreSQL
+        # locks the matched identity; SQLite ignores FOR UPDATE in tests.
+        .with_for_update()
+    )
+    agent = result.scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    matched: str | None = None
+    if agent is not None and agent.trust_state == AgentTrustState.active:
+        if agent.token_hash == presented:
+            expires_at = _as_utc(agent.credential_expires_at)
+            if expires_at is not None:
+                reattach_until = expires_at + timedelta(
+                    seconds=settings.agent_credential_reattach_window_seconds
+                )
+                if expires_at <= now < reattach_until:
+                    matched = "current"
         elif agent.previous_token_hash == presented:
             overlap_until = _as_utc(agent.previous_token_expires_at)
             if overlap_until is not None and overlap_until > now:
