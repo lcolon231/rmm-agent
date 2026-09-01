@@ -219,8 +219,10 @@ The code in this repository currently provides:
   contained agent PowerShell process, reconnect semantics, and fail-closed
   limits. This is a separate transport from signed command polling, which
   remains the compatibility path. See `docs/SHELL-SESSIONS.md`.
-- Loss-safe agent credential renewal: server-enforced credential expiry with a
-  bounded rotation overlap, so a dropped renewal never strands an endpoint.
+- Loss-safe agent credential renewal and bounded reattach: server-enforced
+  expiry with a short rotation overlap, plus active-only recovery when a
+  powered-off endpoint returns within the configurable lapse window. Revoked,
+  quarantined, unknown, and too-old credentials share the same opaque refusal.
 - Authorized, audited MeshCentral remote desktop (issue #62): an admin-owned
   NodeLink-agent-to-MeshCentral-node mapping, role- and scope-gated launch
   authorization, per-operator rate limiting, and a short-lived single-device

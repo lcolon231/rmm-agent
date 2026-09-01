@@ -109,6 +109,12 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     "agent.credential_renewed": _schema(
         "credential_fingerprint", "credential_generation"
     ),
+    # Bounded recovery of a lapsed current bearer (issue #223). The action is
+    # distinct from both enrollment and routine renewal; detail remains the
+    # same secret-free credential lineage metadata.
+    "agent.credential_reattached": _schema(
+        "credential_fingerprint", "credential_generation"
+    ),
     # Non-secret reason a renewal was refused (e.g. rotation_nonce_reused),
     # issue #125. Never carries a token or nonce value, only the coded reason.
     "agent.credential_renewal_rejected": _schema("reason"),

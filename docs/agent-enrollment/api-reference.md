@@ -176,17 +176,33 @@ Failures deliberately avoid sensitive detail:
 ### `POST /api/v1/agents/credentials/renew`
 
 Authentication: current agent credential. Rotates the per-agent bearer and
-returns the new plaintext once. The previous value immediately fails.
+returns the new plaintext once. The previous value remains valid only through
+the configured short overlap, allowing a lost response to retry.
 
 ```json
 {
   "agent_id": "<AGENT_ID>",
   "agent_token": "<NEW_AGENT_CREDENTIAL>",
-  "credential_expires_at": null
+  "credential_expires_at": "2026-09-02T20:00:00Z",
+  "overlap_expires_at": "2026-09-01T20:10:00Z",
+  "credential_generation": 2
 }
 ```
 
-Automatic agent use is deferred until response-loss-safe renewal is designed.
+The agent automatically renews at the credential lifetime midpoint and saves
+the response before adopting it in memory.
+
+### `POST /api/v1/agents/credentials/reattach`
+
+Authentication: the still-current bearer after its normal lifetime expired.
+Only an `active` agent within `AGENT_CREDENTIAL_REATTACH_WINDOW_SECONDS` may
+exchange it; ordinary agent APIs still reject it. The request and successful
+response have the same shape as renewal. The operation rotates immediately and
+is audited as `agent.credential_reattached`.
+
+Unknown, outside-window, quarantined, revoked, and overlapped-out credentials
+all receive the same `401 Invalid agent token`. The short previous-token overlap
+is accepted only so a lost reattach response can be retried safely.
 
 ### `POST /api/v1/heartbeat` — reported agent version
 

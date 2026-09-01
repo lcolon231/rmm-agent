@@ -262,6 +262,10 @@ PRODUCER_DETAILS = {
         "credential_fingerprint": "a" * 64,
         "credential_generation": 2,
     },
+    "agent.credential_reattached": {
+        "credential_fingerprint": "b" * 64,
+        "credential_generation": 3,
+    },
     "agent.credential_renewal_rejected": {"reason": "rotation_nonce_reused"},
     "agent.command_envelope_capabilities_changed": {
         "previous": ["command-v2"],
