@@ -500,6 +500,29 @@ function rebootCauseFromUnknown(value: unknown): RebootCause | null {
   };
 }
 
+function rebootResultDetailFromUnknown(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const detail: Record<string, unknown> = {};
+  if (typeof value.check_type === "string") detail.check_type = value.check_type;
+  if (typeof value.reason === "string") detail.reason = value.reason;
+  if (Number.isInteger(value.pending_file_rename_count)
+      && (value.pending_file_rename_count as number) >= 0) {
+    detail.pending_file_rename_count = value.pending_file_rename_count;
+  }
+  const sources = value.sources;
+  if (isRecord(sources)
+      && typeof sources.component_based_servicing === "boolean"
+      && typeof sources.windows_update === "boolean"
+      && typeof sources.pending_file_rename === "boolean") {
+    detail.sources = {
+      component_based_servicing: sources.component_based_servicing,
+      windows_update: sources.windows_update,
+      pending_file_rename: sources.pending_file_rename,
+    };
+  }
+  return detail;
+}
+
 export function monitoringAlertFromUnknown(value: unknown): MonitoringAlert | null {
   if (!isRecord(value)) return null;
   const timestampFields = [
@@ -608,9 +631,7 @@ export function monitoringAlertDetailFromUnknown(value: unknown): MonitoringAler
   const observations = value.observations.map(alertObservationFromUnknown);
   if (!events.every((item): item is AlertEvent => item !== null)
       || !observations.every((item): item is AlertObservation => item !== null)) return null;
-  const lastResultDetail = isRecord(value.last_result_detail)
-    ? { ...value.last_result_detail }
-    : null;
+  const lastResultDetail = rebootResultDetailFromUnknown(value.last_result_detail);
   return {
     ...alert,
     last_result_detail: lastResultDetail,

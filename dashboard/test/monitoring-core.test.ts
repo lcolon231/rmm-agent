@@ -166,7 +166,7 @@ test("alert list and detail parsers return only allowlisted operational data", (
   assert.doesNotMatch(JSON.stringify(list), /access_token|secret/);
   const detail = monitoringAlertDetailFromUnknown({
     ...alert,
-    last_result_detail: { reason: "reboot_pending" },
+    last_result_detail: { reason: "reboot_pending", password: "secret" },
     reboot_cause: {
       reboot_flagged_updates: [{
         title: "Pending update", kb_id: "KB-PENDING", update_id: null,
