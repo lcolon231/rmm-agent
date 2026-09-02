@@ -50,10 +50,17 @@ async def _sweep_once() -> None:
                 select(Agent).where(Agent.trust_state == AgentTrustState.active)
             )
         ).scalars().all()
-        evaluated = 0
+        offline_evaluated = 0
+        patch_age_evaluated = 0
         for agent in active_agents:
-            evaluated += await monitoring.evaluate_offline_checks(db, agent)
-        metrics.increment("monitoring_offline_evaluation_total", evaluated)
+            offline_evaluated += await monitoring.evaluate_offline_checks(db, agent)
+            patch_age_evaluated += await monitoring.evaluate_patch_age_checks(
+                db, agent
+            )
+        metrics.increment("monitoring_offline_evaluation_total", offline_evaluated)
+        metrics.increment(
+            "monitoring_patch_age_evaluation_total", patch_age_evaluated
+        )
         await db.commit()
 
 

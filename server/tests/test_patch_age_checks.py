@@ -15,6 +15,7 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("COMMAND_SIGNING_KEY_PATH", "command_signing_key.pem")
 
+from app.core import metrics, tasks as tasks_core  # noqa: E402
 from app.core import monitoring as monitoring_core  # noqa: E402
 from app.core.database import AsyncSessionLocal, engine  # noqa: E402
 from app.models.models import (  # noqa: E402
@@ -500,3 +501,29 @@ async def test_patch_age_hysteresis_debounces_breach_and_recovery(operator_clien
         assert history[2].detail["hysteresis"]["pending_count"] == 1
         assert alert.state == AlertState.resolved
         assert alert.resolution_reason == "automatic_recovery"
+
+
+@pytest.mark.asyncio
+async def test_monitoring_sweep_evaluates_patch_age_and_counts_results(operator_client):
+    agent_id, _ = await _agent_policy(operator_client)
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as db:
+        db.add(
+            _snapshot(
+                agent_id,
+                received_at=now,
+                installed=[
+                    {"installed_on": (now - timedelta(days=75)).isoformat()}
+                ],
+            )
+        )
+        await db.commit()
+
+    before = metrics.snapshot().get("monitoring_patch_age_evaluation_total", 0)
+    await tasks_core._sweep_once()
+
+    async with AsyncSessionLocal() as db:
+        result = await db.scalar(select(CheckResult).where(CheckResult.agent_id == agent_id))
+    assert result.status == CheckResultStatus.critical
+    assert metrics.snapshot()["monitoring_patch_age_evaluation_total"] == before + 1
+    assert 'operation="patch_age_evaluation"' in metrics.prometheus_text()
