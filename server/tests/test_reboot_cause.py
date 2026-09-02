@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+import os
 
-from app.core import monitoring
-from app.models.models import AgentInventorySnapshot
-from app.schemas.inventory import InventorySection
-from app.schemas.monitoring import AlertDetailOut, AlertOut, RebootCauseOut
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_reboot_cause.db")
+os.environ.setdefault("DEBUG", "false")
+os.environ.setdefault("SECRET_KEY", "test-secret")
+os.environ.setdefault("COMMAND_SIGNING_KEY_PATH", "command_signing_key.pem")
+
+from app.core import monitoring  # noqa: E402
+from app.models.models import AgentInventorySnapshot  # noqa: E402
+from app.schemas.inventory import InventorySection  # noqa: E402
+from app.schemas.monitoring import AlertDetailOut, AlertOut, RebootCauseOut  # noqa: E402
 
 
 NOW = datetime(2026, 9, 2, 12, tzinfo=timezone.utc)

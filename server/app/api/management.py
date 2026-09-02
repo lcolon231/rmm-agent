@@ -131,6 +131,7 @@ from app.models.models import (
     CommandStatus,
     CheckResult,
     CheckResultStatus,
+    CheckType,
     EnrollmentToken,
     EnrollmentTokenStatus,
     InstallerDownload,
@@ -3539,9 +3540,54 @@ async def _alert_detail(db: AsyncSession, alert: Alert) -> AlertDetailOut:
             )
         ).scalars().all()
     )
+    last_result_detail = None
+    reboot_cause = None
+    revision = await db.get(MonitoringPolicyRevision, alert.policy_revision_id)
+    checks = revision.checks if revision is not None else None
+    is_reboot_alert = isinstance(checks, list) and any(
+        isinstance(check, dict)
+        and check.get("key") == alert.check_key
+        and check.get("type") == CheckType.reboot_pending.value
+        for check in checks
+    )
+    if is_reboot_alert and alert.last_result_id is not None:
+        result = await db.scalar(
+            select(CheckResult).where(
+                CheckResult.id == alert.last_result_id,
+                CheckResult.agent_id == alert.agent_id,
+                CheckResult.check_key == alert.check_key,
+            )
+        )
+        if result is not None:
+            last_result_detail = (
+                result.detail if isinstance(result.detail, dict) else None
+            )
+            snapshot = await db.scalar(
+                select(AgentInventorySnapshot)
+                .where(
+                    AgentInventorySnapshot.agent_id == alert.agent_id,
+                    AgentInventorySnapshot.section
+                    == InventorySection.windows_updates.value,
+                )
+                .order_by(
+                    AgentInventorySnapshot.received_at.desc(),
+                    AgentInventorySnapshot.id.desc(),
+                )
+                .limit(1)
+            )
+            opened_at = alert.first_opened_at or alert.opened_at or alert.created_at
+            if opened_at.tzinfo is None:
+                opened_at = opened_at.replace(tzinfo=timezone.utc)
+            reboot_cause = monitoring_core.derive_reboot_cause(
+                snapshot,
+                last_result_detail,
+                opened_at - monitoring_core.REBOOT_CAUSE_LOOKBACK,
+            )
     return AlertDetailOut.model_validate(
         {
             **AlertOut.model_validate(alert).model_dump(),
+            "last_result_detail": last_result_detail,
+            "reboot_cause": reboot_cause,
             "observations": observations,
             "events": events,
         }
