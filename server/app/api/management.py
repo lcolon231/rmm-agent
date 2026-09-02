@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -40,6 +40,7 @@ from app.core.tenant_scope import (
 from app.core import (
     anchor,
     anchor_publish,
+    approvals as approvals_core,
     audit,
     email_notifications,
     inventory,
@@ -104,6 +105,8 @@ from app.core.script_authorization import (
 from app.models.models import (
     Agent,
     AgentMeshMapping,
+    ApprovalRequest,
+    ApprovalRequestStatus,
     MeshMappingOrigin,
     MeshMappingState,
     Alert,
@@ -330,6 +333,156 @@ router = APIRouter(
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _apply_approval_policy(
+    db: AsyncSession,
+    operator: Operator,
+    agent: Agent,
+    kind: CommandKind,
+    payload: dict,
+    approval_request_id: str | None,
+    now: datetime,
+) -> str | None:
+    """Two-person authorization gate for a dispatch (issue #64).
+
+    Returns the id of the approval this dispatch spent, or ``None`` when no
+    policy requires one. Raises a fail-closed ``409`` in every other case.
+
+    Ordering matters and is deliberate. The gate runs *before* any payload
+    transform (power-operation windows, patch narrowing, package gating), so the
+    digest it verifies is the payload the approvers actually reviewed rather
+    than a server-rewritten one. It runs *after* ordinary command authorization,
+    so an unauthorized operator is refused for the right reason and cannot use
+    a missing-approval response to probe what a policy covers.
+
+    Validating and *spending* are deliberately separate. This function only
+    decides; :func:`_spend_approval` marks the approval consumed immediately
+    before the command row is created. A later gate refusing the dispatch (a
+    closed maintenance window, a denied patch selection) therefore leaves the
+    approval intact and re-usable, instead of burning two people's review on a
+    command that never ran.
+    """
+    policy = await approvals_core.resolve_policy(db, agent, kind)
+    if policy is None:
+        if approval_request_id is not None:
+            # An approval was offered for a dispatch no policy governs. Refuse
+            # rather than ignore: silently accepting would let a stale approval
+            # be marked spent against an unrelated run.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "approval_not_required"},
+            )
+        return None
+
+    base_detail = {
+        "kind": kind.value,
+        "agent_id": agent.id,
+        "policy_id": policy.id,
+        "required_approvals": policy.required_approvals,
+        "approval_request_id": approval_request_id,
+    }
+
+    async def refuse(code: str, http_status: int = status.HTTP_409_CONFLICT):
+        await audit.record(
+            db,
+            action="approval_gate.denied",
+            actor=operator.email,
+            actor_user_id=operator.id,
+            agent_id=agent.id,
+            detail={**base_detail, "reason": code},
+        )
+        await db.commit()
+        return HTTPException(
+            status_code=http_status,
+            detail={
+                "code": code,
+                "policy_id": policy.id,
+                "required_approvals": policy.required_approvals,
+            },
+        )
+
+    if approval_request_id is None:
+        raise await refuse("approval_required")
+
+    approval = (
+        await db.execute(
+            select(ApprovalRequest)
+            .where(ApprovalRequest.id == approval_request_id)
+            .options(selectinload(ApprovalRequest.decisions))
+        )
+    ).scalar_one_or_none()
+    if approval is None or approval.client_id != await tenant_scope.agent_client_id(
+        agent, db
+    ):
+        # Unknown, or belonging to another tenant: indistinguishable, so a
+        # foreign approval id is never an existence oracle.
+        raise await refuse("approval_request_not_found", status.HTTP_404_NOT_FOUND)
+
+    if approvals_core.expire_if_due(approval, now):
+        await audit.record(
+            db,
+            action="approval_request.expired",
+            actor="system",
+            agent_id=approval.agent_id,
+            detail=approvals_core.request_audit_detail(approval),
+        )
+
+    check = await approvals_core.consumption_refusal(
+        db,
+        approval,
+        list(approval.decisions),
+        operator=operator,
+        agent=agent,
+        kind=kind,
+        payload=payload,
+        now=now,
+    )
+    if not check.allowed:
+        raise await refuse(check.reason)
+
+    await audit.record(
+        db,
+        action="approval_gate.allowed",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        agent_id=agent.id,
+        organization_id=approval.client_id,
+        detail={
+            **base_detail,
+            "reason": check.reason,
+            "payload_sha256": approval.payload_sha256,
+            "approver_operator_ids": list(check.approver_ids),
+        },
+    )
+    return approval.id
+
+
+async def _spend_approval(
+    db: AsyncSession, approval_request_id: str, now: datetime
+) -> None:
+    """Mark a validated approval consumed, exactly once (issue #64).
+
+    The transition is a conditional UPDATE against the ``approved`` status
+    rather than an ORM assignment, because that is what makes a single approval
+    spendable once under concurrency: two simultaneous dispatches serialize on
+    the row and the loser matches zero rows. It runs in the dispatch
+    transaction, so the approval is spent if and only if the command it
+    authorized is created.
+    """
+    spent = await db.execute(
+        update(ApprovalRequest)
+        .where(
+            ApprovalRequest.id == approval_request_id,
+            ApprovalRequest.status == ApprovalRequestStatus.approved,
+        )
+        .values(status=ApprovalRequestStatus.consumed, consumed_at=now)
+    )
+    if spent.rowcount != 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "approval_request_already_consumed"},
+        )
 
 
 async def _apply_patch_approval_policy(
@@ -1855,6 +2008,17 @@ async def dispatch_command(
     )
 
     now = _now()
+    # Two-person authorization (issue #64). Evaluated against the operator's
+    # submitted payload, before any server-side transform rewrites it.
+    approval_request_id = await _apply_approval_policy(
+        db,
+        operator,
+        agent,
+        body.kind,
+        body.payload,
+        body.approval_request_id,
+        now,
+    )
     power_window_end: datetime | None = None
     try:
         body.payload, power_window_end = await _apply_power_operation_policy(
@@ -1977,6 +2141,10 @@ async def dispatch_command(
                 "reason": body.payload["reason"],
             },
         )
+    if approval_request_id is not None:
+        # Every other gate has passed; spend the approval in the same
+        # transaction that creates the command it authorized.
+        await _spend_approval(db, approval_request_id, now)
     key_id = active_signing_key().key_id if envelope_version == COMMAND_ENVELOPE_V3 else None
     expires_at = now + timedelta(seconds=body.ttl_seconds)
     if power_window_end is not None:
@@ -2000,6 +2168,8 @@ async def dispatch_command(
         actor_operator_id=operator.id,
         script_version_id=body.script_version_id,
         script_parameter_value_set_id=body.script_parameter_value_set_id,
+        # Execution binding (issue #64): the run carries the approval it spent.
+        approval_request_id=approval_request_id,
     )
     db.add(cmd)
     await db.flush()  # persist before signing

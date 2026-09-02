@@ -811,6 +811,15 @@ class Command(Base):
     dispatch_audit_event_id: Mapped[str | None] = mapped_column(
         ForeignKey("audit_events.id", ondelete="SET NULL")
     )
+    # The approval this run spent, when policy required one (issue #64). This is
+    # the execution binding recorded on the run itself: it answers "who else
+    # authorized this, and against which reviewed payload" without reconstructing
+    # it from the audit chain. NULL means no policy required approval — never a
+    # claim that approval was waived. SET NULL rather than CASCADE so purging
+    # approval history can never quietly delete command records.
+    approval_request_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approval_requests.id", ondelete="SET NULL"), index=True
+    )
     # Forward-compat lifecycle/lineage for recurring scheduling (#49) and retries.
     # No producer populates these yet; they land now so scheduling/retry work
     # needs no second migration. planned_at is the scheduled fire time; attempt
@@ -2677,4 +2686,237 @@ class BreakGlassActivation(Base):
     __table_args__ = (
         # Drives the "what still needs review" queue.
         Index("ix_break_glass_activations_unreviewed", "reviewed_at", "activated_at"),
+    )
+
+
+class ApprovalRequestStatus(str, enum.Enum):
+    """Lifecycle of one request for authorization to run a sensitive command.
+
+    ``pending`` and ``approved`` are the only usable states; everything else is
+    terminal. ``approved`` and ``consumed`` are deliberately distinct: an
+    approval authorizes exactly one dispatch, and separating "authorized" from
+    "already spent" is what makes replay of a single approval detectable rather
+    than invisible.
+    """
+
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    cancelled = "cancelled"
+    expired = "expired"
+    consumed = "consumed"
+
+
+class ApprovalDecisionKind(str, enum.Enum):
+    """One approver's recorded verdict on a request."""
+
+    approve = "approve"
+    reject = "reject"
+
+
+class ApprovalPolicy(Base):
+    """Where approval is required, and how many distinct people it takes (#64).
+
+    Scope resolution mirrors :class:`MonitoringPolicy` and
+    :class:`PatchApprovalPolicy`: the single most specific enabled policy whose
+    ``command_kinds`` contains the dispatched kind governs it (agent, then site,
+    then client, then global). Absence of a policy means the kind dispatches
+    under the existing role/scope rules unchanged, which is what keeps this
+    capability opt-in and safely deployable ahead of any policy being written.
+
+    ``required_approvals`` is the two-person control. At ``2`` a request needs
+    two *distinct* eligible identities that are both not the requester, so no
+    single compromised or mistaken account can authorize its own sensitive
+    action. It is stored per policy rather than assumed globally because the
+    tier that warrants dual control for one customer is a single reviewer for
+    another.
+    """
+
+    __tablename__ = "approval_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    scope: Mapped[MonitoringScope] = mapped_column(
+        Enum(
+            MonitoringScope,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    # NULL only for the global scope. Polymorphic target (client/site/agent id),
+    # so it is not a hard FK -- same rationale as the monitoring policies.
+    scope_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Bounded, validated list of CommandKind values this policy governs. Stored
+    # as JSON rather than a join table because it is a small closed vocabulary
+    # read whole on every dispatch and never queried by element.
+    command_kinds: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    required_approvals: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2, server_default="2"
+    )
+    # How long a created request stays usable. Bounding this is what stops an
+    # approval granted for one incident being spent weeks later against a
+    # changed fleet.
+    request_ttl_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3600, server_default="3600"
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    created_by: Mapped[str | None] = mapped_column(String(320))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str | None] = mapped_column(String(320))
+
+    __table_args__ = (
+        CheckConstraint(
+            "required_approvals >= 1 AND required_approvals <= 2",
+            name="ck_approval_policies_required_approvals",
+        ),
+    )
+
+
+# One policy name per scope target, case- and whitespace-insensitive. Mirrors
+# the patch/monitoring policy indexes: defense in depth behind the API's own
+# duplicate-name rejection.
+Index(
+    "ux_approval_policies_scope_name_normalized",
+    ApprovalPolicy.scope,
+    ApprovalPolicy.scope_id,
+    func.lower(func.trim(ApprovalPolicy.name)),
+    unique=True,
+)
+
+
+class ApprovalRequest(Base):
+    """A proposed sensitive command awaiting authorization by other people.
+
+    The row is a *binding*, not a note. ``payload_sha256`` covers the exact
+    agent, kind, and canonical payload that was reviewed, and dispatch
+    recomputes it from what the operator actually submits: an approval obtained
+    for "restart the print spooler" cannot be spent on "restart SQL Server",
+    because the digest no longer matches and the dispatch fails closed.
+
+    ``payload`` itself is retained so an approver can see what they are being
+    asked to authorize. It is the same operator-supplied structure the command
+    would carry and is subject to the same size validation; it is never copied
+    into the audit chain, which stores only key names and the digest.
+    """
+
+    __tablename__ = "approval_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Denormalized tenancy, captured at creation. The request must stay
+    # answerable to the tenant it was raised in even if the agent is later moved
+    # between sites, and every list/read filters on it.
+    client_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    site_id: Mapped[str | None] = mapped_column(String(36))
+    kind: Mapped[CommandKind] = mapped_column(Enum(CommandKind), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # SHA-256 over the canonical (agent, kind, payload) tuple. The whole
+    # execution binding rests on this column.
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The policy that required this request, and the terms it set. Copied onto
+    # the row rather than read live at approval time: editing a policy must not
+    # retroactively lower the bar for a request already in flight.
+    policy_id: Mapped[str | None] = mapped_column(String(36))
+    required_approvals: Mapped[int] = mapped_column(Integer, nullable=False)
+    requested_by_operator_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    requested_by_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    # Operator prose justifying the request. Shown to approvers; only ever
+    # digested into the audit chain.
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[ApprovalRequestStatus] = mapped_column(
+        Enum(
+            ApprovalRequestStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+        default=ApprovalRequestStatus.pending,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    # When the request reached a decided state (approved or rejected).
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the approval was spent on a dispatch. Set in the same transaction as
+    # the command row it authorized.
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Who ended the request early, and why (cancellation or rejection).
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_by_email: Mapped[str | None] = mapped_column(String(320))
+    closed_reason: Mapped[str | None] = mapped_column(Text)
+
+    decisions: Mapped[list["ApprovalDecision"]] = relationship(
+        back_populates="request", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        # Drives the reviewer queue ("what is waiting, newest first") and the
+        # lazy expiry sweep.
+        Index("ix_approval_requests_status_expires", "status", "expires_at"),
+        Index("ix_approval_requests_client_status", "client_id", "status"),
+    )
+
+
+class ApprovalDecision(Base):
+    """One identity's approve/reject on one request.
+
+    The unique constraint on ``(request_id, operator_id)`` is the enforcement
+    point for "two *distinct* people": a single account cannot satisfy a
+    two-approval policy by approving twice, and a concurrent double submission
+    from the same account loses the race at the database rather than in
+    application logic.
+
+    Decisions are never deleted. A rejected or superseded request keeps every
+    verdict recorded against it, because "who declined this, and why" is exactly
+    the evidence the control exists to produce.
+    """
+
+    __tablename__ = "approval_decisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    request_id: Mapped[str] = mapped_column(
+        ForeignKey("approval_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    operator_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    operator_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    # The approver's global role at the moment they decided. Display and review
+    # only: eligibility is always re-evaluated live at dispatch, so a later
+    # demotion invalidates the approval rather than being papered over by this
+    # snapshot.
+    operator_role: Mapped[OperatorRole] = mapped_column(
+        Enum(OperatorRole), nullable=False
+    )
+    decision: Mapped[ApprovalDecisionKind] = mapped_column(
+        Enum(
+            ApprovalDecisionKind,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    source_ip: Mapped[str | None] = mapped_column(String(45))
+
+    request: Mapped["ApprovalRequest"] = relationship(back_populates="decisions")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "request_id", "operator_id", name="ux_approval_decision_one_per_operator"
+        ),
     )

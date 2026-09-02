@@ -89,6 +89,14 @@ link to reproducible evidence in the release or pilot record.
       admin-granted global, site, or agent scope. Allowed and denied decisions
       are audited before signing/queueing without recording scripts
       (`docs/SCRIPT-AUTHORIZATION.md`).
+- [x] Any command kind can be placed behind approval and two-person
+      authorization. The approval binds the SHA-256 of
+      `(agent, kind, payload)` and is verified before any server-side payload
+      transform; approver eligibility is re-checked live at dispatch; the
+      approval is spent exactly once, and only in the transaction that creates
+      the command it authorized. Scheduled tasks and interactive shells are
+      refused for a governed kind rather than routing around the control.
+      Opt-in and inert until a policy exists (`docs/APPROVAL-WORKFLOWS.md`).
 
 ### Agent identity and endpoint storage
 
@@ -392,6 +400,24 @@ and skipped outside a required window. See [`PATCH-APPROVAL.md`](PATCH-APPROVAL.
 
 Patch compliance reporting (issue #54) is read-only and requires no schema or
 agent change; deploy the reporting API before the dashboard page.
+
+Revision `0041` creates the three `approval_*` tables and adds the nullable
+`commands.approval_request_id` column (issue #64). Nothing reaches the agent:
+the command envelope, schema version, and signing path are unchanged, so agent
+compatibility is unaffected and no capability negotiation is involved. The
+migration is inert on its own — with no policy rows, dispatch follows the
+existing role and script-scope rules exactly as before — so it is safe to apply
+ahead of the server build that uses it, and safe to leave applied if that build
+is rolled back. Deploy migration, then server, then dashboard.
+
+One tightening ships with #64 and only takes effect once a policy exists:
+a scheduled task whose kind is under an approval policy is refused rather than
+dispatched (`last_status` becomes `approval_required`), and an interactive
+shell session against an endpoint whose `powershell` is under a policy is
+refused with `shell_session_requires_approval`. Neither can produce a
+reviewable, payload-bound approval at the moment it runs. Review existing
+schedules before enabling a policy that covers their kind. See
+[`APPROVAL-WORKFLOWS.md`](APPROVAL-WORKFLOWS.md).
 
 ## Rollback procedure
 

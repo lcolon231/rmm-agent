@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_agent, require_role
+from app.core import approvals as approvals_core
 from app.core import audit
 from app.core.clientip import client_ip
 from app.core.config import settings
@@ -230,6 +231,30 @@ async def open_shell_session(
             evidence=evidence,
         )
         raise HTTPException(403, detail={"code": "shell_session_not_authorized"})
+    # An interactive shell runs whatever the operator types, so there is no
+    # payload to bind an approval to and no way to review in advance what will
+    # be executed (issue #64). When policy puts `powershell` behind approval for
+    # this endpoint, the honest behavior is to refuse the interactive path
+    # outright rather than offer a control it cannot actually enforce. Bounded,
+    # reviewable work goes through an approved command dispatch instead.
+    approval_policy = await approvals_core.resolve_policy(
+        db, agent, CommandKind.powershell
+    )
+    if approval_policy is not None:
+        await _record_denied(
+            db,
+            agent,
+            reason="shell_session_requires_approval",
+            policy="approval_policy",
+            evidence=evidence,
+        )
+        raise HTTPException(
+            409,
+            detail={
+                "code": "shell_session_requires_approval",
+                "policy_id": approval_policy.id,
+            },
+        )
     if agent.trust_state != AgentTrustState.active:
         await _record_denied(
             db, agent, reason="agent_not_trusted", policy="trust_state", evidence=evidence

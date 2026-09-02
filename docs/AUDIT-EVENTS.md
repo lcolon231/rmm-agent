@@ -168,6 +168,18 @@ and SHA-256/Merkle roots—remains readable.
 | `scheduled_task.manually_triggered` | `api/scheduled_tasks.py` manual run-now trigger | `scheduled_task_id`, `name_sha256`, `name_bytes`, `dispatched_count`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
 | `scheduled_task.dispatched` | `core/scheduler.py` cron dispatch tick | `scheduled_task_id`, `scheduled_task_name_sha256`, `scheduled_task_name_bytes`, `command_id`, `kind`, `target_type`, `target_id` |
 | `scheduled_task.misfire_skipped` | `core/scheduler.py` misfire handling | `scheduled_task_id`, `scheduled_task_name_sha256`, `scheduled_task_name_bytes`, `scheduled_for`, `detected_at` |
+| `approval_policy.created` | `api/approvals.py` approval policy written (issue #64) | `policy_id`, `name_sha256`, `name_bytes`, `scope`, `scope_id`, `command_kinds`, `required_approvals`, `request_ttl_seconds`, `enabled` |
+| `approval_policy.updated` | `api/approvals.py` approval policy terms changed | `policy_id`, `name_sha256`, `name_bytes`, `scope`, `scope_id`, `previous_command_kinds`, `command_kinds`, `previous_required_approvals`, `required_approvals`, `previous_request_ttl_seconds`, `request_ttl_seconds`, `previous_enabled`, `enabled` |
+| `approval_policy.deleted` | `api/approvals.py` approval policy removed | `policy_id`, `name_sha256`, `name_bytes`, `scope`, `scope_id`, `command_kinds`, `required_approvals` |
+| `approval_request.created` | `api/approvals.py` sensitive command proposed for approval | `approval_request_id`, `kind`, `agent_id`, `client_id`, `site_id`, `policy_id`, `required_approvals`, `payload_keys`, `payload_sha256`, `status`, `reason_sha256`, `reason_bytes`, `expires_at` |
+| `approval_request.denied` | `api/approvals.py` request refused: requester not authorized for the command | `kind`, `agent_id`, `policy`, `reason` |
+| `approval_request.decision_recorded` | `api/approvals.py` one identity's approve/reject | `approval_request_id`, `kind`, `agent_id`, `client_id`, `site_id`, `policy_id`, `required_approvals`, `payload_keys`, `payload_sha256`, `status`, `decision`, `reason_sha256`, `reason_bytes`, `approvals_recorded` |
+| `approval_request.decision_denied` | `api/approvals.py` refused verdict (self-approval, duplicate, lapsed, ineligible) | `approval_request_id`, `kind`, `agent_id`, `client_id`, `site_id`, `policy_id`, `required_approvals`, `payload_keys`, `payload_sha256`, `status`, `decision`, `reason` |
+| `approval_request.cancelled` | `api/approvals.py` request withdrawn by requester or tenant admin | `approval_request_id`, `kind`, `agent_id`, `client_id`, `site_id`, `policy_id`, `required_approvals`, `payload_keys`, `payload_sha256`, `status`, `reason_sha256`, `reason_bytes`, `cancelled_by_requester` |
+| `approval_request.expired` | `api/approvals.py`, `api/management.py` lazy expiry of a lapsed request | `approval_request_id`, `kind`, `agent_id`, `client_id`, `site_id`, `policy_id`, `required_approvals`, `payload_keys`, `payload_sha256`, `status` |
+| `approval_gate.allowed` | `api/management.py` dispatch spent an approval | `kind`, `agent_id`, `policy_id`, `required_approvals`, `approval_request_id`, `reason`, `payload_sha256`, `approver_operator_ids` |
+| `approval_gate.denied` | `api/management.py` fail-closed dispatch refusal under an approval policy | `kind`, `agent_id`, `policy_id`, `required_approvals`, `approval_request_id`, `reason` |
+| `scheduled_task.approval_refused` | `core/scheduler.py` unattended run refused: kind is under an approval policy | `scheduled_task_id`, `scheduled_task_name_sha256`, `scheduled_task_name_bytes`, `kind`, `agent_id`, `policy_id`, `required_approvals` |
 
 
 `server/tests/test_redaction.py` parses the production source and compares every

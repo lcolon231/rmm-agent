@@ -179,8 +179,11 @@ Workstreams:
 - Versioned deterministic JSON/CSV evidence bundles (#79), tagged PDF summaries,
   and domain-separated Ed25519-signed ZIP packages with clean-room verification
   (#80) are implemented.
-- Approval workflow, two-person authorization for sensitive actions, and
-  justified emergency override.
+- Approval workflows and two-person authorization for sensitive actions (#64)
+  are implemented: scoped opt-in policies, a payload-bound approval spent
+  exactly once, live re-checked approver eligibility, and no bypass through
+  scheduled tasks or interactive shells. A justified emergency override (#65)
+  remains open.
 - Explicit tenant IDs, tenant-scoped authorization, tenant-specific roles and
   retention, and isolation tests.
 - MFA, WebAuthn, OIDC or SAML, break-glass accounts, and administrative session

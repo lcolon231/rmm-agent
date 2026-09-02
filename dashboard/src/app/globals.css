@@ -3505,5 +3505,16 @@ textarea:focus-visible,
 .session-badge { padding: 2px 6px; color: var(--slate); font-size: 8px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; background: var(--paper); border-radius: 999px; }
 .session-badge-warn { color: #8a590f; background: var(--amber-soft); }
 .session-badge-alarm { color: var(--red); background: var(--red-soft); }
+/* Approvals (issue #64). A queue row carries more evidence than a session row
+   -- who asked, who has agreed, what is bound -- so the row stacks and the
+   controls sit beside it rather than under it. */
+.approval-queue .session-list li { align-items: flex-start; }
+.approval-queue .session-list code { font-size: 9px; letter-spacing: .03em; }
+.approval-blocked { color: var(--muted); font-style: italic; }
+.approval-actions { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; max-width: 340px; }
+.approval-actions input { min-height: 30px; min-width: 200px; flex: 1 1 200px; padding: 0 9px; font-size: 10px; border: 1px solid var(--line); border-radius: 4px; }
+.approval-actions button { display: inline-flex; min-height: 30px; align-items: center; gap: 5px; padding: 0 10px; color: var(--slate); font-size: 9px; font-weight: 800; background: white; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+.approval-actions button:disabled { opacity: .45; cursor: not-allowed; }
+
 .break-glass .mfa-recovery-codes ul { grid-template-columns: 1fr; }
 .break-glass .mfa-recovery-codes code { font-size: 12px; letter-spacing: .04em; word-break: break-all; }

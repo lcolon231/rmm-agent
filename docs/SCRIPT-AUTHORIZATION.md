@@ -20,9 +20,14 @@ An admin may give an eligible operator exactly one script scope:
 | `agent` | Scripts may be dispatched only to the named agent |
 
 Scopes are persistent until replaced or revoked. NodeLink does not yet support
-multiple simultaneous scopes, expiration, tenant roles, approval workflows, or
-per-script allowlists. Use the narrowest scope and revoke it when the work is
-complete.
+multiple simultaneous scopes, expiration, or per-script allowlists. Use the
+narrowest scope and revoke it when the work is complete.
+
+Two separate, outer gates apply on top of a script grant: per-client roles
+(see [`TENANT-AUTHORIZATION.md`](TENANT-AUTHORIZATION.md)) and, where an
+administrator has configured one, approval and two-person authorization for the
+command kind (see [`APPROVAL-WORKFLOWS.md`](APPROVAL-WORKFLOWS.md)). A script
+grant is necessary but not sufficient when either applies.
 
 ## Admin workflow
 
