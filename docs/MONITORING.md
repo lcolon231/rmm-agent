@@ -24,6 +24,8 @@ runtime contract. Issue #43's alert-state extension is documented in
 7. Each accepted revision-pinned result updates one deduplicated
    policy/endpoint/check alert identity. Failure/unknown results open or update
    it, healthy results recover it, and a later failure reopens a new generation.
+   Patch-age `unknown` results are the exception: they retain unavailable
+   evidence without opening an alert that could be mistaken for an old patch.
 
 When a successful heartbeat replaces or removes a policy revision, the agent
 discards queued results pinned to the superseded assignment before evaluating
@@ -40,6 +42,7 @@ distinct platform probes; additional checks report `unknown` with
 | Type | Input | Passing state | Failure/unavailable behavior |
 |---|---|---|---|
 | `offline` | Server-observed age of `last_seen_at` | Age does not breach the configured numeric threshold | Never checked in is `unknown`; overdue age is warning/critical. Evaluated by the server heartbeat sweeper. |
+| `patch_age` | Age in days of the newest installed update in stored `windows_updates` inventory | Newest install age does not breach the rising numeric threshold | Missing/unusable inventory, no installed updates or timestamps, and timestamps more than five minutes in the future are `unknown` and do not open an alert. Evaluated by the server heartbeat sweeper no more often than hourly. |
 | `cpu` | Current telemetry CPU percentage | Numeric threshold does not breach | Missing or stale sample is `unknown`. |
 | `memory` | Current telemetry memory percentage | Numeric threshold does not breach | Missing or stale sample is `unknown`. |
 | `disk` | Usage percentage for configured `mount_point` | Numeric threshold does not breach | Missing volume, failed probe, or stale system-drive sample is `unknown`. |
@@ -48,6 +51,24 @@ distinct platform probes; additional checks report `unknown` with
 
 The earlier `uptime` policy contract remains compatible and uses the same
 numeric evaluator, although it is not one of issue #42's six initial checks.
+
+### Patch-age inventory prerequisite
+
+`patch_age` is meaningful only when endpoints have a recurring `scan_updates`
+schedule. The `windows_updates` section is populated by that on-demand command,
+not by the heartbeat inventory path. Without a successful scan, the check
+records `unknown` with `no_update_inventory` and intentionally opens no alert.
+After each scan, the server evaluates the newest non-null `installed_on` value;
+an empty installed list and a list whose timestamps are all null remain distinct
+unknown states for troubleshooting.
+
+Patch age and patch-compliance staleness answer different questions.
+`patch_age` measures how long ago the endpoint installed its newest update;
+`patch_compliance` state `stale` means the update scan itself is old. A freshly
+scanned endpoint can have old installed patches, and a recently patched endpoint
+can have stale scan evidence. Keep both signals visible rather than treating one
+as a substitute for the other. See `docs/PATCH-COMPLIANCE.md` for the compliance
+state contract.
 
 Numeric checks evaluate critical before warning and support `gt`, `gte`, `lt`,
 and `lte`. CPU, memory, and disk results must remain in the inclusive 0–100
