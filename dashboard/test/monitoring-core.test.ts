@@ -165,6 +165,24 @@ test("alert list and detail parsers return only allowlisted operational data", (
   assert.doesNotMatch(JSON.stringify(list), /access_token|secret/);
   const detail = monitoringAlertDetailFromUnknown({
     ...alert,
+    last_result_detail: { reason: "reboot_pending" },
+    reboot_cause: {
+      reboot_flagged_updates: [{
+        title: "Pending update", kb_id: "KB-PENDING", update_id: null,
+        classification: "Security Updates", product: "Windows 11", severity: "Critical",
+        reboot_required: true, is_downloaded: true, support_url: null,
+        last_deployment_change: null, priority_grade: "P1 - Critical",
+      }],
+      recent_installs: [{
+        kb_id: "KB-RECENT", update_id: "update-1", revision_number: 2,
+        title: "Recently installed update", description: null,
+        installed_on: "2026-07-31T10:00:00Z", installed_by: "SYSTEM",
+        client_application_id: null, support_url: null, result_code: 2, hresult: null,
+      }],
+      system_reboot_required: true,
+      scanned_at: "2026-08-01T09:58:00Z",
+      snapshot_received_at: "2026-08-01T09:59:00Z",
+    },
     events: [{
       id: "event-1", alert_id: "alert-1", generation: 1, event_type: "opened",
       from_state: "resolved", to_state: "open", actor: "system", actor_user_id: null,
@@ -180,7 +198,27 @@ test("alert list and detail parsers return only allowlisted operational data", (
   });
   assert.ok(detail);
   assert.equal(detail.events[0].event_type, "opened");
+  assert.equal(detail.last_result_detail?.reason, "reboot_pending");
+  assert.equal(detail.reboot_cause?.recent_installs[0].kb_id, "KB-RECENT");
   assert.doesNotMatch(JSON.stringify(detail), /password|secret/);
+});
+
+test("alert detail degrades malformed or absent reboot correlation to null", () => {
+  const base = { ...alert, events: [], observations: [], last_result_detail: null };
+  const absent = monitoringAlertDetailFromUnknown(base);
+  assert.ok(absent);
+  assert.equal(absent.reboot_cause, null);
+
+  const malformed = monitoringAlertDetailFromUnknown({
+    ...base,
+    reboot_cause: {
+      reboot_flagged_updates: [], recent_installs: "not-a-list",
+      system_reboot_required: false, scanned_at: null,
+      snapshot_received_at: "2026-08-01T09:59:00Z",
+    },
+  });
+  assert.ok(malformed);
+  assert.equal(malformed.reboot_cause, null);
 });
 
 test("alert action input requires an idempotency key and bounded version", () => {
