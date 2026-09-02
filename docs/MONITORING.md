@@ -70,6 +70,26 @@ can have stale scan evidence. Keep both signals visible rather than treating one
 as a substitute for the other. See `docs/PATCH-COMPLIANCE.md` for the compliance
 state contract.
 
+### Pending-restart update correlation
+
+Opening a `reboot_pending` alert correlates it with the endpoint's latest stored
+`windows_updates` inventory. The detail response includes missing updates that
+were individually flagged `reboot_required`, plus up to ten updates installed
+inside the seven-day window preceding the alert. It also includes the inventory
+scan and receipt timestamps so technicians can judge evidence freshness.
+
+This read path never dispatches `scan_updates`; correlation is available only
+from inventory already stored by a prior scan. A missing snapshot therefore
+produces no cause block. A deleted policy revision also produces no cause block
+because the server can no longer safely resolve the alert's check type.
+
+Inventory timing is supporting evidence, not a causal verdict. In particular,
+agents deployed before reboot-source reporting have no `sources` key in their
+result detail. The dashboard labels those alerts "Cause unavailable" even when
+it can list nearby update activity. Absence of `sources` must never be treated
+as evidence that the restart is not update-related. The alert's lifecycle,
+severity, suppression, and notification behavior are unchanged.
+
 Numeric checks evaluate critical before warning and support `gt`, `gte`, `lt`,
 and `lte`. CPU, memory, and disk results must remain in the inclusive 0–100
 range at ingestion. An `unknown` result is never treated as `ok`.
