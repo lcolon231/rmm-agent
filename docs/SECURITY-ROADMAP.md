@@ -333,8 +333,24 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   rather than by a second factor -- which is precisely what it exists to
   survive. See [`ADMIN-SESSIONS.md`](ADMIN-SESSIONS.md).
 - Add OIDC/SAML federation.
-- Implement approval and two-person authorization for sensitive operations;
-  emergency override must require justification and produce prominent evidence.
+- **Partially implemented (issue #64).** Approval and two-person authorization
+  for sensitive operations. An opt-in policy at global, client, site, or
+  endpoint scope names the command kinds it governs and how many distinct
+  eligible identities must agree. The approval binds the SHA-256 of
+  `(agent_id, kind, payload)`, so a command mutated after review cannot spend
+  it; approver eligibility is re-evaluated live at dispatch, so a demotion,
+  disablement, tenant removal, or revoked script grant invalidates the approval
+  rather than being papered over by the snapshot on the decision row; and the
+  approval is spent exactly once through a conditional status transition. The
+  requester can never be an approver, and the database -- not application logic
+  -- enforces one verdict per identity. Scheduled tasks and interactive shell
+  sessions are refused for a governed kind rather than dispatching around the
+  control. The trust boundary this does *not* move: an approval is only as
+  strong as the separation between the accounts involved, and two identities
+  held by one person defeat it exactly as they would in any dual-control
+  system. See [`APPROVAL-WORKFLOWS.md`](APPROVAL-WORKFLOWS.md). A justified
+  emergency override that keeps the policy in force while recording the
+  exception remains open (issue #65).
 - **Implemented (issues #79/#80).** A single-tenant, versioned,
   deterministic manifest exports safe actor/endpoint/policy/signed-action/result
   metadata, sanitized audit events, hash-only chain material, anchors/receipts,

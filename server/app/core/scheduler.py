@@ -11,6 +11,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import approvals as approvals_core
 from app.core import audit, metrics, patch_policies as patch_core
 from app.core.command_envelope import (
     COMMAND_ENVELOPE_V2,
@@ -217,7 +218,38 @@ async def dispatch_scheduled_tasks_once(
             target_agents.extend(agents_res.scalars().all())
 
         task_dispatched_any = False
+        # An approval-gated kind is refused per agent; the flag survives the
+        # loop so the task's recorded status says why nothing ran.
+        task_approval_refused = False
         for agent in target_agents:
+            # Two-person authorization (issue #64). An unattended run cannot
+            # obtain approval from two live identities at fire time, and
+            # pre-approving every future occurrence would defeat the control's
+            # per-execution binding. So a scheduled task whose kind is under an
+            # approval policy for this endpoint is refused here, the same way
+            # power operations are refused above, rather than dispatching
+            # around a control an operator deliberately turned on.
+            approval_policy = await approvals_core.resolve_policy(db, agent, task.kind)
+            if approval_policy is not None:
+                await audit.record(
+                    db,
+                    action="scheduled_task.approval_refused",
+                    actor="system",
+                    agent_id=agent.id,
+                    detail={
+                        "scheduled_task_id": task.id,
+                        "scheduled_task_name": task.name,
+                        "kind": task.kind.value
+                        if hasattr(task.kind, "value")
+                        else str(task.kind),
+                        "agent_id": agent.id,
+                        "policy_id": approval_policy.id,
+                        "required_approvals": approval_policy.required_approvals,
+                    },
+                )
+                task_approval_refused = True
+                skipped_count += 1
+                continue
             # Check concurrency policy
             if task.concurrency_policy == ScheduleConcurrencyPolicy.skip:
                 active_cmd_res = await db.execute(
@@ -323,7 +355,13 @@ async def dispatch_scheduled_tasks_once(
             )
 
         task.last_run_at = now
-        task.last_status = "dispatched" if task_dispatched_any else "skipped"
+        task.last_status = (
+            "dispatched"
+            if task_dispatched_any
+            else "approval_required"
+            if task_approval_refused
+            else "skipped"
+        )
         task.next_run_at = compute_next_run(task.cron_expression, task.timezone, now)
         task.updated_at = now
 

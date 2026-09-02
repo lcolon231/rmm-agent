@@ -17,6 +17,7 @@ from app.api import (
     admin_sessions,
     agent_updates,
     agents,
+    approvals,
     auth,
     evidence,
     management,
@@ -99,6 +100,7 @@ app.include_router(admin_sessions.router, prefix="/api/v1")
 app.include_router(agents.router, prefix="/api/v1")
 app.include_router(evidence.router, prefix="/api/v1")
 app.include_router(management.router, prefix="/api/v1")
+app.include_router(approvals.router, prefix="/api/v1")
 app.include_router(script_library.router, prefix="/api/v1")
 app.include_router(scheduled_tasks.router, prefix="/api/v1")
 app.include_router(shell_sessions.router, prefix="/api/v1")

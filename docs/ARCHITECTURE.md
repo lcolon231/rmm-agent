@@ -186,6 +186,22 @@ Windows supports a typed idempotent cancellation path. See
 administrator-only and capability-gated, bounded to an allowlisted channel and
 returning metadata only; see [`EVENT-LOG-ACCESS.md`](EVENT-LOG-ACCESS.md).
 
+Any command kind can additionally be placed behind **approval and two-person
+authorization** (issue #64). An approval policy at global, client, site, or
+endpoint scope names the kinds it governs and how many distinct eligible
+identities must agree. The operator raises a request describing the exact
+command; the request binds the SHA-256 of `(agent_id, kind, payload)`, and
+dispatch recomputes that digest from the submitted payload, re-checks every
+approver's authority live, and spends the approval exactly once via a
+conditional status transition. The gate runs after ordinary command
+authorization and before any server-side payload transform, so what was
+reviewed is what is bound. Nothing reaches the agent: the envelope, schema
+version, and signing path are unchanged. Scheduled tasks and interactive shell
+sessions cannot route around it -- both are refused for a governed kind, since
+neither can produce a reviewable, bound payload at fire time. With no policy
+rows the capability is inert and dispatch behaves exactly as before. See
+[`APPROVAL-WORKFLOWS.md`](APPROVAL-WORKFLOWS.md).
+
 Controlled remediation preserves polling and the signed command/result
 contract. Both server and agent validate fixed managed file roots and the
 `Software\\NodeLink\\Managed` HKLM/HKCU subtree. The endpoint rejects device,
@@ -520,6 +536,19 @@ history. Automatic and manual transitions serialize on the alert row; operator
 comments are scrubbed before operational storage and digest-only in the audit
 chain.
 
+`ApprovalPolicy` mirrors `MonitoringPolicy`/`PatchApprovalPolicy` scoping
+(`global`, `client`, `site`, `agent`) and resolves most-specific-wins among the
+policies that *name* the dispatched kind, so a narrow policy can add a
+requirement but never silently drop a broader one. `ApprovalRequest` is one
+proposed command: it stores the payload for reviewers plus `payload_sha256`,
+the execution binding, and copies `required_approvals` and the deadline off the
+policy so an edit cannot retroactively lower the bar for work already in
+review. `ApprovalDecision` is one identity's verdict, unique per
+`(request, operator)` -- the database constraint is what makes "two distinct
+people" true under concurrency rather than by convention. `Command` carries
+`approval_request_id`, so a run points at the approval it spent; `NULL` means
+no policy required one, never that approval was waived.
+
 ### 4.2 API surface
 
 All application routes except `/healthz` are under `/api/v1`.
@@ -579,6 +608,13 @@ All application routes except `/healthz` are under `/api/v1`.
 | GET | `/monitoring/email-alerts/status` | Safe provider configuration and delivery counts | Readonly |
 | GET | `/monitoring/alerts/{id}/email-deliveries` | Masked recipient delivery/attempt history | Readonly |
 | POST | `/monitoring/email-deliveries/{id}/retry` | Idempotently retry a failed email | Operator |
+| POST/GET | `/approval-policies` | Create/list approval (two-person) policies | Admin / Readonly |
+| PATCH/DELETE | `/approval-policies/{id}` | Change terms or remove a policy | Admin |
+| POST/GET | `/approval-requests` | Propose a governed command / read the reviewer queue | Operator / Readonly |
+| GET | `/approval-requests/{id}` | One request with its payload and recorded verdicts | Readonly |
+| POST | `/approval-requests/{id}/approve` | Record one eligible identity's approval | Operator, never the requester |
+| POST | `/approval-requests/{id}/reject` | Refuse a request (terminal) | Operator, never the requester |
+| POST | `/approval-requests/{id}/cancel` | Withdraw a request | Requester or client admin |
 
 Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, a
 filtered enrollment audit-event list, and the general audit timeline,

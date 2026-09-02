@@ -265,6 +265,19 @@ The code in this repository currently provides:
   Enforcement stages through `off`/`optional`/`required`, and rolling back is a
   configuration change rather than a migration. Attestation is deliberately not
   verified, so this establishes no authenticator provenance.
+- Approval workflows and two-person authorization for sensitive commands
+  (`docs/APPROVAL-WORKFLOWS.md`). An opt-in policy at global, client, site, or
+  endpoint scope names the command kinds it governs and how many distinct
+  eligible identities must agree. The approval binds the SHA-256 of
+  `(agent, kind, payload)`, so a command mutated after review cannot spend it;
+  approver eligibility is re-checked live at dispatch, so a demotion, tenant
+  removal, disablement, or revoked script grant invalidates it; and the
+  approval is spent exactly once. The requester can never approve their own
+  request, and one verdict per identity is enforced by a database constraint
+  rather than by application logic. Scheduled tasks and interactive shell
+  sessions are refused for a governed kind rather than dispatching around the
+  control. With no policy configured the capability is inert and dispatch is
+  unchanged. A justified emergency override is not implemented.
 - Client and site records, agent listing, command dispatch/history APIs, and an
   offline-status sweeper.
 - Agent quarantine/restore (operator) and terminal revocation (admin) with
@@ -415,8 +428,9 @@ at `0035`.
   cancellation.
 - **Milestone 3 — Compliance Productization:** started — tenant-scoped
   authorization (#66) and deterministic JSON/CSV/PDF/signed-ZIP evidence
-  bundles and packages (#79/#80) are implemented server side. Tenant membership
-  UI, tenant-specific retention, approval workflows, stronger identity controls
+  bundles and packages (#79/#80), and approval workflows with two-person
+  authorization (#64) are implemented server side. Tenant membership
+  UI, tenant-specific retention, stronger identity controls
   (MFA, WebAuthn, OIDC/SAML), immutable retention and legal hold, a packaged
   audit verification tool, and a customer audit portal remain planned.
 - **Milestone 4 — Scale and Ecosystem:** shared infrastructure, distributed
@@ -465,6 +479,12 @@ The repository does **not** currently contain:
   certificate-based signing is
   missing). External audit-anchor publication ships (`docs/AUDIT-ANCHORING.md`)
   but the operator must configure and operate the destination.
+- A justified emergency override for approval workflows. Approval and
+  two-person authorization for sensitive commands *is* implemented
+  (`docs/APPROVAL-WORKFLOWS.md`), but the only way past a policy that is
+  blocking urgent work is for a tenant administrator to disable the policy,
+  which is audited as a policy change rather than as a recorded, justified
+  exception. A break-glass override that keeps the policy in force is planned.
 - Tenant-specific retention, OIDC/SAML federation, or legal hold.
   Tenant-scoped authorization with per-tenant roles
   (`docs/TENANT-AUTHORIZATION.md`) and signed compliance evidence exports
