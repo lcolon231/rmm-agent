@@ -277,6 +277,7 @@ class CheckType(str, enum.Enum):
     service = "service"
     reboot_pending = "reboot_pending"
     uptime = "uptime"
+    patch_age = "patch_age"
 
 
 class CheckResultStatus(str, enum.Enum):
