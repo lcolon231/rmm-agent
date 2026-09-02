@@ -108,7 +108,51 @@ export type AlertObservation = {
   created_at: string;
 };
 
+export type RebootFlaggedUpdate = {
+  title: string;
+  kb_id: string | null;
+  update_id: string | null;
+  classification: string | null;
+  product: string | null;
+  severity: string | null;
+  reboot_required: boolean | null;
+  is_downloaded: boolean | null;
+  support_url: string | null;
+  last_deployment_change: string | null;
+  priority_grade: string | null;
+};
+
+export type RebootRecentInstall = {
+  kb_id: string | null;
+  update_id: string | null;
+  revision_number: number | null;
+  title: string | null;
+  description: string | null;
+  installed_on: string | null;
+  installed_by: string | null;
+  client_application_id: string | null;
+  support_url: string | null;
+  result_code: number | null;
+  hresult: string | null;
+};
+
+export type RebootCause = {
+  reboot_flagged_updates: RebootFlaggedUpdate[];
+  recent_installs: RebootRecentInstall[];
+  system_reboot_required: boolean | null;
+  scanned_at: string | null;
+  snapshot_received_at: string;
+};
+
+export type RebootCorrelationPresentation = {
+  state: "unavailable" | "update_correlated" | "no_evidence";
+  title: string;
+  summary: string;
+};
+
 export type MonitoringAlertDetail = MonitoringAlert & {
+  last_result_detail: Record<string, unknown> | null;
+  reboot_cause: RebootCause | null;
   events: AlertEvent[];
   observations: AlertObservation[];
 };
@@ -393,6 +437,92 @@ function nullableTimestamp(value: unknown): value is string | null {
   return value === null || isTimestamp(value);
 }
 
+function nullableBoolean(value: unknown): value is boolean | null {
+  return value === null || typeof value === "boolean";
+}
+
+function rebootFlaggedUpdateFromUnknown(value: unknown): RebootFlaggedUpdate | null {
+  if (!isRecord(value)
+      || typeof value.title !== "string"
+      || !nullableString(value.kb_id) || !nullableString(value.update_id)
+      || !nullableString(value.classification) || !nullableString(value.product)
+      || !nullableString(value.severity) || !nullableBoolean(value.reboot_required)
+      || !nullableBoolean(value.is_downloaded) || !nullableString(value.support_url)
+      || !nullableTimestamp(value.last_deployment_change)
+      || !nullableString(value.priority_grade)) return null;
+  return {
+    title: value.title,
+    kb_id: value.kb_id, update_id: value.update_id,
+    classification: value.classification, product: value.product, severity: value.severity,
+    reboot_required: value.reboot_required, is_downloaded: value.is_downloaded,
+    support_url: value.support_url, last_deployment_change: value.last_deployment_change,
+    priority_grade: value.priority_grade,
+  };
+}
+
+function rebootRecentInstallFromUnknown(value: unknown): RebootRecentInstall | null {
+  if (!isRecord(value)
+      || !nullableString(value.kb_id) || !nullableString(value.update_id)
+      || !(value.revision_number === null || Number.isInteger(value.revision_number))
+      || !nullableString(value.title) || !nullableString(value.description)
+      || !nullableTimestamp(value.installed_on) || !nullableString(value.installed_by)
+      || !nullableString(value.client_application_id) || !nullableString(value.support_url)
+      || !(value.result_code === null || Number.isInteger(value.result_code))
+      || !nullableString(value.hresult)) return null;
+  return {
+    kb_id: value.kb_id, update_id: value.update_id,
+    revision_number: value.revision_number as number | null,
+    title: value.title, description: value.description, installed_on: value.installed_on,
+    installed_by: value.installed_by, client_application_id: value.client_application_id,
+    support_url: value.support_url, result_code: value.result_code as number | null,
+    hresult: value.hresult,
+  };
+}
+
+function rebootCauseFromUnknown(value: unknown): RebootCause | null {
+  if (!isRecord(value)
+      || !Array.isArray(value.reboot_flagged_updates)
+      || !Array.isArray(value.recent_installs)
+      || value.recent_installs.length > 10
+      || !nullableBoolean(value.system_reboot_required)
+      || !nullableTimestamp(value.scanned_at)
+      || !isTimestamp(value.snapshot_received_at)) return null;
+  const rebootFlaggedUpdates = value.reboot_flagged_updates.map(rebootFlaggedUpdateFromUnknown);
+  const recentInstalls = value.recent_installs.map(rebootRecentInstallFromUnknown);
+  if (!rebootFlaggedUpdates.every((item): item is RebootFlaggedUpdate => item !== null)
+      || !recentInstalls.every((item): item is RebootRecentInstall => item !== null)) return null;
+  return {
+    reboot_flagged_updates: rebootFlaggedUpdates,
+    recent_installs: recentInstalls,
+    system_reboot_required: value.system_reboot_required,
+    scanned_at: value.scanned_at,
+    snapshot_received_at: value.snapshot_received_at,
+  };
+}
+
+function rebootResultDetailFromUnknown(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const detail: Record<string, unknown> = {};
+  if (typeof value.check_type === "string") detail.check_type = value.check_type;
+  if (typeof value.reason === "string") detail.reason = value.reason;
+  if (Number.isInteger(value.pending_file_rename_count)
+      && (value.pending_file_rename_count as number) >= 0) {
+    detail.pending_file_rename_count = value.pending_file_rename_count;
+  }
+  const sources = value.sources;
+  if (isRecord(sources)
+      && typeof sources.component_based_servicing === "boolean"
+      && typeof sources.windows_update === "boolean"
+      && typeof sources.pending_file_rename === "boolean") {
+    detail.sources = {
+      component_based_servicing: sources.component_based_servicing,
+      windows_update: sources.windows_update,
+      pending_file_rename: sources.pending_file_rename,
+    };
+  }
+  return detail;
+}
+
 export function monitoringAlertFromUnknown(value: unknown): MonitoringAlert | null {
   if (!isRecord(value)) return null;
   const timestampFields = [
@@ -501,7 +631,52 @@ export function monitoringAlertDetailFromUnknown(value: unknown): MonitoringAler
   const observations = value.observations.map(alertObservationFromUnknown);
   if (!events.every((item): item is AlertEvent => item !== null)
       || !observations.every((item): item is AlertObservation => item !== null)) return null;
-  return { ...alert, events, observations };
+  const lastResultDetail = rebootResultDetailFromUnknown(value.last_result_detail);
+  return {
+    ...alert,
+    last_result_detail: lastResultDetail,
+    reboot_cause: rebootCauseFromUnknown(value.reboot_cause),
+    events,
+    observations,
+  };
+}
+
+export function rebootCorrelationPresentation(
+  detail: Record<string, unknown> | null,
+  cause: RebootCause | null,
+): RebootCorrelationPresentation | null {
+  if (detail === null && cause === null) return null;
+  const sources = detail?.sources;
+  const sourceReportingAvailable = isRecord(sources)
+    && typeof sources.component_based_servicing === "boolean"
+    && typeof sources.windows_update === "boolean"
+    && typeof sources.pending_file_rename === "boolean";
+  if (!sourceReportingAvailable) {
+    return {
+      state: "unavailable",
+      title: "Cause unavailable",
+      summary: "Agent predates cause reporting. Correlated update evidence is shown when available.",
+    };
+  }
+  if (cause === null) {
+    return {
+      state: "unavailable",
+      title: "Cause unavailable",
+      summary: "No Windows Update inventory snapshot is available for correlation.",
+    };
+  }
+  if (cause.reboot_flagged_updates.length > 0 || cause.recent_installs.length > 0) {
+    return {
+      state: "update_correlated",
+      title: "Update activity correlated",
+      summary: "Update activity was reported near this alert. This is correlation, not proof that an update caused the restart.",
+    };
+  }
+  return {
+    state: "no_evidence",
+    title: "No correlated update activity",
+    summary: "No update activity was found in the 7-day correlation window. This does not rule out an update cause.",
+  };
 }
 
 export function alertAssigneesFromUnknown(value: unknown): AlertAssignee[] | null {

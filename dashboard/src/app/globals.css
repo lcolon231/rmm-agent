@@ -3152,6 +3152,31 @@ textarea:focus-visible,
 .alert-detail-head code { font-size: 10px; }
 .alert-summary-grid { margin-bottom: 18px; }
 .alert-summary-grid strong { font-size: 12px; }
+.reboot-correlation-panel { margin-bottom: 18px; overflow: hidden; }
+.reboot-correlation-panel > header { border-bottom: 1px solid var(--line); }
+.reboot-correlation-panel > header svg { color: #6c2ce9; }
+.reboot-correlation-status { margin: 16px 18px 0; padding: 12px 14px; color: #3f3a54; background: #f6f2fe; border-left: 4px solid #6c2ce9; border-radius: 4px; }
+.reboot-correlation-panel.unavailable .reboot-correlation-status { color: #6f5a32; background: #fff8e8; border-left-color: var(--amber); }
+.reboot-correlation-panel.no_evidence .reboot-correlation-status { color: #3f3a54; background: #f5f3fa; border-left-color: #9a93b4; }
+.reboot-correlation-status strong { font-size: 11px; }
+.reboot-correlation-status p { margin: 4px 0 0; font-size: 9px; line-height: 1.5; }
+.reboot-correlation-meta { display: grid; grid-template-columns: repeat(3, 1fr); margin: 14px 18px 0; border: 1px solid var(--line); border-radius: 4px; }
+.reboot-correlation-meta > div { padding: 10px 12px; border-right: 1px solid var(--line); }
+.reboot-correlation-meta > div:last-child { border-right: 0; }
+.reboot-correlation-meta dt { color: var(--muted); font-size: 7px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.reboot-correlation-meta dd { margin: 4px 0 0; color: var(--slate); font-family: var(--font-data); font-size: 8px; }
+.reboot-correlation-evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 14px 18px; }
+.reboot-correlation-evidence > article { overflow: hidden; border: 1px solid var(--line); border-radius: 4px; }
+.reboot-correlation-evidence article > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 11px; background: #faf9fd; border-bottom: 1px solid var(--line); }
+.reboot-correlation-evidence header span { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.reboot-correlation-evidence header strong { display: grid; min-width: 20px; height: 20px; place-items: center; color: #6c2ce9; font: 800 8px var(--font-data); background: #eee7fb; border-radius: 999px; }
+.reboot-correlation-evidence ul { margin: 0; padding: 0; list-style: none; }
+.reboot-correlation-evidence li { display: grid; grid-template-columns: minmax(64px, auto) 1fr; gap: 9px; padding: 9px 11px; border-bottom: 1px solid #ebe8f3; }
+.reboot-correlation-evidence li:last-child { border-bottom: 0; }
+.reboot-correlation-evidence li strong { color: var(--ink); font: 750 8px var(--font-data); }
+.reboot-correlation-evidence li span, .reboot-correlation-evidence article > p { color: var(--slate); font-size: 8px; line-height: 1.45; }
+.reboot-correlation-evidence article > p { margin: 0; padding: 13px 11px; }
+.reboot-correlation-note { margin: 0; padding: 0 18px 16px; color: var(--muted); font-size: 8px; line-height: 1.5; }
 .alert-action-panel { margin-bottom: 18px; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 5px; box-shadow: 0 7px 22px rgb(9 27 41 / 4%); }
 .alert-action-panel > header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
 .alert-action-panel > header span { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -3300,6 +3325,9 @@ textarea:focus-visible,
   .audit-anchor > header { align-items: stretch; flex-direction: column; }
   .audit-root { align-items: stretch; flex-direction: column; gap: 4px; }
   .inventory-grid { grid-template-columns: 1fr; }
+  .reboot-correlation-meta, .reboot-correlation-evidence { grid-template-columns: 1fr; }
+  .reboot-correlation-meta > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .reboot-correlation-meta > div:last-child { border-bottom: 0; }
   .windows-update-toolbar { grid-template-columns: 1fr 1fr; }
   .windows-update-search { grid-column: 1 / -1; }
   .windows-update-selection-bar { grid-template-columns: auto 1fr; }
