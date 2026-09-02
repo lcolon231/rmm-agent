@@ -156,6 +156,10 @@ and SHA-256/Merkle roots—remains readable.
 | `mfa.step_up_succeeded` | `api/mfa.py` re-assertion for a sensitive operation | `operator_id`, `credential_id` |
 | `mfa.recovery_codes_generated` | `api/mfa.py` recovery batch mint; the codes themselves are never recorded | `operator_id`, `batch_id`, `code_count` |
 | `mfa.recovery_code_used` | `api/mfa.py` recovery login; which code was spent is deliberately not recorded | `operator_id`, `codes_remaining` |
+| `mfa.email_code_sent` | `api/mfa.py` email one-time code dispatched; the code is never recorded, and `destination` is masked | `operator_id`, `purpose`, `destination` |
+| `mfa.email_code_send_failed` | `api/mfa.py` delivery refused by the provider; `reason` is a coded fault, never provider prose | `operator_id`, `purpose`, `reason` |
+| `mfa.email_factor_verified` | `api/mfa.py` email factor enrolment completed | `operator_id`, `destination` |
+| `mfa.email_factor_removed` | `api/mfa.py` email factor removed; step-up gated | `operator_id`, `reason_sha256`, `reason_bytes`, `by` |
 | `mfa.reset` | `api/mfa.py` administrative MFA reset after device loss | `operator_id`, `credentials_revoked`, `recovery_codes_invalidated`, `reason_sha256`, `reason_bytes`, `by` |
 | `scheduled_task.created` | `api/scheduled_tasks.py` task schedule creation | `scheduled_task_id`, `name_sha256`, `name_bytes`, `target_type`, `target_id`, `cron_expression`, `timezone`, `next_run_at`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
 | `scheduled_task.updated` | `api/scheduled_tasks.py` task schedule update | `scheduled_task_id`, `name_sha256`, `name_bytes`, `enabled`, `next_run_at`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |

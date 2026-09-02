@@ -107,6 +107,12 @@ TOKEN_TYPE_MFA_PENDING = "mfa_pending"
 AMR_PASSWORD = "pwd"
 AMR_WEBAUTHN = "webauthn"
 AMR_RECOVERY_CODE = "recovery_code"
+#: An emailed one-time code (issue #226). A second factor, but the only one here
+#: that is not phishing-resistant: it carries no origin binding, so a convincing
+#: look-alike page can harvest and replay it inside its validity window. It
+#: therefore sits at exactly the recovery-code tier -- it satisfies
+#: `session_is_mfa_verified` but never `step_up_is_fresh`.
+AMR_EMAIL_CODE = "email_code"
 #: A session opened by activating a break-glass credential (issue #69). It is
 #: deliberately NOT a second factor: it bypassed MFA, which is the whole point,
 #: so it satisfies neither `session_is_mfa_verified` nor `step_up_is_fresh`.

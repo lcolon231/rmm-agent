@@ -2,7 +2,7 @@
 
 "use client";
 
-import { ArrowRight, KeyRound, LifeBuoy, ShieldCheck } from "lucide-react";
+import { ArrowRight, KeyRound, LifeBuoy, Mail, ShieldCheck } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useState } from "react";
 
@@ -32,17 +32,30 @@ type MfaChallengeFormProps = {
  * - **assert** — the normal path: touch the security key.
  * - **recovery** — the fallback, shown only when the server listed it, so the
  *   page never advertises an option that would fail.
+ * - **email** — a mailed one-time code (issue #226), likewise only when the
+ *   server listed it. The copy says plainly that it is the weaker factor and
+ *   that the resulting session cannot change security settings, because an
+ *   operator choosing between two options should be told what they are giving
+ *   up rather than discovering it at a 403.
  *
  * The component decides nothing about whether a ceremony passed. It hands bytes
  * to the browser's authenticator, posts what comes back, and renders the
  * server's verdict.
  */
 export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFormProps) {
+  const recoveryAvailable = methods.includes("recovery_code");
+  const emailAvailable = methods.includes("email_code");
+  const keyAvailable = methods.includes("webauthn");
+
   const [error, setError] = useState("");
   const [isBusy, setIsBusy] = useState(false);
-  const [showRecovery, setShowRecovery] = useState(false);
-
-  const recoveryAvailable = methods.includes("recovery_code");
+  // An operator whose only factor is a mailed code must not land on a screen
+  // telling them to touch a key they do not own.
+  const [mode, setMode] = useState<"assert" | "recovery" | "email">(
+    keyAvailable || !emailAvailable ? "assert" : "email",
+  );
+  const [codeSent, setCodeSent] = useState(false);
+  const [destination, setDestination] = useState("");
 
   const supported = useWebAuthnSupport();
 
@@ -137,6 +150,57 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
     }
   }
 
+  async function requestEmailCode() {
+    setError("");
+    setIsBusy(true);
+    try {
+      const response = await fetch("/api/auth/mfa/login/email/send", {
+        method: "POST",
+      });
+      if (!response.ok) {
+        await failFromResponse(response);
+        return;
+      }
+      const body = await response.json().catch(() => null) as
+        | { destination?: string }
+        | null;
+      // The acknowledgement is deliberately the same whether or not a message
+      // was really sent, so this only ever means "the request was accepted".
+      setDestination(typeof body?.destination === "string" ? body.destination : "");
+      setCodeSent(true);
+    } catch {
+      setError("Multi-factor authentication is unavailable. Try again later.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function submitEmailCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const code = String(new FormData(event.currentTarget).get("code") ?? "");
+    setError("");
+    setIsBusy(true);
+    try {
+      const response = await fetch("/api/auth/mfa/login/email/verify", {
+        body: JSON.stringify({ code }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (response.ok) {
+        // Land on the security page, as the recovery-code path does: this
+        // session cannot change security settings, and the place to fix that is
+        // there.
+        window.location.replace("/security");
+        return;
+      }
+      await failFromResponse(response);
+    } catch {
+      setError("Multi-factor authentication is unavailable. Try again later.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function submitRecoveryCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const code = String(new FormData(event.currentTarget).get("code") ?? "");
@@ -195,7 +259,7 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
               </button>
             </form>
           </>
-        ) : showRecovery ? (
+        ) : mode === "recovery" ? (
           <>
             <h1 id="mfa-title">Use a recovery code</h1>
             <p>
@@ -222,11 +286,74 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
             </form>
             <button
               className="login-secondary"
-              onClick={() => { setShowRecovery(false); setError(""); }}
+              onClick={() => { setMode("assert"); setError(""); }}
               type="button"
             >
               Use my security key instead
             </button>
+          </>
+        ) : mode === "email" ? (
+          <>
+            <h1 id="mfa-title">Check your email</h1>
+            {codeSent ? (
+              <p>
+                We sent a code to {destination || "your email address"}. It expires
+                shortly and works once. Signing in this way lets you register a
+                security key, but not change your security settings until you do.
+              </p>
+            ) : (
+              <p>
+                We can email a one-time code to your login address. An emailed code
+                is not as strong as a security key -- it can be phished -- so this
+                session will not be able to change your security settings.
+              </p>
+            )}
+            {codeSent ? (
+              <form onSubmit={submitEmailCode}>
+                <label htmlFor="code">Emailed code</label>
+                <input
+                  autoComplete="one-time-code"
+                  id="code"
+                  inputMode="numeric"
+                  maxLength={32}
+                  name="code"
+                  placeholder="123456"
+                  required
+                  spellCheck={false}
+                  type="text"
+                />
+                {error ? <p className="login-error" role="alert">{error}</p> : null}
+                <button disabled={isBusy} type="submit">
+                  <Mail size={16} /> {isBusy ? "Checking..." : "Sign in with the code"} <ArrowRight size={16} />
+                </button>
+              </form>
+            ) : (
+              <>
+                {error ? <p className="login-error" role="alert">{error}</p> : null}
+                <button disabled={isBusy} onClick={requestEmailCode} type="button">
+                  <Mail size={16} /> {isBusy ? "Sending..." : "Email me a code"} <ArrowRight size={16} />
+                </button>
+              </>
+            )}
+            {codeSent ? (
+              <button
+                className="login-secondary"
+                disabled={isBusy}
+                onClick={requestEmailCode}
+                type="button"
+              >
+                Send another code
+              </button>
+            ) : null}
+            {keyAvailable ? (
+              <button
+                className="login-secondary"
+                onClick={() => { setMode("assert"); setError(""); }}
+                type="button"
+              >
+                Use my security key instead
+              </button>
+            ) : null}
           </>
         ) : (
           <>
@@ -247,10 +374,19 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
             {recoveryAvailable ? (
               <button
                 className="login-secondary"
-                onClick={() => { setShowRecovery(true); setError(""); }}
+                onClick={() => { setMode("recovery"); setError(""); }}
                 type="button"
               >
                 Lost your key? Use a recovery code
+              </button>
+            ) : null}
+            {emailAvailable ? (
+              <button
+                className="login-secondary"
+                onClick={() => { setMode("email"); setError(""); }}
+                type="button"
+              >
+                Email me a code instead
               </button>
             ) : null}
           </>

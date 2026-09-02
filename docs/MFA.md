@@ -1,8 +1,11 @@
 # Multi-factor authentication (WebAuthn)
 
-Issue #67. Phishing-resistant second-factor authentication for dashboard
+Issue #67, extended by issue #226. Phishing-resistant second-factor authentication for dashboard
 operators, with enrolment, single-use challenges, device naming and revocation,
-step-up for sensitive operations, and audited recovery.
+step-up for sensitive operations, and audited recovery. An optional email
+one-time-code factor exists as a *fallback* for operators who hold no
+authenticator; it is off by default and deliberately weaker — see
+[Email one-time codes](#10-email-one-time-codes-optional-fallback).
 
 **What this is not.** This is a strong authentication control. It is not a
 compliance claim, and it does not verify authenticator provenance — see
@@ -46,6 +49,11 @@ the [administrative reset](#6-administrative-reset-device-loss) exist to handle.
 | `MFA_MAX_CREDENTIALS_PER_OPERATOR` | `10` | Ceiling on registered authenticators. |
 | `MFA_MAX_FAILURES` / `MFA_WINDOW_SECONDS` | `5` / `300` | Second-factor rate limit per (client IP, operator). |
 | `MFA_REQUIRE_USER_VERIFICATION` | `true` | Require PIN/biometric, not merely presence. |
+| `MFA_EMAIL_CODE_POLICY` | `off` | `off` \| `fallback_only` \| `always`. See [Email one-time codes](#10-email-one-time-codes-optional-fallback). |
+| `MFA_EMAIL_CODE_LENGTH` | `6` | Digits per emailed code. |
+| `MFA_EMAIL_CODE_TTL_SECONDS` | `600` | Code lifetime. |
+| `MFA_EMAIL_CODE_MAX_ATTEMPTS` | `5` | Verification attempts before a code is burned. |
+| `MFA_EMAIL_SEND_MAX_PER_WINDOW` / `MFA_EMAIL_SEND_WINDOW_SECONDS` | `3` / `900` | Send limit, per operator and per source IP. |
 
 ### The relying-party ID is effectively immutable
 
@@ -348,6 +356,10 @@ Revision `0036` adds `webauthn_credentials`, `webauthn_challenges`,
 `mfa_recovery_codes`, and one nullable `operators.mfa_recovery_codes_generated_at`
 column. Every change is additive.
 
+Revision `0040` adds `mfa_email_factors` and `mfa_email_codes` for the email
+fallback. Also additive: a deployment that leaves `MFA_EMAIL_CODE_POLICY` at
+`off` gets two unused tables and no behavioural change.
+
 Nothing stored is a secret that could be replayed as a login: a WebAuthn
 credential is a public key, and recovery codes are bcrypt hashes. A database
 disclosure does not yield a usable second factor.
@@ -358,7 +370,9 @@ disclosure does not yield a usable second factor.
 `mfa.credential_renamed`, `mfa.credential_revoked`,
 `mfa.authentication_succeeded`, `mfa.authentication_failed`,
 `mfa.step_up_succeeded`, `mfa.recovery_codes_generated`,
-`mfa.recovery_code_used`, `mfa.reset`. Field-level schemas are in
+`mfa.recovery_code_used`, `mfa.reset`, `mfa.email_code_sent`,
+`mfa.email_code_send_failed`, `mfa.email_factor_verified`,
+`mfa.email_factor_removed`. Field-level schemas are in
 [`AUDIT-EVENTS.md`](AUDIT-EVENTS.md) and enforced fail-closed by
 `app/core/redaction.py`.
 
@@ -367,6 +381,11 @@ as digests plus byte counts. `credential_id` throughout is the credential *row*
 id, never the WebAuthn credential identifier. Recovery codes appear nowhere, and
 `mfa.recovery_code_used` deliberately does not record *which* code was spent —
 that would narrow the search space for the remaining ones if the log were
+disclosed.
+
+Emailed codes get the same treatment as recovery codes: never recorded, not even
+as a digest. What the chain carries is the *masked* destination — enough to
+review where a code went, not enough to be a mailing list if the log is
 disclosed.
 
 ### Tests
@@ -382,6 +401,12 @@ session revocation mid-login, rate limiting, credential limits, all three
 enforcement positions, the last-credential guard, recovery issuance/use/
 regeneration, the full device-loss path, administrative reset, and audit
 completeness with secret absence.
+
+`server/tests/test_mfa_email_code.py` (21 tests) covers the email factor:
+each policy position, the fallback-only downgrade guard, code expiry, the
+attempt ceiling, send limiting per operator and per IP, purpose binding between
+enrolment and login codes, invalidation on delivery failure, refusal to satisfy
+step-up, and audit completeness with the code absent from the chain.
 
 `dashboard/test/mfa-core.test.ts` covers encoding, ceremony conversion, login
 interpretation, error-code collapsing, and the route handlers' origin, credential
@@ -399,3 +424,104 @@ selection, and cookie behaviour.
   so a backlog is a storage note rather than a security one.
 - **No authenticator attestation or FIDO MDS integration**, as above.
 - **No per-operator enrolment exemption or override.** Policy is role-based.
+- **Email delivery is an availability boundary.** An operator whose only second
+  factor is email cannot sign in while mail is delayed past the code's TTL. That
+  is a lockout path with no cryptographic mitigation; it is why the factor is
+  `fallback_only` at most, and why break-glass
+  ([`ADMIN-SESSIONS.md`](ADMIN-SESSIONS.md)) is the answer for a total lockout
+  rather than a longer TTL.
+- **An emailed code is not phishing-resistant** and never can be. Enabling the
+  factor is a deliberate trade of assurance for coverage; see section 10.
+
+---
+
+## 10. Email one-time codes (optional fallback)
+
+Issue #226. **Off by default, and the default is the right choice for a
+deployment that has issued security keys to everyone.**
+
+### What it is trading away
+
+Section 1 rejected TOTP because a code can be read aloud, typed into a
+look-alike page, and replayed. An emailed code has exactly that weakness — it is
+the same class of secret, delivered over a channel the operator does not control
+either. Adding it does not make the account stronger; it makes the account
+*reachable* by an operator who has no authenticator, at the cost of the property
+that made WebAuthn worth building.
+
+So the design question is never how to send a code. It is what the code is
+allowed to do.
+
+### `MFA_EMAIL_CODE_POLICY` — the whole decision
+
+| Position | Effect | When it is defensible |
+| --- | --- | --- |
+| `off` | Email is never a factor. Enrolment and login by email both refuse. | Every operator holds a key. |
+| `fallback_only` | Email is a login factor **only** for an operator with no active authenticator. | Rolling out keys gradually, or covering operators who cannot hold one. |
+| `always` | Email is offered alongside WebAuthn to everyone. | Rarely. See below. |
+
+`fallback_only` is the recommended position because it **cannot downgrade an
+already-protected account**: an operator who holds a key must still use it, so
+enabling the factor only reaches people who would otherwise have no second
+factor at all.
+
+`always` is the position to understand before choosing. It reduces every account
+to the weaker factor — including accounts that hold a key — because an attacker
+can simply phish the code and never touch the authenticator. The strong factor
+becomes decorative. Choose it knowingly or not at all.
+
+### No email code ever satisfies step-up
+
+This is the load-bearing rule, and it is the same rule recovery codes get, for
+the same reason. Device revocation, recovery-code minting, and operator
+administration must not be reachable by phishing six digits. A session that got
+in with an email code can do ordinary work and **can register an authenticator**
+— that is the exit path — but it cannot remove the email factor, revoke a
+device, or touch another operator's account.
+
+Removing the email factor is itself step-up gated, so a phished code cannot be
+escalated into a lasting change to the account.
+
+### Why six digits is defensible
+
+It is not the entropy. `10^6` is small. What bounds it is that a code dies after
+`MFA_EMAIL_CODE_MAX_ATTEMPTS` (5) verifications and after
+`MFA_EMAIL_CODE_TTL_SECONDS` (600s), and that sends are limited separately from
+verifies — mailbox flooding and guessing are different abuses, and sharing one
+budget would let either exhaust the other. Raise the length before relaxing
+either bound.
+
+Codes are stored hashed, single-use, and bound to a *purpose*: an enrolment code
+cannot be presented at login, and vice versa.
+
+### Endpoints
+
+| Endpoint | Auth | Purpose |
+| --- | --- | --- |
+| `POST /api/v1/auth/mfa/email/enrollment/start` | enrolment states | Send an enrolment code to the operator's login address. |
+| `POST /api/v1/auth/mfa/email/enrollment/verify` | enrolment states | Complete enrolment. |
+| `POST /api/v1/auth/mfa/email` | session + **step-up** | Remove the factor; mandatory reason. |
+| `POST /api/v1/auth/mfa/login/email/send` | `mfa_pending` token | Send a login code. |
+| `POST /api/v1/auth/mfa/login/email/verify` | `mfa_pending` token | Complete login. |
+
+Enrolment accepts the same three states WebAuthn enrolment does (`get_enrollment_operator`):
+a not-yet-enrolled session, a session that already presented a second factor, and
+a restricted post-password token when policy obliges the operator to enrol.
+
+### The destination is not a choice
+
+Codes go to `Operator.email` and nowhere else. There is no per-factor address to
+set, because a settable delivery address is an account-takeover primitive: an
+attacker with a live session would otherwise point the factor at their own
+mailbox. Changing where codes go means changing the login identity, through the
+operator-administration path, with its own audit trail.
+
+Responses are identical whether or not the operator actually has an email
+factor, and nothing in a response says whether a message reached the wire.
+
+### When delivery fails
+
+The code is invalidated rather than left live in the database, the failure is
+audited with a coded provider reason, and the caller gets `503
+email_delivery_unavailable`. Telling an operator a code is coming when it is not
+means they wait out the expiry and blame their mailbox.

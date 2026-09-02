@@ -37,10 +37,11 @@ from app.api.deps import (
     require_role,
     require_step_up,
 )
-from app.core import audit, mfa, sessions
+from app.core import audit, mfa, mfa_email, sessions
 from app.core.clientip import client_ip
 from app.core.database import get_db
 from app.core.security import (
+    AMR_EMAIL_CODE,
     AMR_PASSWORD,
     AMR_RECOVERY_CODE,
     AMR_WEBAUTHN,
@@ -59,6 +60,7 @@ from app.core.webauthn import (
     verify_registration,
 )
 from app.models.models import (
+    MfaEmailCodePurpose,
     Operator,
     OperatorRole,
     WebAuthnChallengePurpose,
@@ -69,6 +71,9 @@ from app.schemas.mfa import (
     AuthenticationOptionsOut,
     CredentialRename,
     CredentialRevoke,
+    EmailCodeSent,
+    EmailCodeVerification,
+    EmailFactorOut,
     LoginResponse,
     MfaReset,
     MfaResetOut,
@@ -165,6 +170,123 @@ def _decode_field(value: str, code: str) -> bytes:
         return b64url_decode(value)
     except WebAuthnError as exc:
         raise WebAuthnError(code) from exc
+
+
+def _require_email_enabled() -> None:
+    """Refuse every email-factor operation while the policy is ``off``.
+
+    ``off`` is the rollback position for this factor specifically, and it has to
+    mean the same thing ``mfa_enforcement=off`` means for WebAuthn: nothing can
+    be enrolled, nothing can be completed, and a stale browser tab cannot
+    half-re-enable the feature.
+    """
+    _require_enabled()
+    if not mfa_email.factor_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "email_code_disabled"},
+        )
+
+
+def _email_factor_out(factor, operator: Operator) -> EmailFactorOut | None:
+    if factor is None:
+        return None
+    return EmailFactorOut(
+        verified=mfa_email.factor_is_usable(factor, operator),
+        destination=mfa_email.masked_destination(operator),
+        verified_at=factor.verified_at,
+    )
+
+
+def _enforce_send_limit(request: Request, operator: Operator) -> None:
+    """Bound code sends per operator *and* per source IP, independently.
+
+    Two keys rather than the composite key the verify path uses: a mailbox flood
+    aimed at one operator comes from many addresses, and an address spraying
+    sends across many operators is a different abuse that a per-operator budget
+    alone would never see.
+    """
+    for key in (f"op:{operator.id}", f"ip:{client_ip(request)}"):
+        retry_after = mfa_email.email_send_limiter.retry_after(key)
+        if retry_after is not None:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many codes requested; try again later",
+                headers={"Retry-After": str(int(retry_after) + 1)},
+            )
+
+
+def _record_send(request: Request, operator: Operator) -> None:
+    for key in (f"op:{operator.id}", f"ip:{client_ip(request)}"):
+        mfa_email.email_send_limiter.record_failure(key)
+
+
+async def _issue_and_send_code(
+    db: AsyncSession,
+    request: Request,
+    operator: Operator,
+    *,
+    purpose: MfaEmailCodePurpose,
+) -> EmailCodeSent:
+    """Mint one code, mail it, and audit the attempt either way.
+
+    The send is charged against the limiter *before* the provider call, so a
+    provider that is timing out cannot be used as a free way to keep minting
+    codes.
+    """
+    from app.core.config import settings as _settings
+
+    _record_send(request, operator)
+    code, row = await mfa_email.issue_code(db, operator, purpose=purpose)
+    try:
+        await mfa_email.send_code(
+            code, operator=operator, row=row, purpose=purpose
+        )
+    except mfa_email.EmailDeliveryUnavailable as exc:
+        # The code exists but nobody can read it. Invalidate it rather than
+        # leaving a live secret nobody asked for, record the failure, and tell
+        # the caller: an operator who is told a code is coming, when it is not,
+        # waits out the expiry and blames their mailbox.
+        await mfa_email.invalidate_codes(db, operator.id, purpose=purpose)
+        await audit.record(
+            db,
+            action="mfa.email_code_send_failed",
+            actor=operator.email,
+            actor_user_id=operator.id,
+            source_ip=client_ip(request),
+            user_agent=request.headers.get("user-agent", "")[:500] or None,
+            detail={
+                "operator_id": operator.id,
+                "purpose": purpose.value,
+                "reason": exc.code,
+            },
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "email_delivery_unavailable"},
+        ) from exc
+
+    await audit.record(
+        db,
+        action="mfa.email_code_sent",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "operator_id": operator.id,
+            "purpose": purpose.value,
+            # Masked, never the full address, and never the code in any form --
+            # not even a digest, for the same reason recovery codes are kept out
+            # of the chain entirely.
+            "destination": mfa_email.masked_destination(operator),
+        },
+    )
+    return EmailCodeSent(
+        destination=mfa_email.masked_destination(operator),
+        expires_in_seconds=_settings.mfa_email_code_ttl_seconds,
+    )
 
 
 async def _credential_descriptors(
@@ -271,6 +393,10 @@ async def mfa_status(
             WebAuthnCredentialOut.model_validate(credential)
             for credential in credentials
         ],
+        email_code_policy=mfa_email.policy_mode(),
+        email_factor=_email_factor_out(
+            await mfa_email.get_factor(db, operator.id), operator
+        ),
     )
 
 
@@ -839,6 +965,250 @@ async def complete_login_with_recovery_code(
         subject=operator.id,
         generation=operator.token_generation,
         amr=(AMR_PASSWORD, AMR_RECOVERY_CODE),
+        session_id=session.id,
+    )
+    return LoginResponse(access_token=token)
+
+
+# --------------------------------------------------------------------------- #
+# Email one-time codes (issue #226)
+# --------------------------------------------------------------------------- #
+@router.post("/auth/mfa/email/enrollment/start", response_model=EmailCodeSent)
+async def start_email_enrollment(
+    request: Request,
+    operator: Operator = Depends(get_enrollment_operator),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mail a code to prove control of the operator's own login address.
+
+    The destination is not a parameter. It is always ``Operator.email``, which
+    is what keeps an attacker who has only a password from pointing the factor
+    at a mailbox they control -- they would need the corporate mailbox too.
+
+    Authorization is the same dependency WebAuthn registration uses, so the same
+    three states are admitted for the same reasons: bootstrap for an operator
+    with no factor yet, an MFA-verified session adding a factor to a protected
+    account, and the restricted post-password token for an operator policy
+    obliges to enrol. A password-only session on an already-protected account is
+    refused there, so a stolen session cannot quietly attach a mailbox.
+    """
+    _require_email_enabled()
+    _enforce_send_limit(request, operator)
+    await mfa_email.begin_enrollment(db, operator)
+    sent = await _issue_and_send_code(
+        db, request, operator, purpose=MfaEmailCodePurpose.enrollment
+    )
+    await db.commit()
+    return sent
+
+
+@router.post("/auth/mfa/email/enrollment/verify", response_model=EmailFactorOut)
+async def verify_email_enrollment(
+    body: EmailCodeVerification,
+    request: Request,
+    operator: Operator = Depends(get_enrollment_operator),
+    db: AsyncSession = Depends(get_db),
+):
+    """Finish enrolment by presenting the mailed code."""
+    _require_email_enabled()
+    _enforce_rate_limit(request, operator)
+    limit_key = _rate_limit_key(request, operator)
+
+    factor = await mfa_email.get_factor(db, operator.id)
+    result = await mfa_email.consume_code(
+        db,
+        operator,
+        presented=body.code,
+        purpose=MfaEmailCodePurpose.enrollment,
+    )
+    if factor is None or not result.ok:
+        mfa.mfa_limiter.record_failure(limit_key)
+        await _audit_failure(
+            db,
+            request,
+            operator,
+            method="email_code",
+            reason=result.reason if factor is not None else "no_enrollment_in_progress",
+        )
+        await db.commit()
+        raise _ceremony_failed()
+
+    mfa.mfa_limiter.clear(limit_key)
+    factor.verified_at = datetime.now(timezone.utc)
+    await audit.record(
+        db,
+        action="mfa.email_factor_verified",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "operator_id": operator.id,
+            "destination": mfa_email.masked_destination(operator),
+        },
+    )
+    await db.commit()
+    return _email_factor_out(factor, operator)
+
+
+@router.post("/auth/mfa/email", response_model=EmailFactorOut)
+async def remove_email_factor(
+    body: CredentialRevoke,
+    request: Request,
+    operator: Operator = Depends(require_step_up),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the caller's own email factor.
+
+    Step-up gated, like revoking an authenticator: removing a factor is a
+    security-settings change, and a session that got in *with* an email code
+    cannot use it to take the factor away -- which is what stops a phished code
+    from being escalated into a lasting change to the account.
+
+    Modelled as POST rather than DELETE because it carries a mandatory reason
+    for the audit trail, matching the credential-revocation endpoint above.
+    """
+    _require_enabled()
+    removed = await mfa_email.remove_factor(db, operator)
+    if not removed:
+        raise HTTPException(status_code=404, detail="No email factor registered")
+    await audit.record(
+        db,
+        action="mfa.email_factor_removed",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "operator_id": operator.id,
+            "reason": body.reason,
+            "by": "self",
+        },
+    )
+    await db.commit()
+    return EmailFactorOut(verified=False, destination=None, verified_at=None)
+
+
+@router.post("/auth/mfa/login/email/send", response_model=EmailCodeSent)
+async def send_login_email_code(
+    request: Request,
+    operator: Operator = Depends(get_mfa_pending_operator),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mail a login code to an operator who has completed the password step.
+
+    The response is identical whether or not this operator actually holds a
+    verified email factor. The destination is always their own login address, so
+    echoing it back masked tells a caller who already knows the password nothing
+    new, and a caller who does not know it never reaches this endpoint.
+
+    One residual disclosure is worth naming rather than hiding: while the mail
+    provider is failing, an operator *with* a factor gets a 503 where an
+    operator without one still gets a 202. That distinction is only observable
+    to someone who already has the password and only during an outage, which is
+    a better trade than telling every operator that a code is on its way when
+    none was sent.
+    """
+    _require_email_enabled()
+    _enforce_send_limit(request, operator)
+
+    decision = await mfa.decide_login(db, operator)
+    if "email_code" not in decision.methods:
+        # No factor, or policy does not offer it to this operator. Charge the
+        # send budget anyway so this path cannot be used as an unmetered probe,
+        # and return the same acknowledgement the success path returns.
+        from app.core.config import settings as _settings
+
+        _record_send(request, operator)
+        await _audit_failure(
+            db, request, operator, method="email_code", reason="no_email_factor"
+        )
+        await db.commit()
+        return EmailCodeSent(
+            destination=mfa_email.masked_destination(operator),
+            expires_in_seconds=_settings.mfa_email_code_ttl_seconds,
+        )
+
+    sent = await _issue_and_send_code(
+        db, request, operator, purpose=MfaEmailCodePurpose.login
+    )
+    await db.commit()
+    return sent
+
+
+@router.post("/auth/mfa/login/email/verify", response_model=LoginResponse)
+async def complete_login_with_email_code(
+    body: EmailCodeVerification,
+    request: Request,
+    operator: Operator = Depends(get_mfa_pending_operator),
+    db: AsyncSession = Depends(get_db),
+):
+    """Finish a login with an emailed one-time code.
+
+    The resulting session sits at exactly the recovery-code tier: it is
+    MFA-verified, so it can enrol a replacement authenticator, but it carries no
+    step-up, so it cannot revoke devices, mint recovery codes, remove the email
+    factor itself, or touch another operator's account. That ceiling is the
+    whole reason a phishable factor is admissible at all.
+    """
+    _require_email_enabled()
+    _enforce_rate_limit(request, operator)
+    limit_key = _rate_limit_key(request, operator)
+
+    # Re-decided here rather than trusted from the login response: policy or the
+    # operator's factors may have changed since the password step, and the
+    # pending token must not carry a stale entitlement.
+    decision = await mfa.decide_login(db, operator)
+    if "email_code" not in decision.methods:
+        mfa.mfa_limiter.record_failure(limit_key)
+        await _audit_failure(
+            db, request, operator, method="email_code", reason="method_not_permitted"
+        )
+        await db.commit()
+        raise _ceremony_failed()
+
+    result = await mfa_email.consume_code(
+        db, operator, presented=body.code, purpose=MfaEmailCodePurpose.login
+    )
+    if not result.ok:
+        mfa.mfa_limiter.record_failure(limit_key)
+        await _audit_failure(
+            db, request, operator, method="email_code", reason=result.reason
+        )
+        await db.commit()
+        raise _ceremony_failed()
+
+    mfa.mfa_limiter.clear(limit_key)
+    await audit.record(
+        db,
+        action="mfa.authentication_succeeded",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "operator_id": operator.id,
+            # Null rather than omitted: the schema for this action is exact, and
+            # an email login has no authenticator to name. Recording the absence
+            # explicitly is what lets a reviewer tell "logged in without a
+            # credential" apart from "producer forgot the field".
+            "credential_id": None,
+            "method": "email_code",
+            "purpose": "login",
+        },
+    )
+    session = await sessions.create(
+        db,
+        operator,
+        auth_methods=(AMR_PASSWORD, AMR_EMAIL_CODE),
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    # No step_up_at: an emailed code never satisfies step-up.
+    token = create_access_token(
+        subject=operator.id,
+        generation=operator.token_generation,
+        amr=(AMR_PASSWORD, AMR_EMAIL_CODE),
         session_id=session.id,
     )
     return LoginResponse(access_token=token)

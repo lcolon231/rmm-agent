@@ -27,6 +27,7 @@ import {
   mfaErrorMessage,
   readLoginChallenge,
   validateDeviceName,
+  validateEmailCode,
   validateRecoveryCode,
   validateRevokeReason,
   type MfaErrorCode,
@@ -163,7 +164,10 @@ export async function handleLoginOptions(
  */
 export async function handleLoginVerify(
   request: Request,
-  dependencies: MfaRouteDependencies & { verify: UpstreamCall; kind: "webauthn" | "recovery_code" },
+  dependencies: MfaRouteDependencies & {
+    verify: UpstreamCall;
+    kind: "webauthn" | "recovery_code" | "email_code";
+  },
 ): Promise<MfaRouteResult> {
   if (!isSameOriginRequest(request)) {
     return errorResult("request-rejected", 403);
@@ -176,7 +180,9 @@ export async function handleLoginVerify(
   const body = await readJsonBody(request);
   const payload = dependencies.kind === "recovery_code"
     ? recoveryPayload(body)
-    : assertionPayload(body);
+    : dependencies.kind === "email_code"
+      ? emailCodePayload(body)
+      : assertionPayload(body);
   if (payload === null) {
     return errorResult("invalid-request", 400);
   }
@@ -225,6 +231,13 @@ function assertionPayload(body: unknown): Record<string, string> | null {
     payload[field] = value;
   }
   return payload;
+}
+
+function emailCodePayload(body: unknown): Record<string, string> | null {
+  const code = validateEmailCode(
+    body && typeof body === "object" ? (body as Record<string, unknown>).code : null,
+  );
+  return code === null ? null : { code };
 }
 
 function recoveryPayload(body: unknown): Record<string, string> | null {
@@ -405,6 +418,78 @@ export async function handleGenerateRecoveryCodes(
     return token;
   }
   const upstream = await dependencies.generate(token);
+  if (upstream.status !== 200) {
+    return upstreamFailure(upstream.status, upstream.code);
+  }
+  return { response: json(upstream.body), cookies: [] };
+}
+
+/**
+ * Request that a one-time code be mailed (issue #226).
+ *
+ * `credential` selects which token the send is authorised with: the restricted
+ * post-password cookie during a login, or the operator's session while
+ * enrolling from the security page.
+ *
+ * The upstream acknowledgement is passed through as-is. It is deliberately the
+ * same shape whether or not the operator actually has an email factor, and this
+ * layer must not "helpfully" turn the two into different client outcomes.
+ */
+export async function handleSendEmailCode(
+  request: Request,
+  dependencies: MfaRouteDependencies & {
+    send: UpstreamCall;
+    credential: "mfa-token" | "session";
+  },
+): Promise<MfaRouteResult> {
+  if (!isSameOriginRequest(request)) {
+    return errorResult("request-rejected", 403);
+  }
+  const token = dependencies.credential === "mfa-token"
+    ? await requireMfaToken(dependencies)
+    : await requireSessionToken(dependencies);
+  if (typeof token !== "string") {
+    return token;
+  }
+  const upstream = await dependencies.send(token);
+  if (upstream.status !== 200) {
+    return upstreamFailure(upstream.status, upstream.code);
+  }
+  return { response: json(upstream.body), cookies: [] };
+}
+
+/**
+ * Confirm an emailed enrolment code, or remove the factor.
+ *
+ * Both are ordinary session-authorised mutations that return the resulting
+ * factor state, so they share one handler shaped by `payload`.
+ */
+export async function handleEmailFactorMutation(
+  request: Request,
+  dependencies: MfaRouteDependencies & {
+    mutate: UpstreamCall;
+    payload: "code" | "reason";
+  },
+): Promise<MfaRouteResult> {
+  if (!isSameOriginRequest(request)) {
+    return errorResult("request-rejected", 403);
+  }
+  const token = await requireSessionToken(dependencies);
+  if (typeof token !== "string") {
+    return token;
+  }
+  const body = await readJsonBody(request);
+  const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const payload = dependencies.payload === "code"
+    ? emailCodePayload(record)
+    : (() => {
+      const reason = validateRevokeReason(record.reason);
+      return reason === null ? null : { reason };
+    })();
+  if (payload === null) {
+    return errorResult("invalid-request", 400);
+  }
+  const upstream = await dependencies.mutate(token, payload);
   if (upstream.status !== 200) {
     return upstreamFailure(upstream.status, upstream.code);
   }
