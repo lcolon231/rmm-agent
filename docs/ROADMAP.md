@@ -150,14 +150,36 @@ Workstreams, in order:
    boundary is designed; MSI and EXE deployment.
 3. Typed service, process, event-log, file-transfer, registry, reboot, and
    shutdown operations.
-4. Interactive remote shell and streaming command output over a live transport,
-   retaining polling fallback.
-5. Technician-to-end-user chat over the same live transport: the agent surfaces
-   a chat window on the endpoint so the machine's user can talk to the
-   technician from their computer, with sessions initiated or accepted
-   endpoint-side, participant identity on every message, complete audit of
-   session lifecycle, bounded/retained transcripts, and no remote-control
-   capability piggybacked on the chat channel.
+4. Interactive remote shell and streaming command output. **Implemented**
+   (issue #61) on the existing authenticated HTTPS transport using bounded long
+   polling with reconnect-by-sequence and acknowledgement-based eviction — not a
+   persistent live transport. No WebSocket exists server-side outside the
+   MeshCentral adapter, consistent with
+   [`ARCHITECTURE.md`](ARCHITECTURE.md). This workstream previously read "over a
+   live transport, retaining polling fallback"; what shipped is the polling
+   path, and the live transport was never built or scoped. See
+   [`SHELL-SESSIONS.md`](SHELL-SESSIONS.md).
+5. Technician-to-end-user chat, on the same bounded-polling transport as
+   workstream 4: sessions initiated or accepted endpoint-side, participant
+   identity on every message, complete audit of session lifecycle,
+   bounded/retained transcripts, and no remote-control capability piggybacked on
+   the chat channel. Specified and scheduled (issues #233, #234, #235, #236,
+   #237); see [`../specs/SPEC-support-chat.md`](../specs/SPEC-support-chat.md).
+
+   The endpoint-side surface is a browser page that the service launches into
+   the logged-on user's session, **not** a native chat window. The agent runs in
+   session 0 with no UI surface, and a Go GUI toolkit would add a large
+   transitive dependency tree to a `go.mod` that has one entry, while
+   Authenticode signing remains a pilot blocker
+   ([`DEPLOYMENT-READINESS.md`](DEPLOYMENT-READINESS.md)). Revisit the native
+   window after signing lands.
+
+   Conversation creation is mediated by the service over a local named pipe and
+   authenticated with the agent's own credential, so the feature introduces no
+   per-endpoint secret; the short-lived, conversation-scoped chat token is the
+   only new credential. Transcripts are retained for 30 days by default while
+   lifecycle audit events are never pruned, keeping the accountability record
+   separate from the PHI liability.
 6. MeshCentral remote desktop integration with explicit authorization and audit
    boundaries.
 7. Signed, staged, rollback-capable agent self-update. **Implemented**
