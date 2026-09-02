@@ -57,6 +57,7 @@ def prometheus_text(agent_statuses: dict[str, int] | None = None) -> str:
         "monitoring_result_duplicate_total",
         "monitoring_result_rejected_total",
         "monitoring_offline_evaluation_total",
+        "monitoring_patch_age_evaluation_total",
         "monitoring_alert_opened_total",
         "monitoring_alert_occurrence_total",
         "monitoring_alert_recovered_total",

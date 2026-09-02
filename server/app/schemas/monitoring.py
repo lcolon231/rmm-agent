@@ -54,6 +54,7 @@ MAX_CHECKS_PER_POLICY = 100
 #: budget evaluating; above the maximum a check is no longer "monitoring".
 MIN_CHECK_INTERVAL_SECONDS = 30
 MAX_CHECK_INTERVAL_SECONDS = 86_400
+PATCH_AGE_MIN_INTERVAL_SECONDS = 3_600
 #: Consecutive-sample bounds for hysteresis (breach/clear debouncing).
 MAX_HYSTERESIS_SAMPLES = 100
 MAX_RESULTS_PER_BATCH = 100
@@ -158,6 +159,7 @@ CHECK_PARAM_MODELS: dict[CheckType, type[BaseModel]] = {
     CheckType.service: ServiceParams,
     CheckType.reboot_pending: _NoParams,
     CheckType.uptime: _NoParams,
+    CheckType.patch_age: _NoParams,
 }
 
 #: State checks derive status directly rather than comparing a numeric sample.
@@ -180,6 +182,21 @@ class CheckDefinition(BaseModel):
     hysteresis: Hysteresis = Field(default_factory=Hysteresis)
     params: dict = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_patch_age_falling_threshold(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        check_type = data.get("type")
+        threshold = data.get("threshold")
+        if check_type in (CheckType.patch_age, CheckType.patch_age.value) and isinstance(
+            threshold, dict
+        ):
+            op = threshold.get("op")
+            if op in (ThresholdOp.lt, ThresholdOp.lte, "lt", "lte"):
+                raise ValueError("patch_age check requires a rising threshold")
+        return data
+
     @model_validator(mode="after")
     def _validate_type_specifics(self) -> "CheckDefinition":
         # Reject unknown/malformed params against this type's model.
@@ -190,6 +207,11 @@ class CheckDefinition(BaseModel):
                 raise ValueError(f"{self.type.value} check does not take a threshold")
         elif self.type not in THRESHOLD_OPTIONAL_TYPES and self.threshold is None:
             raise ValueError(f"{self.type.value} check requires a threshold")
+        if self.type is CheckType.patch_age:
+            if self.schedule.interval_seconds < PATCH_AGE_MIN_INTERVAL_SECONDS:
+                raise ValueError(
+                    "patch_age check interval must be at least 3600 seconds"
+                )
         return self
 
 

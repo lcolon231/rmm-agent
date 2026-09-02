@@ -10,8 +10,8 @@ Responsibilities:
 * :func:`record_check_result` / :func:`prune_check_results` persist and bound the
   check-result contract. #42's authenticated ingestion route calls it with a
   durable agent-generated result ID.
-* :func:`evaluate_offline_checks` records due heartbeat-age checks in the
-  server sweeper with the same cadence and hysteresis semantics.
+* :func:`evaluate_offline_checks` and :func:`evaluate_patch_age_checks` record
+  due server-owned checks with the same cadence and hysteresis semantics.
 * :func:`apply_check_result_to_alert` serializes one durable alert identity per
   policy/endpoint/check, including recovery, retrigger, suppression,
   exactly-once observation evidence, and immutable lifecycle history (#43/#44).
@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import email_notifications, metrics, webhook_notifications
 from app.models.models import (
     Agent,
+    AgentInventorySnapshot,
     Alert,
     AlertEvent,
     AlertEventType,
@@ -43,12 +44,14 @@ from app.models.models import (
     AlertState,
     CheckResult,
     CheckResultStatus,
+    CheckType,
     MaintenanceWindow,
     MonitoringPolicy,
     MonitoringPolicyRevision,
     MonitoringScope,
     Site,
 )
+from app.schemas.inventory import InventorySection
 from app.schemas.monitoring import CheckDefinition, Threshold, ThresholdOp
 
 # Scope precedence, least- to most-specific. A check defined at a higher number
@@ -61,6 +64,7 @@ _SCOPE_PRECEDENCE: dict[MonitoringScope, int] = {
 }
 
 MAX_CHECK_RESULT_DETAIL_BYTES = 16 * 1024
+INSTALL_TIMESTAMP_SKEW_TOLERANCE = timedelta(minutes=5)
 _CHECK_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
@@ -569,10 +573,13 @@ async def record_check_result(
     policy_id: str | None = None,
     policy_revision_id: str | None = None,
     result_id: str | None = None,
+    alert_on_unknown: bool = True,
 ) -> CheckResult:
     """Append one check-result row. The caller owns the transaction/commit.
 
-    Agent ingestion and server-owned offline evaluation both call this seam.
+    Agent ingestion and server-owned evaluation both call this seam. Callers
+    may retain an unknown result as evidence without applying it to alert state;
+    the default preserves the shipped behavior that unknown opens an alert.
     """
     if not _CHECK_KEY_PATTERN.fullmatch(check_key):
         raise ValueError("check_key must be a lowercase slug up to 64 characters")
@@ -608,7 +615,8 @@ async def record_check_result(
     )
     db.add(row)
     await db.flush()
-    await apply_check_result_to_alert(db, row)
+    if alert_on_unknown or status is not CheckResultStatus.unknown:
+        await apply_check_result_to_alert(db, row)
     await db.flush()
     return row
 
@@ -747,6 +755,166 @@ async def evaluate_offline_checks(
             value=value,
             detail=detail,
             evaluated_at=at,
+        )
+        written += 1
+    return written
+
+
+def _inventory_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return _utc(value)
+    if isinstance(value, str):
+        try:
+            return _utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
+        except ValueError:
+            return None
+    return None
+
+
+async def evaluate_patch_age_checks(
+    db: AsyncSession, agent: Agent, at: datetime | None = None
+) -> int:
+    """Evaluate due server-owned patch-age checks for one endpoint."""
+    at = at or _now()
+    written = 0
+    for assignment in await resolve_effective_policy(db, agent):
+        definition = assignment.definition
+        if definition.type is not CheckType.patch_age:
+            continue
+        previous = await db.scalar(
+            select(CheckResult)
+            .where(
+                CheckResult.agent_id == agent.id,
+                CheckResult.check_key == definition.key,
+            )
+            .order_by(CheckResult.evaluated_at.desc(), CheckResult.id.desc())
+            .limit(1)
+        )
+        if previous is not None and (
+            previous.policy_id != assignment.source_policy_id
+            or previous.policy_revision_id != assignment.source_revision_id
+        ):
+            # A new revision may change thresholds, cadence, or hysteresis.
+            # Never carry transition state or its due time across that boundary.
+            previous = None
+        if previous is not None:
+            elapsed = (
+                at
+                - previous.evaluated_at.replace(
+                    tzinfo=previous.evaluated_at.tzinfo or timezone.utc
+                )
+            ).total_seconds()
+            if elapsed < definition.schedule.interval_seconds:
+                continue
+
+        snapshot = await db.scalar(
+            select(AgentInventorySnapshot)
+            .where(
+                AgentInventorySnapshot.agent_id == agent.id,
+                AgentInventorySnapshot.section
+                == InventorySection.windows_updates.value,
+            )
+            .order_by(
+                AgentInventorySnapshot.received_at.desc(),
+                AgentInventorySnapshot.id.desc(),
+            )
+            .limit(1)
+        )
+        installed_count = 0
+        newest_installed_on = None
+        newest_kb_id = None
+        scanned_at = None
+        snapshot_received_at = None
+        value = None
+        if snapshot is None:
+            raw = CheckResultStatus.unknown
+            reason = "no_update_inventory"
+        else:
+            payload = snapshot.payload if isinstance(snapshot.payload, dict) else {}
+            scanned_at = _inventory_datetime(payload.get("scanned_at"))
+            snapshot_received_at = _utc(snapshot.received_at)
+            if snapshot.status not in {"ok", "partial"}:
+                raw = CheckResultStatus.unknown
+                reason = "update_scan_unusable"
+            else:
+                installed = payload.get("installed")
+                rows = (
+                    [item for item in installed if isinstance(item, dict)]
+                    if isinstance(installed, list)
+                    else []
+                )
+                installed_count = len(rows)
+                if not rows:
+                    raw = CheckResultStatus.unknown
+                    reason = "no_installed_updates"
+                else:
+                    dated_rows = [
+                        (_inventory_datetime(item.get("installed_on")), item)
+                        for item in rows
+                    ]
+                    dated_rows = [item for item in dated_rows if item[0] is not None]
+                    if not dated_rows:
+                        raw = CheckResultStatus.unknown
+                        reason = "no_install_timestamps"
+                    else:
+                        newest_installed_on, newest = max(
+                            dated_rows, key=lambda item: item[0]
+                        )
+                        newest_kb_id = newest.get("kb_id")
+                        if newest_installed_on - at > INSTALL_TIMESTAMP_SKEW_TOLERANCE:
+                            raw = CheckResultStatus.unknown
+                            reason = "install_timestamp_in_future"
+                        else:
+                            value = max(
+                                0.0,
+                                (at - newest_installed_on).total_seconds() / 86_400,
+                            )
+                            raw = classify_numeric(
+                                value, definition.threshold  # type: ignore[arg-type]
+                            )
+                            reason = (
+                                "newest_install_within_threshold"
+                                if raw == CheckResultStatus.ok
+                                else "newest_install_overdue"
+                            )
+
+        stable, pending_status, pending_count = _apply_hysteresis(
+            raw, definition, previous
+        )
+        detail = {
+            "check_type": "patch_age",
+            "reason": reason,
+            "raw_status": raw.value,
+            "evidence_source": InventorySection.windows_updates.value,
+            "newest_installed_on": (
+                newest_installed_on.isoformat()
+                if newest_installed_on is not None
+                else None
+            ),
+            "newest_kb_id": newest_kb_id,
+            "installed_count": installed_count,
+            "scanned_at": scanned_at.isoformat() if scanned_at is not None else None,
+            "snapshot_received_at": (
+                snapshot_received_at.isoformat()
+                if snapshot_received_at is not None
+                else None
+            ),
+            "hysteresis": {
+                "pending_status": pending_status,
+                "pending_count": pending_count,
+            },
+        }
+        await record_check_result(
+            db,
+            agent_id=agent.id,
+            policy_id=assignment.source_policy_id,
+            policy_revision_id=assignment.source_revision_id,
+            check_key=definition.key,
+            status=stable,
+            value=value,
+            detail=detail,
+            evaluated_at=at,
+            alert_on_unknown=False,
         )
         written += 1
     return written

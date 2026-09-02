@@ -8,6 +8,7 @@ import {
   alertEmailDeliveryListFromUnknown,
   alertWebhookDeliveryListFromUnknown,
   formatCheckInterval,
+  formatCheckType,
   formatMonitoringScope,
   formatMonitoringTimestamp,
   monitoringPolicyDetailFromUnknown,
@@ -89,6 +90,32 @@ test("offline checks are accepted as a supported monitoring contract", () => {
   });
   assert.ok(detail);
   assert.equal(detail.checks[0].type, "offline");
+});
+
+test("patch-age checks are accepted without weakening the type allowlist", () => {
+  const detail = monitoringPolicyDetailFromUnknown({
+    ...summary,
+    checks: [{
+      ...check,
+      key: "patch-age",
+      type: "patch_age",
+      schedule: { interval_seconds: 3600 },
+      threshold: { op: "gt", warning: 30, critical: 60 },
+    }],
+    revisions: [],
+  });
+  assert.ok(detail);
+  assert.equal(detail.checks[0].type, "patch_age");
+  assert.equal(formatCheckType(detail.checks[0].type), "patch age");
+
+  assert.equal(
+    monitoringPolicyDetailFromUnknown({
+      ...summary,
+      checks: [{ ...check, type: "future_check" }],
+      revisions: [],
+    }),
+    null,
+  );
 });
 
 test("scope, schedule, threshold, and timestamps format explicitly", () => {

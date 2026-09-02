@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 export type MonitoringScope = "global" | "client" | "site" | "agent";
-export type CheckType = "offline" | "cpu" | "memory" | "disk" | "service" | "reboot_pending" | "uptime";
+export type CheckType = "offline" | "cpu" | "memory" | "disk" | "service" | "reboot_pending" | "uptime" | "patch_age";
 export type ThresholdOp = "gt" | "gte" | "lt" | "lte";
 
 export type MonitoringCheck = {
@@ -228,6 +228,7 @@ const checkTypes = new Set<CheckType>([
   "service",
   "reboot_pending",
   "uptime",
+  "patch_age",
 ]);
 const thresholdOps = new Set<ThresholdOp>(["gt", "gte", "lt", "lte"]);
 const alertStates = new Set<AlertState>(["open", "acknowledged", "resolved"]);
