@@ -32,6 +32,7 @@ from app.schemas.monitoring import MonitoringPolicyCreate  # noqa: E402
 from tests.test_monitoring import (  # noqa: E402
     _create_policy,
     _enroll,
+    _numeric_check,
     operator_client,
 )
 
@@ -527,3 +528,46 @@ async def test_monitoring_sweep_evaluates_patch_age_and_counts_results(operator_
     assert result.status == CheckResultStatus.critical
     assert metrics.snapshot()["monitoring_patch_age_evaluation_total"] == before + 1
     assert 'operation="patch_age_evaluation"' in metrics.prometheus_text()
+
+
+@pytest.mark.asyncio
+async def test_monitoring_sweep_handles_patch_age_without_inventory(operator_client):
+    agent_id, _ = await _agent_policy(operator_client)
+    await tasks_core._sweep_once()
+
+    async with AsyncSessionLocal() as db:
+        result = await db.scalar(select(CheckResult).where(CheckResult.agent_id == agent_id))
+        alert = await db.scalar(select(Alert).where(Alert.agent_id == agent_id))
+    assert result.status == CheckResultStatus.unknown
+    assert result.detail["reason"] == "no_update_inventory"
+    assert alert is None
+
+
+@pytest.mark.asyncio
+async def test_unknown_results_still_alert_by_default_for_existing_checks(
+    operator_client,
+):
+    _, _, agent_id, _ = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name=f"Existing unknown behavior {uuid4().hex}",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_numeric_check("cpu")],
+    )
+    at = datetime.now(timezone.utc)
+
+    async with AsyncSessionLocal() as db:
+        await monitoring_core.record_check_result(
+            db,
+            agent_id=agent_id,
+            policy_id=policy["id"],
+            policy_revision_id=policy["revisions"][0]["id"],
+            check_key="cpu",
+            status=CheckResultStatus.unknown,
+            evaluated_at=at,
+        )
+        await db.commit()
+        alert = await db.scalar(select(Alert).where(Alert.agent_id == agent_id))
+    assert alert.state == AlertState.open
+    assert alert.last_result_status == CheckResultStatus.unknown

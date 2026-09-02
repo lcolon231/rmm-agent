@@ -10,8 +10,8 @@ Responsibilities:
 * :func:`record_check_result` / :func:`prune_check_results` persist and bound the
   check-result contract. #42's authenticated ingestion route calls it with a
   durable agent-generated result ID.
-* :func:`evaluate_offline_checks` records due heartbeat-age checks in the
-  server sweeper with the same cadence and hysteresis semantics.
+* :func:`evaluate_offline_checks` and :func:`evaluate_patch_age_checks` record
+  due server-owned checks with the same cadence and hysteresis semantics.
 * :func:`apply_check_result_to_alert` serializes one durable alert identity per
   policy/endpoint/check, including recovery, retrigger, suppression,
   exactly-once observation evidence, and immutable lifecycle history (#43/#44).
@@ -51,6 +51,7 @@ from app.models.models import (
     MonitoringScope,
     Site,
 )
+from app.schemas.inventory import InventorySection
 from app.schemas.monitoring import CheckDefinition, Threshold, ThresholdOp
 
 # Scope precedence, least- to most-specific. A check defined at a higher number
@@ -576,7 +577,9 @@ async def record_check_result(
 ) -> CheckResult:
     """Append one check-result row. The caller owns the transaction/commit.
 
-    Agent ingestion and server-owned offline evaluation both call this seam.
+    Agent ingestion and server-owned evaluation both call this seam. Callers
+    may retain an unknown result as evidence without applying it to alert state;
+    the default preserves the shipped behavior that unknown opens an alert.
     """
     if not _CHECK_KEY_PATTERN.fullmatch(check_key):
         raise ValueError("check_key must be a lowercase slug up to 64 characters")
@@ -808,7 +811,8 @@ async def evaluate_patch_age_checks(
             select(AgentInventorySnapshot)
             .where(
                 AgentInventorySnapshot.agent_id == agent.id,
-                AgentInventorySnapshot.section == "windows_updates",
+                AgentInventorySnapshot.section
+                == InventorySection.windows_updates.value,
             )
             .order_by(
                 AgentInventorySnapshot.received_at.desc(),
@@ -881,7 +885,7 @@ async def evaluate_patch_age_checks(
             "check_type": "patch_age",
             "reason": reason,
             "raw_status": raw.value,
-            "evidence_source": "windows_updates",
+            "evidence_source": InventorySection.windows_updates.value,
             "newest_installed_on": (
                 newest_installed_on.isoformat()
                 if newest_installed_on is not None
