@@ -65,6 +65,7 @@ _SCOPE_PRECEDENCE: dict[MonitoringScope, int] = {
 
 MAX_CHECK_RESULT_DETAIL_BYTES = 16 * 1024
 INSTALL_TIMESTAMP_SKEW_TOLERANCE = timedelta(minutes=5)
+REBOOT_CAUSE_LOOKBACK = timedelta(days=7)
 _CHECK_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
@@ -112,6 +113,21 @@ class EffectiveCheck:
     source_policy_id: str
     source_revision_id: str
     source_policy_name: str
+
+
+@dataclass(frozen=True)
+class RebootCause:
+    """Update inventory correlated with a pending-restart alert.
+
+    This deliberately carries evidence only. Source-based causal attribution is
+    a separate agent capability, and older agents do not report those sources.
+    """
+
+    reboot_flagged_updates: list[dict]
+    recent_installs: list[dict]
+    system_reboot_required: bool | None
+    scanned_at: datetime | None
+    snapshot_received_at: datetime
 
 
 async def current_revision(
@@ -769,6 +785,64 @@ def _inventory_datetime(value: object) -> datetime | None:
         except ValueError:
             return None
     return None
+
+
+def derive_reboot_cause(
+    snapshot: AgentInventorySnapshot | None,
+    detail: dict | None,
+    since: datetime,
+) -> RebootCause | None:
+    """Correlate a pending reboot with recent update activity.
+
+    Returns ``None`` when no update snapshot exists. An absent ``sources`` key
+    means the agent predates cause reporting; this layer therefore returns only
+    correlation evidence and never manufactures a negative causal verdict.
+    """
+    if snapshot is None:
+        return None
+
+    # ``detail`` is intentionally accepted at this seam so source attribution
+    # can extend the same payload later. Layer 2 must remain evidence-only even
+    # when the key is absent on every currently deployed agent.
+    del detail
+
+    payload = snapshot.payload if isinstance(snapshot.payload, dict) else {}
+    missing = payload.get("missing")
+    reboot_flagged_updates = (
+        [
+            dict(item)
+            for item in missing
+            if isinstance(item, dict) and item.get("reboot_required") is True
+        ]
+        if isinstance(missing, list)
+        else []
+    )
+
+    lower_bound = _utc(since)
+    upper_bound = _now()
+    installed = payload.get("installed")
+    dated_installs = []
+    if isinstance(installed, list):
+        for item in installed:
+            if not isinstance(item, dict):
+                continue
+            installed_on = _inventory_datetime(item.get("installed_on"))
+            if installed_on is None or not lower_bound <= installed_on <= upper_bound:
+                continue
+            dated_installs.append((installed_on, dict(item)))
+    dated_installs.sort(key=lambda item: item[0], reverse=True)
+
+    return RebootCause(
+        reboot_flagged_updates=reboot_flagged_updates,
+        recent_installs=[item for _, item in dated_installs[:10]],
+        system_reboot_required=(
+            payload.get("reboot_required")
+            if isinstance(payload.get("reboot_required"), bool)
+            else None
+        ),
+        scanned_at=_inventory_datetime(payload.get("scanned_at")),
+        snapshot_received_at=_utc(snapshot.received_at),
+    )
 
 
 async def evaluate_patch_age_checks(
