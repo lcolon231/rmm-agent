@@ -144,6 +144,12 @@ export type RebootCause = {
   snapshot_received_at: string;
 };
 
+export type RebootCorrelationPresentation = {
+  state: "unavailable" | "update_correlated" | "no_evidence";
+  title: string;
+  summary: string;
+};
+
 export type MonitoringAlertDetail = MonitoringAlert & {
   last_result_detail: Record<string, unknown> | null;
   reboot_cause: RebootCause | null;
@@ -611,6 +617,44 @@ export function monitoringAlertDetailFromUnknown(value: unknown): MonitoringAler
     reboot_cause: rebootCauseFromUnknown(value.reboot_cause),
     events,
     observations,
+  };
+}
+
+export function rebootCorrelationPresentation(
+  detail: Record<string, unknown> | null,
+  cause: RebootCause | null,
+): RebootCorrelationPresentation | null {
+  if (detail === null && cause === null) return null;
+  const sources = detail?.sources;
+  const sourceReportingAvailable = isRecord(sources)
+    && typeof sources.component_based_servicing === "boolean"
+    && typeof sources.windows_update === "boolean"
+    && typeof sources.pending_file_rename === "boolean";
+  if (!sourceReportingAvailable) {
+    return {
+      state: "unavailable",
+      title: "Cause unavailable",
+      summary: "Agent predates cause reporting. Correlated update evidence is shown when available.",
+    };
+  }
+  if (cause === null) {
+    return {
+      state: "unavailable",
+      title: "Cause unavailable",
+      summary: "No Windows Update inventory snapshot is available for correlation.",
+    };
+  }
+  if (cause.reboot_flagged_updates.length > 0 || cause.recent_installs.length > 0) {
+    return {
+      state: "update_correlated",
+      title: "Update activity correlated",
+      summary: "Update activity was reported near this alert. This is correlation, not proof that an update caused the restart.",
+    };
+  }
+  return {
+    state: "no_evidence",
+    title: "No correlated update activity",
+    summary: "No update activity was found in the 7-day correlation window. This does not rule out an update cause.",
   };
 }
 

@@ -15,6 +15,7 @@ import {
   monitoringPolicyListFromUnknown,
   monitoringAlertDetailFromUnknown,
   monitoringAlertListFromUnknown,
+  rebootCorrelationPresentation,
   validateAlertActionInput,
   webhookEndpointListFromUnknown,
   webhookEndpointSecretFromUnknown,
@@ -219,6 +220,48 @@ test("alert detail degrades malformed or absent reboot correlation to null", () 
   });
   assert.ok(malformed);
   assert.equal(malformed.reboot_cause, null);
+});
+
+test("reboot correlation presentation distinguishes unavailable, evidence, and no-evidence states", () => {
+  const unavailable = rebootCorrelationPresentation(
+    { reason: "reboot_pending" },
+    {
+      reboot_flagged_updates: [], recent_installs: [], system_reboot_required: true,
+      scanned_at: null, snapshot_received_at: "2026-08-01T09:59:00Z",
+    },
+  );
+  assert.equal(unavailable?.state, "unavailable");
+  assert.match(unavailable?.summary ?? "", /agent predates cause reporting/i);
+
+  const sourceDetail = {
+    reason: "reboot_pending",
+    sources: {
+      component_based_servicing: false,
+      windows_update: true,
+      pending_file_rename: false,
+    },
+  };
+  const correlated = rebootCorrelationPresentation(sourceDetail, {
+    reboot_flagged_updates: [],
+    recent_installs: [{
+      kb_id: "KB-RECENT", update_id: null, revision_number: null, title: "Update",
+      description: null, installed_on: "2026-08-01T08:00:00Z", installed_by: null,
+      client_application_id: null, support_url: null, result_code: null, hresult: null,
+    }],
+    system_reboot_required: true,
+    scanned_at: "2026-08-01T09:58:00Z",
+    snapshot_received_at: "2026-08-01T09:59:00Z",
+  });
+  assert.equal(correlated?.state, "update_correlated");
+  assert.match(correlated?.summary ?? "", /correlation, not proof/i);
+
+  const noEvidence = rebootCorrelationPresentation(sourceDetail, {
+    reboot_flagged_updates: [], recent_installs: [], system_reboot_required: false,
+    scanned_at: null, snapshot_received_at: "2026-08-01T09:59:00Z",
+  });
+  assert.equal(noEvidence?.state, "no_evidence");
+  assert.match(noEvidence?.summary ?? "", /does not rule out/i);
+  assert.equal(rebootCorrelationPresentation(null, null), null);
 });
 
 test("alert action input requires an idempotency key and bounded version", () => {
