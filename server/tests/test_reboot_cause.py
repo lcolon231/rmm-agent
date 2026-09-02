@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from app.core import monitoring
 from app.models.models import AgentInventorySnapshot
 from app.schemas.inventory import InventorySection
+from app.schemas.monitoring import AlertDetailOut, AlertOut, RebootCauseOut
 
 
 NOW = datetime(2026, 9, 2, 12, tzinfo=timezone.utc)
@@ -128,3 +129,33 @@ def test_reboot_cause_keeps_empty_evidence_distinct_from_no_snapshot(monkeypatch
     assert result.recent_installs == []
     assert result.system_reboot_required is False
     assert result.scanned_at is None
+
+
+def test_reboot_cause_output_contract_is_detail_only(monkeypatch) -> None:
+    monkeypatch.setattr(monitoring, "_now", lambda: NOW)
+    cause = monitoring.derive_reboot_cause(
+        _snapshot(
+            {
+                "scanned_at": NOW.isoformat(),
+                "reboot_required": True,
+                "missing": [
+                    {
+                        "kb_id": "KB-PENDING",
+                        "title": "Pending update",
+                        "reboot_required": True,
+                    }
+                ],
+                "installed": [],
+            }
+        ),
+        None,
+        NOW - monitoring.REBOOT_CAUSE_LOOKBACK,
+    )
+
+    payload = RebootCauseOut.model_validate(cause).model_dump()
+    assert payload["reboot_flagged_updates"][0]["kb_id"] == "KB-PENDING"
+    assert payload["snapshot_received_at"] == NOW
+    assert "last_result_detail" not in AlertOut.model_fields
+    assert "reboot_cause" not in AlertOut.model_fields
+    assert AlertDetailOut.model_fields["last_result_detail"].default is None
+    assert AlertDetailOut.model_fields["reboot_cause"].default is None

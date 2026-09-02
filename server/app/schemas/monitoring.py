@@ -43,6 +43,7 @@ from app.models.models import (
     WebhookAttemptStatus,
     WebhookDeliveryStatus,
 )
+from app.schemas.inventory import InstalledUpdate, MissingUpdate
 
 # --------------------------------------------------------------------------- #
 # Bounds (schema-level; runtime quotas live in app/core/config.py)
@@ -554,7 +555,24 @@ class AlertObservationOut(BaseModel):
     created_at: datetime
 
 
+class RebootCauseOut(BaseModel):
+    """Update inventory correlated with a pending-restart alert.
+
+    The fields are evidence, not a causal verdict. Source attribution is absent
+    for agents that predate reboot-source reporting.
+    """
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+    reboot_flagged_updates: list[MissingUpdate] = Field(default_factory=list)
+    recent_installs: list[InstalledUpdate] = Field(default_factory=list, max_length=10)
+    system_reboot_required: bool | None = None
+    scanned_at: datetime | None = None
+    snapshot_received_at: datetime
+
+
 class AlertDetailOut(AlertOut):
+    last_result_detail: dict | None = None
+    reboot_cause: RebootCauseOut | None = None
     observations: list[AlertObservationOut] = Field(default_factory=list)
     events: list["AlertEventOut"] = Field(default_factory=list)
 
