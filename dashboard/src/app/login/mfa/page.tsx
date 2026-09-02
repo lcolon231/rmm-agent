@@ -39,14 +39,20 @@ export default async function MfaChallengePage({ searchParams }: MfaPageProps) {
   const hinted = (raw ?? "")
     .split(",")
     .filter((method): method is MfaMethod =>
-      method === "webauthn" || method === "recovery_code" || method === "enrollment");
+      method === "webauthn"
+      || method === "recovery_code"
+      || method === "email_code"
+      || method === "enrollment");
 
-  // A page reload loses the hint. Offering both paths in that case is safe and
-  // kinder than hiding the recovery option: the server refuses any method the
-  // operator is not actually entitled to.
+  // A page reload loses the hint. Offering every path in that case is safe and
+  // kinder than hiding one: the server re-decides on each request and refuses
+  // any method the operator is not actually entitled to, so a widened hint
+  // grants nothing. The email option is deliberately included here -- an
+  // operator who has only that factor would otherwise be stranded by a reload
+  // on a page offering them a key they do not have.
   const methods: MfaMethod[] = hinted.length > 0
     ? hinted
-    : ["webauthn", "recovery_code"];
+    : ["webauthn", "recovery_code", "email_code"];
 
   const enroll = (Array.isArray(query.enroll) ? query.enroll[0] : query.enroll) === "1"
     || hinted.includes("enrollment");

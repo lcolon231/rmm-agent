@@ -63,6 +63,21 @@ export const verifyLoginAssertion = (token: string, body?: unknown) =>
 export const verifyRecoveryCode = (token: string, body?: unknown) =>
   call("/api/v1/auth/mfa/login/recovery-code", token, { method: "POST", body });
 
+export const sendLoginEmailCode = (token: string) =>
+  call("/api/v1/auth/mfa/login/email/send", token, { method: "POST" });
+
+export const verifyLoginEmailCode = (token: string, body?: unknown) =>
+  call("/api/v1/auth/mfa/login/email/verify", token, { method: "POST", body });
+
+export const startEmailEnrollment = (token: string) =>
+  call("/api/v1/auth/mfa/email/enrollment/start", token, { method: "POST" });
+
+export const verifyEmailEnrollment = (token: string, body?: unknown) =>
+  call("/api/v1/auth/mfa/email/enrollment/verify", token, { method: "POST", body });
+
+export const removeEmailFactor = (token: string, body: unknown) =>
+  call("/api/v1/auth/mfa/email", token, { method: "POST", body });
+
 export const fetchRegistrationOptions = (token: string) =>
   call("/api/v1/auth/mfa/credentials/options", token, { method: "POST" });
 

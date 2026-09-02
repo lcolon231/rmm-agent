@@ -188,6 +188,49 @@ class Settings(BaseSettings):
     # merely user presence. This is what makes the factor two-factor on its own.
     mfa_require_user_verification: bool = True
 
+    # --- Email one-time-code second factor (issue #226) ---
+    # An emailed code is NOT phishing-resistant. WebAuthn resists phishing
+    # because the browser binds the assertion to an origin; a code read off a
+    # screen and typed into a look-alike page carries no such binding. This
+    # lever therefore decides what the weaker factor is *allowed to do*, and the
+    # three positions are the three defensible answers:
+    #   off            -> email is never a factor. The default, and the position
+    #                     a deployment that has issued keys to everyone should
+    #                     stay in. Enrolment and login by email both refuse.
+    #   fallback_only  -> email is a login factor ONLY for an operator with no
+    #                     active authenticator. An operator who holds a key must
+    #                     still use it, so enabling this cannot downgrade an
+    #                     already-protected account; it only covers people who
+    #                     would otherwise have no second factor at all.
+    #   always         -> email is offered alongside WebAuthn to everyone. This
+    #                     reduces every account to the weaker factor, including
+    #                     accounts that hold a key, because an attacker can
+    #                     simply phish the code and never touch the
+    #                     authenticator. Choose it knowingly or not at all.
+    # No position lets an email code satisfy step-up. That gate gets the same
+    # treatment as recovery codes, for the same reason: device revocation,
+    # recovery-code minting, and operator administration must not be reachable
+    # by phishing six digits.
+    mfa_email_code_policy: str = "off"  # off | fallback_only | always
+    # Digits per code. Six is the familiar format, and its 10^6 space is only
+    # safe because mfa_email_code_max_attempts and the send limiter below bound
+    # guessing to single digits of attempts per code and per window. Raise this
+    # before relaxing either of those.
+    mfa_email_code_length: int = 6
+    # A code lives this long. Long enough to survive ordinary mail latency,
+    # short enough that a code sitting in a mailbox is not a standing credential.
+    mfa_email_code_ttl_seconds: int = 600  # 10m
+    # Verification attempts allowed against a single code before it is burned.
+    # This, not the code's entropy, is what makes six digits defensible.
+    mfa_email_code_max_attempts: int = 5
+    # Codes that may be *sent* per operator, and per source IP, in the window.
+    # Send is rate limited separately from verify: they are different abuses
+    # (mailbox flooding versus guessing) and sharing a budget would let either
+    # one exhaust the other. Shares the process-local limiter caveat in
+    # ratelimit.py.
+    mfa_email_send_max_per_window: int = 3
+    mfa_email_send_window_seconds: int = 900
+
     # --- Personalized agent installer downloads (issue #9) ---
     # Path to the pre-built, signed stock Windows installer the server bundles
     # into a personalized download. The server never rebuilds or re-signs it — it

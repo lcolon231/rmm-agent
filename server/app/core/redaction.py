@@ -854,6 +854,19 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     # code was used is not recorded: it would narrow the search space for the
     # remaining ones if the audit log were ever disclosed.
     "mfa.recovery_code_used": _schema("operator_id", "codes_remaining"),
+    # Email one-time codes (issue #226). The code itself never appears in any of
+    # these, in any form -- not even as a digest. A digest of a six-digit value
+    # is trivially reversible by enumeration, so recording one would put a live
+    # code in the chain for anyone who later reads it, which is precisely the
+    # reasoning that keeps recovery codes out of the chain entirely. What is
+    # recorded is the masked destination: enough to review where a code went,
+    # not enough to be a mailing list if the log is disclosed.
+    "mfa.email_code_sent": _schema("operator_id", "purpose", "destination"),
+    "mfa.email_code_send_failed": _schema("operator_id", "purpose", "reason"),
+    "mfa.email_factor_verified": _schema("operator_id", "destination"),
+    "mfa.email_factor_removed": _schema(
+        "operator_id", "reason", "by", digest_fields=("reason",)
+    ),
     "mfa.reset": _schema(
         "operator_id",
         "credentials_revoked",

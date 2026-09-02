@@ -148,6 +148,46 @@ class RecoveryCodeVerification(BaseModel):
     code: Annotated[str, StringConstraints(min_length=1, max_length=64)]
 
 
+class EmailCodeVerification(BaseModel):
+    """One presented email one-time code (issue #226).
+
+    Bounded generously rather than to the exact code length: the server
+    normalises away spaces and separators a mail client may have introduced, and
+    refusing a correctly-typed code because it arrived with a stray space would
+    push operators towards the request-another-code loop the send limiter exists
+    to prevent.
+    """
+
+    code: Annotated[str, StringConstraints(min_length=1, max_length=32)]
+
+
+class EmailCodeSent(BaseModel):
+    """The acknowledgement of a send request.
+
+    Deliberately identical whether or not the operator actually has an email
+    factor: the destination is always the operator's own login address, so
+    echoing it back masked discloses nothing that the caller -- who already
+    presented the correct password -- does not know. Nothing here says whether a
+    message was really put on the wire.
+    """
+
+    #: Masked form of the operator's login address, for the "we sent a code
+    #: to ..." line in the UI.
+    destination: str
+    expires_in_seconds: int
+
+
+class EmailFactorOut(BaseModel):
+    """The operator's email factor as the dashboard should render it."""
+
+    #: False while an enrolment is in progress. Only a verified factor counts.
+    verified: bool
+    #: Masked. The full address is the operator's own login email, which the
+    #: dashboard already knows; masking keeps it out of one more response body.
+    destination: str | None = None
+    verified_at: datetime | None = None
+
+
 class CredentialRename(BaseModel):
     name: DeviceName
 
@@ -193,6 +233,12 @@ class MfaStatusOut(BaseModel):
     step_up_satisfied: bool
     session_methods: list[str]
     credentials: list[WebAuthnCredentialOut]
+    #: Configured position for the email factor: "off", "fallback_only", or
+    #: "always" (issue #226). The dashboard needs it to explain *why* the email
+    #: option is or is not offered, rather than silently hiding it.
+    email_code_policy: str = "off"
+    #: The operator's email factor, or null if they have none.
+    email_factor: EmailFactorOut | None = None
 
 
 class RecoveryCodesOut(BaseModel):

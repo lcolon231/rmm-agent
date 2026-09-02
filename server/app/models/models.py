@@ -2395,6 +2395,94 @@ class MfaRecoveryCode(Base):
     )
 
 
+class MfaEmailCodePurpose(str, enum.Enum):
+    """What a given code is allowed to complete.
+
+    Purpose is bound into the row rather than inferred at verification time, so
+    a code mailed to prove control of an address cannot be replayed against the
+    login endpoint, or the reverse.
+    """
+
+    enrollment = "enrollment"
+    login = "login"
+
+
+class MfaEmailFactor(Base):
+    """An operator's email second factor (issue #226), at most one per operator.
+
+    ``address`` is a snapshot of the operator's login email taken when the
+    factor was verified, not a freely chosen destination. Codes only ever go to
+    the operator's own login address, so an attacker holding only a password
+    cannot point the factor at a mailbox they control. The snapshot is what
+    makes a later email change detectable: when it stops matching
+    ``Operator.email`` the factor is no longer proven and stops counting, rather
+    than silently continuing to authorize a mailbox nobody re-verified.
+
+    A row with ``verified_at`` NULL is an enrolment in progress. It is not a
+    factor, and nothing in the login path may treat it as one.
+    """
+
+    __tablename__ = "mfa_email_factors"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    address: Mapped[str] = mapped_column(String(320), nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class MfaEmailCode(Base):
+    """One emailed one-time code, stored only as a hash.
+
+    Three properties are load-bearing and are enforced here rather than left to
+    the caller:
+
+    * **Consumed, not deleted.** A spent row stays, so presenting the same code
+      twice is distinguishable from presenting a code that never existed. A
+      deleted row would make a replay look identical to a typo.
+    * **Attempt-bounded.** ``attempts`` is what makes a six-digit code safe;
+      the code burns long before its 10^6 space is meaningfully explored.
+    * **Superseded on reissue.** Requesting a new code invalidates the previous
+      one, so a mailbox never accumulates several simultaneously live codes.
+    """
+
+    __tablename__ = "mfa_email_codes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    purpose: Mapped[MfaEmailCodePurpose] = mapped_column(
+        Enum(MfaEmailCodePurpose), nullable=False
+    )
+    code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # The address this code was actually mailed to, for evidence. A code is only
+    # valid while it still matches the operator's current login address.
+    address: Mapped[str] = mapped_column(String(320), nullable=False)
+    attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_mfa_email_codes_operator_live", "operator_id", "consumed_at"),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Administrative session management and break-glass access (issue #69)
 # --------------------------------------------------------------------------- #

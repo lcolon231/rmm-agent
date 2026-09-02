@@ -15,7 +15,7 @@
  * said. Anything that looks like a policy check here is presentation only.
  */
 
-export type MfaMethod = "webauthn" | "recovery_code" | "enrollment";
+export type MfaMethod = "webauthn" | "recovery_code" | "email_code" | "enrollment";
 
 export type MfaLoginChallenge = {
   mfaRequired: true;
@@ -46,6 +46,16 @@ export type MfaStatus = {
   step_up_satisfied: boolean;
   session_methods: string[];
   credentials: MfaCredentialRecord[];
+  /** Configured position for the email factor (issue #226). */
+  email_code_policy?: "off" | "fallback_only" | "always";
+  email_factor?: MfaEmailFactorRecord | null;
+};
+
+export type MfaEmailFactorRecord = {
+  verified: boolean;
+  /** Masked; the full address is the operator's own login email. */
+  destination: string | null;
+  verified_at: string | null;
 };
 
 export type MfaErrorCode =
@@ -322,7 +332,10 @@ export function readLoginChallenge(body: unknown): MfaLoginChallenge | null {
   const methods = Array.isArray(record.mfa_methods)
     ? record.mfa_methods.filter(
       (method): method is MfaMethod =>
-        method === "webauthn" || method === "recovery_code" || method === "enrollment",
+        method === "webauthn"
+        || method === "recovery_code"
+        || method === "email_code"
+        || method === "enrollment",
     )
     : [];
   return {
@@ -355,6 +368,21 @@ export function validateRecoveryCode(value: unknown): string | null {
     return null;
   }
   return trimmed;
+}
+
+export function validateEmailCode(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  // Digits only, and only as many as a code can have. Stripping separators here
+  // rather than rejecting them keeps a code pasted out of a mail client -- which
+  // may arrive with a space in the middle -- from being refused and pushing the
+  // operator into requesting another one.
+  const digits = value.replace(/\D/g, "");
+  if (digits.length < 6 || digits.length > 12) {
+    return null;
+  }
+  return digits;
 }
 
 export function validateRevokeReason(value: unknown): string | null {

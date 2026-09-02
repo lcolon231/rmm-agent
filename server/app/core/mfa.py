@@ -39,9 +39,11 @@ import bcrypt
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import mfa_email
 from app.core.config import Settings, settings
 from app.core.ratelimit import LoginRateLimiter
 from app.core.security import (
+    AMR_EMAIL_CODE,
     AMR_RECOVERY_CODE,
     AMR_WEBAUTHN,
 )
@@ -267,11 +269,31 @@ async def decide_login(db: AsyncSession, operator: Operator) -> LoginDecision:
     if enforcement_mode() == ENFORCEMENT_OFF:
         return LoginDecision(False, False, ())
 
+    email_policy = mfa_email.policy_mode()
+    email_available = email_policy != mfa_email.POLICY_OFF and await (
+        mfa_email.has_usable_factor(db, operator)
+    )
+
     if await has_active_credential(db, operator.id):
         methods = ["webauthn"]
         if await unused_recovery_code_count(db, operator.id) > 0:
             methods.append("recovery_code")
+        # An operator who holds an authenticator is offered the email code only
+        # under the ``always`` position, and that position is documented as a
+        # deliberate downgrade: an attacker can then phish the code and never
+        # touch the key. Under ``fallback_only`` the key stays mandatory, which
+        # is what keeps enabling this feature from weakening accounts that are
+        # already properly protected.
+        if email_available and email_policy == mfa_email.POLICY_ALWAYS:
+            methods.append("email_code")
         return LoginDecision(True, False, tuple(methods))
+
+    # No authenticator, but a proven mailbox. That *is* a second factor, so the
+    # operator completes a real login rather than being pushed into the
+    # enrolment-only session below -- which is the entire point of the feature:
+    # covering people who cannot hold a key.
+    if email_available:
+        return LoginDecision(True, False, ("email_code",))
 
     if enrollment_is_required(operator):
         return LoginDecision(True, True, ("enrollment",))
@@ -284,7 +306,7 @@ async def decide_login(db: AsyncSession, operator: Operator) -> LoginDecision:
 # --------------------------------------------------------------------------- #
 def session_is_mfa_verified(amr: frozenset[str]) -> bool:
     """Whether the session presented any second factor at login."""
-    return bool(amr & {AMR_WEBAUTHN, AMR_RECOVERY_CODE})
+    return bool(amr & {AMR_WEBAUTHN, AMR_RECOVERY_CODE, AMR_EMAIL_CODE})
 
 
 def step_up_is_fresh(amr: frozenset[str], step_up_at: datetime | None) -> bool:
@@ -292,7 +314,10 @@ def step_up_is_fresh(amr: frozenset[str], step_up_at: datetime | None) -> bool:
 
     Only a WebAuthn assertion counts. A recovery code is explicitly excluded:
     it is a written-down bearer secret, so allowing it to satisfy step-up would
-    make the strongest gate in the system only as strong as the weakest one.
+    make the strongest gate in the system only as strong as the weakest one. An
+    emailed code (issue #226) is excluded for the same reason and one more --
+    it is phishable, so admitting it here would put device revocation, recovery
+    -code minting, and operator administration one convincing page away.
     """
     if AMR_WEBAUTHN not in amr or step_up_at is None:
         return False

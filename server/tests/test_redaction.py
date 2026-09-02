@@ -1009,6 +1009,28 @@ PRODUCER_DETAILS = {
         "code_count": 10,
     },
     "mfa.recovery_code_used": {"operator_id": ID1, "codes_remaining": 9},
+    "mfa.email_code_sent": {
+        "operator_id": ID1,
+        "purpose": "login",
+        # Masked at the producer. The chain never carries a full address, and
+        # never the code itself in any form.
+        "destination": "o***@example.com",
+    },
+    "mfa.email_code_send_failed": {
+        "operator_id": ID1,
+        "purpose": "login",
+        # A coded provider fault, never provider prose.
+        "reason": "provider_unavailable",
+    },
+    "mfa.email_factor_verified": {
+        "operator_id": ID1,
+        "destination": "o***@example.com",
+    },
+    "mfa.email_factor_removed": {
+        "operator_id": ID1,
+        "reason": SENTINEL,
+        "by": "self",
+    },
     "mfa.reset": {
         "operator_id": ID1,
         "credentials_revoked": 2,
