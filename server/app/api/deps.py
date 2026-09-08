@@ -2,14 +2,25 @@
 """Shared API dependencies."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import mfa, sessions
+from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import decode_access_token, hash_token
+from app.core.security import (
+    TOKEN_TYPE_ACCESS,
+    TOKEN_TYPE_MFA_PENDING,
+    decode_access_token,
+    hash_token,
+    token_amr,
+    token_session_id,
+    token_step_up_at,
+    token_type,
+)
 from app.models.models import Agent, AgentTrustState, Operator, OperatorRole
 
 
@@ -82,21 +93,80 @@ async def get_current_agent(
     return agent
 
 
+async def get_agent_for_credential_reattach(
+    authorization: str | None = Header(default=None, description="Bearer <agent_token>"),
+    db: AsyncSession = Depends(get_db),
+) -> Agent:
+    """Resolve only a bearer eligible for bounded credential reattachment.
+
+    This deliberately does not relax :func:`get_current_agent`. An active
+    agent's expired *current* bearer is accepted here only until the configured
+    lapse deadline. The overlap slot is accepted solely to make a lost
+    reattach response retryable, just like ordinary rotation. Unknown,
+    not-yet-expired, outside-window, quarantined, revoked, and overlapped-out
+    credentials all receive the same opaque 401.
+    """
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization header",
+        )
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or malformed Authorization header",
+        )
+
+    presented = hash_token(token)
+    result = await db.execute(
+        select(Agent)
+        .where(
+            or_(
+                Agent.token_hash == presented,
+                Agent.previous_token_hash == presented,
+            )
+        )
+        # Serialize recovery with concurrent recovery/revocation. PostgreSQL
+        # locks the matched identity; SQLite ignores FOR UPDATE in tests.
+        .with_for_update()
+    )
+    agent = result.scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    matched: str | None = None
+    if agent is not None and agent.trust_state == AgentTrustState.active:
+        if agent.token_hash == presented:
+            expires_at = _as_utc(agent.credential_expires_at)
+            if expires_at is not None:
+                reattach_until = expires_at + timedelta(
+                    seconds=settings.agent_credential_reattach_window_seconds
+                )
+                if expires_at <= now < reattach_until:
+                    matched = "current"
+        elif agent.previous_token_hash == presented:
+            overlap_until = _as_utc(agent.previous_token_expires_at)
+            if overlap_until is not None and overlap_until > now:
+                matched = "overlap"
+
+    if agent is None or matched is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token"
+        )
+    agent.credential_matched = matched
+    return agent
+
+
 # --------------------------------------------------------------------------- #
 # Operator authentication (authN) and authorization (authZ)
 # --------------------------------------------------------------------------- #
-async def get_current_operator(
-    authorization: str | None = Header(default=None, description="Bearer <operator_jwt>"),
-    db: AsyncSession = Depends(get_db),
-) -> Operator:
-    """AuthN: resolve the operator from a JWT bearer token.
+def _bearer_claims(authorization: str | None) -> dict:
+    """Extract and verify the JWT claims from an Authorization header.
 
-    This proves *who* the caller is. It does not decide what they may do — that
-    is authorization, handled by require_role below.
-
-    The header is declared Optional so that a *missing* token produces a 401
-    (an auth failure we raise) rather than FastAPI's 422 request-validation
-    error. A missing credential is "unauthenticated", not "malformed request".
+    The header is declared Optional by callers so that a *missing* token
+    produces a 401 (an auth failure we raise) rather than FastAPI's 422
+    request-validation error. A missing credential is "unauthenticated", not
+    "malformed request".
     """
     if not authorization:
         raise HTTPException(
@@ -115,7 +185,10 @@ async def get_current_operator(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )
+    return claims
 
+
+async def _operator_for_claims(db: AsyncSession, claims: dict) -> Operator:
     operator = await db.get(Operator, claims.get("sub"))
     if operator is None or operator.disabled:
         raise HTTPException(
@@ -127,7 +200,179 @@ async def get_current_operator(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )
+    # Transient markers (never persisted), mirroring Agent.credential_matched:
+    # they carry how this session authenticated to the authorization helpers
+    # below, so an MFA decision never has to re-parse the token.
+    operator.session_amr = token_amr(claims)
+    operator.session_step_up_at = token_step_up_at(claims)
+    operator.session_record = None
     return operator
+
+
+async def _bind_session(
+    db: AsyncSession, operator: Operator, claims: dict
+) -> Operator:
+    """Attach and validate the server-side session behind an access token (#69).
+
+    Three cases, and the middle one is the compatibility decision worth reading:
+
+    1. **A `sid` that resolves to a live session.** The normal path. Revocation,
+       idle timeout, and the absolute ceiling are all enforced here, so they
+       take effect on the very next request rather than whenever a token
+       happens to expire.
+    2. **No `sid` at all.** The token predates server-side sessions. Accepted
+       while ``ADMIN_SESSION_ACCEPT_LEGACY_TOKENS`` is on, so deploying this
+       does not sign the whole fleet out mid-shift. Such a session is
+       *unmanaged*: it never appears in an inventory and cannot be revoked
+       individually. It is still bounded -- the JWT expiry caps it within the
+       access-token lifetime, and a ``token_generation`` bump still kills it --
+       and the flag exists so a deployment that would rather force
+       re-authentication can refuse them outright.
+    3. **A `sid` that does not resolve.** Revoked, expired, idle, or simply not
+       this operator's. Always the same opaque 401: a coded reason would tell a
+       holder of a stale token which of those it was.
+    """
+    session_id = token_session_id(claims)
+    if session_id is None:
+        if settings.admin_session_accept_legacy_tokens:
+            return operator
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
+    session, rejection = await sessions.resolve(db, session_id, operator)
+    if session is None:
+        # Commit the terminal marking sessions.resolve may have written, so the
+        # inventory records why this session ended even though the request that
+        # discovered it is about to fail.
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+    operator.session_record = session
+    return operator
+
+
+async def get_current_operator(
+    authorization: str | None = Header(default=None, description="Bearer <operator_jwt>"),
+    db: AsyncSession = Depends(get_db),
+) -> Operator:
+    """AuthN: resolve the operator from a full-access JWT bearer token.
+
+    This proves *who* the caller is. It does not decide what they may do — that
+    is authorization, handled by require_role below.
+
+    This is also the single choke point that refuses the half-authenticated
+    ``mfa_pending`` token (issue #67). Every operator-facing route in the app
+    resolves identity through here, so rejecting the restricted type once means
+    a correct password with no second factor buys access to nothing but the MFA
+    completion endpoints, which resolve it deliberately and separately.
+    """
+    claims = _bearer_claims(authorization)
+    if token_type(claims) != TOKEN_TYPE_ACCESS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+    operator = await _operator_for_claims(db, claims)
+    return await _bind_session(db, operator, claims)
+
+
+async def get_mfa_pending_operator(
+    authorization: str | None = Header(default=None, description="Bearer <mfa_token>"),
+    db: AsyncSession = Depends(get_db),
+) -> Operator:
+    """Resolve the operator behind a restricted, post-password MFA token.
+
+    Accepts *only* the restricted type. A full access token is refused here on
+    purpose: an already-complete session has no business replaying the login
+    ceremony, and allowing it would create a second path to mint a session that
+    skips the checks the login endpoint performs.
+    """
+    claims = _bearer_claims(authorization)
+    if token_type(claims) != TOKEN_TYPE_MFA_PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+    return await _operator_for_claims(db, claims)
+
+
+def _session_amr(operator: Operator) -> frozenset[str]:
+    return getattr(operator, "session_amr", None) or frozenset()
+
+
+async def require_step_up(
+    operator: Operator = Depends(get_current_operator),
+    db: AsyncSession = Depends(get_db),
+) -> Operator:
+    """AuthZ: require a recent proof of possession of a registered authenticator.
+
+    Applied to the operations whose abuse would let a stolen session entrench
+    itself or widen its reach: changing another operator's role or status,
+    revoking someone's sessions, resetting someone's MFA, and reconfiguring the
+    caller's own factors.
+
+    The gate is *vacuous for operators who have no second factor to present*.
+    That is not a loophole, it is the compatibility contract: a deployment that
+    has not adopted MFA behaves exactly as it did before, and an operator part
+    way through enrolment is never locked out of the account management they
+    already had. The moment an operator holds an active credential, the gate
+    becomes real for them, with no configuration change required.
+
+    A recovery-code session never satisfies this, however recently it
+    authenticated — see :func:`app.core.mfa.step_up_is_fresh`.
+    """
+    # ``off`` disables the gate outright, and it has to: with MFA off no
+    # ceremony can be started, so a gate that still demanded one would be
+    # unsatisfiable and would lock every enrolled administrator out of operator
+    # management. Rollback must actually restore the previous behaviour.
+    if mfa.enforcement_mode() == mfa.ENFORCEMENT_OFF:
+        return operator
+    if not await mfa.has_active_credential(db, operator.id):
+        return operator
+    if mfa.step_up_is_fresh(
+        _session_amr(operator), getattr(operator, "session_step_up_at", None)
+    ):
+        return operator
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "code": "step_up_required",
+            "message": (
+                "Re-authenticate with your security key to perform this operation."
+            ),
+        },
+    )
+
+
+async def require_mfa_verified(
+    operator: Operator = Depends(get_current_operator),
+    db: AsyncSession = Depends(get_db),
+) -> Operator:
+    """AuthZ: require that the session presented *some* second factor at login.
+
+    Weaker than :func:`require_step_up` by design, and used for the one
+    operation that must stay reachable after device loss: enrolling a
+    replacement authenticator. A recovery code satisfies this, which is what
+    makes the codes worth having; it does not satisfy step-up, which is what
+    stops them from being a full account takeover.
+    """
+    if mfa.enforcement_mode() == mfa.ENFORCEMENT_OFF:
+        return operator
+    if not await mfa.has_active_credential(db, operator.id):
+        return operator
+    if mfa.session_is_mfa_verified(_session_amr(operator)):
+        return operator
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "code": "mfa_verification_required",
+            "message": "Complete multi-factor authentication to perform this operation.",
+        },
+    )
 
 
 # Privilege ordering: a higher role satisfies any requirement at or below it.

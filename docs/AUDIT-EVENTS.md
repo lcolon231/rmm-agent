@@ -31,6 +31,7 @@ and SHA-256/Merkle roots—remains readable.
 | `agent.enrolled` | `api/agents.py` enrollment | `hostname_sha256`, `hostname_bytes`, `agent_name_sha256`, `agent_name_bytes`, `os_sha256`, `os_bytes`, `architecture`, `site_id`, `environment`, `command_envelope_version`, `supported_command_envelope_versions`, `public_key_supplied` |
 | `agent.enrollment_failed` | `api/agents.py` rejected enrollment | `reason`, `hostname_sha256`, `hostname_bytes`, `agent_name_sha256`, `agent_name_bytes` |
 | `agent.credential_renewed` | `api/agents.py` credential renewal | `credential_fingerprint`, `credential_generation` |
+| `agent.credential_reattached` | `api/agents.py` bounded recovery of a lapsed active credential | `credential_fingerprint`, `credential_generation` |
 | `agent.credential_renewal_rejected` | `api/agents.py` credential renewal | `reason` |
 | `agent.command_envelope_capabilities_changed` | `api/agents.py` heartbeat | `previous`, `current` |
 | `agent.version_changed` | `api/agents.py` heartbeat | `previous`, `current` |
@@ -133,10 +134,33 @@ and SHA-256/Merkle roots—remains readable.
 | `operator.role_changed` | `api/auth.py` global-role change | `operator_id`, `previous_role`, `new_role`, `script_permission_revoked`, `reason_sha256`, `reason_bytes` |
 | `operator.status_changed` | `api/auth.py` disable/re-enable | `operator_id`, `previous_disabled`, `new_disabled`, `reason_sha256`, `reason_bytes` |
 | `operator.tokens_revoked` | `api/auth.py` token-generation bump | `operator_id`, `by` |
+| `operator.password_reset` | `core/password_reset.py` out-of-band reset via `scripts/reset_password.py` | `operator_id`, `sessions_revoked`, `mfa_reset`, `credentials_revoked`, `recovery_codes_invalidated`, `by` |
+| `operator.session_started` | `api/auth.py` sign-in opening a tracked session (#69) | `operator_id`, `session_id`, `auth_methods`, `break_glass` |
+| `operator.session_revoked` | `api/admin_sessions.py` self, other-devices, or administrative session revocation (#69) | `operator_id`, `session_id`, `by`, `reason_sha256`, `reason_bytes`, `session_count` |
+| `break_glass.account_created` | `api/admin_sessions.py` emergency credential provisioned (#69); the credential itself is never recorded | `account_id`, `operator_id`, `label_sha256`, `label_bytes`, `credential_fingerprint`, `reason_sha256`, `reason_bytes` |
+| `break_glass.credential_rotated` | `api/admin_sessions.py` emergency credential rotated (#69) | `account_id`, `label_sha256`, `label_bytes`, `previous_fingerprint`, `credential_fingerprint`, `reason_sha256`, `reason_bytes` |
+| `break_glass.account_state_changed` | `api/admin_sessions.py` emergency credential disabled or re-enabled (#69) | `account_id`, `label_sha256`, `label_bytes`, `disabled`, `reason_sha256`, `reason_bytes` |
+| `break_glass.activated` | `api/admin_sessions.py` emergency access used (#69) — the loudest event in the system | `account_id`, `activation_id`, `operator_id`, `session_id`, `label_sha256`, `label_bytes`, `credential_fingerprint`, `reason_sha256`, `reason_bytes` |
+| `break_glass.activation_failed` | `api/admin_sessions.py` refused activation (#69); `reason` is a coded value, never the submitted credential | `reason` |
+| `break_glass.activation_reviewed` | `api/admin_sessions.py` activation signed off (#69) | `activation_id`, `account_id`, `note_sha256`, `note_bytes` |
 | `operator.tenant_membership_granted` | `api/auth.py` client-membership grant (#66) | `operator_id`, `client_id`, `previous_role`, `new_role`, `reason_sha256`, `reason_bytes` |
 | `operator.tenant_membership_revoked` | `api/auth.py` client-membership revoke (#66) | `operator_id`, `client_id`, `previous_role`, `reason_sha256`, `reason_bytes` |
 | `operator.platform_admin_changed` | `api/auth.py` platform-admin toggle (#66) | `operator_id`, `previous`, `new`, `reason_sha256`, `reason_bytes` |
 | `tenant.access_denied` | `api/management.py` cross-tenant dispatch attempt (#66) | `operator_id`, `resource`, `agent_id`, `client_id` |
+| `mfa.second_factor_required` | `api/auth.py` login that stopped at the password step | `operator_id`, `enrollment_required`, `methods` |
+| `mfa.credential_registered` | `api/mfa.py` WebAuthn enrolment | `operator_id`, `credential_id`, `name_sha256`, `name_bytes`, `algorithm`, `aaguid`, `attestation_format`, `backup_eligible` |
+| `mfa.credential_renamed` | `api/mfa.py` device rename | `operator_id`, `credential_id`, `previous_name_sha256`, `previous_name_bytes`, `new_name_sha256`, `new_name_bytes` |
+| `mfa.credential_revoked` | `api/mfa.py` device revoke | `operator_id`, `credential_id`, `name_sha256`, `name_bytes`, `reason_sha256`, `reason_bytes`, `by` |
+| `mfa.authentication_failed` | `api/mfa.py` refused ceremony; `reason` is a coded rule name, never a submitted value | `operator_id`, `method`, `reason` |
+| `mfa.authentication_succeeded` | `api/mfa.py` accepted assertion | `operator_id`, `credential_id`, `method`, `purpose` |
+| `mfa.step_up_succeeded` | `api/mfa.py` re-assertion for a sensitive operation | `operator_id`, `credential_id` |
+| `mfa.recovery_codes_generated` | `api/mfa.py` recovery batch mint; the codes themselves are never recorded | `operator_id`, `batch_id`, `code_count` |
+| `mfa.recovery_code_used` | `api/mfa.py` recovery login; which code was spent is deliberately not recorded | `operator_id`, `codes_remaining` |
+| `mfa.email_code_sent` | `api/mfa.py` email one-time code dispatched; the code is never recorded, and `destination` is masked | `operator_id`, `purpose`, `destination` |
+| `mfa.email_code_send_failed` | `api/mfa.py` delivery refused by the provider; `reason` is a coded fault, never provider prose | `operator_id`, `purpose`, `reason` |
+| `mfa.email_factor_verified` | `api/mfa.py` email factor enrolment completed | `operator_id`, `destination` |
+| `mfa.email_factor_removed` | `api/mfa.py` email factor removed; step-up gated | `operator_id`, `reason_sha256`, `reason_bytes`, `by` |
+| `mfa.reset` | `api/mfa.py` administrative MFA reset after device loss | `operator_id`, `credentials_revoked`, `recovery_codes_invalidated`, `reason_sha256`, `reason_bytes`, `by` |
 | `scheduled_task.created` | `api/scheduled_tasks.py` task schedule creation | `scheduled_task_id`, `name_sha256`, `name_bytes`, `target_type`, `target_id`, `cron_expression`, `timezone`, `next_run_at`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
 | `scheduled_task.updated` | `api/scheduled_tasks.py` task schedule update | `scheduled_task_id`, `name_sha256`, `name_bytes`, `enabled`, `next_run_at`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
 | `scheduled_task.deleted` | `api/scheduled_tasks.py` task schedule deletion | `scheduled_task_id`, `name_sha256`, `name_bytes`, `target_type`, `target_id`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
@@ -144,6 +168,18 @@ and SHA-256/Merkle roots—remains readable.
 | `scheduled_task.manually_triggered` | `api/scheduled_tasks.py` manual run-now trigger | `scheduled_task_id`, `name_sha256`, `name_bytes`, `dispatched_count`, `actor`, `actor_user_id`, `source_ip`, `user_agent` |
 | `scheduled_task.dispatched` | `core/scheduler.py` cron dispatch tick | `scheduled_task_id`, `scheduled_task_name_sha256`, `scheduled_task_name_bytes`, `command_id`, `kind`, `target_type`, `target_id` |
 | `scheduled_task.misfire_skipped` | `core/scheduler.py` misfire handling | `scheduled_task_id`, `scheduled_task_name_sha256`, `scheduled_task_name_bytes`, `scheduled_for`, `detected_at` |
+| `approval_policy.created` | `api/approvals.py` approval policy written (issue #64) | `policy_id`, `name_sha256`, `name_bytes`, `scope`, `scope_id`, `command_kinds`, `required_approvals`, `request_ttl_seconds`, `enabled` |
+| `approval_policy.updated` | `api/approvals.py` approval policy terms changed | `policy_id`, `name_sha256`, `name_bytes`, `scope`, `scope_id`, `previous_command_kinds`, `command_kinds`, `previous_required_approvals`, `required_approvals`, `previous_request_ttl_seconds`, `request_ttl_seconds`, `previous_enabled`, `enabled` |
+| `approval_policy.deleted` | `api/approvals.py` approval policy removed | `policy_id`, `name_sha256`, `name_bytes`, `scope`, `scope_id`, `command_kinds`, `required_approvals` |
+| `approval_request.created` | `api/approvals.py` sensitive command proposed for approval | `approval_request_id`, `kind`, `agent_id`, `client_id`, `site_id`, `policy_id`, `required_approvals`, `payload_keys`, `payload_sha256`, `status`, `reason_sha256`, `reason_bytes`, `expires_at` |
+| `approval_request.denied` | `api/approvals.py` request refused: requester not authorized for the command | `kind`, `agent_id`, `policy`, `reason` |
+| `approval_request.decision_recorded` | `api/approvals.py` one identity's approve/reject | `approval_request_id`, `kind`, `agent_id`, `client_id`, `site_id`, `policy_id`, `required_approvals`, `payload_keys`, `payload_sha256`, `status`, `decision`, `reason_sha256`, `reason_bytes`, `approvals_recorded` |
+| `approval_request.decision_denied` | `api/approvals.py` refused verdict (self-approval, duplicate, lapsed, ineligible) | `approval_request_id`, `kind`, `agent_id`, `client_id`, `site_id`, `policy_id`, `required_approvals`, `payload_keys`, `payload_sha256`, `status`, `decision`, `reason` |
+| `approval_request.cancelled` | `api/approvals.py` request withdrawn by requester or tenant admin | `approval_request_id`, `kind`, `agent_id`, `client_id`, `site_id`, `policy_id`, `required_approvals`, `payload_keys`, `payload_sha256`, `status`, `reason_sha256`, `reason_bytes`, `cancelled_by_requester` |
+| `approval_request.expired` | `api/approvals.py`, `api/management.py` lazy expiry of a lapsed request | `approval_request_id`, `kind`, `agent_id`, `client_id`, `site_id`, `policy_id`, `required_approvals`, `payload_keys`, `payload_sha256`, `status` |
+| `approval_gate.allowed` | `api/management.py` dispatch spent an approval | `kind`, `agent_id`, `policy_id`, `required_approvals`, `approval_request_id`, `reason`, `payload_sha256`, `approver_operator_ids` |
+| `approval_gate.denied` | `api/management.py` fail-closed dispatch refusal under an approval policy | `kind`, `agent_id`, `policy_id`, `required_approvals`, `approval_request_id`, `reason` |
+| `scheduled_task.approval_refused` | `core/scheduler.py` unattended run refused: kind is under an approval policy | `scheduled_task_id`, `scheduled_task_name_sha256`, `scheduled_task_name_bytes`, `kind`, `agent_id`, `policy_id`, `required_approvals` |
 
 
 `server/tests/test_redaction.py` parses the production source and compares every

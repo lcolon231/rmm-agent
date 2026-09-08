@@ -123,9 +123,13 @@ async def assert_client_visible(
     client_id: str | None,
     db: AsyncSession,
     *,
-    detail: str = "Not found",
+    detail: str | dict = "Not found",
 ) -> None:
     """Fail closed with ``404`` unless the operator may see ``client_id``.
+
+    ``detail`` is passed through to the ``HTTPException`` unchanged, so a caller
+    whose API contract uses coded errors may hand in ``{"code": ...}`` instead
+    of prose.
 
     Call after resolving a target resource to its client. A cross-tenant client
     id -- or ``None``, which no membership can match -- is indistinguishable
@@ -142,7 +146,7 @@ async def assert_client_action(
     db: AsyncSession,
     *,
     minimum: ClientRole,
-    detail: str = "Not found",
+    detail: str | dict = "Not found",
 ) -> None:
     """Authorize a mutating/dispatch action against ``client_id``.
 
@@ -182,7 +186,7 @@ async def assert_agent_visible(
     db: AsyncSession,
     *,
     minimum: ClientRole | None = None,
-    detail: str = "Not found",
+    detail: str | dict = "Not found",
 ) -> None:
     """Tenant gate for an agent-keyed handler after it has loaded the agent.
 

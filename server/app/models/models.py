@@ -278,6 +278,7 @@ class CheckType(str, enum.Enum):
     service = "service"
     reboot_pending = "reboot_pending"
     uptime = "uptime"
+    patch_age = "patch_age"
 
 
 class CheckResultStatus(str, enum.Enum):
@@ -453,9 +454,22 @@ class Operator(Base):
     # under; bumping this immediately invalidates all outstanding tokens for
     # this operator (logout-everywhere / revocation after a suspected leak).
     token_generation: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # When this operator last generated a recovery-code batch (issue #67).
+    # Enrollment state itself is not duplicated here — it is derived from the
+    # operator's un-revoked webauthn_credentials rows, so there is exactly one
+    # source of truth for "does this person have a second factor".
+    mfa_recovery_codes_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
+    webauthn_credentials: Mapped[list["WebAuthnCredential"]] = relationship(
+        back_populates="operator", cascade="all, delete-orphan"
+    )
     client_memberships: Mapped[list["OperatorClientMembership"]] = relationship(
+        back_populates="operator", cascade="all, delete-orphan"
+    )
+    sessions: Mapped[list["OperatorSession"]] = relationship(
         back_populates="operator", cascade="all, delete-orphan"
     )
 
@@ -821,6 +835,15 @@ class Command(Base):
     # place in the hash chain. SET NULL keeps the run if audit is ever pruned.
     dispatch_audit_event_id: Mapped[str | None] = mapped_column(
         ForeignKey("audit_events.id", ondelete="SET NULL")
+    )
+    # The approval this run spent, when policy required one (issue #64). This is
+    # the execution binding recorded on the run itself: it answers "who else
+    # authorized this, and against which reviewed payload" without reconstructing
+    # it from the audit chain. NULL means no policy required approval — never a
+    # claim that approval was waived. SET NULL rather than CASCADE so purging
+    # approval history can never quietly delete command records.
+    approval_request_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approval_requests.id", ondelete="SET NULL"), index=True
     )
     # Forward-compat lifecycle/lineage for recurring scheduling (#49) and retries.
     # No producer populates these yet; they land now so scheduling/retry work
@@ -2259,3 +2282,666 @@ class AgentUpdateAttempt(Base):
     reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     release: Mapped["AgentUpdateRelease"] = relationship(back_populates="attempts")
+
+
+# --------------------------------------------------------------------------- #
+# Multi-factor authentication (issue #67)
+# --------------------------------------------------------------------------- #
+class WebAuthnChallengePurpose(str, enum.Enum):
+    """Which ceremony a challenge was minted for.
+
+    The purpose is bound to the stored row and re-checked on consumption, so a
+    challenge issued to add a device can never be spent to complete a login or
+    to satisfy a step-up. Without this, the three ceremonies would share one
+    replay pool and the weakest entry point would set the bar for all of them.
+    """
+
+    registration = "registration"
+    authentication = "authentication"
+    step_up = "step_up"
+
+
+class WebAuthnCredential(Base):
+    """One registered authenticator belonging to one operator.
+
+    Nothing here is a secret: a WebAuthn credential is a public key, and the
+    private half never leaves the authenticator. That is the property that makes
+    this factor phishing-resistant and also means a database disclosure cannot
+    be replayed as a login, unlike a shared TOTP seed.
+
+    Revocation is a tombstone (``revoked_at``) rather than a delete so the audit
+    trail keeps pointing at a row that still exists. A revoked credential is
+    excluded from every authentication path by the same predicate everywhere:
+    ``revoked_at IS NULL``.
+    """
+
+    __tablename__ = "webauthn_credentials"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # base64url of the raw credential ID. Unique across all operators: an
+    # authenticator must never resolve to two identities.
+    credential_id: Mapped[str] = mapped_column(
+        String(1400), nullable=False, unique=True, index=True
+    )
+    # base64url of the COSE-encoded public key, stored exactly as the
+    # authenticator emitted it so verification is byte-reproducible.
+    public_key_cose: Mapped[str] = mapped_column(Text, nullable=False)
+    algorithm: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Authenticator signature counter. BigInteger because the field is a 32-bit
+    # unsigned value and Integer is signed on some backends.
+    sign_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    aaguid: Mapped[str] = mapped_column(String(36), nullable=False, default="")
+    # Operator-supplied label ("YubiKey 5C", "work laptop"). Free text, so it is
+    # digested rather than stored verbatim in audit detail.
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    transports: Mapped[str | None] = mapped_column(String(120))
+    attestation_format: Mapped[str] = mapped_column(String(32), nullable=False, default="none")
+    # Whether the credential may be, and currently is, backed up (synced
+    # passkey). Recorded because a synced credential has a different recovery
+    # and blast-radius story than a hardware-bound one, and reviewers ask.
+    backup_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    backup_state: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Coded, non-secret reason (e.g. operator_revoked, admin_reset).
+    revoked_reason: Mapped[str | None] = mapped_column(String(64))
+
+    operator: Mapped["Operator"] = relationship(back_populates="webauthn_credentials")
+
+    __table_args__ = (
+        Index("ix_webauthn_credentials_operator_active", "operator_id", "revoked_at"),
+    )
+
+
+class WebAuthnChallenge(Base):
+    """A single-use, expiring challenge for one operator and one ceremony.
+
+    Replay protection lives here rather than in the verification module: the
+    challenge row is the only thing that can distinguish a first use from a
+    second, and only the database can make that decision atomically. Consumption
+    marks ``consumed_at`` in the same transaction that verifies the ceremony, so
+    a replayed response finds a spent row and is refused.
+    """
+
+    __tablename__ = "webauthn_challenges"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    purpose: Mapped[WebAuthnChallengePurpose] = mapped_column(
+        Enum(
+            WebAuthnChallengePurpose,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    # base64url of the 32 random bytes. Unique so a collision, however
+    # improbable, is a database error rather than an ambiguous lookup.
+    challenge: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # The RP ID and origin in force when the challenge was minted. Re-checked at
+    # consumption so a mid-ceremony configuration change cannot be used to widen
+    # the scope a response is accepted under.
+    rp_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_webauthn_challenges_operator_purpose", "operator_id", "purpose"),
+        Index("ix_webauthn_challenges_expires_at", "expires_at"),
+    )
+
+
+class MfaRecoveryCode(Base):
+    """One single-use recovery code, stored only as a hash.
+
+    Recovery codes are the deliberate weak point of any MFA design: they are
+    bearer secrets a human can copy, so they get the strong storage treatment
+    (bcrypt, like passwords — not the single SHA-256 pass used for high-entropy
+    machine tokens) and the loudest audit trail. ``batch_id`` exists so
+    regenerating codes invalidates the previous set as one reviewable unit.
+    """
+
+    __tablename__ = "mfa_recovery_codes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_mfa_recovery_codes_operator_used", "operator_id", "used_at"),
+    )
+
+
+class MfaEmailCodePurpose(str, enum.Enum):
+    """What a given code is allowed to complete.
+
+    Purpose is bound into the row rather than inferred at verification time, so
+    a code mailed to prove control of an address cannot be replayed against the
+    login endpoint, or the reverse.
+    """
+
+    enrollment = "enrollment"
+    login = "login"
+
+
+class MfaEmailFactor(Base):
+    """An operator's email second factor (issue #226), at most one per operator.
+
+    ``address`` is a snapshot of the operator's login email taken when the
+    factor was verified, not a freely chosen destination. Codes only ever go to
+    the operator's own login address, so an attacker holding only a password
+    cannot point the factor at a mailbox they control. The snapshot is what
+    makes a later email change detectable: when it stops matching
+    ``Operator.email`` the factor is no longer proven and stops counting, rather
+    than silently continuing to authorize a mailbox nobody re-verified.
+
+    A row with ``verified_at`` NULL is an enrolment in progress. It is not a
+    factor, and nothing in the login path may treat it as one.
+    """
+
+    __tablename__ = "mfa_email_factors"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    address: Mapped[str] = mapped_column(String(320), nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class MfaEmailCode(Base):
+    """One emailed one-time code, stored only as a hash.
+
+    Three properties are load-bearing and are enforced here rather than left to
+    the caller:
+
+    * **Consumed, not deleted.** A spent row stays, so presenting the same code
+      twice is distinguishable from presenting a code that never existed. A
+      deleted row would make a replay look identical to a typo.
+    * **Attempt-bounded.** ``attempts`` is what makes a six-digit code safe;
+      the code burns long before its 10^6 space is meaningfully explored.
+    * **Superseded on reissue.** Requesting a new code invalidates the previous
+      one, so a mailbox never accumulates several simultaneously live codes.
+    """
+
+    __tablename__ = "mfa_email_codes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    purpose: Mapped[MfaEmailCodePurpose] = mapped_column(
+        Enum(MfaEmailCodePurpose), nullable=False
+    )
+    code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # The address this code was actually mailed to, for evidence. A code is only
+    # valid while it still matches the operator's current login address.
+    address: Mapped[str] = mapped_column(String(320), nullable=False)
+    attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_mfa_email_codes_operator_live", "operator_id", "consumed_at"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Administrative session management and break-glass access (issue #69)
+# --------------------------------------------------------------------------- #
+class OperatorSessionEndReason(str, enum.Enum):
+    """Why a session stopped being usable. Terminal in every case.
+
+    Distinguishing these matters for review: an idle timeout is routine, an
+    administrator revoking someone else's session is an intervention worth
+    explaining, and a break-glass session closing tells a reviewer the emergency
+    window is shut.
+    """
+
+    revoked_by_self = "revoked_by_self"
+    revoked_by_admin = "revoked_by_admin"
+    idle_timeout = "idle_timeout"
+    absolute_timeout = "absolute_timeout"
+    superseded = "superseded"
+    operator_disabled = "operator_disabled"
+
+
+class OperatorSession(Base):
+    """One issued dashboard session, tracked server side (issue #69).
+
+    Before this, operator sessions were pure JWTs: stateless, invisible, and
+    revocable only in bulk by bumping ``Operator.token_generation``. That is
+    enough to end an incident but not to *investigate* one - you could not
+    answer "where is this account signed in from" or end one suspicious session
+    without logging the person out everywhere.
+
+    Each row is the authoritative record for one session; the token carries its
+    id in the ``sid`` claim and every request re-checks the row. Revocation is
+    therefore immediate and individual, and the inventory is real rather than
+    inferred.
+
+    The cost of that authority is one indexed read on every authenticated
+    request, plus a bounded write to keep ``last_seen_at`` fresh. The write is
+    skipped unless the stored value is already stale (see
+    ``admin_session_last_seen_write_interval_seconds``), so a busy session does
+    not generate a database write per request.
+    """
+
+    __tablename__ = "operator_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The generation the session was minted under. Kept on the row as well as in
+    # the token so a bulk revocation is visible in the inventory, not only in
+    # the token check.
+    token_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # How the operator authenticated, as a sorted comma-separated `amr` list.
+    # Display and review only - authorization always reads the signed claim.
+    auth_methods: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    # Context captured at sign-in, for "is this me?" review. Both are
+    # attacker-influenced strings, so they are bounded here and digested before
+    # they reach the audit chain.
+    source_ip: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    # A session opened by activating a break-glass credential. These bypass MFA
+    # by design, so they are marked, short-lived, and surfaced for review.
+    is_break_glass: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    # Hard ceiling set at creation. A refresh can move the token's expiry but
+    # never this, so a session cannot be renewed indefinitely.
+    absolute_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_reason: Mapped[OperatorSessionEndReason | None] = mapped_column(
+        Enum(
+            OperatorSessionEndReason,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        )
+    )
+    # Who ended it, when an administrator did.
+    ended_by_operator_id: Mapped[str | None] = mapped_column(String(36))
+
+    operator: Mapped["Operator"] = relationship(back_populates="sessions")
+
+    __table_args__ = (
+        # The hot path: "the live sessions for this operator".
+        Index("ix_operator_sessions_operator_active", "operator_id", "ended_at"),
+        Index("ix_operator_sessions_absolute_expires", "absolute_expires_at"),
+    )
+
+
+class BreakGlassAccount(Base):
+    """A pre-provisioned emergency identity with an offline-usable credential.
+
+    This is the deliberate exception to every authentication control the system
+    otherwise enforces, and it exists because those controls can fail closed on
+    the operator: an administrator whose only authenticator is lost, or a
+    federation outage, would otherwise have no way back into a deployment that
+    manages their whole fleet.
+
+    The trade is stated plainly rather than hidden. A break-glass credential is
+    a single high-entropy secret, so it is:
+
+    * **Offline usable.** It depends on nothing but the printed value - no
+      second factor, no email, no hardware. That is the point, and it is also
+      exactly why it is dangerous.
+    * **Stored only as a bcrypt hash**, shown once at creation or rotation, with
+      a non-secret fingerprint retained so an administrator can tell two sealed
+      envelopes apart without opening either.
+    * **Bound to a dedicated operator row** whose password hash is unusable, so
+      the identity can never be reached by ordinary password login.
+    * **Loud.** Every activation writes an audit event, opens a marked
+      short-lived session, and creates a review row that stays open until a
+      human closes it.
+    """
+
+    __tablename__ = "break_glass_accounts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # The identity this credential activates. Dedicated, never a real person's
+    # account, so disabling break-glass never disturbs someone's own login.
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    # Operator-facing name for the sealed envelope ("safe, London office").
+    label: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    # bcrypt, like a password: this is a human-held bearer secret, not a
+    # machine token, so it gets password-grade storage.
+    credential_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Non-authenticating, domain-separated digest, safe to display so an
+    # administrator can tell two sealed envelopes apart without opening either.
+    credential_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    created_by_email: Mapped[str | None] = mapped_column(String(320))
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Disabling is reversible and preferred over deletion: the activation
+    # history must keep pointing at a row that still exists.
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled_reason: Mapped[str | None] = mapped_column(String(200))
+
+    operator: Mapped["Operator"] = relationship()
+    activations: Mapped[list["BreakGlassActivation"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+
+
+class BreakGlassActivation(Base):
+    """One use of a break-glass credential, and its mandatory review.
+
+    An activation is an incident record, not a log line. It stays unreviewed
+    until a human explicitly closes it, so "was every emergency access accounted
+    for?" is answerable from data rather than from memory.
+    """
+
+    __tablename__ = "break_glass_activations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("break_glass_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # The session the activation opened. SET NULL rather than CASCADE: the
+    # activation record must outlive the session it created.
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operator_sessions.id", ondelete="SET NULL")
+    )
+    activated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    source_ip: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    # The justification given at activation. Free-form prose, so it is stored
+    # here for the reviewer but only ever digested into the audit chain.
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by_email: Mapped[str | None] = mapped_column(String(320))
+    review_note: Mapped[str | None] = mapped_column(Text)
+
+    account: Mapped["BreakGlassAccount"] = relationship(back_populates="activations")
+
+    __table_args__ = (
+        # Drives the "what still needs review" queue.
+        Index("ix_break_glass_activations_unreviewed", "reviewed_at", "activated_at"),
+    )
+
+
+class ApprovalRequestStatus(str, enum.Enum):
+    """Lifecycle of one request for authorization to run a sensitive command.
+
+    ``pending`` and ``approved`` are the only usable states; everything else is
+    terminal. ``approved`` and ``consumed`` are deliberately distinct: an
+    approval authorizes exactly one dispatch, and separating "authorized" from
+    "already spent" is what makes replay of a single approval detectable rather
+    than invisible.
+    """
+
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    cancelled = "cancelled"
+    expired = "expired"
+    consumed = "consumed"
+
+
+class ApprovalDecisionKind(str, enum.Enum):
+    """One approver's recorded verdict on a request."""
+
+    approve = "approve"
+    reject = "reject"
+
+
+class ApprovalPolicy(Base):
+    """Where approval is required, and how many distinct people it takes (#64).
+
+    Scope resolution mirrors :class:`MonitoringPolicy` and
+    :class:`PatchApprovalPolicy`: the single most specific enabled policy whose
+    ``command_kinds`` contains the dispatched kind governs it (agent, then site,
+    then client, then global). Absence of a policy means the kind dispatches
+    under the existing role/scope rules unchanged, which is what keeps this
+    capability opt-in and safely deployable ahead of any policy being written.
+
+    ``required_approvals`` is the two-person control. At ``2`` a request needs
+    two *distinct* eligible identities that are both not the requester, so no
+    single compromised or mistaken account can authorize its own sensitive
+    action. It is stored per policy rather than assumed globally because the
+    tier that warrants dual control for one customer is a single reviewer for
+    another.
+    """
+
+    __tablename__ = "approval_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    scope: Mapped[MonitoringScope] = mapped_column(
+        Enum(
+            MonitoringScope,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    # NULL only for the global scope. Polymorphic target (client/site/agent id),
+    # so it is not a hard FK -- same rationale as the monitoring policies.
+    scope_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Bounded, validated list of CommandKind values this policy governs. Stored
+    # as JSON rather than a join table because it is a small closed vocabulary
+    # read whole on every dispatch and never queried by element.
+    command_kinds: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    required_approvals: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2, server_default="2"
+    )
+    # How long a created request stays usable. Bounding this is what stops an
+    # approval granted for one incident being spent weeks later against a
+    # changed fleet.
+    request_ttl_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3600, server_default="3600"
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    created_by: Mapped[str | None] = mapped_column(String(320))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str | None] = mapped_column(String(320))
+
+    __table_args__ = (
+        CheckConstraint(
+            "required_approvals >= 1 AND required_approvals <= 2",
+            name="ck_approval_policies_required_approvals",
+        ),
+    )
+
+
+# One policy name per scope target, case- and whitespace-insensitive. Mirrors
+# the patch/monitoring policy indexes: defense in depth behind the API's own
+# duplicate-name rejection.
+Index(
+    "ux_approval_policies_scope_name_normalized",
+    ApprovalPolicy.scope,
+    ApprovalPolicy.scope_id,
+    func.lower(func.trim(ApprovalPolicy.name)),
+    unique=True,
+)
+
+
+class ApprovalRequest(Base):
+    """A proposed sensitive command awaiting authorization by other people.
+
+    The row is a *binding*, not a note. ``payload_sha256`` covers the exact
+    agent, kind, and canonical payload that was reviewed, and dispatch
+    recomputes it from what the operator actually submits: an approval obtained
+    for "restart the print spooler" cannot be spent on "restart SQL Server",
+    because the digest no longer matches and the dispatch fails closed.
+
+    ``payload`` itself is retained so an approver can see what they are being
+    asked to authorize. It is the same operator-supplied structure the command
+    would carry and is subject to the same size validation; it is never copied
+    into the audit chain, which stores only key names and the digest.
+    """
+
+    __tablename__ = "approval_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Denormalized tenancy, captured at creation. The request must stay
+    # answerable to the tenant it was raised in even if the agent is later moved
+    # between sites, and every list/read filters on it.
+    client_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    site_id: Mapped[str | None] = mapped_column(String(36))
+    kind: Mapped[CommandKind] = mapped_column(Enum(CommandKind), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # SHA-256 over the canonical (agent, kind, payload) tuple. The whole
+    # execution binding rests on this column.
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The policy that required this request, and the terms it set. Copied onto
+    # the row rather than read live at approval time: editing a policy must not
+    # retroactively lower the bar for a request already in flight.
+    policy_id: Mapped[str | None] = mapped_column(String(36))
+    required_approvals: Mapped[int] = mapped_column(Integer, nullable=False)
+    requested_by_operator_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    requested_by_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    # Operator prose justifying the request. Shown to approvers; only ever
+    # digested into the audit chain.
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[ApprovalRequestStatus] = mapped_column(
+        Enum(
+            ApprovalRequestStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+        default=ApprovalRequestStatus.pending,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    # When the request reached a decided state (approved or rejected).
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the approval was spent on a dispatch. Set in the same transaction as
+    # the command row it authorized.
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Who ended the request early, and why (cancellation or rejection).
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_by_email: Mapped[str | None] = mapped_column(String(320))
+    closed_reason: Mapped[str | None] = mapped_column(Text)
+
+    decisions: Mapped[list["ApprovalDecision"]] = relationship(
+        back_populates="request", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        # Drives the reviewer queue ("what is waiting, newest first") and the
+        # lazy expiry sweep.
+        Index("ix_approval_requests_status_expires", "status", "expires_at"),
+        Index("ix_approval_requests_client_status", "client_id", "status"),
+    )
+
+
+class ApprovalDecision(Base):
+    """One identity's approve/reject on one request.
+
+    The unique constraint on ``(request_id, operator_id)`` is the enforcement
+    point for "two *distinct* people": a single account cannot satisfy a
+    two-approval policy by approving twice, and a concurrent double submission
+    from the same account loses the race at the database rather than in
+    application logic.
+
+    Decisions are never deleted. A rejected or superseded request keeps every
+    verdict recorded against it, because "who declined this, and why" is exactly
+    the evidence the control exists to produce.
+    """
+
+    __tablename__ = "approval_decisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    request_id: Mapped[str] = mapped_column(
+        ForeignKey("approval_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    operator_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    operator_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    # The approver's global role at the moment they decided. Display and review
+    # only: eligibility is always re-evaluated live at dispatch, so a later
+    # demotion invalidates the approval rather than being papered over by this
+    # snapshot.
+    operator_role: Mapped[OperatorRole] = mapped_column(
+        Enum(OperatorRole), nullable=False
+    )
+    decision: Mapped[ApprovalDecisionKind] = mapped_column(
+        Enum(
+            ApprovalDecisionKind,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+    )
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    source_ip: Mapped[str | None] = mapped_column(String(45))
+
+    request: Mapped["ApprovalRequest"] = relationship(back_populates="decisions")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "request_id", "operator_id", name="ux_approval_decision_one_per_operator"
+        ),
+    )

@@ -103,15 +103,52 @@ fail authentication with the same response as an unknown token; terminal —
 the endpoint must re-enroll as a new identity). Quarantine/restore require the
 operator role; revocation requires admin. Every transition demands a reason
 and is audited, and revocation expires the agent's outstanding queued and
-dispatched commands.
+dispatched commands. Finite agent bearers rotate at their lifetime midpoint.
+An active agent powered off across expiry may rotate through a dedicated,
+configurably bounded reattach path while the expired bearer still matches its
+current token slot. That path takes a row lock, refuses quarantined/revoked
+agents with the same 401 as unknown or too-old credentials, and records
+`agent.credential_reattached` rather than enrollment or routine-renewal audit
+evidence.
 
 Signing-key rotation is an operator-run workflow (`scripts/rotate_command_key.py`
 with the `docs/KEY-ROTATION.md` runbook): staged active/overlap/retired
 transitions, a compromise fast path, and rollback, each written atomically to
 the registry and appended to a rotation journal. Known gaps include
-MFA/federation and certificate pinning. Tenant-scoped authorization is
+OIDC/SAML federation and certificate pinning. Tenant-scoped authorization is
 implemented server side (issue #66); a dashboard membership-management UI is a
 follow-up.
+
+Operator authentication supports a phishing-resistant WebAuthn second factor
+(issue #67, `docs/MFA.md`). A correct password alone yields a restricted
+`mfa_pending` token accepted only by the MFA completion endpoints; every other
+operator route resolves identity through one dependency that refuses that type.
+Sessions carry signed `amr` and step-up claims, so authorization can distinguish
+a password-only session from one that recently proved possession of a registered
+authenticator. Step-up is required to change another operator's role or status,
+revoke their sessions, reset their MFA, grant or revoke tenant membership,
+toggle platform-admin, or reconfigure the caller's own factors —
+and is vacuous for operators holding no credential, which is what keeps
+pre-adoption deployments behaving exactly as before. Recovery codes restore
+access and permit enrolling a replacement authenticator but never satisfy
+step-up. Enforcement has three staged positions (`off`, `optional`, `required`);
+rollback is a configuration change, not a schema change. Registered credentials
+are public keys and recovery codes are bcrypt hashes, so a database disclosure
+yields no replayable second factor.
+
+Operator sessions are tracked server side (issue #69, `docs/ADMIN-SESSIONS.md`).
+A token carries its session id in a signed `sid` claim and every authenticated
+request re-checks the row, so revocation is immediate and individual rather than
+only in bulk, and an operator can see where their account is signed in from. Two
+independent ceilings bound a session -- an absolute wall set at sign-in that
+refresh can never move, and an idle timeout evaluated against a
+bounded-write `last_seen_at` -- and a lapsed session is refused by the request
+that presents it rather than by a sweeper. Break-glass credentials are the
+deliberate exception to MFA: a pre-provisioned, offline-usable secret bound to a
+dedicated identity with an unusable password hash, opening a one-hour marked
+session that is audited and must be reviewed. An emergency session may act but
+may not create or rotate break-glass credentials, so one stolen envelope cannot
+become a permanent foothold.
 
 ### 3.2 Operations plane
 
@@ -148,6 +185,22 @@ Windows supports a typed idempotent cancellation path. See
 [`POWER-OPERATIONS.md`](POWER-OPERATIONS.md). Event log access is
 administrator-only and capability-gated, bounded to an allowlisted channel and
 returning metadata only; see [`EVENT-LOG-ACCESS.md`](EVENT-LOG-ACCESS.md).
+
+Any command kind can additionally be placed behind **approval and two-person
+authorization** (issue #64). An approval policy at global, client, site, or
+endpoint scope names the kinds it governs and how many distinct eligible
+identities must agree. The operator raises a request describing the exact
+command; the request binds the SHA-256 of `(agent_id, kind, payload)`, and
+dispatch recomputes that digest from the submitted payload, re-checks every
+approver's authority live, and spends the approval exactly once via a
+conditional status transition. The gate runs after ordinary command
+authorization and before any server-side payload transform, so what was
+reviewed is what is bound. Nothing reaches the agent: the envelope, schema
+version, and signing path are unchanged. Scheduled tasks and interactive shell
+sessions cannot route around it -- both are refused for a governed kind, since
+neither can produce a reviewable, bound payload at fire time. With no policy
+rows the capability is inert and dispatch behaves exactly as before. See
+[`APPROVAL-WORKFLOWS.md`](APPROVAL-WORKFLOWS.md).
 
 Controlled remediation preserves polling and the signed command/result
 contract. Both server and agent validate fixed managed file roots and the
@@ -483,6 +536,19 @@ history. Automatic and manual transitions serialize on the alert row; operator
 comments are scrubbed before operational storage and digest-only in the audit
 chain.
 
+`ApprovalPolicy` mirrors `MonitoringPolicy`/`PatchApprovalPolicy` scoping
+(`global`, `client`, `site`, `agent`) and resolves most-specific-wins among the
+policies that *name* the dispatched kind, so a narrow policy can add a
+requirement but never silently drop a broader one. `ApprovalRequest` is one
+proposed command: it stores the payload for reviewers plus `payload_sha256`,
+the execution binding, and copies `required_approvals` and the deadline off the
+policy so an edit cannot retroactively lower the bar for work already in
+review. `ApprovalDecision` is one identity's verdict, unique per
+`(request, operator)` -- the database constraint is what makes "two distinct
+people" true under concurrency rather than by convention. `Command` carries
+`approval_request_id`, so a run points at the approval it spent; `NULL` means
+no policy required one, never that approval was waived.
+
 ### 4.2 API surface
 
 All application routes except `/healthz` are under `/api/v1`.
@@ -500,6 +566,8 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/auth/revoke-tokens` | Revoke caller sessions | Readonly+ |
 | POST | `/auth/operators/{id}/revoke-tokens` | Revoke operator sessions | Admin |
 | POST | `/enroll` | Enroll with site token | Enrollment token |
+| POST | `/agents/credentials/renew` | Rotate a live agent bearer with response-loss overlap | Agent token |
+| POST | `/agents/credentials/reattach` | Bounded active-only recovery of a still-current expired bearer | Lapsed agent token within configured window |
 | POST | `/heartbeat` | Store telemetry, report the running agent version, advertise inventory hashes, poll commands | Agent token |
 | POST | `/agents/me/inventory` | Submit requested inventory sections | Agent token |
 | POST | `/agents/me/monitoring/results` | Submit revision-pinned idempotent check results | Agent token |
@@ -540,6 +608,13 @@ All application routes except `/healthz` are under `/api/v1`.
 | GET | `/monitoring/email-alerts/status` | Safe provider configuration and delivery counts | Readonly |
 | GET | `/monitoring/alerts/{id}/email-deliveries` | Masked recipient delivery/attempt history | Readonly |
 | POST | `/monitoring/email-deliveries/{id}/retry` | Idempotently retry a failed email | Operator |
+| POST/GET | `/approval-policies` | Create/list approval (two-person) policies | Admin / Readonly |
+| PATCH/DELETE | `/approval-policies/{id}` | Change terms or remove a policy | Admin |
+| POST/GET | `/approval-requests` | Propose a governed command / read the reviewer queue | Operator / Readonly |
+| GET | `/approval-requests/{id}` | One request with its payload and recorded verdicts | Readonly |
+| POST | `/approval-requests/{id}/approve` | Record one eligible identity's approval | Operator, never the requester |
+| POST | `/approval-requests/{id}/reject` | Refuse a request (terminal) | Operator, never the requester |
+| POST | `/approval-requests/{id}/cancel` | Withdraw a request | Requester or client admin |
 
 Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, a
 filtered enrollment audit-event list, and the general audit timeline,
@@ -966,12 +1041,17 @@ moved merely to match an aspirational tree.
   fixture-backed; beyond the endpoint telemetry and command console views,
   live audit UI, complete inventory, monitoring alerts, scheduling, patching,
   remediation and remote desktop are not implemented.
-- Operator administration has no delete endpoint, password change/reset or
-  forced-rotation flow, server-enforced password complexity, or pagination.
-  The dashboard omits those controls rather than simulating them.
-  Administrator-chosen initial passwords without forced rotation remain a
-  security weakness; a future server change should add a one-time activation or
-  forced-change flow with authorization, audit events, tests, and documentation.
+- Operator administration has no delete endpoint, no in-product password
+  change/reset flow, no forced rotation, no server-enforced password
+  complexity, and no pagination. The dashboard omits those controls rather than
+  simulating them. A locked-out operator is recovered out-of-band by someone
+  with database access (`scripts/reset_password.py`), which bumps the token
+  generation, closes every live session, optionally clears a lost second factor,
+  and is audited as `operator.password_reset`; it is a recovery path, not a
+  self-service one. Administrator-chosen initial passwords without forced
+  rotation remain a security weakness; a future server change should add a
+  one-time activation or forced-change flow with authorization, audit events,
+  tests, and documentation.
 - TLS termination itself remains an operator-run topology, but production
   mode (ENVIRONMENT=production) now fails startup on debug mode, placeholder
   or short secrets, missing signing keys, and a missing/non-HTTPS/loopback

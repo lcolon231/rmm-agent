@@ -50,10 +50,17 @@ async def _sweep_once() -> None:
                 select(Agent).where(Agent.trust_state == AgentTrustState.active)
             )
         ).scalars().all()
-        evaluated = 0
+        offline_evaluated = 0
+        patch_age_evaluated = 0
         for agent in active_agents:
-            evaluated += await monitoring.evaluate_offline_checks(db, agent)
-        metrics.increment("monitoring_offline_evaluation_total", evaluated)
+            offline_evaluated += await monitoring.evaluate_offline_checks(db, agent)
+            patch_age_evaluated += await monitoring.evaluate_patch_age_checks(
+                db, agent
+            )
+        metrics.increment("monitoring_offline_evaluation_total", offline_evaluated)
+        metrics.increment(
+            "monitoring_patch_age_evaluation_total", patch_age_evaluated
+        )
         await db.commit()
 
 
@@ -164,12 +171,33 @@ async def _publish_once() -> None:
 async def _retention_once() -> None:
     """Prune expired telemetry and command output, then log a warning if any
     storage class has breached its observability threshold (issue #114)."""
-    from app.core import retention
+    from app.core import mfa, retention, sessions
 
     async with AsyncSessionLocal() as db:
         result = await retention.prune_expired(db, settings)
+        # Spent and expired WebAuthn challenges (issue #67) carry no
+        # accountability value once they cannot be spent -- the audit chain
+        # already records every ceremony -- so unlike audit data they are
+        # deleted outright. Bounded per pass so one sweep cannot hold a long
+        # transaction open on a large backlog.
+        challenges_purged = await mfa.purge_expired_challenges(db)
+        # Mark lapsed sessions terminal and drop long-dead rows (issue #69).
+        # Neither is a security control -- `sessions.resolve` already refuses an
+        # expired session on the request that presents it -- so this only keeps
+        # the operator-visible inventory honest and bounds table growth.
+        sessions_expired = await sessions.expire_lapsed(db)
+        sessions_purged = await sessions.purge_ended(
+            db, older_than_days=settings.command_output_retention_days
+        )
         await db.commit()
         status = await retention.storage_status(db, settings)
+    if challenges_purged:
+        print(f"[retention] purged {challenges_purged} expired MFA challenge(s)")
+    if sessions_expired or sessions_purged:
+        print(
+            f"[retention] expired {sessions_expired} session(s), "
+            f"purged {sessions_purged} ended session row(s)"
+        )
     if result.heartbeats_deleted or result.command_outputs_cleared:
         print(
             f"[retention] pruned {result.heartbeats_deleted} heartbeat(s), "

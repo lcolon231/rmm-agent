@@ -6,7 +6,9 @@ defines the controls and evidence required to strengthen them.
 
 ## Current security baseline
 
-Implemented controls include operator password authentication, global RBAC,
+Implemented controls include operator password authentication (with no
+self-service reset: lockout recovery is an audited out-of-band script requiring
+database access), global RBAC,
 JWT generation revocation, in-process login throttling, hashed server-side agent
 tokens, outbound-only polling, negotiated `command-v3` Ed25519 verification
 with shared cross-language vectors and downgrade rejection, signed schema/time
@@ -308,10 +310,47 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   revocation). See [`TENANT-AUTHORIZATION.md`](TENANT-AUTHORIZATION.md). The
   dashboard membership-management UI is a follow-up (backend already filters
   responses per tenant).
-- Add MFA, WebAuthn, federation, break-glass accounts, and administrative
-  session policy.
-- Implement approval and two-person authorization for sensitive operations;
-  emergency override must require justification and produce prominent evidence.
+- **Delivered (issue #67):** phishing-resistant WebAuthn multi-factor
+  authentication. A correct password yields only a restricted token accepted by
+  the MFA completion endpoints; challenges are single-use and purpose-bound;
+  sessions carry signed authentication-method and step-up claims that gate
+  operator-management and factor-reconfiguration operations; recovery codes
+  restore access and permit re-enrolment but never satisfy step-up; enforcement
+  stages through `off`/`optional`/`required` with configuration-only rollback.
+  The trust boundary this does *not* move: registration requests
+  `attestation: "none"`, so authenticator make, model, and certification are not
+  established and no hardware-provenance claim rests on it. See
+  [`MFA.md`](MFA.md).
+- **Delivered (issue #69):** administrative session management and break-glass
+  access. Sessions are server-side rows bound to a signed `sid` claim, so they
+  can be inventoried with device context and revoked individually; absolute and
+  idle ceilings bound each one and a lapsed session is refused on read rather
+  than by a sweeper. Break-glass provides pre-provisioned, offline-usable
+  emergency credentials bound to dedicated identities, opening short marked
+  sessions that are audited and must be reviewed, and that cannot provision
+  further emergency access. The trust boundary this does *not* move: a stolen
+  sealed envelope is a full compromise, bounded by time, noise, and rotation
+  rather than by a second factor -- which is precisely what it exists to
+  survive. See [`ADMIN-SESSIONS.md`](ADMIN-SESSIONS.md).
+- Add OIDC/SAML federation.
+- **Partially implemented (issue #64).** Approval and two-person authorization
+  for sensitive operations. An opt-in policy at global, client, site, or
+  endpoint scope names the command kinds it governs and how many distinct
+  eligible identities must agree. The approval binds the SHA-256 of
+  `(agent_id, kind, payload)`, so a command mutated after review cannot spend
+  it; approver eligibility is re-evaluated live at dispatch, so a demotion,
+  disablement, tenant removal, or revoked script grant invalidates the approval
+  rather than being papered over by the snapshot on the decision row; and the
+  approval is spent exactly once through a conditional status transition. The
+  requester can never be an approver, and the database -- not application logic
+  -- enforces one verdict per identity. Scheduled tasks and interactive shell
+  sessions are refused for a governed kind rather than dispatching around the
+  control. The trust boundary this does *not* move: an approval is only as
+  strong as the separation between the accounts involved, and two identities
+  held by one person defeat it exactly as they would in any dual-control
+  system. See [`APPROVAL-WORKFLOWS.md`](APPROVAL-WORKFLOWS.md). A justified
+  emergency override that keeps the policy in force while recording the
+  exception remains open (issue #65).
 - **Implemented (issues #79/#80).** A single-tenant, versioned,
   deterministic manifest exports safe actor/endpoint/policy/signed-action/result
   metadata, sanitized audit events, hash-only chain material, anchors/receipts,

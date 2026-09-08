@@ -7,8 +7,9 @@ import { nodelinkApiRequest } from "@/lib/nodelink-api";
 import { getRuntimeConfig } from "@/lib/runtime-config";
 
 type LoginResponse = {
-  access_token: string;
+  access_token: string | null;
   token_type: "bearer";
+  mfa_required?: boolean;
 };
 
 export class NodelinkAuthenticationError extends Error {
@@ -18,6 +19,23 @@ export class NodelinkAuthenticationError extends Error {
     super("NodeLink authentication failed.");
     this.name = "NodelinkAuthenticationError";
     this.status = status;
+  }
+}
+
+/**
+ * The password was accepted but a second factor is owed (issue #67).
+ *
+ * Signalled as a distinct throw rather than a nullable return so that no caller
+ * can accidentally treat the half-authenticated state as a session: the only
+ * way to reach the restricted token is to catch this deliberately.
+ */
+export class NodelinkSecondFactorRequired extends Error {
+  public readonly body: unknown;
+
+  constructor(body: unknown) {
+    super("NodeLink requires a second authentication factor.");
+    this.name = "NodelinkSecondFactorRequired";
+    this.body = body;
   }
 }
 
@@ -36,6 +54,9 @@ export async function authenticateOperator(credentials: LoginCredentials) {
   }
 
   const body = await response.json() as LoginResponse;
+  if (body.mfa_required === true) {
+    throw new NodelinkSecondFactorRequired(body);
+  }
   if (body.token_type !== "bearer" || !body.access_token) {
     throw new NodelinkAuthenticationError(502);
   }

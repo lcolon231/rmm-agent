@@ -212,7 +212,17 @@ credential.
 | Rate limited | Wait for the server `Retry-After` interval |
 | Identity already exists | Do not overwrite; review/revoke the existing server identity first |
 | DPAPI unprotect failure | Run under the enrolling Windows account or revoke/delete/re-enroll under the service account |
-| Repeated unauthorized heartbeat | Agent may be revoked or restored DB state may not contain its credential |
+| Repeated unauthorized heartbeat followed by `reattached lapsed agent credential` | The machine was reachable but its bearer expired while it was off; bounded reattach repaired it. Confirm a fresh heartbeat and review `agent.credential_reattached` audit evidence |
+| Repeated `server refused bounded credential reattach` | The server is reachable and answering, so this is not a network-offline diagnosis. The identity is revoked, quarantined, unknown to the current database, or older than `AGENT_CREDENTIAL_REATTACH_WINDOW_SECONDS`; inspect trust state and audit history by agent ID without requesting the bearer |
+| No HTTP response / connection, DNS, or TLS errors | The endpoint or route is genuinely unreachable. Check service state, DNS, proxy/TLS, firewall, and egress before changing identity state |
+
+The dashboard's **Offline** state is derived from a stale `last_seen_at`; it
+does not by itself distinguish unreachable transport from rejected
+authentication. Endpoint logs do: an HTTP 401 plus a refused bounded reattach
+proves the server was reached, while connection/DNS/TLS failures do not. Never
+paste `identity.json` or its bearer into a ticket. A revoked or quarantined
+agent must remain refused; restore trust deliberately or re-enroll only after
+the existing identity and audit history have been reviewed.
 
 ## Security recommendations
 

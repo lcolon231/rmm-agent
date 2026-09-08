@@ -31,6 +31,19 @@ export function LoginForm({ initialError }: LoginFormProps) {
       });
 
       if (response.ok) {
+        const body = await response.json().catch(() => null) as
+          | { mfa_required?: boolean; mfa_enrollment_required?: boolean; mfa_methods?: string[] }
+          | null;
+        if (body?.mfa_required) {
+          // The password was accepted but a second factor is owed. The methods
+          // travel as a display hint only; the server re-decides them.
+          const params = new URLSearchParams();
+          if (body.mfa_methods?.length) params.set("methods", body.mfa_methods.join(","));
+          if (body.mfa_enrollment_required) params.set("enroll", "1");
+          const query = params.toString();
+          window.location.replace(query ? `/login/mfa?${query}` : "/login/mfa");
+          return;
+        }
         window.location.replace("/");
         return;
       }

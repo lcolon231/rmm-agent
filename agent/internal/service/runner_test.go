@@ -680,6 +680,157 @@ func TestMaybeRenewCredentialRevokedIsSurfaced(t *testing.T) {
 	}
 }
 
+func TestLoopReattachesExpiredCredentialAndLeaves401Spin(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var (
+		mu            sync.Mutex
+		reattachCalls int
+		newTokenBeats int
+		reattachAuth  string
+		reattachNonce string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/agents/credentials/renew":
+			w.WriteHeader(http.StatusUnauthorized)
+		case "/api/v1/agents/credentials/reattach":
+			var body struct {
+				RotationNonce string `json:"rotation_nonce"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			reattachCalls++
+			reattachAuth = r.Header.Get("Authorization")
+			reattachNonce = body.RotationNonce
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"agent_id":              "agent-test",
+				"agent_token":           "reattached-token",
+				"credential_expires_at": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339Nano),
+				"overlap_expires_at":    time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339Nano),
+				"credential_generation": 2,
+			})
+		case "/api/v1/heartbeat":
+			if r.Header.Get("Authorization") != "Bearer reattached-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			mu.Lock()
+			newTokenBeats++
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "trust_state": "active"})
+			cancel()
+		case "/api/v1/agents/me/shell-sessions/attach":
+			_ = json.NewEncoder(w).Encode(map[string]any{"session": nil})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(cfg, []byte(`{"server_url":"`+srv.URL+`","heartbeat_seconds":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	idPath := filepath.Join(dir, "identity.json")
+	writeFakeIdentity(t, idPath, srv.URL)
+	id, err := config.LoadIdentity(idPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id.AgentToken = "expired-token"
+	id.CredentialExpiresAt = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	id.CredentialObtainedAt = time.Now().Add(-25 * time.Hour).UTC().Format(time.RFC3339Nano)
+	if err := id.Save(idPath); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	a := NewAgent(cfg, "test", log.New(&logs, "", 0))
+	a.backoffInitial = time.Millisecond
+	a.backoffMax = time.Millisecond
+	done := make(chan error, 1)
+	go func() { done <- a.loop(ctx, context.Background()) }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("loop returned error: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatalf("agent loop stayed in the unauthorized retry spin:\n%s", logs.String())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if reattachCalls != 1 {
+		t.Fatalf("reattach calls = %d, want 1", reattachCalls)
+	}
+	if reattachAuth != "Bearer expired-token" {
+		t.Fatalf("reattach authorization = %q", reattachAuth)
+	}
+	if len(reattachNonce) < 16 {
+		t.Fatalf("reattach nonce too short: %q", reattachNonce)
+	}
+	if newTokenBeats != 1 {
+		t.Fatalf("heartbeats with recovered token = %d, want 1", newTokenBeats)
+	}
+	persisted, err := config.LoadIdentity(idPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.AgentToken != "reattached-token" {
+		t.Fatalf("persisted token = %q, want reattached token", persisted.AgentToken)
+	}
+	if !strings.Contains(logs.String(), "reattached lapsed agent credential") {
+		t.Fatalf("missing successful reattach log:\n%s", logs.String())
+	}
+}
+
+func TestRecoverCredentialRefusalKeepsIdentity(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/agents/credentials/reattach" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		calls++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	idPath := filepath.Join(t.TempDir(), "identity.json")
+	id := &config.Identity{AgentID: "agent-1", AgentToken: "refused-token", ServerURL: srv.URL}
+	if err := id.Save(idPath); err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{log: log.New(&bytes.Buffer{}, "", 0)}
+	s := &session{api: client.New(srv.URL, id.AgentToken), identity: id, identityPath: idPath, agentID: id.AgentID}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		err := a.recoverCredential(context.Background(), s)
+		if !client.IsUnauthorized(err) {
+			t.Fatalf("attempt %d: refused reattach must remain unauthorized, got %v", attempt+1, err)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("reattach calls = %d, want 2", calls)
+	}
+	if s.identity.AgentToken != "refused-token" {
+		t.Fatalf("in-memory token changed after refusal: %q", s.identity.AgentToken)
+	}
+	persisted, err := config.LoadIdentity(idPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.AgentToken != "refused-token" {
+		t.Fatalf("persisted token changed after refusal: %q", persisted.AgentToken)
+	}
+}
+
 func TestUpdateScanCommandResultFailsOnSearchError(t *testing.T) {
 	result := updateScanCommandResult(patching.Summary{
 		Status:    "unavailable",

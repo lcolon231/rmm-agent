@@ -9,7 +9,7 @@
 - [x] Verify authorization, redaction, injection, failure and bounds with fake provider.
 - [x] Run backend and dashboard verification; document pilot configuration and limits.
 
-Verification on 2026-09-07:
+Initial implementation verification on 2026-09-07 (before integration with main):
 
 - Full backend rerun: 627 passed, 8 skipped. Two existing Windows-sensitive
   chronological-order tests now use explicit, distinct fixture timestamps.
@@ -27,3 +27,17 @@ Verification on 2026-09-07:
 - PostgreSQL multi-worker contention remains a pilot-environment check.
 - Temporary smoke processes stopped; no deployment, merge, secret provisioning,
   or changes to the existing untracked work.
+
+Integration with main on 2026-09-07:
+
+- Resolved dashboard test-script and FastAPI router conflicts by retaining both
+  the assistant and the incoming MFA, session-management and approval features.
+- Renumbered the unreleased assistant migration to 0042 after main's 0041;
+  Alembic reports one head. Updated rollout instructions and migration tests.
+- Assistant/migration regression suite: 48 passed, 1 PostgreSQL-only test skipped.
+  Checks include managed-session revocation during provider waits, upgrades and
+  rollback preserving the existing session and approval tables.
+- Full backend integration suite: 812 passed, 8 skipped. The two new managed-session
+  revocation cases were verified in the separate regression run above.
+- Dashboard: 298 tests passed; lint, typecheck and production build passed.
+  Lint still reports the two existing shell-session-panel warnings.

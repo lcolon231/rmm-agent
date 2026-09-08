@@ -17,7 +17,7 @@ os.environ.setdefault("COMMAND_SIGNING_KEY_PATH", "command_signing_key.pem")
 
 import httpx  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
-from sqlalchemy import func, select  # noqa: E402
+from sqlalchemy import delete, func, select  # noqa: E402
 
 from app.core import monitoring as monitoring_core  # noqa: E402
 from app.core.command_envelope import COMMAND_ENVELOPE_V3  # noqa: E402
@@ -27,6 +27,7 @@ from app.main import app
 from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
     Agent,
+    AgentInventorySnapshot,
     Alert,
     AlertEvent,
     AlertEventType,
@@ -37,9 +38,11 @@ from app.models.models import (  # noqa: E402
     CheckResultStatus,
     Operator,
     OperatorRole,
+    MonitoringPolicyRevision,
     ScriptExecutionScope,
 )
-from app.schemas.monitoring import MonitoringPolicyCreate  # noqa: E402
+from app.schemas.inventory import InventorySection  # noqa: E402
+from app.schemas.monitoring import AlertOut, MonitoringPolicyCreate  # noqa: E402
 
 
 def _numeric_check(
@@ -803,6 +806,174 @@ async def test_alert_dedup_recovery_retrigger_suppression_and_read_api(
         transport=httpx.ASGITransport(app=app), base_url="http://t/api/v1"
     ) as anonymous:
         assert (await anonymous.get("/monitoring/alerts")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_reboot_alert_detail_includes_correlated_update_evidence_only(
+    operator_client,
+):
+    _, _, agent_id, agent_token = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name="Restart evidence",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_reboot_check("restart-required")],
+    )
+    revision_id = policy["revisions"][0]["id"]
+    now = datetime.now(timezone.utc)
+    result_detail = {"reason": "reboot_pending"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://t/api/v1",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    ) as agent_client:
+        response = await agent_client.post(
+            "/agents/me/monitoring/results",
+            json={
+                "results": [
+                    {
+                        "id": "d" * 32,
+                        "policy_id": policy["id"],
+                        "policy_revision_id": revision_id,
+                        "check_key": "restart-required",
+                        "status": "critical",
+                        "value": 1,
+                        "detail": result_detail,
+                        "evaluated_at": now.isoformat(),
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200, response.text
+
+    async with AsyncSessionLocal() as db:
+        db.add(
+            AgentInventorySnapshot(
+                id=str(uuid4()),
+                agent_id=agent_id,
+                section=InventorySection.windows_updates.value,
+                status="ok",
+                schema_version=1,
+                content_hash="c" * 64,
+                byte_size=1,
+                payload={
+                    "scanned_at": (now - timedelta(minutes=2)).isoformat(),
+                    "reboot_required": True,
+                    "missing": [
+                        {
+                            "kb_id": "KB-PENDING",
+                            "title": "Pending update",
+                            "reboot_required": True,
+                        }
+                    ],
+                    "installed": [
+                        {
+                            "kb_id": "KB-RECENT",
+                            "title": "Recently installed update",
+                            "installed_on": (now - timedelta(days=1)).isoformat(),
+                        },
+                        {
+                            "kb_id": "KB-OLD",
+                            "title": "Old update",
+                            "installed_on": (now - timedelta(days=9)).isoformat(),
+                        },
+                    ],
+                },
+                collected_at=now - timedelta(minutes=2),
+                received_at=now - timedelta(minutes=1),
+            )
+        )
+        await db.commit()
+
+    listing = await operator_client.get(
+        f"/monitoring/alerts?agent_id={agent_id}&check_key=restart-required"
+    )
+    assert listing.status_code == 200, listing.text
+    alert = listing.json()["items"][0]
+    assert set(alert) == set(AlertOut.model_fields)
+    assert "last_result_detail" not in alert
+    assert "reboot_cause" not in alert
+
+    response = await operator_client.get(f"/monitoring/alerts/{alert['id']}")
+    assert response.status_code == 200, response.text
+    detail = response.json()
+    assert detail["last_result_detail"] == result_detail
+    assert [row["kb_id"] for row in detail["reboot_cause"]["recent_installs"]] == [
+        "KB-RECENT"
+    ]
+    assert [
+        row["kb_id"] for row in detail["reboot_cause"]["reboot_flagged_updates"]
+    ] == ["KB-PENDING"]
+    assert detail["reboot_cause"]["system_reboot_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_alert_detail_returns_null_cause_for_non_reboot_or_missing_revision(
+    operator_client,
+):
+    _, _, agent_id, agent_token = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name="Cause applicability",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_numeric_check("cpu"), _reboot_check("restart-required")],
+    )
+    revision_id = policy["revisions"][0]["id"]
+    now = datetime.now(timezone.utc)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://t/api/v1",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    ) as agent_client:
+        for key, result_id in (("cpu", "c" * 32), ("restart-required", "d" * 32)):
+            response = await agent_client.post(
+                "/agents/me/monitoring/results",
+                json={
+                    "results": [
+                        {
+                            "id": result_id,
+                            "policy_id": policy["id"],
+                            "policy_revision_id": revision_id,
+                            "check_key": key,
+                            "status": "critical",
+                            "value": 99,
+                            "detail": {"reason": "test"},
+                            "evaluated_at": now.isoformat(),
+                        }
+                    ]
+                },
+            )
+            assert response.status_code == 200, response.text
+
+    alerts = (
+        await operator_client.get(f"/monitoring/alerts?agent_id={agent_id}")
+    ).json()["items"]
+    cpu_alert = next(item for item in alerts if item["check_key"] == "cpu")
+    cpu_detail = (
+        await operator_client.get(f"/monitoring/alerts/{cpu_alert['id']}")
+    ).json()
+    assert cpu_detail["last_result_detail"] is None
+    assert cpu_detail["reboot_cause"] is None
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            delete(MonitoringPolicyRevision).where(
+                MonitoringPolicyRevision.id == revision_id
+            )
+        )
+        await db.commit()
+
+    reboot_alert = next(
+        item for item in alerts if item["check_key"] == "restart-required"
+    )
+    response = await operator_client.get(
+        f"/monitoring/alerts/{reboot_alert['id']}"
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["last_result_detail"] is None
+    assert response.json()["reboot_cause"] is None
 
 
 @pytest.mark.asyncio

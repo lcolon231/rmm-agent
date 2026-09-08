@@ -12,7 +12,14 @@ import {
   sessionCookieOptions,
   validateLoginCredentials,
 } from "@/lib/dashboard-auth-core";
-import { NodelinkAuthenticationError, authenticateOperator } from "@/lib/nodelink-auth";
+import { applyMfaResult } from "@/lib/mfa-route";
+import { loginOutcome } from "@/lib/mfa-route-core";
+import { readLoginChallenge } from "@/lib/mfa-core";
+import {
+  NodelinkAuthenticationError,
+  NodelinkSecondFactorRequired,
+  authenticateOperator,
+} from "@/lib/nodelink-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +67,32 @@ export async function POST(request: NextRequest) {
     response.cookies.set(sessionCookieName(), sessionToken, sessionCookieOptions());
     return response;
   } catch (error) {
+    if (error instanceof NodelinkSecondFactorRequired) {
+      // The password was correct but a second factor is owed. Stash the
+      // restricted token in its own cookie and send the caller to the challenge
+      // — never to "/", which would suggest a session that does not exist.
+      const outcome = loginOutcome(error.body);
+      const challenge = readLoginChallenge(error.body);
+      if (outcome === null || challenge === null) {
+        return loginErrorResponse(responseOrigin, submissionKind, "unavailable", 503);
+      }
+      if (submissionKind === "form") {
+        const challengeUrl = new URL("/login/mfa", responseOrigin);
+        if (challenge.methods.length > 0) {
+          challengeUrl.searchParams.set("methods", challenge.methods.join(","));
+        }
+        if (challenge.enrollmentRequired) {
+          challengeUrl.searchParams.set("enroll", "1");
+        }
+        const redirect = NextResponse.redirect(challengeUrl, 303);
+        for (const cookie of outcome.cookies) {
+          redirect.cookies.set(cookie.name, cookie.value, cookie.options);
+        }
+        return redirect;
+      }
+      return applyMfaResult(outcome);
+    }
+
     if (error instanceof NodelinkAuthenticationError) {
       const status = error.status === 429 ? 429 : error.status === 401 ? 401 : 503;
       const errorCode = status === 401

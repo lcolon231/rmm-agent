@@ -15,8 +15,8 @@ approval workflows are separate and unchanged.
 ## Server configuration
 
 Apply migrations using the normal release procedure (`alembic upgrade head` from
-`server/`). This release adds **0038**, directly after the verified local head
-**0037**. The migration adds two tables and does not rewrite existing endpoint data.
+`server/`). This release adds **0042**, directly after the verified local head
+**0041**. The migration adds two tables and does not rewrite existing endpoint data.
 Downgrade drops assistant history, so disable the pilot before any rollback.
 
 All settings below belong to FastAPI's secret/configuration environment. None
@@ -119,7 +119,7 @@ reusing the request UUID returns the existing run without starting another one.
 
 ## Pilot verification and rollout
 
-1. Keep the flag off, apply migration 0038, and verify ordinary endpoint operations.
+1. Keep the flag off, apply migration 0042, and verify ordinary endpoint operations.
 2. Configure the dedicated secrets, model and explicit pilot operator IDs through
    the deployment's secret/configuration system. Do not paste credentials into chat.
 3. Enable the pilot. Compare offline results, timestamps, missing inventory, alert

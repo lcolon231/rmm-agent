@@ -11,19 +11,22 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_platform_admin, require_role
-from app.core import audit
+from app.api.deps import require_platform_admin, require_role, require_step_up
+from app.core import audit, mfa, sessions
 from app.core.clientip import client_ip
 from app.core.database import get_db
 from app.core.ratelimit import login_limiter
 from app.core.security import (
+    AMR_PASSWORD,
     create_access_token,
+    create_mfa_pending_token,
     dummy_verify,
     hash_password,
     verify_password,
 )
 from app.models.models import (
     Agent,
+    OperatorSessionEndReason,
     Client,
     ClientRole,
     Operator,
@@ -44,13 +47,13 @@ from app.schemas.schemas import (
     PlatformAdminChange,
     ScriptExecutionPermissionChange,
     ScriptExecutionPermissionRevoke,
-    TokenResponse,
 )
+from app.schemas.mfa import LoginResponse
 
 router = APIRouter(tags=["auth"])
 
 
-@router.post("/auth/login", response_model=TokenResponse)
+@router.post("/auth/login", response_model=LoginResponse)
 async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Exchange email + password for a signed JWT.
 
@@ -63,6 +66,11 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
         fills, further attempts get 429 with Retry-After. Keying on the pair
         slows brute force without letting a remote attacker lock the real user
         out from a different address.
+      - A correct password is not, on its own, a session (issue #67). When a
+        second factor applies, this returns a short-lived restricted token that
+        only the ``/auth/mfa/login/*`` endpoints accept. When it does not, the
+        response is exactly the pre-MFA one, so an older dashboard build and a
+        deployment with ``MFA_ENFORCEMENT=off`` are both unaffected.
     """
     limit_key = f"{client_ip(request)}:{body.email}"
     retry_after = login_limiter.retry_after(limit_key)
@@ -90,11 +98,66 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
         )
 
     login_limiter.clear(limit_key)
+
+    # The password is correct. Whether that is enough is a separate question,
+    # answered from the operator's actual second-factor state rather than from
+    # anything the caller supplied.
+    decision = await mfa.decide_login(db, operator)
+    if decision.second_factor_required:
+        await audit.record(
+            db,
+            action="mfa.second_factor_required",
+            actor=operator.email,
+            actor_user_id=operator.id,
+            source_ip=client_ip(request),
+            user_agent=request.headers.get("user-agent", "")[:500] or None,
+            detail={
+                "operator_id": operator.id,
+                "enrollment_required": decision.enrollment_required,
+                "methods": list(decision.methods),
+            },
+        )
+        return LoginResponse(
+            mfa_required=True,
+            mfa_token=create_mfa_pending_token(
+                subject=operator.id, generation=operator.token_generation
+            ),
+            mfa_enrollment_required=decision.enrollment_required,
+            mfa_methods=list(decision.methods),
+        )
+
     # The token's subject is the operator id. The token is signed, not
     # encrypted — it carries no secret, just a claim the server can verify.
-    # The generation claim ties it to the operator's current token version.
-    token = create_access_token(subject=operator.id, generation=operator.token_generation)
-    return TokenResponse(access_token=token)
+    # The generation claim ties it to the operator's current token version, and
+    # the session id (issue #69) ties it to a server-side row so it can be
+    # inventoried and revoked individually rather than only in bulk.
+    session = await sessions.create(
+        db,
+        operator,
+        auth_methods=(AMR_PASSWORD,),
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    await audit.record(
+        db,
+        action="operator.session_started",
+        actor=operator.email,
+        actor_user_id=operator.id,
+        source_ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", "")[:500] or None,
+        detail={
+            "operator_id": operator.id,
+            "session_id": session.id,
+            "auth_methods": sorted((AMR_PASSWORD,)),
+            "break_glass": False,
+        },
+    )
+    token = create_access_token(
+        subject=operator.id,
+        generation=operator.token_generation,
+        session_id=session.id,
+    )
+    return LoginResponse(access_token=token)
 
 
 @router.post("/auth/operators", response_model=OperatorOut, status_code=201)
@@ -204,9 +267,16 @@ async def change_operator_role(
     body: OperatorRoleChange,
     request: Request,
     admin: Operator = Depends(require_role(OperatorRole.admin)),
+    _step_up: Operator = Depends(require_step_up),
     db: AsyncSession = Depends(get_db),
 ):
-    """Change a global operator role and invalidate every existing session."""
+    """Change a global operator role and invalidate every existing session.
+
+    Step-up gated (issue #67): granting privilege is the most valuable thing a
+    stolen admin session could do, so it requires a recent proof of possession
+    of the administrator's own authenticator. The gate is vacuous for an admin
+    who has not enrolled one, which is what keeps pre-MFA deployments working.
+    """
     target = await _operator_or_404(db, operator_id)
     if target.role == body.role:
         raise HTTPException(
@@ -250,9 +320,14 @@ async def change_operator_disabled_state(
     body: OperatorStatusChange,
     request: Request,
     admin: Operator = Depends(require_role(OperatorRole.admin)),
+    _step_up: Operator = Depends(require_step_up),
     db: AsyncSession = Depends(get_db),
 ):
-    """Disable or re-enable an operator and invalidate all issued sessions."""
+    """Disable or re-enable an operator and invalidate all issued sessions.
+
+    Step-up gated (issue #67): disabling accounts is how an attacker would lock
+    the real administrators out while they work.
+    """
     target = await _operator_or_404(db, operator_id)
     if target.disabled == body.disabled:
         raise HTTPException(
@@ -399,6 +474,16 @@ async def revoke_own_tokens(
     """Invalidate every token issued to the calling operator, including the one
     used for this request ("log out everywhere"). Log in again for a new one."""
     operator.token_generation += 1
+    # Mark the tracked sessions terminal in the same transaction (issue #69).
+    # The token check alone would refuse them, but the inventory would still
+    # show them as live, which is exactly the kind of quietly-wrong evidence
+    # this feature exists to remove.
+    await sessions.revoke_all_for_operator(
+        db,
+        operator.id,
+        reason=OperatorSessionEndReason.revoked_by_self,
+        ended_by=operator.id,
+    )
     await audit.record(
         db,
         action="operator.tokens_revoked",
@@ -414,15 +499,26 @@ async def revoke_own_tokens(
 async def revoke_operator_tokens(
     operator_id: str,
     admin: Operator = Depends(require_role(OperatorRole.admin)),
+    _step_up: Operator = Depends(require_step_up),
     db: AsyncSession = Depends(get_db),
 ):
     """Admin: invalidate every token issued to another operator (leaked laptop,
     offboarding). The account itself stays enabled — pair with `disabled` to
-    lock it entirely."""
+    lock it entirely.
+
+    Step-up gated (issue #67): mass session revocation is a denial-of-service
+    lever against the people best placed to notice an intrusion.
+    """
     target = await db.get(Operator, operator_id)
     if target is None:
         raise HTTPException(status_code=404, detail="Operator not found")
     target.token_generation += 1
+    await sessions.revoke_all_for_operator(
+        db,
+        target.id,
+        reason=OperatorSessionEndReason.revoked_by_admin,
+        ended_by=admin.id,
+    )
     await audit.record(
         db,
         action="operator.tokens_revoked",
@@ -478,9 +574,15 @@ async def grant_client_membership(
     body: ClientMembershipGrant,
     request: Request,
     admin: Operator = Depends(require_platform_admin),
+    _step_up: Operator = Depends(require_step_up),
     db: AsyncSession = Depends(get_db),
 ):
     """Grant (or replace) an operator's role over one client. Platform-admin only.
+
+    Step-up gated (issue #67): granting tenant access widens reach exactly the
+    way a global role change does, so it requires a recent proof of possession
+    of the administrator's own authenticator. Vacuous for an admin who has not
+    enrolled one, which is what keeps pre-MFA deployments working.
 
     Re-granting for the same (operator, client) replaces the role rather than
     erroring, so the unique constraint is never hit and the operation is
@@ -543,9 +645,14 @@ async def revoke_client_membership(
     body: ClientMembershipRevoke,
     request: Request,
     admin: Operator = Depends(require_platform_admin),
+    _step_up: Operator = Depends(require_step_up),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove an operator's role over one client. Platform-admin only."""
+    """Remove an operator's role over one client. Platform-admin only.
+
+    Step-up gated (issue #67): mass revocation is a denial-of-service lever
+    against the people best placed to notice an intrusion.
+    """
     target = await _operator_or_404(db, operator_id)
     membership = (
         await db.execute(
@@ -585,9 +692,14 @@ async def change_platform_admin(
     body: PlatformAdminChange,
     request: Request,
     admin: Operator = Depends(require_platform_admin),
+    _step_up: Operator = Depends(require_step_up),
     db: AsyncSession = Depends(get_db),
 ):
     """Grant or revoke deployment-wide platform-admin. Platform-admin only.
+
+    Step-up gated (issue #67): this is the widest grant in the system, so it
+    carries the same recent-assertion requirement as every other privilege
+    escalation path.
 
     Refuses to remove the last remaining platform admin so a deployment cannot
     lock itself out of the only principal able to administer tenants.

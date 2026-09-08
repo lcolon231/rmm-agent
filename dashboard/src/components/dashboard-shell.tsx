@@ -31,9 +31,11 @@ import {
   Search,
   Server,
   Settings,
+  Siren,
   Shield,
   ShieldCheck,
   TerminalSquare,
+  UserCheck,
   Users,
   X,
 } from "lucide-react";
@@ -71,9 +73,12 @@ const navItems = [
   { label: "Monitoring", icon: HeartPulse, count: null, href: "/monitoring" },
   { label: "Maintenance", icon: CalendarClock, count: null, href: "/maintenance-windows" },
   { label: "Patch compliance", icon: Shield, count: null, href: "/patch-compliance" },
+  { label: "Approvals", icon: UserCheck, count: null, href: "/approvals" },
   { label: "Audit", icon: ShieldCheck, count: null, href: "/audit" },
   { label: "Administration", icon: Settings, count: null, href: "/enrollment" },
   { label: "Operators", icon: Users, count: null, href: "/operators", adminOnly: true },
+  { label: "Security keys", icon: KeyRound, count: null, href: "/security" },
+  { label: "Break-glass", icon: Siren, count: null, href: "/security/break-glass", adminOnly: true },
 ];
 
 const statusLabels: Record<EndpointStatus, string> = {

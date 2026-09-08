@@ -350,6 +350,18 @@ func (c *Client) RenewCredential(ctx context.Context, rotationNonce string) (*Ag
 	return &out, nil
 }
 
+// ReattachCredential replaces a recently expired bearer through the server's
+// bounded recovery path. Refused credentials always receive the same 401, so
+// callers cannot distinguish revoked, quarantined, unknown, or too-old state.
+func (c *Client) ReattachCredential(ctx context.Context, rotationNonce string) (*AgentCredentialRenewResponse, error) {
+	var out AgentCredentialRenewResponse
+	body := map[string]any{"rotation_nonce": rotationNonce}
+	if err := c.do(ctx, "POST", "/api/v1/agents/credentials/reattach", body, &out, true); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // Command mirrors the server's CommandOut schema.
 type Command struct {
 	ID              string          `json:"id"`

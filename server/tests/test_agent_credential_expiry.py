@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Expiring agent credentials and loss-safe automatic renewal (issue #125).
+"""Expiring agent credentials, renewal, and bounded reattach (#125, #223).
 
 Covers the server side of the bounded-lifetime bearer model: enrollment issues a
 finite lifetime, expired credentials are refused, renewal rotates atomically
 with a bounded overlap so the superseded credential keeps working, a dropped
 renewal response is recoverable via retry, a verbatim replay (same nonce) is
-rejected, and a revoked identity can never renew.
+rejected, and recently lapsed active identities can reattach while quarantined,
+revoked, unknown, and stale credentials remain indistinguishable and refused.
 """
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ from app.core.command_envelope import COMMAND_ENVELOPE_V2  # noqa: E402
 from app.models.models import (  # noqa: E402
     Agent,
     AgentTrustState,
+    AuditEvent,
     Operator,
     OperatorRole,
 )
@@ -97,6 +99,14 @@ async def _heartbeat_status(c, token: str) -> int:
     return (await c.post("/heartbeat", json=_HEARTBEAT, headers=_auth(token))).status_code
 
 
+async def _reattach(c, token: str):
+    return await c.post(
+        "/agents/credentials/reattach",
+        json={"rotation_nonce": f"nonce-{uuid4().hex}"},
+        headers=_auth(token),
+    )
+
+
 async def _set_agent(agent_id: str, **fields) -> None:
     async with AsyncSessionLocal() as db:
         agent = (
@@ -134,6 +144,85 @@ async def test_expired_credential_is_refused(client):
         credential_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
     )
     assert await _heartbeat_status(client, token) == 401
+
+
+@pytest.mark.asyncio
+async def test_expired_active_credential_reattaches_and_audits_distinctly(client):
+    agent_id, expired_token = await _enroll(client)
+    await _set_agent(
+        agent_id,
+        credential_expires_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+    )
+    assert await _heartbeat_status(client, expired_token) == 401
+
+    recovered = await _reattach(client, expired_token)
+    assert recovered.status_code == 200, recovered.text
+    body = recovered.json()
+    assert body["agent_id"] == agent_id
+    assert body["agent_token"] != expired_token
+    assert body["credential_generation"] == 2
+    assert await _heartbeat_status(client, body["agent_token"]) == 200
+
+    async with AsyncSessionLocal() as db:
+        actions = (
+            await db.execute(
+                select(AuditEvent.action).where(AuditEvent.agent_id == agent_id)
+            )
+        ).scalars().all()
+    assert actions.count("agent.credential_reattached") == 1
+    assert "agent.credential_renewed" not in actions
+
+
+@pytest.mark.asyncio
+async def test_lost_reattach_response_can_retry_on_overlap(client):
+    agent_id, expired_token = await _enroll(client)
+    await _set_agent(
+        agent_id,
+        credential_expires_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+    )
+
+    # The first response is notionally lost. The agent still holds the expired
+    # bearer, now preserved in the short overlap slot, and retries reattach.
+    first = await _reattach(client, expired_token)
+    assert first.status_code == 200
+    retry = await _reattach(client, expired_token)
+    assert retry.status_code == 200, retry.text
+    assert await _heartbeat_status(client, retry.json()["agent_token"]) == 200
+
+
+@pytest.mark.asyncio
+async def test_reattach_refuses_revoked_and_quarantined_agents(client):
+    for trust_state in (AgentTrustState.revoked, AgentTrustState.quarantined):
+        agent_id, token = await _enroll(client)
+        fields = {
+            "credential_expires_at": datetime.now(timezone.utc)
+            - timedelta(minutes=5),
+            "trust_state": trust_state,
+        }
+        if trust_state == AgentTrustState.revoked:
+            fields["revoked_at"] = datetime.now(timezone.utc)
+        await _set_agent(agent_id, **fields)
+
+        refused = await _reattach(client, token)
+        refused_again = await _reattach(client, token)
+        unknown = await _reattach(client, f"unknown-{uuid4().hex}")
+        assert refused.status_code == refused_again.status_code == unknown.status_code == 401
+        assert refused.json() == refused_again.json() == unknown.json()
+
+
+@pytest.mark.asyncio
+async def test_reattach_outside_window_matches_unknown_refusal(client):
+    agent_id, token = await _enroll(client)
+    await _set_agent(
+        agent_id,
+        credential_expires_at=datetime.now(timezone.utc)
+        - timedelta(seconds=settings.agent_credential_reattach_window_seconds + 1),
+    )
+
+    expired = await _reattach(client, token)
+    unknown = await _reattach(client, f"unknown-{uuid4().hex}")
+    assert expired.status_code == unknown.status_code == 401
+    assert expired.json() == unknown.json() == {"detail": "Invalid agent token"}
 
 
 @pytest.mark.asyncio

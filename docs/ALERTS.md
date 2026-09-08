@@ -72,6 +72,30 @@ Readonly-or-higher operators may use:
 - `GET /api/v1/monitoring/alerts/{alert_id}` for current state, at most 100
   retained observations, and the most recent 200 lifecycle events.
 
+The single-alert response also carries two detail-only fields. They are never
+added to `AlertOut` or the alerts list:
+
+- `last_result_detail` is the stored result detail for the alert's latest
+  `reboot_pending` result; it is `null` for other check types.
+- `reboot_cause` is server-derived update correlation evidence with
+  `reboot_flagged_updates`, `recent_installs`, `system_reboot_required`,
+  `scanned_at`, and `snapshot_received_at`. It is `null` for a non-reboot
+  alert, a missing policy revision, or when no update inventory exists.
+
+`recent_installs` contains at most ten entries, newest first, whose install
+timestamps fall between seven days before the alert first opened and the time
+the detail is read. `reboot_flagged_updates` contains missing-update entries
+whose inventory record reports `reboot_required: true`. These lists are
+correlation evidence only: proximity to an alert does not establish that an
+update caused the pending restart. Reading an alert uses the latest stored
+`windows_updates` snapshot and never starts an update scan.
+
+Older agents do not report a `sources` key in result detail. Its absence means
+the cause is unknown and the dashboard says "Cause unavailable" while showing
+any correlated inventory beneath it. It must never be interpreted as "not
+update-related." A later agent capability may provide source attribution
+without changing this evidence contract.
+
 Operator-or-higher technicians may use:
 
 - `GET /api/v1/monitoring/alert-assignees` for active assignment targets;
@@ -110,8 +134,9 @@ Data API access from `anon` and `authenticated`; `alert_events` also revokes
 attempt history with the same Data API isolation. NodeLink's authorized
 FastAPI service remains the data boundary.
 
-Deploy through revision `0019`, then the server and dashboard. No agent change is
-required. A new server refuses to start against an older schema; the old server
+Deploy through revision `0019`, then the server and dashboard. Reboot
+correlation is derived at read time and adds no migration or agent change. A
+new server refuses to start against an older schema; the old server
 ignores the additive columns/table during a staged rollout. NodeLink migrations
 are forward-only. Rollback therefore restores a tested pre-`0018` database
 backup together with the previous server/dashboard release, or uses a reviewed

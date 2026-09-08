@@ -2,7 +2,7 @@
 
 1. Inspect local branch, authorization, migration graph and installed Next.js guides.
 2. Add bounded request contracts, disabled-by-default settings, encrypted persistence
-   and migration after verified head 0037.
+   and migration after verified head 0041.
 3. Implement current permission checks, run admission/cancel/history, audited strict
    tools, and replaceable Responses provider. Deliver offline endpoint investigation.
 4. Add inventory/history/change, alert and patch compliance adapters using existing logic.

@@ -42,8 +42,9 @@ def sqlite_url(path: Path) -> str:
 def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
     path = tmp_path / "assistant-migration.db"
     config = migration_config(sqlite_url(path))
-    command.upgrade(config, "0037")
-    command.upgrade(config, "0038")
+    assert ScriptDirectory.from_config(config).get_heads() == ["0042"]
+    command.upgrade(config, "0041")
+    command.upgrade(config, "0042")
     with sqlite3.connect(path) as connection:
         columns = {row[1]: row[2] for row in connection.execute("PRAGMA table_info(assistant_runs)")}
         assert columns["body"] == "BLOB"
@@ -51,8 +52,14 @@ def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
         foreign_keys = list(connection.execute("PRAGMA foreign_key_list(assistant_conversations)"))
         assert {row[2] for row in foreign_keys} == {"operators", "clients"}
         assert all(row[6] == "CASCADE" for row in foreign_keys)
-    command.downgrade(config, "0037")
-    command.upgrade(config, "0038")
+    command.downgrade(config, "0041")
+    with sqlite3.connect(path) as connection:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        assert "approval_requests" in tables
+        assert "operator_sessions" in tables
+        assert "assistant_runs" not in tables
+        assert "assistant_conversations" not in tables
+    command.upgrade(config, "0042")
     asyncio.run(_assert_current(sqlite_url(path)))
 
 

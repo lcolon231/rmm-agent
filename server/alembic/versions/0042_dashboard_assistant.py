@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Private, encrypted dashboard assistant history.
 
-Revision ID: 0038
-Revises: 0037
+Revision ID: 0042
+Revises: 0041
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0038"
-down_revision = "0037"
+revision = "0042"
+down_revision = "0041"
 branch_labels = None
 depends_on = None
 

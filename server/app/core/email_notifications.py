@@ -279,8 +279,32 @@ def enqueue_alert_event(
     return len(recipients)
 
 
+@dataclass(frozen=True)
+class OutboundEmail:
+    """One message to hand a provider, decoupled from where it came from.
+
+    The alert pipeline builds these from durable rows; the authentication path
+    (issue #226) builds them in memory and sends immediately. ``namespace`` and
+    ``key`` form the provider idempotency key, kept in separate namespaces so a
+    retried alert can never collide with an authentication code.
+    """
+
+    namespace: str
+    key: str
+    recipient: str
+    subject: str
+    text_body: str
+    html_body: str
+
+    @property
+    def idempotency_key(self) -> str:
+        return f"{self.namespace}/{self.key}"
+
+
 class EmailProvider(Protocol):
     async def send(self, delivery: AlertEmailDelivery) -> str: ...
+
+    async def send_message(self, message: OutboundEmail) -> str: ...
 
 
 class ProviderError(RuntimeError):
@@ -298,16 +322,28 @@ class ResendEmailProvider:
         self._timeout = config.email_alert_request_timeout_seconds
 
     async def send(self, delivery: AlertEmailDelivery) -> str:
+        return await self.send_message(
+            OutboundEmail(
+                namespace="alert-email",
+                key=delivery.id,
+                recipient=delivery.recipient,
+                subject=delivery.subject,
+                text_body=delivery.text_body,
+                html_body=delivery.html_body,
+            )
+        )
+
+    async def send_message(self, message: OutboundEmail) -> str:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
-            "Idempotency-Key": f"alert-email/{delivery.id}",
+            "Idempotency-Key": message.idempotency_key,
         }
         payload = {
             "from": self._sender,
-            "to": [delivery.recipient],
-            "subject": delivery.subject,
-            "text": delivery.text_body,
-            "html": delivery.html_body,
+            "to": [message.recipient],
+            "subject": message.subject,
+            "text": message.text_body,
+            "html": message.html_body,
         }
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -346,6 +382,47 @@ class ResendEmailProvider:
 
 def build_provider(config: Settings = settings) -> EmailProvider | None:
     if configuration_problems(config):
+        return None
+    if config.email_alert_provider.strip().lower() == "resend":
+        return ResendEmailProvider(config)
+    return None
+
+
+def transactional_configuration_problems(config: Settings = settings) -> list[str]:
+    """Problems that block a *transactional* send, as safe codes.
+
+    Deliberately narrower than :func:`configuration_problems`: a transactional
+    message addresses one operator's own mailbox, so the alert recipient list,
+    dashboard URL, and the queue's batching and backoff knobs are irrelevant to
+    it. Reusing the alert check would make an authentication factor unavailable
+    because, say, ``EMAIL_ALERT_RECIPIENTS`` was empty -- a configuration fact
+    with no bearing on whether this deployment can send one operator an email.
+    """
+    provider = config.email_alert_provider.strip().lower()
+    if provider not in {"disabled", "resend"}:
+        return ["EMAIL_ALERT_PROVIDER must be disabled or resend"]
+    if provider == "disabled":
+        return ["EMAIL_ALERT_PROVIDER is disabled"]
+
+    problems: list[str] = []
+    api_key = config.email_alert_resend_api_key or ""
+    if not api_key:
+        problems.append("EMAIL_ALERT_RESEND_API_KEY is required for resend")
+    elif not api_key.startswith("re_") or len(api_key) > 512:
+        problems.append("EMAIL_ALERT_RESEND_API_KEY has an invalid format")
+    sender = config.email_alert_sender or ""
+    _, sender_address = parseaddr(sender)
+    if len(sender) > 500 or not sender_address or not _valid_email(sender_address):
+        problems.append("EMAIL_ALERT_SENDER must contain a valid email address")
+    timeout = config.email_alert_request_timeout_seconds
+    if not 1 <= timeout <= 30:
+        problems.append("EMAIL_ALERT_REQUEST_TIMEOUT_SECONDS must be between 1 and 30")
+    return problems
+
+
+def build_transactional_provider(config: Settings = settings) -> EmailProvider | None:
+    """A provider for immediate, single-recipient sends, or None if unusable."""
+    if transactional_configuration_problems(config):
         return None
     if config.email_alert_provider.strip().lower() == "resend":
         return ResendEmailProvider(config)

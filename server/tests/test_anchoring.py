@@ -31,7 +31,7 @@ from app.core.database import Base, engine, AsyncSessionLocal  # noqa: E402
 from app.core import audit  # noqa: E402
 from app.core.anchor import merkle_root  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
-from app.models.models import Operator, OperatorRole  # noqa: E402
+from app.models.models import AuditEvent, Operator, OperatorRole  # noqa: E402
 
 
 @pytest_asyncio.fixture
@@ -64,6 +64,29 @@ async def client():
         c.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
         yield c
     await engine.dispose()
+
+
+async def _clear_events() -> None:
+    """Empty the audit chain.
+
+    Signing in is itself audited since issue #69, so the fixture's login leaves
+    an ``operator.session_started`` event behind. A test about the *empty-chain*
+    guard has to establish that emptiness explicitly rather than assume it.
+    """
+    from sqlalchemy import delete
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(delete(AuditEvent))
+        await db.commit()
+
+
+async def _event_count() -> int:
+    from sqlalchemy import func, select
+
+    async with AsyncSessionLocal() as db:
+        return int(
+            (await db.execute(select(func.count()).select_from(AuditEvent))).scalar_one()
+        )
 
 
 async def _seed_events(n: int) -> None:
@@ -110,21 +133,26 @@ def test_merkle_rejects_empty():
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_anchor_covers_chain_and_verifies(client):
+    # Whatever the fixture's audited sign-in already wrote, plus five more.
+    # Counted rather than hard-coded so the assertion stays about the anchor
+    # covering the whole chain, not about how many events a login happens to
+    # produce.
     await _seed_events(5)
+    covered = await _event_count()
 
     r = await client.post("/audit/anchors")
     assert r.status_code == 200
     body = r.json()
-    assert body["event_count"] == 5
+    assert body["event_count"] == covered
     assert len(body["merkle_root"]) == 64
 
     v = (await client.get(f"/audit/anchors/{body['id']}/verify")).json()
     assert v["intact"] is True and v["reason"] is None
 
-    # The anchoring itself is audited, so a second anchor covers more events
-    # (5 + the audit.anchored event).
+    # The anchoring itself is audited, so a second anchor covers one more event
+    # (the audit.anchored event the first anchor wrote).
     r2 = await client.post("/audit/anchors")
-    assert r2.json()["event_count"] == 6
+    assert r2.json()["event_count"] == covered + 1
     anchors = (await client.get("/audit/anchors")).json()
     assert [a["id"] for a in anchors] == [body["id"], r2.json()["id"]]
 
@@ -170,6 +198,10 @@ async def test_consistent_rebuild_defeats_chain_check_but_not_anchor(client):
 
 @pytest.mark.asyncio
 async def test_anchor_requires_events(client):
+    # The fixture's sign-in is audited (issue #69), so empty the chain first:
+    # this test is about refusing to anchor nothing, not about what a fresh
+    # deployment happens to contain.
+    await _clear_events()
     r = await client.post("/audit/anchors")
     assert r.status_code == 400
 

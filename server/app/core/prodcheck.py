@@ -116,6 +116,29 @@ def production_config_problems(settings: Settings) -> list[str]:
             "does not exist; generate keys with scripts/gen_command_keys.py"
         )
 
+    # Multi-factor authentication (issue #67). A deployment that intends to run
+    # MFA must be able to state the scope credentials are bound to. Resolving it
+    # here, at startup, turns a misconfiguration into a refused boot rather than
+    # a 503 the first time an operator reaches for their security key -- and,
+    # worse, rather than credentials silently registered under a guessed scope.
+    from app.core import mfa
+
+    if mfa.enforcement_mode(settings) != mfa.ENFORCEMENT_OFF:
+        try:
+            party = mfa.relying_party(settings)
+        except mfa.MfaConfigurationError as exc:
+            problems.append(f"MFA is enabled but misconfigured: {exc}")
+        else:
+            insecure = sorted(
+                origin for origin in party.origins if not origin.startswith("https://")
+            )
+            if insecure:
+                problems.append(
+                    "MFA_ALLOWED_ORIGINS must be https:// in production "
+                    f"(got {', '.join(insecure)}); an http origin defeats the "
+                    "origin binding that makes WebAuthn phishing-resistant"
+                )
+
     problems.extend(configuration_problems(settings))
     if settings.email_alert_dashboard_base_url:
         dashboard_url = urlparse(settings.email_alert_dashboard_base_url)

@@ -33,6 +33,7 @@ def prometheus_text(agent_statuses: dict[str, int] | None = None) -> str:
         "enrollment_token_created_total",
         "enrollment_token_revoked_total",
         "agent_credential_renewed_total",
+        "agent_credential_reattached_total",
         "agent_revoked_total",
     )
     lines = [
@@ -56,6 +57,7 @@ def prometheus_text(agent_statuses: dict[str, int] | None = None) -> str:
         "monitoring_result_duplicate_total",
         "monitoring_result_rejected_total",
         "monitoring_offline_evaluation_total",
+        "monitoring_patch_age_evaluation_total",
         "monitoring_alert_opened_total",
         "monitoring_alert_occurrence_total",
         "monitoring_alert_recovered_total",

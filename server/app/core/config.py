@@ -97,6 +97,147 @@ class Settings(BaseSettings):
     # overlap well below the lifetime — it only needs to cover a renewal retry.
     agent_credential_lifetime_seconds: int = 86_400  # 24h
     agent_credential_overlap_seconds: int = 600  # 10 min
+    # An endpoint powered off across the normal lifetime may reattach with the
+    # still-current expired bearer for this long. Zero disables reattach. The
+    # hard ceiling prevents a configuration typo from making recovery
+    # effectively unbounded; 30 days covers ordinary extended shutdowns.
+    agent_credential_reattach_window_seconds: int = Field(
+        default=2_592_000, ge=0, le=31_536_000
+    )
+
+    # --- Administrative session management (issue #69) ---
+    # Sessions are tracked server side so they can be inventoried and revoked
+    # individually. Two independent ceilings bound one:
+    #   absolute -> a hard wall set at sign-in that refresh can never move, so a
+    #               session cannot be renewed indefinitely.
+    #   idle     -> ends a session that stops being used, which is what limits
+    #               the value of an unattended logged-in browser.
+    admin_session_absolute_lifetime_seconds: int = 28_800  # 8h
+    admin_session_idle_timeout_seconds: int = 1_800  # 30 min
+    # `last_seen_at` is only written when the stored value is already older than
+    # this, so idle tracking costs a bounded number of writes rather than one
+    # per request. Keep it well below the idle timeout or the timeout becomes
+    # imprecise in the operator's favour.
+    admin_session_last_seen_write_interval_seconds: int = 60
+    # Ceiling on concurrent live sessions per operator. Reaching it ends the
+    # oldest rather than refusing the new sign-in: locking someone out of their
+    # own account is a worse failure than closing a stale tab.
+    admin_session_max_concurrent: int = 10
+    # Sessions minted before this feature carry no `sid`. They are accepted
+    # until they expire on their own so upgrading does not sign the whole fleet
+    # out, but they are unmanaged: absent from the inventory and revocable only
+    # in bulk. Set false to refuse them outright and force re-authentication.
+    admin_session_accept_legacy_tokens: bool = True
+
+    # --- Break-glass emergency access (issue #69) ---
+    # Break-glass deliberately bypasses MFA -- it is the escape hatch for the
+    # case where MFA itself is what locked the operator out -- so its blast
+    # radius is bounded by time and by noise rather than by another factor.
+    break_glass_enabled: bool = True
+    # Break-glass sessions get their own, much shorter absolute lifetime.
+    break_glass_session_lifetime_seconds: int = 3_600  # 1h
+    # Activation attempts allowed per source IP in the window. Tighter than
+    # login: this endpoint is unauthenticated by necessity and guards the most
+    # privileged credential in the deployment.
+    break_glass_max_attempts: int = 5
+    break_glass_window_seconds: int = 900
+
+    # --- Multi-factor authentication (issue #67) ---
+    # Enforcement is a three-position lever, and the three positions exist so a
+    # fleet can be migrated without locking anyone out:
+    #   off      -> MFA endpoints refuse; login is password-only. The rollback
+    #               position: flipping back here restores password-only login
+    #               without touching the schema or deleting a credential.
+    #   optional -> operators may enrol, and anyone who HAS a credential must
+    #               use it. This is the staging position: enrolment happens
+    #               under real enforcement for the enrolled, with no lockout
+    #               risk for the not-yet-enrolled.
+    #   required -> operators at or above mfa_required_minimum_role must hold a
+    #               credential. An unenrolled operator can still authenticate
+    #               with a password but receives a session restricted to
+    #               enrolment, so the requirement cannot strand them.
+    mfa_enforcement: str = "optional"  # off | optional | required
+    # Which roles the "required" mode applies to, by privilege floor. Admins are
+    # the default because they are the accounts whose compromise is unbounded.
+    mfa_required_minimum_role: str = "admin"  # readonly | operator | admin
+    # WebAuthn Relying Party ID: the registrable domain credentials are scoped
+    # to. Unset derives it from public_base_url's host, which is what a single
+    # deployment wants. Set it explicitly only to scope credentials to a parent
+    # domain. It cannot be changed without invalidating every credential
+    # registered under the old value, so it is treated as immutable in practice.
+    mfa_rp_id: str | None = None
+    # Human-readable RP name shown in the browser's authenticator prompt.
+    mfa_rp_name: str | None = None  # defaults to app_name
+    # Exact origins accepted in clientDataJSON, comma-separated. Unset derives
+    # the single origin from public_base_url. This is the phishing-resistance
+    # boundary: every entry here is a site allowed to complete a ceremony, so it
+    # is an exact-match allow-list with no wildcards.
+    mfa_allowed_origins: str = ""
+    # A challenge is single-use and expires this quickly. Long enough for a user
+    # to find a security key, short enough to bound a stolen challenge.
+    mfa_challenge_ttl_seconds: int = 300
+    # Lifetime of the restricted token issued after a correct password but
+    # before the second factor. Only the MFA completion endpoints accept it.
+    mfa_pending_token_ttl_seconds: int = 600
+    # How recently a session must have proven possession of an authenticator to
+    # perform a step-up-gated operation. Past this, the operation is refused
+    # until the session re-asserts.
+    mfa_step_up_max_age_seconds: int = 900
+    # Recovery codes minted per batch. Generating a batch invalidates the last.
+    mfa_recovery_code_count: int = 10
+    # Ceiling on registered authenticators per operator, so enrolment cannot be
+    # used to grow a table without bound.
+    mfa_max_credentials_per_operator: int = 10
+    # Failed second-factor attempts allowed per (client IP, operator) in the
+    # window. Shares the process-local limiter caveat documented in ratelimit.py.
+    mfa_max_failures: int = 5
+    mfa_window_seconds: int = 300
+    # Require the authenticator to report user verification (PIN/biometric), not
+    # merely user presence. This is what makes the factor two-factor on its own.
+    mfa_require_user_verification: bool = True
+
+    # --- Email one-time-code second factor (issue #226) ---
+    # An emailed code is NOT phishing-resistant. WebAuthn resists phishing
+    # because the browser binds the assertion to an origin; a code read off a
+    # screen and typed into a look-alike page carries no such binding. This
+    # lever therefore decides what the weaker factor is *allowed to do*, and the
+    # three positions are the three defensible answers:
+    #   off            -> email is never a factor. The default, and the position
+    #                     a deployment that has issued keys to everyone should
+    #                     stay in. Enrolment and login by email both refuse.
+    #   fallback_only  -> email is a login factor ONLY for an operator with no
+    #                     active authenticator. An operator who holds a key must
+    #                     still use it, so enabling this cannot downgrade an
+    #                     already-protected account; it only covers people who
+    #                     would otherwise have no second factor at all.
+    #   always         -> email is offered alongside WebAuthn to everyone. This
+    #                     reduces every account to the weaker factor, including
+    #                     accounts that hold a key, because an attacker can
+    #                     simply phish the code and never touch the
+    #                     authenticator. Choose it knowingly or not at all.
+    # No position lets an email code satisfy step-up. That gate gets the same
+    # treatment as recovery codes, for the same reason: device revocation,
+    # recovery-code minting, and operator administration must not be reachable
+    # by phishing six digits.
+    mfa_email_code_policy: str = "off"  # off | fallback_only | always
+    # Digits per code. Six is the familiar format, and its 10^6 space is only
+    # safe because mfa_email_code_max_attempts and the send limiter below bound
+    # guessing to single digits of attempts per code and per window. Raise this
+    # before relaxing either of those.
+    mfa_email_code_length: int = 6
+    # A code lives this long. Long enough to survive ordinary mail latency,
+    # short enough that a code sitting in a mailbox is not a standing credential.
+    mfa_email_code_ttl_seconds: int = 600  # 10m
+    # Verification attempts allowed against a single code before it is burned.
+    # This, not the code's entropy, is what makes six digits defensible.
+    mfa_email_code_max_attempts: int = 5
+    # Codes that may be *sent* per operator, and per source IP, in the window.
+    # Send is rate limited separately from verify: they are different abuses
+    # (mailbox flooding versus guessing) and sharing a budget would let either
+    # one exhaust the other. Shares the process-local limiter caveat in
+    # ratelimit.py.
+    mfa_email_send_max_per_window: int = 3
+    mfa_email_send_window_seconds: int = 900
 
     # --- Personalized agent installer downloads (issue #9) ---
     # Path to the pre-built, signed stock Windows installer the server bundles

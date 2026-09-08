@@ -250,14 +250,24 @@ func (a *Agent) loop(ctx, execCtx context.Context) error {
 			if isFatal(err) {
 				return err
 			}
-			wait = b.Next()
 			if client.IsUnauthorized(err) {
-				// A definitive credential rejection usually means the agent was
-				// revoked server-side. Keep the identity on disk for operator
-				// investigation and keep retrying at capped backoff — a server
-				// restored from backup can also cause a transient 401.
-				a.log.Printf("server rejected agent credentials (agent may be revoked); retrying in %s", wait.Round(time.Millisecond))
+				// A powered-off endpoint may have crossed its credential expiry.
+				// Try the server's active-only, bounded reattach path before
+				// backing off. A revoked, quarantined, unknown, or too-old bearer
+				// gets the same 401 and the persisted identity remains untouched.
+				recoveryErr := a.recoverCredential(ctx, sess)
+				if recoveryErr == nil {
+					b.Reset()
+					continue // retry the heartbeat immediately with the new bearer
+				}
+				wait = b.Next()
+				if client.IsUnauthorized(recoveryErr) {
+					a.log.Printf("server refused bounded credential reattach (agent may be revoked, quarantined, unknown, or outside the recovery window); retrying in %s", wait.Round(time.Millisecond))
+				} else {
+					a.log.Printf("credential reattach failed (%v); retrying in %s", recoveryErr, wait.Round(time.Millisecond))
+				}
 			} else {
+				wait = b.Next()
 				a.log.Printf("check-in failed (%v); retrying in %s", err, wait.Round(time.Millisecond))
 			}
 		} else {
@@ -602,32 +612,60 @@ func (a *Agent) maybeRenewCredential(ctx context.Context, s *session) error {
 	resp, err := s.api.RenewCredential(ctx, nonce)
 	if err != nil {
 		if client.IsUnauthorized(err) {
-			// The credential was rejected outright: the agent is revoked or its
-			// credential already expired past the overlap. Surface it so the loop
-			// logs the revocation/re-enrollment condition instead of silently
-			// spinning; the identity is kept on disk for operator investigation.
-			a.log.Printf("credential renewal rejected by server; this agent may be revoked or its credential expired — re-enrollment is required")
+			// Surface the definitive rejection so the outer loop can attempt the
+			// dedicated bounded reattach path. The same 401 also covers revocation,
+			// quarantine, unknown credentials, and recovery-window expiry.
+			a.log.Printf("credential renewal rejected by server; attempting bounded reattach")
 			return err
 		}
 		a.log.Printf("credential renewal failed (%v); current credential still valid, will retry", err)
 		return nil
 	}
 
-	// Persist before adopting. If the save fails, the server has already rotated
-	// but the previous token stays valid through its overlap window, so we keep
-	// the old token in memory and retry with a fresh nonce next beat rather than
-	// switch to a token we could not durably record.
-	prev := *s.identity
-	s.identity.AgentToken = resp.AgentToken
-	s.identity.CredentialExpiresAt = resp.CredentialExpiresAt
-	s.identity.CredentialObtainedAt = now.Format(time.RFC3339Nano)
-	if err := s.identity.Save(s.identityPath); err != nil {
-		*s.identity = prev
+	if err := persistAndAdoptCredential(s, resp, now); err != nil {
 		a.log.Printf("failed to persist renewed credential (%v); keeping current credential and retrying", err)
 		return nil
 	}
-	s.api.SetToken(resp.AgentToken)
 	a.log.Printf("renewed agent credential (generation %d)", resp.CredentialGeneration)
+	return nil
+}
+
+// recoverCredential attempts the only repair available after a 401: exchange
+// the held bearer through the server's bounded, active-only reattach endpoint.
+// Persist-before-adopt is identical to routine rotation. If persistence fails,
+// the old bearer remains in memory and the server's overlap slot makes a retry
+// possible without ever running on a credential that would be lost at restart.
+func (a *Agent) recoverCredential(ctx context.Context, s *session) error {
+	nonce, err := newRotationNonce()
+	if err != nil {
+		return fmt.Errorf("generate credential reattach nonce: %w", err)
+	}
+	resp, err := s.api.ReattachCredential(ctx, nonce)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if err := persistAndAdoptCredential(s, resp, now); err != nil {
+		return fmt.Errorf("persist reattached credential: %w", err)
+	}
+	a.log.Printf("reattached lapsed agent credential (generation %d)", resp.CredentialGeneration)
+	return nil
+}
+
+func persistAndAdoptCredential(
+	s *session, resp *client.AgentCredentialRenewResponse, obtainedAt time.Time,
+) error {
+	// The server rotates before returning. Save first, then update the live HTTP
+	// client; on failure restore every in-memory identity field to its old value.
+	prev := *s.identity
+	s.identity.AgentToken = resp.AgentToken
+	s.identity.CredentialExpiresAt = resp.CredentialExpiresAt
+	s.identity.CredentialObtainedAt = obtainedAt.Format(time.RFC3339Nano)
+	if err := s.identity.Save(s.identityPath); err != nil {
+		*s.identity = prev
+		return err
+	}
+	s.api.SetToken(resp.AgentToken)
 	return nil
 }
 

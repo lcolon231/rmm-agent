@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.main import app
 from app.core.assistant import policy, service, tools
 from app.core.assistant.provider import OpenAIProvider, ProviderError, get_provider
+from app.core import sessions as operator_sessions
 from app.core.config import Settings, settings
 from app.core.database import Base, get_db
 from app.core.security import create_access_token
@@ -162,6 +163,36 @@ async def test_model_cannot_cross_client_even_for_platform_admin(env):
     assert response.status_code == 404
     assert len(fake.inputs) == 1
     assert "FOREIGN-SECRET" not in response.text
+
+
+@pytest.mark.parametrize("revoke_at", [1, 2])
+async def test_managed_session_revocation_during_provider_wait(env, revoke_at):
+    client, sessions, ids, fake = env
+    async with sessions() as db:
+        operator = await db.get(Operator, ids["operator"])
+        session = await operator_sessions.create(
+            db, operator, auth_methods=("pwd",), source_ip=None, user_agent=None,
+        )
+        session_id = session.id
+        await db.commit()
+    client.headers["Authorization"] = f"Bearer {create_access_token(ids['operator'], session_id=session_id)}"
+    conversation = await create(env)
+
+    async def revoke(step):
+        if step == revoke_at:
+            async with sessions() as db:
+                active = await operator_sessions.list_for_operator(db, ids["operator"])
+                session = next(row for row in active if row.id == session_id)
+                await operator_sessions.revoke(db, session, by_admin=False, ended_by=ids["operator"])
+                await db.commit()
+
+    fake.hook = revoke
+    response = await ask(env, conversation=conversation)
+    assert response.status_code == 401
+    assert len(fake.inputs) == revoke_at
+    assert "offline-device" not in response.text
+    history = await client.get(f"/api/v1/assistant/conversations/{conversation}")
+    assert history.status_code == 401
 
 
 @pytest.mark.parametrize("change", ["membership", "disabled", "generation", "moved", "revoked", "feature"])

@@ -110,6 +110,12 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     "agent.credential_renewed": _schema(
         "credential_fingerprint", "credential_generation"
     ),
+    # Bounded recovery of a lapsed current bearer (issue #223). The action is
+    # distinct from both enrollment and routine renewal; detail remains the
+    # same secret-free credential lineage metadata.
+    "agent.credential_reattached": _schema(
+        "credential_fingerprint", "credential_generation"
+    ),
     # Non-secret reason a renewal was refused (e.g. rotation_nonce_reused),
     # issue #125. Never carries a token or nonce value, only the coded reason.
     "agent.credential_renewal_rejected": _schema("reason"),
@@ -606,6 +612,155 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "event_id_filter",
         "paginated",
     ),
+    # Approval workflows and two-person authorization (issue #64). The whole
+    # family shares one discipline: identities, ids, counts, and the binding
+    # digest are stored plainly because they are the evidence; the proposed
+    # command's payload never appears, only its key names and SHA-256; and every
+    # operator-written justification is digested, never stored verbatim.
+    "approval_policy.created": _schema(
+        "policy_id",
+        "name",
+        "scope",
+        "scope_id",
+        "command_kinds",
+        "required_approvals",
+        "request_ttl_seconds",
+        "enabled",
+        digest_fields=("name",),
+    ),
+    "approval_policy.updated": _schema(
+        "policy_id",
+        "name",
+        "scope",
+        "scope_id",
+        "previous_command_kinds",
+        "command_kinds",
+        "previous_required_approvals",
+        "required_approvals",
+        "previous_request_ttl_seconds",
+        "request_ttl_seconds",
+        "previous_enabled",
+        "enabled",
+        digest_fields=("name",),
+    ),
+    "approval_policy.deleted": _schema(
+        "policy_id",
+        "name",
+        "scope",
+        "scope_id",
+        "command_kinds",
+        "required_approvals",
+        digest_fields=("name",),
+    ),
+    "approval_request.created": _schema(
+        "approval_request_id",
+        "kind",
+        "agent_id",
+        "client_id",
+        "site_id",
+        "policy_id",
+        "required_approvals",
+        "payload_keys",
+        "payload_sha256",
+        "status",
+        "reason",
+        "expires_at",
+        digest_fields=("reason",),
+    ),
+    # A request refused before it was ever created: the would-be requester was
+    # not authorized to run the command in the first place.
+    "approval_request.denied": _schema("kind", "agent_id", "policy", "reason"),
+    "approval_request.decision_recorded": _schema(
+        "approval_request_id",
+        "kind",
+        "agent_id",
+        "client_id",
+        "site_id",
+        "policy_id",
+        "required_approvals",
+        "payload_keys",
+        "payload_sha256",
+        "status",
+        "decision",
+        "reason",
+        "approvals_recorded",
+        digest_fields=("reason",),
+    ),
+    # A refused verdict — self-approval, a duplicate, a lapsed request, or an
+    # approver who is not (or is no longer) eligible. ``reason`` here is a coded
+    # refusal, not operator prose, so it stays readable.
+    "approval_request.decision_denied": _schema(
+        "approval_request_id",
+        "kind",
+        "agent_id",
+        "client_id",
+        "site_id",
+        "policy_id",
+        "required_approvals",
+        "payload_keys",
+        "payload_sha256",
+        "status",
+        "decision",
+        "reason",
+    ),
+    "approval_request.cancelled": _schema(
+        "approval_request_id",
+        "kind",
+        "agent_id",
+        "client_id",
+        "site_id",
+        "policy_id",
+        "required_approvals",
+        "payload_keys",
+        "payload_sha256",
+        "status",
+        "reason",
+        "cancelled_by_requester",
+        digest_fields=("reason",),
+    ),
+    "approval_request.expired": _schema(
+        "approval_request_id",
+        "kind",
+        "agent_id",
+        "client_id",
+        "site_id",
+        "policy_id",
+        "required_approvals",
+        "payload_keys",
+        "payload_sha256",
+        "status",
+    ),
+    # The dispatch-time gate. ``approver_operator_ids`` is the two-person
+    # evidence: which identities' authority was still live at execution.
+    "approval_gate.allowed": _schema(
+        "kind",
+        "agent_id",
+        "policy_id",
+        "required_approvals",
+        "approval_request_id",
+        "reason",
+        "payload_sha256",
+        "approver_operator_ids",
+    ),
+    "approval_gate.denied": _schema(
+        "kind",
+        "agent_id",
+        "policy_id",
+        "required_approvals",
+        "approval_request_id",
+        "reason",
+    ),
+    # A scheduled task whose kind is under an approval policy. Unattended runs
+    # cannot obtain two-person authorization at fire time, so they are refused.
+    "scheduled_task.approval_refused": _schema(
+        "scheduled_task_id",
+        "scheduled_task_name",
+        "kind",
+        "agent_id",
+        "policy_id",
+        "required_approvals",
+        digest_fields=("scheduled_task_name",),
+    ),
     "command_detail.viewed": _schema("command_id", "status"),
     "command_detail.access_denied": _schema(
         "command_id", "kind", "operator_role", "reason"
@@ -729,6 +884,147 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "client_id",
     ),
     "operator.tokens_revoked": _schema("operator_id", "by"),
+    # Out-of-band reset from scripts/reset_password.py. Counts only: the new
+    # credential, and whether the old one was ever known, are never recorded.
+    "operator.password_reset": _schema(
+        "operator_id",
+        "sessions_revoked",
+        "mfa_reset",
+        "credentials_revoked",
+        "recovery_codes_invalidated",
+        "by",
+    ),
+    # --- Administrative sessions and break-glass (issue #69) ---
+    # `session_id` throughout is the session row id, which the owner already
+    # holds; it is not a credential and cannot be presented as one. Free-form
+    # reasons and review notes are digest-only. Break-glass credentials never
+    # appear in any form -- only the domain-separated, non-authenticating
+    # fingerprint, which is what lets a reviewer match an event to a sealed
+    # envelope without the event carrying anything that could open it.
+    "operator.session_started": _schema(
+        "operator_id", "session_id", "auth_methods", "break_glass"
+    ),
+    "operator.session_revoked": _schema(
+        "operator_id",
+        "session_id",
+        "by",
+        "reason",
+        "session_count",
+        digest_fields=("reason",),
+    ),
+    "break_glass.account_created": _schema(
+        "account_id",
+        "operator_id",
+        "label",
+        "credential_fingerprint",
+        "reason",
+        digest_fields=("label", "reason"),
+    ),
+    "break_glass.credential_rotated": _schema(
+        "account_id",
+        "label",
+        "previous_fingerprint",
+        "credential_fingerprint",
+        "reason",
+        digest_fields=("label", "reason"),
+    ),
+    "break_glass.account_state_changed": _schema(
+        "account_id",
+        "label",
+        "disabled",
+        "reason",
+        digest_fields=("label", "reason"),
+    ),
+    # The loudest event in the system. Everything needed to investigate is
+    # here; nothing that could be replayed to repeat the activation is.
+    "break_glass.activated": _schema(
+        "account_id",
+        "activation_id",
+        "operator_id",
+        "session_id",
+        "label",
+        "credential_fingerprint",
+        "reason",
+        digest_fields=("label", "reason"),
+    ),
+    # Coded, non-secret refusal. Never echoes the submitted credential.
+    "break_glass.activation_failed": _schema("reason"),
+    "break_glass.activation_reviewed": _schema(
+        "activation_id", "account_id", "note", digest_fields=("note",)
+    ),
+    # --- Multi-factor authentication (issue #67) ---
+    # Nothing in this group may carry a credential. Device names are
+    # operator-controlled prose and are digested; recovery codes never appear at
+    # all, not even as a digest, because a digest of a low-cardinality human
+    # secret is itself an offline attack surface. ``credential_id`` throughout
+    # is the credential *row* id (a UUID we mint), never the WebAuthn credential
+    # identifier the authenticator produced.
+    "mfa.second_factor_required": _schema(
+        "operator_id", "enrollment_required", "methods"
+    ),
+    "mfa.credential_registered": _schema(
+        "operator_id",
+        "credential_id",
+        "name",
+        "algorithm",
+        "aaguid",
+        "attestation_format",
+        "backup_eligible",
+        digest_fields=("name",),
+    ),
+    "mfa.credential_renamed": _schema(
+        "operator_id",
+        "credential_id",
+        "previous_name",
+        "new_name",
+        digest_fields=("previous_name", "new_name"),
+    ),
+    "mfa.credential_revoked": _schema(
+        "operator_id",
+        "credential_id",
+        "name",
+        "reason",
+        "by",
+        digest_fields=("name", "reason"),
+    ),
+    # Coded, non-secret ceremony outcome. ``reason`` is a WebAuthnError code
+    # (e.g. origin_mismatch, sign_count_regressed) — it names the rule that
+    # refused the ceremony and never the value that failed it.
+    "mfa.authentication_failed": _schema("operator_id", "method", "reason"),
+    "mfa.authentication_succeeded": _schema(
+        "operator_id", "credential_id", "method", "purpose"
+    ),
+    "mfa.step_up_succeeded": _schema("operator_id", "credential_id"),
+    # The batch id correlates a generation with the codes later spent from it.
+    # It is a server-minted identifier, not derived from any code.
+    "mfa.recovery_codes_generated": _schema(
+        "operator_id", "batch_id", "code_count"
+    ),
+    # Deliberately records only that a code was spent and how many remain. Which
+    # code was used is not recorded: it would narrow the search space for the
+    # remaining ones if the audit log were ever disclosed.
+    "mfa.recovery_code_used": _schema("operator_id", "codes_remaining"),
+    # Email one-time codes (issue #226). The code itself never appears in any of
+    # these, in any form -- not even as a digest. A digest of a six-digit value
+    # is trivially reversible by enumeration, so recording one would put a live
+    # code in the chain for anyone who later reads it, which is precisely the
+    # reasoning that keeps recovery codes out of the chain entirely. What is
+    # recorded is the masked destination: enough to review where a code went,
+    # not enough to be a mailing list if the log is disclosed.
+    "mfa.email_code_sent": _schema("operator_id", "purpose", "destination"),
+    "mfa.email_code_send_failed": _schema("operator_id", "purpose", "reason"),
+    "mfa.email_factor_verified": _schema("operator_id", "destination"),
+    "mfa.email_factor_removed": _schema(
+        "operator_id", "reason", "by", digest_fields=("reason",)
+    ),
+    "mfa.reset": _schema(
+        "operator_id",
+        "credentials_revoked",
+        "recovery_codes_invalidated",
+        "reason",
+        "by",
+        digest_fields=("reason",),
+    ),
     "scheduled_task.created": _schema(
         "scheduled_task_id",
         "name",

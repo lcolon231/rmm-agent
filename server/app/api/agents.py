@@ -14,7 +14,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_agent
+from app.api.deps import get_agent_for_credential_reattach, get_current_agent
 from app.core import audit, inventory, metrics, monitoring
 from app.core.clientip import client_ip
 from app.core.command_envelope import (
@@ -72,6 +72,31 @@ router = APIRouter(tags=["agent"])
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _rotate_agent_credential(
+    agent: Agent, *, now: datetime, rotation_nonce: str
+) -> tuple[str, datetime]:
+    """Issue and install the next bearer while preserving response-loss safety."""
+    overlap_until = now + timedelta(seconds=settings.agent_credential_overlap_seconds)
+    # A request authenticated by the overlap bearer is retrying after a lost
+    # response or failed local persist. Keep that bearer in the overlap slot;
+    # otherwise demote the current bearer into it.
+    if getattr(agent, "credential_matched", "current") != "overlap":
+        agent.previous_token_hash = agent.token_hash
+    agent.previous_token_expires_at = overlap_until
+
+    plaintext = generate_token()
+    agent.token_hash = hash_token(plaintext)
+    agent.credential_fingerprint = credential_fingerprint(plaintext)
+    agent.credential_issued_at = now
+    agent.credential_expires_at = now + timedelta(
+        seconds=settings.agent_credential_lifetime_seconds
+    )
+    agent.credential_generation += 1
+    agent.last_rotation_nonce = rotation_nonce
+    agent.last_renewed_at = now
+    return plaintext, overlap_until
 
 
 @router.post("/enroll", response_model=EnrollResponse)
@@ -248,24 +273,9 @@ async def renew_agent_credential(
             detail={"code": "rotation_nonce_reused"},
         )
 
-    overlap_until = now + timedelta(seconds=settings.agent_credential_overlap_seconds)
-    # Preserve the overlap slot on a retry that came in on the overlap credential
-    # so the token the agent still holds keeps working; otherwise demote the
-    # current token into the overlap slot.
-    if getattr(agent, "credential_matched", "current") != "overlap":
-        agent.previous_token_hash = agent.token_hash
-    agent.previous_token_expires_at = overlap_until
-
-    plaintext = generate_token()
-    agent.token_hash = hash_token(plaintext)
-    agent.credential_fingerprint = credential_fingerprint(plaintext)
-    agent.credential_issued_at = now
-    agent.credential_expires_at = now + timedelta(
-        seconds=settings.agent_credential_lifetime_seconds
+    plaintext, overlap_until = _rotate_agent_credential(
+        agent, now=now, rotation_nonce=body.rotation_nonce
     )
-    agent.credential_generation += 1
-    agent.last_rotation_nonce = body.rotation_nonce
-    agent.last_renewed_at = now
 
     await audit.record(
         db,
@@ -279,6 +289,58 @@ async def renew_agent_credential(
         },
     )
     metrics.increment("agent_credential_renewed_total")
+    return AgentCredentialRenewResponse(
+        agent_id=agent.id,
+        agent_token=plaintext,
+        credential_expires_at=agent.credential_expires_at,
+        overlap_expires_at=overlap_until,
+        credential_generation=agent.credential_generation,
+    )
+
+
+@router.post(
+    "/agents/credentials/reattach",
+    response_model=AgentCredentialRenewResponse,
+)
+async def reattach_agent_credential(
+    body: AgentCredentialRenewRequest,
+    agent: Agent = Depends(get_agent_for_credential_reattach),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace a recently expired current bearer for an active agent (#223).
+
+    The dedicated dependency is the trust boundary: ordinary agent APIs still
+    reject every expired bearer. Reattachment is bounded from the credential's
+    expiry, is never available to quarantined or revoked agents, and returns the
+    same opaque 401 for every refused credential state. Rotation then uses the
+    ordinary overlap mechanism so persist-before-adopt remains loss-safe.
+    """
+    if agent.last_rotation_nonce is not None and secrets.compare_digest(
+        agent.last_rotation_nonce, body.rotation_nonce
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token"
+        )
+
+    now = _now()
+    site = await db.get(Site, agent.site_id)
+    organization_id = site.client_id if site else None
+    plaintext, overlap_until = _rotate_agent_credential(
+        agent, now=now, rotation_nonce=body.rotation_nonce
+    )
+
+    await audit.record(
+        db,
+        action="agent.credential_reattached",
+        actor=f"agent:{agent.id}",
+        agent_id=agent.id,
+        organization_id=organization_id,
+        detail={
+            "credential_fingerprint": agent.credential_fingerprint,
+            "credential_generation": agent.credential_generation,
+        },
+    )
+    metrics.increment("agent_credential_reattached_total")
     return AgentCredentialRenewResponse(
         agent_id=agent.id,
         agent_token=plaintext,

@@ -1043,6 +1043,11 @@ class CommandCreate(BaseModel):
     # version, failing closed on any mismatch.
     script_version_id: str | None = Field(default=None, max_length=36)
     script_parameter_value_set_id: str | None = Field(default=None, max_length=36)
+    # The approval being spent on this dispatch (issue #64). Required only when
+    # an approval policy governs this kind for this endpoint; supplying one when
+    # no policy applies is refused rather than ignored, so a stale approval can
+    # never be marked spent against an unrelated run.
+    approval_request_id: str | None = Field(default=None, max_length=36)
 
     @field_validator("payload")
     @classmethod
