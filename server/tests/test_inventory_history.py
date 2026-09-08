@@ -180,7 +180,14 @@ def test_a_large_software_change_stays_proportional():
 # API and retention
 # --------------------------------------------------------------------------- #
 @pytest_asyncio.fixture
-async def client():
+async def client(monkeypatch):
+    # Successive reports need distinct receipt times to test temporal order.
+    # Rapid writes can share a Windows clock tick and use the UUID tie-breaker.
+    from itertools import count
+    from app.core import inventory
+    ticks = count()
+    base = datetime.now(timezone.utc)
+    monkeypatch.setattr(inventory, "_now", lambda: base + timedelta(milliseconds=next(ticks)))
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)

@@ -39,6 +39,23 @@ def sqlite_url(path: Path) -> str:
     return f"sqlite+aiosqlite:///{path.as_posix()}"
 
 
+def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
+    path = tmp_path / "assistant-migration.db"
+    config = migration_config(sqlite_url(path))
+    command.upgrade(config, "0037")
+    command.upgrade(config, "0038")
+    with sqlite3.connect(path) as connection:
+        columns = {row[1]: row[2] for row in connection.execute("PRAGMA table_info(assistant_runs)")}
+        assert columns["body"] == "BLOB"
+        assert set(columns) == {"id", "conversation_id", "request_id", "status", "created_at", "deadline", "body", "tool_count", "usage_tokens"}
+        foreign_keys = list(connection.execute("PRAGMA foreign_key_list(assistant_conversations)"))
+        assert {row[2] for row in foreign_keys} == {"operators", "clients"}
+        assert all(row[6] == "CASCADE" for row in foreign_keys)
+    command.downgrade(config, "0037")
+    command.upgrade(config, "0038")
+    asyncio.run(_assert_current(sqlite_url(path)))
+
+
 async def _assert_current(url: str) -> None:
     engine = create_async_engine(url)
     try:

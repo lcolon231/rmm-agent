@@ -2,7 +2,7 @@
 """Application configuration loaded from environment variables."""
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     app_name: str = "NodeLink RMM"
     environment: str = "development"
     debug: bool = True
+
+    # Optional read-only assistant. Credentials never belong in dashboard config.
+    assistant_enabled: bool = False
+    assistant_provider: str = "openai"
+    assistant_model: str = ""
+    assistant_api_key: SecretStr | None = None
+    assistant_history_key: SecretStr | None = None  # base64url 32-byte AES-GCM
+    assistant_pilot_operator_ids: str = ""  # comma-separated; empty = all authenticated
 
     # Public HTTPS base URL clients use to reach this deployment (through the
     # TLS-terminating proxy), e.g. https://rmm.example.com. Required in

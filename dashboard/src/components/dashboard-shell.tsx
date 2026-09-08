@@ -63,6 +63,7 @@ import type { Endpoint, EndpointStatus } from "@/data/dashboard";
 const navItems = [
   { label: "Overview", icon: Activity, href: "/" },
   { label: "Endpoints", icon: Monitor, count: null, href: "/endpoints" },
+  { label: "AI assistant", icon: Bot, count: null, href: "/assistant" },
   { label: "Alerts", icon: AlertTriangle, count: null, href: "/alerts" },
   { label: "Automation", icon: Bot, count: null, href: "/scripts" },
   { label: "Tasks", icon: ListChecks, count: null, href: "/tasks" },

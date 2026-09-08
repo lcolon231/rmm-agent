@@ -88,6 +88,7 @@ def _schema(
 # rejects unknown actions and any field drift, so adding or changing a producer
 # requires an explicit, reviewable policy update.
 AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
+    "assistant.activity": _schema("conversation_id", "run_id", "tool", "outcome"),
     "agent.enrolled": _schema(
         "hostname",
         "agent_name",

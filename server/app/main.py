@@ -16,6 +16,7 @@ from sqlalchemy import func, select, text
 from app.api import (
     agent_updates,
     agents,
+    assistant,
     auth,
     evidence,
     management,
@@ -92,6 +93,7 @@ app = FastAPI(
 )
 
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(assistant.router, prefix="/api/v1")
 app.include_router(agents.router, prefix="/api/v1")
 app.include_router(evidence.router, prefix="/api/v1")
 app.include_router(management.router, prefix="/api/v1")

@@ -49,6 +49,7 @@ class PruneResult:
     command_outputs_cleared: int
     inventory_snapshots_deleted: int = 0
     check_results_deleted: int = 0
+    assistant_conversations_deleted: int = 0
 
 
 async def prune_expired(
@@ -100,11 +101,14 @@ async def prune_expired(
             db, s.check_result_history_per_key
         )
 
+    from app.core.assistant.service import prune as prune_assistant
+    assistant_deleted = await prune_assistant(db, now)
     return PruneResult(
         heartbeats_deleted=heartbeats_deleted,
         command_outputs_cleared=command_outputs_cleared,
         inventory_snapshots_deleted=inventory_deleted,
         check_results_deleted=check_results_deleted,
+        assistant_conversations_deleted=assistant_deleted,
     )
 
 
