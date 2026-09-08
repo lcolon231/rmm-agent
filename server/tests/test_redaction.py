@@ -242,6 +242,7 @@ ID3 = "33333333-3333-4333-8333-333333333333"
 # Exact input shape for every production action. Free-form agent/operator text
 # deliberately contains the sentinel and must become digest+byte-count fields.
 PRODUCER_DETAILS = {
+    "assistant.activity": {"conversation_id": ID1, "run_id": ID2, "tool": "list_endpoints", "outcome": "observed"},
     "agent.enrolled": {
         "hostname": SENTINEL,
         "agent_name": SENTINEL,

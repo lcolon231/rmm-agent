@@ -165,6 +165,9 @@ export function EndpointDetailView({ endpoint, operator }: { endpoint: EndpointD
             <Link className="detail-console-link" href={`/endpoints/${encodeURIComponent(endpoint.id)}/inventory`}>
               <HardDrive size={15} /> Inventory
             </Link>
+            <Link className="detail-console-link" href={`/assistant?client_id=${encodeURIComponent(endpoint.client_id)}&endpoint_id=${encodeURIComponent(endpoint.id)}`}>
+              Investigate with AI
+            </Link>
           </div>
         </section>
 

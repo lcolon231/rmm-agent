@@ -14,6 +14,7 @@ from app.core.config import normalize_database_url, settings
 engine = create_async_engine(
     normalize_database_url(settings.database_url),
     echo=settings.debug,
+    hide_parameters=True,  # SQL diagnostics must not expose assistant search text or secrets.
     pool_pre_ping=True,
 )
 

@@ -200,3 +200,10 @@ If a deployment fails after adding or changing a producer, treat an
 `AuditDetailError` as a contract mismatch: stop that operation, correct the
 producer/schema/documentation together, and deploy forward. Never bypass the
 boundary or edit historical audit rows.
+# Assistant investigation
+
+`assistant.activity` stores only `conversation_id`, `run_id`, `tool`, and
+`outcome`. Existing event columns identify the operator (`actor_user_id`), client
+(`organization_id`) and authorized endpoint (`agent_id`) where applicable.
+Unknown tools are recorded as `rejected`, never as raw model-supplied names.
+Prompts, answers, provider errors, credentials and tool bodies are excluded.

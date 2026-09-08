@@ -109,6 +109,14 @@ async def _dispatch(c, agent_id: str, script: str, ttl: int = 300) -> dict:
 async def test_history_paginates_newest_first(client):
     agent_id, _ = await _enroll(client)
     ids = [(await _dispatch(client, agent_id, f"echo {i}"))["id"] for i in range(3)]
+    # Windows wall-clock resolution can give rapid dispatches identical times.
+    # This test is about chronological pagination, not the UUID tie-breaker.
+    async with AsyncSessionLocal() as db:
+        base = datetime.now(timezone.utc) - timedelta(seconds=3)
+        for index, command_id in enumerate(ids):
+            command = await db.get(Command, command_id)
+            command.created_at = base + timedelta(seconds=index)
+        await db.commit()
 
     page1 = (
         await client.get(f"/agents/{agent_id}/commands?page=1&page_size=2")

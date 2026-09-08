@@ -27,6 +27,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -385,6 +386,29 @@ class ScriptParameterKind(str, enum.Enum):
     boolean = "boolean"
     choice = "choice"
     secret = "secret"
+
+
+class AssistantConversation(Base):
+    __tablename__ = "assistant_conversations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(ForeignKey("operators.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AssistantRun(Base):
+    __tablename__ = "assistant_runs"
+    __table_args__ = (UniqueConstraint("conversation_id", "request_id", name="uq_assistant_request"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("assistant_conversations.id", ondelete="CASCADE"), index=True)
+    request_id: Mapped[str] = mapped_column(String(36))
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    body: Mapped[bytes] = mapped_column(LargeBinary)  # AES-GCM, never plaintext
+    tool_count: Mapped[int] = mapped_column(Integer, default=0)
+    usage_tokens: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class Client(Base):

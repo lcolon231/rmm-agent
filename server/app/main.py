@@ -18,6 +18,7 @@ from app.api import (
     agent_updates,
     agents,
     approvals,
+    assistant,
     auth,
     evidence,
     management,
@@ -95,6 +96,7 @@ app = FastAPI(
 )
 
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(assistant.router, prefix="/api/v1")
 app.include_router(mfa.router, prefix="/api/v1")
 app.include_router(admin_sessions.router, prefix="/api/v1")
 app.include_router(agents.router, prefix="/api/v1")
