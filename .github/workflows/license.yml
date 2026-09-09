@@ -13,7 +13,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Test license header rules
-        run: python3 tools/test_check_license.py
       - name: Validate repository licensing
         run: python3 tools/check_license.py

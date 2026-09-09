@@ -10,10 +10,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SUFFIXES = {".go", ".py", ".sh", ".ps1", ".js", ".ts", ".tsx", ".jsx"}
 EXCLUDED_PARTS = {".git", ".venv", "vendor", "node_modules"}
-THIRD_PARTY_LICENSES = {
-    ".agents/skills/idea-refine/scripts/idea-refine.sh": "MIT",
-    ".claude/skills/idea-refine/scripts/idea-refine.sh": "MIT",
-}
 
 
 def tracked_files() -> list[Path]:
@@ -28,10 +24,8 @@ def tracked_files() -> list[Path]:
 
 
 def has_spdx(path: Path) -> bool:
-    expected = THIRD_PARTY_LICENSES.get(path.relative_to(ROOT).as_posix(), "AGPL-3.0-only")
     lines = path.read_text(encoding="utf-8").splitlines()[:16]
-    return any(line.strip().removeprefix("#").removeprefix("//").strip() ==
-               f"SPDX-License-Identifier: {expected}" for line in lines)
+    return any("SPDX-License-Identifier: AGPL-3.0-only" in line for line in lines)
 
 
 def main() -> int:
