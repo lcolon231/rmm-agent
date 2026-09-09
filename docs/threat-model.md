@@ -349,6 +349,25 @@ prior gap where the scheduler dispatched commands without the approval/window
 gate. Residual risk: reboot consent relies on the endpoint's self-reported
 user-session evidence, the same trust assumption as power operations.
 
+Issue #231 makes the `reboot_pending` check report which Windows reboot-required
+registry source is set rather than whether any is, which widens what one check
+tells the server about an endpoint. The boundary it defends is the
+`PendingFileRenameOperations` value: it lists file paths that routinely contain
+user names (`C:\Users\<name>\...`) and installer temp paths that disclose
+internal software, and `CheckResult.detail` is the alert payload operators and
+integrations read and is meant to stay safe to forward to alert email and
+third-party webhooks. The paths are therefore never collected: the agent counts
+the entries on the endpoint and reports only `pending_file_rename_count`, and no
+probe code path returns a path. `redaction.py` is deliberately not the control
+here — it is pattern-based and could not reliably strip a user name from an
+arbitrary path, so routing paths through it would be a false guarantee rather
+than a fix. The count is best-effort and reports unknown rather than zero when
+the value cannot be read, so an absent count is never mistaken for "no renames
+queued". Residual risk: the categorical cause is derived from the endpoint's
+self-reported registry state, the same trust assumption as every other agent
+sample; it is triage information and gates no authorization or dispatch
+decision.
+
 Issue #55 adds a package-management boundary. Discovery (`scan_packages`) is
 read-only and operator-level; install/upgrade (`install_packages`) is
 administrator-only and installs an explicit, bounded set of package ids — never a
