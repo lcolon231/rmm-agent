@@ -3,6 +3,7 @@ package monitoring
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ type fakeProbe struct {
 	diskOK        bool
 	serviceState  string
 	serviceOK     bool
-	rebootPending bool
+	rebootSources RebootSources
 	rebootOK      bool
 }
 
@@ -25,8 +26,8 @@ func (p fakeProbe) DiskPercent(context.Context, string) (float64, bool, string) 
 func (p fakeProbe) ServiceState(context.Context, string) (string, bool, string) {
 	return p.serviceState, p.serviceOK, "fake_service"
 }
-func (p fakeProbe) RebootPending(context.Context) (bool, bool, string) {
-	return p.rebootPending, p.rebootOK, "fake_reboot"
+func (p fakeProbe) RebootPending(context.Context) (RebootSources, bool, string) {
+	return p.rebootSources, p.rebootOK, "fake_reboot"
 }
 
 func number(value float64) *float64 { return &value }
@@ -119,7 +120,7 @@ func TestEvaluatorUnavailableStateChecksAndStaleSamples(t *testing.T) {
 		diskOK:        true,
 		serviceState:  "stopped",
 		serviceOK:     true,
-		rebootPending: true,
+		rebootSources: RebootSources{ComponentBasedServicing: true},
 		rebootOK:      true,
 	})
 	now := time.Date(2026, 8, 2, 6, 0, 0, 0, time.UTC)
@@ -217,5 +218,86 @@ func TestEvaluatorDropsResultsFromSupersededAssignments(t *testing.T) {
 	}
 	if len(reloaded.Pending) != 1 || reloaded.Pending[0].PolicyRevisionID != "revision-new" {
 		t.Fatalf("reconciled outbox was not durable: %#v", reloaded.Pending)
+	}
+}
+
+// The reboot detail is evidence only: this fixes the pre-source outcomes so a
+// source flag can never be wired into status by accident.
+func TestEvaluatorRebootStatusIsUnchangedBySources(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		sources RebootSources
+		ok      bool
+		status  string
+		reason  string
+	}{
+		{name: "none set", ok: true, status: "ok", reason: "reboot_not_pending"},
+		{name: "servicing only", sources: RebootSources{ComponentBasedServicing: true}, ok: true, status: "critical", reason: "reboot_pending"},
+		{name: "update only", sources: RebootSources{WindowsUpdate: true}, ok: true, status: "critical", reason: "reboot_pending"},
+		{name: "rename only", sources: RebootSources{PendingFileRename: true, PendingFileRenameCount: 3}, ok: true, status: "critical", reason: "reboot_pending"},
+		{name: "all set", sources: RebootSources{ComponentBasedServicing: true, WindowsUpdate: true, PendingFileRename: true}, ok: true, status: "critical", reason: "reboot_pending"},
+		{name: "probe failed", ok: false, status: "unknown", reason: "fake_reboot"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := newTestStore(t)
+			evaluator := NewEvaluator(store, fakeProbe{rebootSources: testCase.sources, rebootOK: testCase.ok})
+			now := time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC)
+			check := assignment("reboot", "reboot_pending")
+			check.Definition.Threshold = nil
+			check.Definition.Hysteresis = Hysteresis{RaiseSamples: 1, ClearSamples: 1}
+			if _, err := evaluator.Evaluate(context.Background(), []Assignment{check}, telemetry.Sample{CollectedAt: now}, now); err != nil {
+				t.Fatal(err)
+			}
+			result := store.Pending[0]
+			if result.Status != testCase.status || result.Detail["reason"] != testCase.reason {
+				t.Fatalf("status=%q reason=%v", result.Status, result.Detail["reason"])
+			}
+			sources, reported := result.Detail["sources"].(map[string]any)
+			if !testCase.ok {
+				if reported {
+					t.Fatal("an unavailable probe must not report sources")
+				}
+				return
+			}
+			if !reported {
+				t.Fatalf("detail carried no sources: %#v", result.Detail)
+			}
+			want := map[string]any{
+				"component_based_servicing": testCase.sources.ComponentBasedServicing,
+				"windows_update":            testCase.sources.WindowsUpdate,
+				"pending_file_rename":       testCase.sources.PendingFileRename,
+			}
+			for key, value := range want {
+				if sources[key] != value {
+					t.Fatalf("sources[%q]=%v want %v", key, sources[key], value)
+				}
+			}
+			if result.Detail["pending_file_rename_count"] != testCase.sources.PendingFileRenameCount {
+				t.Fatalf("count=%v", result.Detail["pending_file_rename_count"])
+			}
+		})
+	}
+}
+
+// The result detail is bounded server-side; the source block must stay well
+// inside that limit.
+func TestEvaluatorRebootDetailStaysBounded(t *testing.T) {
+	store := newTestStore(t)
+	evaluator := NewEvaluator(store, fakeProbe{
+		rebootSources: RebootSources{ComponentBasedServicing: true, WindowsUpdate: true, PendingFileRename: true, PendingFileRenameCount: 4096},
+		rebootOK:      true,
+	})
+	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+	check := assignment("reboot", "reboot_pending")
+	check.Definition.Threshold = nil
+	if _, err := evaluator.Evaluate(context.Background(), []Assignment{check}, telemetry.Sample{CollectedAt: now}, now); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(store.Pending[0].Detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > 16*1024 {
+		t.Fatalf("detail is %d bytes", len(encoded))
 	}
 }

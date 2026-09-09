@@ -20,7 +20,7 @@ from enum import Enum
 import json
 import math
 import re
-from typing import Annotated
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -555,19 +555,37 @@ class AlertObservationOut(BaseModel):
     created_at: datetime
 
 
-class RebootCauseOut(BaseModel):
-    """Update inventory correlated with a pending-restart alert.
+class RebootSourcesOut(BaseModel):
+    """Which Windows reboot-required signals the agent reported set.
 
-    The fields are evidence, not a causal verdict. Source attribution is absent
-    for agents that predate reboot-source reporting.
+    ``pending_file_rename_count`` is a count of queued rename operations and is
+    best-effort. The paths behind it are deliberately never collected.
     """
 
     model_config = ConfigDict(from_attributes=True, extra="forbid")
+    component_based_servicing: bool
+    windows_update: bool
+    pending_file_rename: bool
+    pending_file_rename_count: int | None = Field(default=None, ge=0)
+
+
+class RebootCauseOut(BaseModel):
+    """Why a restart is pending, plus correlated update inventory.
+
+    ``cause`` is the categorical verdict, and it is ``unknown`` whenever
+    ``sources`` is absent — an agent that predates reboot-source reporting must
+    never read as "not update-related". The inventory fields below it are
+    correlated evidence, not a causal claim.
+    """
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+    cause: Literal["unknown", "update_caused", "not_update_caused"]
+    sources: RebootSourcesOut | None = None
     reboot_flagged_updates: list[MissingUpdate] = Field(default_factory=list)
     recent_installs: list[InstalledUpdate] = Field(default_factory=list, max_length=10)
     system_reboot_required: bool | None = None
     scanned_at: datetime | None = None
-    snapshot_received_at: datetime
+    snapshot_received_at: datetime | None = None
 
 
 class AlertDetailOut(AlertOut):

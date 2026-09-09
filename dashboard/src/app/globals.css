@@ -3157,9 +3157,11 @@ textarea:focus-visible,
 .reboot-correlation-panel > header svg { color: #6c2ce9; }
 .reboot-correlation-status { margin: 16px 18px 0; padding: 12px 14px; color: #3f3a54; background: #f6f2fe; border-left: 4px solid #6c2ce9; border-radius: 4px; }
 .reboot-correlation-panel.unavailable .reboot-correlation-status { color: #6f5a32; background: #fff8e8; border-left-color: var(--amber); }
-.reboot-correlation-panel.no_evidence .reboot-correlation-status { color: #3f3a54; background: #f5f3fa; border-left-color: #9a93b4; }
+.reboot-correlation-panel.not_update_caused .reboot-correlation-status { color: #3f3a54; background: #f5f3fa; border-left-color: #9a93b4; }
 .reboot-correlation-status strong { font-size: 11px; }
 .reboot-correlation-status p { margin: 4px 0 0; font-size: 9px; line-height: 1.5; }
+.reboot-source-flags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.reboot-source-flags li { padding: 3px 7px; color: inherit; font: 750 8px var(--font-data); background: rgb(255 255 255 / 70%); border: 1px solid rgb(0 0 0 / 8%); border-radius: 999px; }
 .reboot-correlation-meta { display: grid; grid-template-columns: repeat(3, 1fr); margin: 14px 18px 0; border: 1px solid var(--line); border-radius: 4px; }
 .reboot-correlation-meta > div { padding: 10px 12px; border-right: 1px solid var(--line); }
 .reboot-correlation-meta > div:last-child { border-right: 0; }

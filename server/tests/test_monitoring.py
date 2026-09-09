@@ -906,6 +906,79 @@ async def test_reboot_alert_detail_includes_correlated_update_evidence_only(
         row["kb_id"] for row in detail["reboot_cause"]["reboot_flagged_updates"]
     ] == ["KB-PENDING"]
     assert detail["reboot_cause"]["system_reboot_required"] is True
+    # This agent reports no sources, so the cause stays unknown: correlated
+    # evidence must never be promoted into a categorical answer.
+    assert detail["reboot_cause"]["cause"] == "unknown"
+    assert detail["reboot_cause"]["sources"] is None
+
+
+@pytest.mark.asyncio
+async def test_reboot_alert_detail_states_the_cause_when_the_agent_reports_sources(
+    operator_client,
+):
+    _, _, agent_id, agent_token = await _enroll(operator_client)
+    policy = await _create_policy(
+        operator_client,
+        name="Restart cause",
+        scope="agent",
+        scope_id=agent_id,
+        checks=[_reboot_check("restart-required")],
+    )
+    revision_id = policy["revisions"][0]["id"]
+    now = datetime.now(timezone.utc)
+    result_detail = {
+        "check_type": "reboot_pending",
+        "reason": "reboot_pending",
+        "sources": {
+            "component_based_servicing": True,
+            "windows_update": True,
+            "pending_file_rename": False,
+        },
+        "pending_file_rename_count": 0,
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://t/api/v1",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    ) as agent_client:
+        response = await agent_client.post(
+            "/agents/me/monitoring/results",
+            json={
+                "results": [
+                    {
+                        "id": "e" * 32,
+                        "policy_id": policy["id"],
+                        "policy_revision_id": revision_id,
+                        "check_key": "restart-required",
+                        "status": "critical",
+                        "value": 1,
+                        "detail": result_detail,
+                        "evaluated_at": now.isoformat(),
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200, response.text
+
+    listing = await operator_client.get(
+        f"/monitoring/alerts?agent_id={agent_id}&check_key=restart-required"
+    )
+    assert listing.status_code == 200, listing.text
+    alert = listing.json()["items"][0]
+    detail = (await operator_client.get(f"/monitoring/alerts/{alert['id']}")).json()
+
+    # No inventory snapshot exists for this endpoint, so the correlated evidence
+    # is empty — the categorical verdict stands on the source flags alone.
+    assert detail["reboot_cause"]["cause"] == "update_caused"
+    assert detail["reboot_cause"]["sources"] == {
+        "component_based_servicing": True,
+        "windows_update": True,
+        "pending_file_rename": False,
+        "pending_file_rename_count": 0,
+    }
+    assert detail["reboot_cause"]["recent_installs"] == []
+    assert detail["reboot_cause"]["snapshot_received_at"] is None
+    assert detail["last_result_detail"] == result_detail
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ import {
   formatAlertEventType,
   formatMonitoringTimestamp,
   rebootCorrelationPresentation,
+  rebootSourceLabels,
 } from "@/lib/monitoring-core";
 import { NodelinkApiError } from "@/lib/nodelink-api";
 
@@ -48,6 +49,8 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ al
     alert.last_result_detail,
     alert.reboot_cause,
   );
+  const rebootSources = alert.reboot_cause?.sources
+    ? rebootSourceLabels(alert.reboot_cause.sources) : [];
 
   return (
     <>
@@ -83,19 +86,24 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ al
       {rebootPresentation ? (
         <section className={`enrollment-panel reboot-correlation-panel ${rebootPresentation.state}`}>
           <header>
-            <div><span>Restart attribution</span><h2>Windows Update correlation</h2></div>
+            <div><span>Restart attribution</span><h2>Pending restart cause</h2></div>
             <PackageCheck size={19} />
           </header>
           <div className="reboot-correlation-status">
             <strong>{rebootPresentation.title}</strong>
             <p>{rebootPresentation.summary}</p>
+            {rebootSources.length ? (
+              <ul className="reboot-source-flags">
+                {rebootSources.map((label) => <li key={label}>{label}</li>)}
+              </ul>
+            ) : null}
           </div>
           {alert.reboot_cause ? (
             <>
               <dl className="reboot-correlation-meta">
                 <div><dt>System reboot flag</dt><dd>{alert.reboot_cause.system_reboot_required === null ? "Unavailable" : alert.reboot_cause.system_reboot_required ? "Reported" : "Not reported"}</dd></div>
                 <div><dt>Update scan</dt><dd>{alert.reboot_cause.scanned_at ? formatMonitoringTimestamp(alert.reboot_cause.scanned_at) : "Unavailable"}</dd></div>
-                <div><dt>Snapshot received</dt><dd>{formatMonitoringTimestamp(alert.reboot_cause.snapshot_received_at)}</dd></div>
+                <div><dt>Snapshot received</dt><dd>{alert.reboot_cause.snapshot_received_at ? formatMonitoringTimestamp(alert.reboot_cause.snapshot_received_at) : "Unavailable"}</dd></div>
               </dl>
               <div className="reboot-correlation-evidence">
                 <article>
@@ -120,7 +128,7 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ al
                   ) : <p>No installs were recorded inside the correlation window.</p>}
                 </article>
               </div>
-              <p className="reboot-correlation-note">Inventory proximity is supporting evidence only; it does not establish which event caused the pending restart.</p>
+              <p className="reboot-correlation-note">{rebootPresentation.correlation.summary} Inventory proximity is supporting evidence only; it does not establish which event caused the pending restart.</p>
             </>
           ) : null}
         </section>

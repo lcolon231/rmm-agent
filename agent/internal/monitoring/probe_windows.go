@@ -52,15 +52,28 @@ func (platformProbe) ServiceState(ctx context.Context, name string) (string, boo
 	return strings.ToLower(out), true, "sample_collected"
 }
 
-func (platformProbe) RebootPending(ctx context.Context) (bool, bool, string) {
-	script := `$pending=(Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or ($null -ne (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue)); $pending.ToString().ToLowerInvariant()`
-	out, err := powerShell(ctx, script)
+// rebootProbeScript reports the three reboot-required registry sources as
+// independent flags plus a count of queued rename operations. It deliberately
+// emits no registry values: only presence tests and a count leave the endpoint.
+// PendingFileRenameOperations stores source/destination pairs, so the operation
+// count is half the entry count. The count is wrapped so that a failure to read
+// it degrades to 0 rather than failing the whole probe.
+const rebootProbeScript = `$cbs = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+$wu = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+$entry = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
+$pfr = $null -ne $entry
+$count = 0
+if ($pfr) { try { $count = [math]::Floor(@($entry.PendingFileRenameOperations).Count / 2) } catch { $count = 0 } }
+'{0} {1} {2} {3}' -f $cbs.ToString().ToLowerInvariant(), $wu.ToString().ToLowerInvariant(), $pfr.ToString().ToLowerInvariant(), $count`
+
+func (platformProbe) RebootPending(ctx context.Context) (RebootSources, bool, string) {
+	out, err := powerShell(ctx, rebootProbeScript)
 	if err != nil {
-		return false, false, "reboot_probe_failed"
+		return RebootSources{}, false, "reboot_probe_failed"
 	}
-	value, err := strconv.ParseBool(out)
-	if err != nil {
-		return false, false, "reboot_probe_invalid"
+	sources, ok := parseRebootSources(out)
+	if !ok {
+		return RebootSources{}, false, "reboot_probe_invalid"
 	}
-	return value, true, "sample_collected"
+	return sources, true, "sample_collected"
 }

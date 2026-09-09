@@ -13,6 +13,6 @@ func (platformProbe) ServiceState(context.Context, string) (string, bool, string
 	return "", false, "unsupported_platform"
 }
 
-func (platformProbe) RebootPending(context.Context) (bool, bool, string) {
-	return false, false, "unsupported_platform"
+func (platformProbe) RebootPending(context.Context) (RebootSources, bool, string) {
+	return RebootSources{}, false, "unsupported_platform"
 }

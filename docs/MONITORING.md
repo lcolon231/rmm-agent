@@ -47,7 +47,7 @@ distinct platform probes; additional checks report `unknown` with
 | `memory` | Current telemetry memory percentage | Numeric threshold does not breach | Missing or stale sample is `unknown`. |
 | `disk` | Usage percentage for configured `mount_point` | Numeric threshold does not breach | Missing volume, failed probe, or stale system-drive sample is `unknown`. |
 | `service` | Windows service named by `service_name` | Service state is `running` | Absent or non-running is `critical`; probe failure/unsupported platform is `unknown`. A legacy numeric threshold is accepted for old #41 revisions but ignored. |
-| `reboot_pending` | Windows reboot-required registry sources | No reboot is pending | Pending is `critical`; failed/unsupported probe is `unknown`. |
+| `reboot_pending` | Windows reboot-required registry sources | No reboot is pending | Pending is `critical`; failed/unsupported probe is `unknown`. Which sources are set rides along in the result detail (agent v0.1.8+) without affecting status. |
 
 The earlier `uptime` policy contract remains compatible and uses the same
 numeric evaluator, although it is not one of issue #42's six initial checks.
@@ -89,6 +89,48 @@ result detail. The dashboard labels those alerts "Cause unavailable" even when
 it can list nearby update activity. Absence of `sources` must never be treated
 as evidence that the restart is not update-related. The alert's lifecycle,
 severity, suppression, and notification behavior are unchanged.
+
+### Reboot source reporting
+
+Agent v0.1.8 and later report which of the three reboot-required registry
+sources are set, so the server can state the cause categorically instead of
+inferring it from update timing. The `reboot_pending` result detail carries:
+
+```json
+{
+  "check_type": "reboot_pending",
+  "reason": "reboot_pending",
+  "sources": {
+    "component_based_servicing": true,
+    "windows_update": true,
+    "pending_file_rename": false
+  },
+  "pending_file_rename_count": 0
+}
+```
+
+The alert detail route turns those flags into `reboot_cause.cause`:
+`update_caused` when `windows_update` is set, `not_update_caused` otherwise,
+and `unknown` when the flags are absent or unusable. Component-Based Servicing
+and a queued file rename are reported and rendered, but neither of them means
+an installed update is waiting on a restart, so neither produces
+`update_caused`.
+
+**Status does not move.** Any source being set is still pending and still
+`critical`, no source set is still `ok`, and a failed probe is still `unknown`
+with `reboot_probe_failed`. The flags are evidence carried alongside a decision
+that is made exactly as it was before.
+
+`pending_file_rename_count` counts queued rename operations. **The paths behind
+it are deliberately never collected**, on the endpoint or anywhere downstream:
+`PendingFileRenameOperations` entries routinely contain user names
+(`C:\Users\<name>\...`) and installer temp paths that disclose internal
+software, and result detail fans out over alert email and third-party webhooks,
+so a path here would leave the tenant boundary. Knowing that a file-rename
+reboot is pending is the actionable fact; the file list does not change what a
+technician does. The count is best-effort and never decides status — a failed
+count query leaves it at `0` (or `null` server-side) with the source flags
+intact.
 
 Numeric checks evaluate critical before warning and support `gt`, `gte`, `lt`,
 and `lte`. CPU, memory, and disk results must remain in the inclusive 0–100

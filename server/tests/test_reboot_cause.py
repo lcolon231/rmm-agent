@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Correlated update evidence for pending-restart alert details (#230)."""
+"""Cause and correlated update evidence for pending-restart alerts (#230, #231)."""
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -104,9 +104,13 @@ def test_reboot_cause_correlates_flagged_updates_and_recent_installs(
     assert result.scanned_at == NOW - timedelta(minutes=2)
     assert result.snapshot_received_at == NOW
 
-    # Layer 2 is evidence only. A missing sources object must not manufacture a
-    # categorical "not update-related" answer for an older agent.
+    # A missing sources object must not manufacture a categorical
+    # "not update-related" answer for an older agent.
+    assert result.cause == monitoring.REBOOT_CAUSE_UNKNOWN
+    assert result.sources is None
     assert set(asdict(result)) == {
+        "cause",
+        "sources",
         "reboot_flagged_updates",
         "recent_installs",
         "system_reboot_required",
@@ -159,9 +163,125 @@ def test_reboot_cause_output_contract_is_detail_only(monkeypatch) -> None:
     )
 
     payload = RebootCauseOut.model_validate(cause).model_dump()
+    assert payload["cause"] == "unknown"
+    assert payload["sources"] is None
     assert payload["reboot_flagged_updates"][0]["kb_id"] == "KB-PENDING"
     assert payload["snapshot_received_at"] == NOW
     assert "last_result_detail" not in AlertOut.model_fields
     assert "reboot_cause" not in AlertOut.model_fields
     assert AlertDetailOut.model_fields["last_result_detail"].default is None
     assert AlertDetailOut.model_fields["reboot_cause"].default is None
+
+
+def _detail(
+    *,
+    component_based_servicing: bool = False,
+    windows_update: bool = False,
+    pending_file_rename: bool = False,
+    count: object = 0,
+) -> dict:
+    return {
+        "check_type": "reboot_pending",
+        "reason": "reboot_pending",
+        "sources": {
+            "component_based_servicing": component_based_servicing,
+            "windows_update": windows_update,
+            "pending_file_rename": pending_file_rename,
+        },
+        "pending_file_rename_count": count,
+    }
+
+
+def test_reboot_cause_states_the_cause_categorically(monkeypatch) -> None:
+    monkeypatch.setattr(monitoring, "_now", lambda: NOW)
+    snapshot = _snapshot(
+        {
+            "scanned_at": NOW.isoformat(),
+            "reboot_required": True,
+            "missing": [
+                {"kb_id": "KB-PENDING", "title": "Pending", "reboot_required": True}
+            ],
+            "installed": [
+                {
+                    "kb_id": "KB-RECENT",
+                    "title": "Recent",
+                    "installed_on": (NOW - timedelta(hours=2)).isoformat(),
+                }
+            ],
+        }
+    )
+    cases = [
+        (_detail(windows_update=True), monitoring.REBOOT_CAUSE_UPDATE),
+        (
+            _detail(windows_update=True, component_based_servicing=True, pending_file_rename=True),
+            monitoring.REBOOT_CAUSE_UPDATE,
+        ),
+        (_detail(pending_file_rename=True, count=3), monitoring.REBOOT_CAUSE_NOT_UPDATE),
+        (_detail(component_based_servicing=True), monitoring.REBOOT_CAUSE_NOT_UPDATE),
+    ]
+    for detail, expected in cases:
+        result = monitoring.derive_reboot_cause(
+            snapshot, detail, NOW - monitoring.REBOOT_CAUSE_LOOKBACK
+        )
+        assert result is not None
+        assert result.cause == expected
+        assert result.sources is not None
+        assert result.sources.windows_update is detail["sources"]["windows_update"]
+        # The categorical verdict never replaces the correlated evidence.
+        assert [row["kb_id"] for row in result.reboot_flagged_updates] == ["KB-PENDING"]
+        assert [row["kb_id"] for row in result.recent_installs] == ["KB-RECENT"]
+        assert result.snapshot_received_at == NOW
+
+
+def test_reboot_cause_reports_sources_without_an_inventory_snapshot(monkeypatch) -> None:
+    monkeypatch.setattr(monitoring, "_now", lambda: NOW)
+    result = monitoring.derive_reboot_cause(
+        None, _detail(windows_update=True), NOW - monitoring.REBOOT_CAUSE_LOOKBACK
+    )
+
+    assert result is not None
+    assert result.cause == monitoring.REBOOT_CAUSE_UPDATE
+    assert result.reboot_flagged_updates == []
+    assert result.recent_installs == []
+    assert result.system_reboot_required is None
+    assert result.scanned_at is None
+    assert result.snapshot_received_at is None
+    assert RebootCauseOut.model_validate(result).model_dump()["cause"] == "update_caused"
+
+
+def test_reboot_cause_treats_unusable_sources_as_unknown(monkeypatch) -> None:
+    monkeypatch.setattr(monitoring, "_now", lambda: NOW)
+    snapshot = _snapshot({"missing": [], "installed": []})
+    partial = _detail(windows_update=True)
+    del partial["sources"]["pending_file_rename"]
+    for detail in (
+        None,
+        {},
+        {"sources": None},
+        {"sources": {}},
+        {"sources": {"component_based_servicing": 1, "windows_update": 1, "pending_file_rename": 1}},
+        partial,
+    ):
+        result = monitoring.derive_reboot_cause(
+            snapshot, detail, NOW - monitoring.REBOOT_CAUSE_LOOKBACK
+        )
+        assert result is not None
+        assert result.cause == monitoring.REBOOT_CAUSE_UNKNOWN
+        assert result.sources is None
+
+
+def test_reboot_cause_keeps_the_file_rename_count_best_effort(monkeypatch) -> None:
+    monkeypatch.setattr(monitoring, "_now", lambda: NOW)
+    snapshot = _snapshot({"missing": [], "installed": []})
+    for count, expected in ((4, 4), (0, 0), (-1, None), ("many", None), (True, None), (None, None)):
+        result = monitoring.derive_reboot_cause(
+            snapshot,
+            _detail(pending_file_rename=True, count=count),
+            NOW - monitoring.REBOOT_CAUSE_LOOKBACK,
+        )
+        assert result is not None
+        assert result.sources is not None
+        # A bad count never costs us the flags, which are what the verdict uses.
+        assert result.sources.pending_file_rename is True
+        assert result.cause == monitoring.REBOOT_CAUSE_NOT_UPDATE
+        assert result.sources.pending_file_rename_count == expected

@@ -33,7 +33,7 @@ type probeCache struct {
 	remaining int
 	disks     map[string]probeNumber
 	services  map[string]probeString
-	reboot    *probeBool
+	reboot    *probeReboot
 }
 
 type probeNumber struct {
@@ -48,10 +48,10 @@ type probeString struct {
 	reason string
 }
 
-type probeBool struct {
-	value  bool
-	ok     bool
-	reason string
+type probeReboot struct {
+	sources RebootSources
+	ok      bool
+	reason  string
 }
 
 // Evaluate appends every due result to the durable outbox before callers send
@@ -109,7 +109,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, assignments []Assignment, samp
 			continue
 		}
 
-		raw, value, reason := e.rawStatus(ctx, cache, definition, sample, now, interval)
+		raw, value, reason, extra := e.rawStatus(ctx, cache, definition, sample, now, interval)
 		stable := applyHysteresis(raw, &state, definition.Hysteresis)
 		id, err := resultID()
 		if err != nil {
@@ -117,6 +117,18 @@ func (e *Evaluator) Evaluate(ctx context.Context, assignments []Assignment, samp
 		}
 		state.LastEvaluated = now
 		e.store.Checks[definition.Key] = state
+		detail := map[string]any{
+			"check_type": definition.Type,
+			"reason":     reason,
+			"raw_status": raw,
+			"hysteresis": map[string]any{
+				"pending_status": state.PendingStatus,
+				"pending_count":  state.PendingCount,
+			},
+		}
+		for key, item := range extra {
+			detail[key] = item
+		}
 		e.store.Pending = append(e.store.Pending, Result{
 			ID:               id,
 			PolicyID:         assignment.PolicyID,
@@ -124,16 +136,8 @@ func (e *Evaluator) Evaluate(ctx context.Context, assignments []Assignment, samp
 			CheckKey:         definition.Key,
 			Status:           stable,
 			Value:            value,
-			Detail: map[string]any{
-				"check_type": definition.Type,
-				"reason":     reason,
-				"raw_status": raw,
-				"hysteresis": map[string]any{
-					"pending_status": state.PendingStatus,
-					"pending_count":  state.PendingCount,
-				},
-			},
-			EvaluatedAt: now,
+			Detail:           detail,
+			EvaluatedAt:      now,
 		})
 		written++
 	}
@@ -145,22 +149,25 @@ func (e *Evaluator) Evaluate(ctx context.Context, assignments []Assignment, samp
 	return written, nil
 }
 
-func (e *Evaluator) rawStatus(ctx context.Context, cache *probeCache, definition Definition, sample telemetry.Sample, now time.Time, interval time.Duration) (string, *float64, string) {
+// rawStatus returns the pre-hysteresis status, its value, the reason, and any
+// check-type-specific detail to merge into the result. The extra detail is
+// evidence only: nothing in it may influence status.
+func (e *Evaluator) rawStatus(ctx context.Context, cache *probeCache, definition Definition, sample telemetry.Sample, now time.Time, interval time.Duration) (string, *float64, string, map[string]any) {
 	staleAfter := 2 * interval
 	if staleAfter < 2*time.Minute {
 		staleAfter = 2 * time.Minute
 	}
-	sampleState := func(available bool, value float64) (string, *float64, string) {
+	sampleState := func(available bool, value float64) (string, *float64, string, map[string]any) {
 		if sample.CollectedAt.IsZero() || now.Sub(sample.CollectedAt) > staleAfter {
-			return "unknown", nil, "sample_stale"
+			return "unknown", nil, "sample_stale", nil
 		}
 		if !available {
-			return "unknown", nil, "sample_unavailable"
+			return "unknown", nil, "sample_unavailable", nil
 		}
 		if definition.Threshold == nil {
-			return "unknown", nil, "threshold_missing"
+			return "unknown", nil, "threshold_missing", nil
 		}
-		return classifyNumeric(value, *definition.Threshold), &value, "threshold_evaluated"
+		return classifyNumeric(value, *definition.Threshold), &value, "threshold_evaluated", nil
 	}
 
 	switch definition.Type {
@@ -177,42 +184,52 @@ func (e *Evaluator) rawStatus(ctx context.Context, cache *probeCache, definition
 		}
 		probe := e.disk(ctx, cache, mount)
 		if !probe.ok {
-			return "unknown", nil, probe.reason
+			return "unknown", nil, probe.reason, nil
 		}
 		if definition.Threshold == nil {
-			return "unknown", nil, "threshold_missing"
+			return "unknown", nil, "threshold_missing", nil
 		}
-		return classifyNumeric(probe.value, *definition.Threshold), &probe.value, "threshold_evaluated"
+		return classifyNumeric(probe.value, *definition.Threshold), &probe.value, "threshold_evaluated", nil
 	case "service":
 		name, _ := definition.Params["service_name"].(string)
 		probe := e.service(ctx, cache, name)
 		if !probe.ok {
-			return "unknown", nil, probe.reason
+			return "unknown", nil, probe.reason, nil
 		}
 		value := 0.0
 		if probe.value == "running" {
 			value = 1
-			return "ok", &value, "service_running"
+			return "ok", &value, "service_running", nil
 		}
 		if probe.value == "absent" {
-			return "critical", &value, "service_absent"
+			return "critical", &value, "service_absent", nil
 		}
-		return "critical", &value, "service_not_running"
+		return "critical", &value, "service_not_running", nil
 	case "reboot_pending":
 		probe := e.reboot(ctx, cache)
 		if !probe.ok {
-			return "unknown", nil, probe.reason
+			return "unknown", nil, probe.reason, nil
+		}
+		// Which sources are set rides along as evidence so the server can state
+		// the cause. Whether any is set is still the only input to status.
+		extra := map[string]any{
+			"sources": map[string]any{
+				"component_based_servicing": probe.sources.ComponentBasedServicing,
+				"windows_update":            probe.sources.WindowsUpdate,
+				"pending_file_rename":       probe.sources.PendingFileRename,
+			},
+			"pending_file_rename_count": probe.sources.PendingFileRenameCount,
 		}
 		value := 0.0
-		if probe.value {
+		if probe.sources.Pending() {
 			value = 1
-			return "critical", &value, "reboot_pending"
+			return "critical", &value, "reboot_pending", extra
 		}
-		return "ok", &value, "reboot_not_pending"
+		return "ok", &value, "reboot_not_pending", extra
 	case "offline":
-		return "unknown", nil, "server_owned_check"
+		return "unknown", nil, "server_owned_check", nil
 	default:
-		return "unknown", nil, "unsupported_check_type"
+		return "unknown", nil, "unsupported_check_type", nil
 	}
 }
 
@@ -244,16 +261,16 @@ func (e *Evaluator) service(ctx context.Context, cache *probeCache, name string)
 	return result
 }
 
-func (e *Evaluator) reboot(ctx context.Context, cache *probeCache) probeBool {
+func (e *Evaluator) reboot(ctx context.Context, cache *probeCache) probeReboot {
 	if cache.reboot != nil {
 		return *cache.reboot
 	}
 	if cache.remaining <= 0 {
-		return probeBool{reason: "probe_budget_exhausted"}
+		return probeReboot{reason: "probe_budget_exhausted"}
 	}
 	cache.remaining--
-	value, ok, reason := e.probe.RebootPending(ctx)
-	result := probeBool{value: value, ok: ok, reason: reason}
+	sources, ok, reason := e.probe.RebootPending(ctx)
+	result := probeReboot{sources: sources, ok: ok, reason: reason}
 	cache.reboot = &result
 	return result
 }

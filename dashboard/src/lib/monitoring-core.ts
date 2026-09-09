@@ -136,18 +136,35 @@ export type RebootRecentInstall = {
   hresult: string | null;
 };
 
+export type RebootVerdict = "unknown" | "update_caused" | "not_update_caused";
+
+export type RebootSources = {
+  component_based_servicing: boolean;
+  windows_update: boolean;
+  pending_file_rename: boolean;
+  pending_file_rename_count: number | null;
+};
+
 export type RebootCause = {
+  cause: RebootVerdict;
+  sources: RebootSources | null;
   reboot_flagged_updates: RebootFlaggedUpdate[];
   recent_installs: RebootRecentInstall[];
   system_reboot_required: boolean | null;
   scanned_at: string | null;
-  snapshot_received_at: string;
+  snapshot_received_at: string | null;
 };
 
 export type RebootCorrelationPresentation = {
-  state: "unavailable" | "update_correlated" | "no_evidence";
+  state: "unavailable" | "update_caused" | "not_update_caused";
   title: string;
   summary: string;
+  // The categorical verdict above and the correlated inventory below it are
+  // separate claims, so they carry separate copy.
+  correlation: {
+    state: "unavailable" | "update_correlated" | "no_evidence";
+    summary: string;
+  };
 };
 
 export type MonitoringAlertDetail = MonitoringAlert & {
@@ -441,6 +458,10 @@ function nullableBoolean(value: unknown): value is boolean | null {
   return value === null || typeof value === "boolean";
 }
 
+function isRebootVerdict(value: unknown): value is RebootVerdict {
+  return value === "unknown" || value === "update_caused" || value === "not_update_caused";
+}
+
 function rebootFlaggedUpdateFromUnknown(value: unknown): RebootFlaggedUpdate | null {
   if (!isRecord(value)
       || typeof value.title !== "string"
@@ -479,19 +500,44 @@ function rebootRecentInstallFromUnknown(value: unknown): RebootRecentInstall | n
   };
 }
 
+function rebootSourcesFromUnknown(value: unknown): RebootSources | null {
+  if (!isRecord(value)
+      || typeof value.component_based_servicing !== "boolean"
+      || typeof value.windows_update !== "boolean"
+      || typeof value.pending_file_rename !== "boolean"
+      || !(value.pending_file_rename_count === null
+        || (Number.isInteger(value.pending_file_rename_count)
+          && (value.pending_file_rename_count as number) >= 0))) return null;
+  return {
+    component_based_servicing: value.component_based_servicing,
+    windows_update: value.windows_update,
+    pending_file_rename: value.pending_file_rename,
+    pending_file_rename_count: value.pending_file_rename_count as number | null,
+  };
+}
+
 function rebootCauseFromUnknown(value: unknown): RebootCause | null {
   if (!isRecord(value)
+      || !isRebootVerdict(value.cause)
       || !Array.isArray(value.reboot_flagged_updates)
       || !Array.isArray(value.recent_installs)
       || value.recent_installs.length > 10
       || !nullableBoolean(value.system_reboot_required)
       || !nullableTimestamp(value.scanned_at)
-      || !isTimestamp(value.snapshot_received_at)) return null;
+      || !nullableTimestamp(value.snapshot_received_at)) return null;
+  // Absent sources are the pre-C2 agent case and are expected. A present but
+  // unparseable block is not, and a verdict other than "unknown" is meaningless
+  // without the sources it was derived from — reject both rather than guess.
+  const absent = value.sources === null || value.sources === undefined;
+  const sources = absent ? null : rebootSourcesFromUnknown(value.sources);
+  if (sources === null && (!absent || value.cause !== "unknown")) return null;
   const rebootFlaggedUpdates = value.reboot_flagged_updates.map(rebootFlaggedUpdateFromUnknown);
   const recentInstalls = value.recent_installs.map(rebootRecentInstallFromUnknown);
   if (!rebootFlaggedUpdates.every((item): item is RebootFlaggedUpdate => item !== null)
       || !recentInstalls.every((item): item is RebootRecentInstall => item !== null)) return null;
   return {
+    cause: value.cause,
+    sources,
     reboot_flagged_updates: rebootFlaggedUpdates,
     recent_installs: recentInstalls,
     system_reboot_required: value.system_reboot_required,
@@ -641,42 +687,61 @@ export function monitoringAlertDetailFromUnknown(value: unknown): MonitoringAler
   };
 }
 
+const REBOOT_VERDICT_COPY: Record<RebootVerdict, { title: string; summary: string }> = {
+  unknown: {
+    title: "Cause unavailable",
+    summary: "Agent predates cause reporting. Correlated update evidence is shown when available.",
+  },
+  update_caused: {
+    title: "Update-caused restart",
+    summary: "Windows Update reports an installed update waiting on a restart.",
+  },
+  not_update_caused: {
+    title: "Not an update restart",
+    summary: "A restart is pending from a source other than Windows Update.",
+  },
+};
+
 export function rebootCorrelationPresentation(
   detail: Record<string, unknown> | null,
   cause: RebootCause | null,
 ): RebootCorrelationPresentation | null {
   if (detail === null && cause === null) return null;
-  const sources = detail?.sources;
-  const sourceReportingAvailable = isRecord(sources)
-    && typeof sources.component_based_servicing === "boolean"
-    && typeof sources.windows_update === "boolean"
-    && typeof sources.pending_file_rename === "boolean";
-  if (!sourceReportingAvailable) {
-    return {
-      state: "unavailable",
-      title: "Cause unavailable",
-      summary: "Agent predates cause reporting. Correlated update evidence is shown when available.",
-    };
-  }
-  if (cause === null) {
-    return {
-      state: "unavailable",
-      title: "Cause unavailable",
+  // The verdict is the server's to make. A cause block that never arrived, or
+  // one whose sources an older agent never sent, must read as unknown and
+  // never as "not update-related".
+  const verdict: RebootVerdict = cause?.cause ?? "unknown";
+  const correlation = cause === null
+    ? {
+      state: "unavailable" as const,
       summary: "No Windows Update inventory snapshot is available for correlation.",
-    };
-  }
-  if (cause.reboot_flagged_updates.length > 0 || cause.recent_installs.length > 0) {
-    return {
-      state: "update_correlated",
-      title: "Update activity correlated",
-      summary: "Update activity was reported near this alert. This is correlation, not proof that an update caused the restart.",
-    };
-  }
+    }
+    : cause.reboot_flagged_updates.length > 0 || cause.recent_installs.length > 0
+      ? {
+        state: "update_correlated" as const,
+        summary: "Update activity was reported near this alert. This is correlation, not proof that an update caused the restart.",
+      }
+      : {
+        state: "no_evidence" as const,
+        summary: "No update activity was found in the 7-day correlation window. This does not rule out an update cause.",
+      };
   return {
-    state: "no_evidence",
-    title: "No correlated update activity",
-    summary: "No update activity was found in the 7-day correlation window. This does not rule out an update cause.",
+    state: verdict === "unknown" ? "unavailable" : verdict,
+    ...REBOOT_VERDICT_COPY[verdict],
+    correlation,
   };
+}
+
+export function rebootSourceLabels(sources: RebootSources): string[] {
+  const labels: string[] = [];
+  if (sources.component_based_servicing) labels.push("Component-Based Servicing");
+  if (sources.windows_update) labels.push("Windows Update");
+  if (sources.pending_file_rename) {
+    labels.push(sources.pending_file_rename_count === null
+      ? "Pending file rename"
+      : `Pending file rename (${sources.pending_file_rename_count})`);
+  }
+  return labels;
 }
 
 export function alertAssigneesFromUnknown(value: unknown): AlertAssignee[] | null {
