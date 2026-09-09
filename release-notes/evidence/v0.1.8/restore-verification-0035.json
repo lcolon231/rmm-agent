@@ -1,0 +1,25 @@
+{
+  "format": "nodelink-restore-verification",
+  "version": 1,
+  "created_at_utc": "2026-09-09T21:54:58.643394+00:00",
+  "status": "verified",
+  "schema_revision": "0035",
+  "expected_schema_revision": "0035",
+  "counts": {
+    "operators": 1,
+    "agents": 1,
+    "commands": 1,
+    "enrollment_tokens": 0,
+    "heartbeats": 0,
+    "audit_events": 5,
+    "audit_anchors": 1
+  },
+  "audit_chain_intact": true,
+  "anchors": [
+    {
+      "id": "3b31f101-c874-42d3-a142-d66340f2c5cd",
+      "intact": true
+    }
+  ],
+  "failures": []
+}
