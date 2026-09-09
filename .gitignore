@@ -55,3 +55,8 @@ config.json
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local agent skill installations
+/.agents/skills/
+/.claude/skills/
+/skills-lock.json
