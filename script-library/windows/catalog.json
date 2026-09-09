@@ -1,0 +1,35 @@
+[
+  {
+    "name": "Windows health check",
+    "file": "health-check.ps1",
+    "language": "powershell",
+    "description": "Read-only OS, uptime, memory, disk capacity, Defender, reboot indicators, and stopped automatic service report. Failed sections report unavailable; collection status is not a health verdict.",
+    "tags": ["windows", "health", "diagnostics"],
+    "supported_platforms": ["windows"],
+    "parameters": []
+  },
+  {
+    "name": "Windows temporary file cleanup",
+    "file": "disk-cleanup.ps1",
+    "language": "powershell",
+    "description": "Preview or delete old files directly inside Windows Temp. Skips subdirectories and reparse points. Defaults to preview and a seven-day minimum age. Reports candidate and deleted bytes and file counts.",
+    "tags": ["windows", "disk", "maintenance"],
+    "supported_platforms": ["windows"],
+    "parameters": [
+      { "key": "Preview", "label": "Preview only", "kind": "boolean", "required": false, "default_value": true },
+      { "key": "MinimumAgeDays", "label": "Minimum file age (whole days)", "kind": "number", "required": false, "default_value": 7, "minimum": 1, "maximum": 365 }
+    ]
+  },
+  {
+    "name": "Windows service management",
+    "file": "service-management.ps1",
+    "language": "powershell",
+    "description": "Show status, start, stop, or restart one exact Windows service name. Defaults to status. Does not force dependent services to stop or change startup configuration.",
+    "tags": ["windows", "services", "maintenance"],
+    "supported_platforms": ["windows"],
+    "parameters": [
+      { "key": "ServiceName", "label": "Exact service name", "kind": "string", "required": true, "min_length": 1, "max_length": 256 },
+      { "key": "Action", "label": "Action", "kind": "choice", "required": false, "default_value": "status", "choices": ["status", "start", "stop", "restart"] }
+    ]
+  }
+]
