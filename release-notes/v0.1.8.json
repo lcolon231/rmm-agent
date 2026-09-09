@@ -1,0 +1,149 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "v0.1.8",
+    "title": "NodeLink v0.1.8 states why a Windows restart is pending",
+    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after the sole repository owner reviewed and accepted the release evidence. This is a feature release on top of v0.1.7. Its headline agent change makes the reboot_pending check report which Windows reboot-required registry source is set instead of whether any is, so a pending-restart alert can state categorically whether an installed update is waiting on the restart. Categorical restart-cause reporting requires agent 0.1.8 or later; there is no server-side substitute for reading the endpoint's own registry. The release also carries the server, dashboard, and authorization work merged since v0.1.7, which adds Alembic revisions 0036 through 0042. It is not approved for multi-tenant or high-availability claims."
+  },
+  "server": {
+    "tag": "v0.1.8",
+    "deployment": "Deploy source from the exact commit bound to v0.1.8 by the release workflow. The server side of the restart-cause work reads the agent-reported sources object out of the stored reboot_pending result detail and derives a categorical verdict on the single-alert detail response; it stores no new column and adds no endpoint. Revisions 0036 through 0042, merged since v0.1.7 for MeshCentral launch mapping, tenant-scoped authorization, WebAuthn and email-code MFA, administrative and break-glass sessions, approval workflows, and encrypted dashboard assistant history, must be applied before the server serves traffic."
+  },
+  "agent": {
+    "version": "0.1.8",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "0.1.8",
+    "filename": "NodeLinkAgentSetup-0.1.8.exe"
+  },
+  "database": {
+    "alembic_revision": "0042",
+    "compatible_from": [
+      "0001",
+      "0012",
+      "0029",
+      "0035",
+      "0042"
+    ],
+    "migration_policy": "Migrations are forward-only. v0.1.8 adds seven revisions since v0.1.7's 0035: 0036 (MeshCentral remote-desktop launch mapping and audit metadata), 0037 (operator-client memberships and platform admin), 0038 (WebAuthn MFA credentials and audited recovery), 0039 (administrative session management and break-glass access), 0040 (email one-time-code second factor), 0041 (approval workflows and two-person authorization), and 0042 (private encrypted dashboard assistant history). All seven are additive; no column is dropped or narrowed and no existing row is rewritten. The restart-cause work in this release adds no revision of its own and stores nothing new. A v0.1.7 database at 0035 runs the seven revisions with alembic upgrade head; a v0.1.5 database at 0029 upgrades forward through 0030 to 0035 first; a v0.1.2 database upgrades from 0012 and an unversioned public v0.1.1 database must pass guarded schema adoption at 0001 before upgrading. Never edit a revision or perform an in-place downgrade. PostgreSQL enum values added by 0036 through 0042 cannot be removed in place, so crossing back below 0042 requires the exact-revision restore procedure in docs/ROLLBACK.md rather than an Alembic downgrade."
+  },
+  "protocols": {
+    "command_envelopes": [
+      "command-v3"
+    ],
+    "mixed_version_behavior": "command-v3 is unchanged from v0.1.7, and no command kind is added or removed, so a v0.1.7 and a v0.1.8 agent are protocol-identical and a mixed fleet needs no staging. The restart-cause change travels entirely in existing fields: a v0.1.8 agent adds a sources object and a pending_file_rename_count key to the bounded reboot_pending result detail it already sends, well inside the 16 KiB detail cap, and an older server ignores both. A v0.1.7 or earlier endpoint sends no sources key, so its pending-restart alerts report verdict unknown and read as cause unavailable while still showing correlated update activity, labelled as correlation. No alert changes state as a result of this release: pending is still critical, any source set is still pending, and a failed or unsupported probe is still unknown with reboot_probe_failed. Roll the server out before the agent, as for every monitoring change."
+  },
+  "known_limitations": [
+    "Categorical restart-cause reporting requires agent 0.1.8 or later. Endpoints on 0.1.7 or earlier report no reboot sources, so their pending-restart alerts state verdict unknown. Absence of a sources key means the cause is unknown and must never be read as evidence that a restart is not update-related.",
+    "The pending file-rename count is best-effort. The registry presence test stays the authority for check status, so a failed count query omits the key rather than flipping a working check to unknown, and an absent key is never a zero. The file paths behind that count are deliberately never collected: PendingFileRenameOperations lists paths that routinely contain user names, and result detail is meant to stay safe to forward to alert email and third-party webhooks.",
+    "Pending-restart update correlation still requires a stored windows_updates inventory snapshot from a prior scan_updates command; reading an alert never starts a scan. A reported source object yields a verdict without one, but the correlated update lists stay empty until an endpoint has been scanned.",
+    "#24: Windows agent and installer artifacts are not Authenticode signed, so SmartScreen or antivirus warnings remain possible. Signed self-update artifacts use the existing Ed25519 command-signing trust, not Authenticode; an optional Authenticode signer-thumbprint pin is available once a certificate exists.",
+    "#84: Enrollment rate limits, counters, and metrics are process-local; no multi-worker or high-availability protection claim is made.",
+    "#126: Empty deployments must bootstrap the first client and site through the existing administrative API before using enrollment.",
+    "This manifest's backup, restore, and rollback rehearsal evidence was produced against a disposable rehearsal database seeded with a representative dataset (server/tests/test_backup_restore.py shape), not a production database, and has no external immutable audit-anchor receipt to cross-check because anchor publication is opt-in and was not configured for the rehearsal.",
+    "Endpoint inventory, monitoring checks, alerting, patching, remediation, and self-update are Windows-first; Linux and macOS remain development-only builds with reduced or absent collectors and no self-update support (self-update is a Windows-only capability because committing an update requires the managed service restart). The reboot source probe is Windows-only and reports unsupported_platform elsewhere, exactly as the previous boolean probe did.",
+    "Alert email and signed webhook delivery are best-effort with process-local state; there is no multi-worker delivery deduplication or high-availability guarantee.",
+    "#179: an agent's reported version refreshes only on a successful authenticated heartbeat, so an offline, quarantined, or unauthenticated endpoint keeps displaying its last recorded version. Because restart-cause reporting is gated on agent version, an endpoint whose displayed version is stale may also be reporting sources the dashboard has not yet attributed to a 0.1.8 agent.",
+    "Agent self-update is disabled by default (per-agent update_channel is nullable and unset) and must be explicitly enrolled into a channel and targeted by an admin-authorized rollout; it never applies itself without an operator-published, signed release.",
+    "The automatic post-update health check and rollback covers process start and a bounded number of successful heartbeats; it does not evaluate application-level regressions beyond that window, so a release that misbehaves only after the health-check window is a forward-fix or operator-triggered rollback, not an automatic one.",
+    "This manifest's evidence is complete for the rollback procedure and the migration decision; the full release drill's production HTTPS deployment and Windows canary phases are not part of these records and remain operator tasks before broad rollout."
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "Pause enrollment, command dispatch, scheduled-task execution, agent self-update rollouts, server promotion, and external agent rollout automation.",
+      "Take a fresh encrypted backup of the live v0.1.7 (schema 0035) database with deploy/backup/nodelink-backup.sh and verify its manifest checksums. This release migrates 0035 to 0042, so this is a pre-migration recovery point and is the only supported way back to v0.1.7.",
+      "Confirm Python 3.12, PostgreSQL, command signing keys, production secrets, trusted-proxy settings, HTTPS public URL, and server-only dashboard API URL are configured.",
+      "Verify every release artifact checksum and GitHub build-provenance attestation, and confirm each agent binary reports 0.1.8 via `rmm-agent version -expect 0.1.8` rather than the unstamped 0.1.0-dev fallback."
+    ],
+    "steps": [
+      "Run `alembic upgrade head` against the v0.1.7 database to apply the seven additive revisions 0036 through 0042; the startup revision guard must report 0042 before serving traffic.",
+      "For a v0.1.5 database at 0029, upgrade forward through 0030 to 0035 first and then continue to 0042; for a v0.1.2 database upgrade from 0012, and for an unversioned public v0.1.1 database run guarded adoption to 0001 first.",
+      "Deploy the server and dashboard together from the workflow-bound v0.1.8 source commit.",
+      "Deploy the checksum-verified Windows agent or installer to one owned canary endpoint before expanding the rollout; the installer upgrades an enrolled endpoint in place without an enrollment token.",
+      "Leave every agent's update_channel unset (the default) until self-update has been separately qualified on the pilot topology; enrolling a channel is a deliberate, later operator action, not part of this upgrade."
+    ],
+    "verification": [
+      "Confirm Alembic current reports 0042 and health, readiness, metrics, login, and production configuration checks pass over verified HTTPS.",
+      "Confirm the upgraded canary endpoint keeps its agent ID and credentials and reports agent version 0.1.8 after its first heartbeat.",
+      "On a canary endpoint with a pending restart, confirm the reboot_pending result detail carries a sources object with the three boolean keys and, when a file rename is queued, a pending_file_rename_count integer, and confirm the alert detail reports a verdict of update_caused or not_update_caused accordingly.",
+      "Confirm the same alert reports verdict unknown and reads as cause unavailable on an endpoint still running 0.1.7, and that its correlated update activity is still shown and still labelled as correlation.",
+      "Confirm no reboot_pending alert changed state across the upgrade: a pending restart stays critical, no pending restart stays ok, and a failed probe stays unknown.",
+      "Confirm no file path appears anywhere in a reboot_pending result detail, alert email body, or webhook delivery payload.",
+      "Confirm heartbeat, audit sequence, expected metric deltas, token revocation, agent revocation, and post-revocation authentication rejection."
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "Prefer a forward fix. v0.1.8 adds seven additive revisions on top of v0.1.7's 0035; if the current database is still at 0035 because the server redeploy failed before migrating, the planner resolves to redeploy_without_database_restore and no restore is needed.",
+      "If the database has already migrated to 0042, a component rollback to v0.1.7 requires restoring the retained pre-migration 0035 backup, because the PostgreSQL enum values added by 0036 through 0042 cannot be removed in place and there is no Alembic downgrade. This was rehearsed for this tag with server/scripts/plan_release_rollback.py against a 0035 recovery point, and the retained plan records status ready, action restore_backup_then_redeploy, restore_required true, and data_loss_accepted true.",
+      "Before rolling back, pause rollout, agent self-update, and writers, and name the decision maker; restoring the pre-migration backup discards every write made after that backup, including MFA enrollments, administrative and break-glass session records, approval decisions, and dashboard assistant history created under v0.1.8.",
+      "Rolling back reinstates the v0.1.7 restart-attribution behavior: the endpoint reports only whether some reboot source is set, so every pending-restart alert reverts to cause unavailable with correlated update evidence only. No alert changes state, because status never depended on the sources.",
+      "If artifact, audit, or startup verification fails, keep promotion blocked and continue with a reviewed forward fix."
+    ],
+    "target": {
+      "server": {
+        "tag": "v0.1.7",
+        "commit": "006060c2b45d4998ab57498f7f9dc65df961d9a2"
+      },
+      "agent": {
+        "version": "0.1.7",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "ed5aea62be3409112428d4b28e8639255c02ac24f017ede279e7022126760a22",
+          "rmm-agent-linux-amd64": "e5ba628fbda1565c70d08681290cfe1ddf59bf6316f4e35f9850e1d89d514557",
+          "rmm-agent-darwin-arm64": "c00a13c0faa2e861751f611b2df8cf1a75092899cc6d5376b61a7dba33b33d1e"
+        }
+      },
+      "installer": {
+        "filename": "NodeLinkAgentSetup-0.1.7.exe",
+        "sha256": "84add1fca865a4ca5177a79138a32b5267c8f8c0e8bed4bac9a2597dae8206d6"
+      },
+      "database": {
+        "alembic_revision": "0035",
+        "backup_manifest": {
+          "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/2759531a877314767e9dac79b42623a87ca6a2a0/release-notes/evidence/v0.1.8/nodelink-backup-20260909T215426Z.manifest.json",
+          "sha256": "ef66c50ec2809b08f1b1d0e1841f2828599078799d9ac86e24aed510b2ab19f4"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "command-v3"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "The restart-cause work in v0.1.8 changes no authorization, TLS, signing, or audit behavior and adds no endpoint capability, but it does widen what one existing check reports about an endpoint. The agent now sends three reboot-source booleans and a queued file-rename count where it previously sent one boolean. The registry value behind that count lists file paths that routinely contain user names and installer temp directories, so the count is computed on the endpoint and the paths are never collected, never transmitted, and cannot be reconstructed from anything this release sends. Pattern-based redaction was deliberately not used as the control here: it could not reliably strip a user name from an arbitrary path, and relying on it would be a false guarantee rather than a fix.",
+    "fixed_vulnerabilities": [
+      "No vulnerability is fixed by the restart-cause work and no security boundary failed in v0.1.7. What it corrects is an information gap rather than an exposure: a technician could not tell an update-caused restart from a servicing or file-rename restart, and the server could only offer inventory proximity as circumstantial evidence."
+    ],
+    "new_risks": [
+      "Result detail for a reboot_pending check is slightly wider than in v0.1.7, carrying three booleans and an integer that describe endpoint state. This is bounded by the server's 16 KiB detail cap, the agent emitting no other reboot field, and the probe having no code path that returns a path; the added keys measure under 512 bytes in the worst case.",
+      "The categorical verdict is derived from agent-reported registry state and is only as trustworthy as the endpoint reporting it. A compromised endpoint could report a source that is not set, exactly as it could previously report a pending restart that was not pending; the verdict is triage information and is not used for any authorization or dispatch decision.",
+      "Revisions 0036 through 0042 carried by this release introduce MFA, administrative session, break-glass, and approval records. Those subsystems shipped with their own controls, but the pre-migration 0035 recovery point predates all of them, so a rollback discards that security-relevant history rather than downgrading it.",
+      "#24 remains open because Windows artifacts are unsigned and require checksum and provenance verification; the self-update Authenticode signer-thumbprint pin is therefore not enforced by default.",
+      "#84 remains open because enrollment limiting and counters are process local."
+    ],
+    "operator_actions": [
+      "Take and verify a fresh encrypted backup of the live 0035 database before promoting. This release migrates the schema, so that pre-migration backup is the only supported way back to v0.1.7 and its loss makes the rollback path unavailable.",
+      "After upgrading endpoints, treat a pending-restart alert that still reads cause unavailable as an endpoint that has not reached agent 0.1.8, and check its reported version rather than concluding the restart is not update-related.",
+      "Leave every agent's update_channel unset after upgrading; do not enroll endpoints into a self-update channel until the rollout, health-check, and rollback behavior has been separately qualified on the pilot topology.",
+      "Because independent second-operator review is not available, the sole release operator must personally verify the complete v0.1.8 evidence index, retained digests, preflight result, and green release checks before tagging.",
+      "Complete the production HTTPS deployment and Windows canary phases of the release drill and retain their evidence before broad rollout."
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/2759531a877314767e9dac79b42623a87ca6a2a0/release-notes/evidence/v0.1.8/restore-verification-0035.json",
+      "sha256": "e54fb840e9ebce28dc4c9b494d4c3dcaf53c22a326b82ac97768d8b9e0b326ae"
+    },
+    "rollback_rehearsal": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/2759531a877314767e9dac79b42623a87ca6a2a0/release-notes/evidence/v0.1.8/rollback-plan-v018-to-v017.json",
+      "sha256": "9e1b95d255c574d27dc6c0bea39e0cec8a5962d3088bf2f9e8df9575d6a99b5d"
+    }
+  }
+}

@@ -20,7 +20,7 @@ from enum import Enum
 import json
 import math
 import re
-from typing import Annotated
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -555,11 +555,29 @@ class AlertObservationOut(BaseModel):
     created_at: datetime
 
 
-class RebootCauseOut(BaseModel):
-    """Update inventory correlated with a pending-restart alert.
+class RebootSourcesOut(BaseModel):
+    """Which Windows reboot-required registry sources the endpoint reported.
 
-    The fields are evidence, not a causal verdict. Source attribution is absent
-    for agents that predate reboot-source reporting.
+    Only ``windows_update`` means an installed update is waiting on a restart.
+    ``pending_file_rename_count`` is a count and never a path: the paths behind
+    it routinely contain user names, and this payload is meant to stay safe to
+    forward to alert email and third-party webhooks. It is best-effort and null
+    when unavailable.
+    """
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+    component_based_servicing: bool
+    windows_update: bool
+    pending_file_rename: bool
+    pending_file_rename_count: int | None = Field(default=None, ge=0)
+
+
+class RebootCauseOut(BaseModel):
+    """Why a restart is pending, plus correlated update inventory.
+
+    ``verdict`` is categorical and derives only from ``sources``. The update
+    lists stay correlation evidence and never become a cause. Agents that
+    predate reboot-source reporting send no sources and yield ``unknown``.
     """
 
     model_config = ConfigDict(from_attributes=True, extra="forbid")
@@ -567,7 +585,9 @@ class RebootCauseOut(BaseModel):
     recent_installs: list[InstalledUpdate] = Field(default_factory=list, max_length=10)
     system_reboot_required: bool | None = None
     scanned_at: datetime | None = None
-    snapshot_received_at: datetime
+    snapshot_received_at: datetime | None = None
+    sources: RebootSourcesOut | None = None
+    verdict: Literal["update_caused", "not_update_caused", "unknown"] = "unknown"
 
 
 class AlertDetailOut(AlertOut):

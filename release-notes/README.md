@@ -5,6 +5,13 @@ Every version tag requires a source manifest at
 and replace every required value before creating the tag. The template is
 intentionally invalid until completed.
 
+Facts that a merged change makes the next tag responsible for stating — a
+required agent version, a new known limitation — are accumulated in
+[`PENDING.md`](PENDING.md) as they land, and folded into the manifest when the
+tag is cut. A feature branch records them there rather than drafting a manifest
+early, because a manifest is bound to artifacts and evidence that do not exist
+until release time.
+
 The release gate has two fail-closed phases:
 
 1. **Preflight**, before tests or builds, validates the tag, component

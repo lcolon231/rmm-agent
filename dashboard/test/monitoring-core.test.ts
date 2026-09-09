@@ -16,6 +16,7 @@ import {
   monitoringAlertDetailFromUnknown,
   monitoringAlertListFromUnknown,
   rebootCorrelationPresentation,
+  rebootVerdictFromSources,
   validateAlertActionInput,
   webhookEndpointListFromUnknown,
   webhookEndpointSecretFromUnknown,
@@ -183,6 +184,11 @@ test("alert list and detail parsers return only allowlisted operational data", (
       system_reboot_required: true,
       scanned_at: "2026-08-01T09:58:00Z",
       snapshot_received_at: "2026-08-01T09:59:00Z",
+      sources: {
+        component_based_servicing: false, windows_update: true,
+        pending_file_rename: false, pending_file_rename_count: null,
+      },
+      verdict: "update_caused",
     },
     events: [{
       id: "event-1", alert_id: "alert-1", generation: 1, event_type: "opened",
@@ -201,6 +207,8 @@ test("alert list and detail parsers return only allowlisted operational data", (
   assert.equal(detail.events[0].event_type, "opened");
   assert.equal(detail.last_result_detail?.reason, "reboot_pending");
   assert.equal(detail.reboot_cause?.recent_installs[0].kb_id, "KB-RECENT");
+  assert.equal(detail.reboot_cause?.verdict, "update_caused");
+  assert.equal(detail.reboot_cause?.sources?.windows_update, true);
   assert.doesNotMatch(JSON.stringify(detail), /password|secret/);
 });
 
@@ -222,46 +230,144 @@ test("alert detail degrades malformed or absent reboot correlation to null", () 
   assert.equal(malformed.reboot_cause, null);
 });
 
-test("reboot correlation presentation distinguishes unavailable, evidence, and no-evidence states", () => {
-  const unavailable = rebootCorrelationPresentation(
-    { reason: "reboot_pending" },
-    {
-      reboot_flagged_updates: [], recent_installs: [], system_reboot_required: true,
-      scanned_at: null, snapshot_received_at: "2026-08-01T09:59:00Z",
-    },
-  );
-  assert.equal(unavailable?.state, "unavailable");
-  assert.match(unavailable?.summary ?? "", /agent predates cause reporting/i);
+const causeWith = (overrides: Record<string, unknown> = {}) => ({
+  reboot_flagged_updates: [], recent_installs: [], system_reboot_required: true,
+  scanned_at: null, snapshot_received_at: "2026-08-01T09:59:00Z",
+  sources: null, verdict: "unknown" as const, ...overrides,
+});
 
-  const sourceDetail = {
-    reason: "reboot_pending",
-    sources: {
-      component_based_servicing: false,
-      windows_update: true,
-      pending_file_rename: false,
+const sourcesOf = (overrides: Record<string, unknown> = {}) => ({
+  component_based_servicing: false, windows_update: false,
+  pending_file_rename: false, pending_file_rename_count: null, ...overrides,
+});
+
+test("detail with no sources key still renders cause unavailable", () => {
+  const unavailable = rebootCorrelationPresentation({ reason: "reboot_pending" }, causeWith());
+  assert.equal(unavailable?.state, "unknown");
+  assert.equal(unavailable?.title, "Cause unavailable");
+  assert.match(unavailable?.summary ?? "", /agent predates cause reporting/i);
+  assert.equal(unavailable?.sources, null);
+
+  // Malformed sources are the same case: absence is never read as a negative.
+  const malformed = rebootCorrelationPresentation(
+    { reason: "reboot_pending", sources: { windows_update: true } },
+    causeWith(),
+  );
+  assert.equal(malformed?.state, "unknown");
+  assert.match(malformed?.summary ?? "", /agent predates cause reporting/i);
+  assert.equal(rebootCorrelationPresentation(null, null), null);
+});
+
+test("reboot presentation states the categorical cause from the reported sources", () => {
+  const updateCaused = rebootCorrelationPresentation(
+    { reason: "reboot_pending", sources: sourcesOf({ windows_update: true }) },
+    causeWith({ sources: sourcesOf({ windows_update: true }), verdict: "update_caused" }),
+  );
+  assert.equal(updateCaused?.state, "update_caused");
+  assert.match(updateCaused?.summary ?? "", /installed update is waiting on a restart/i);
+
+  const fileRenameOnly = rebootCorrelationPresentation(
+    {
+      reason: "reboot_pending",
+      sources: sourcesOf({ pending_file_rename: true }),
+      pending_file_rename_count: 3,
     },
-  };
-  const correlated = rebootCorrelationPresentation(sourceDetail, {
-    reboot_flagged_updates: [],
+    causeWith({
+      sources: sourcesOf({ pending_file_rename: true, pending_file_rename_count: 3 }),
+      verdict: "not_update_caused",
+    }),
+  );
+  assert.equal(fileRenameOnly?.state, "not_update_caused");
+  assert.match(fileRenameOnly?.summary ?? "", /no windows update restart flag is set/i);
+  assert.match(fileRenameOnly?.summary ?? "", /3 pending file renames/);
+
+  const servicingOnly = rebootCorrelationPresentation(
+    { reason: "reboot_pending", sources: sourcesOf({ component_based_servicing: true }) },
+    null,
+  );
+  assert.equal(servicingOnly?.state, "not_update_caused");
+  assert.match(servicingOnly?.summary ?? "", /component-based servicing/);
+
+  // Nothing set is contradictory for a pending restart; stay unknown.
+  const nothingSet = rebootCorrelationPresentation(
+    { reason: "reboot_pending", sources: sourcesOf() },
+    null,
+  );
+  assert.equal(nothingSet?.state, "unknown");
+  assert.match(nothingSet?.summary ?? "", /no restart source set/i);
+});
+
+test("reboot presentation keeps correlated evidence labelled as correlation", () => {
+  const detail = { reason: "reboot_pending", sources: sourcesOf({ windows_update: true }) };
+  const correlated = rebootCorrelationPresentation(detail, causeWith({
     recent_installs: [{
       kb_id: "KB-RECENT", update_id: null, revision_number: null, title: "Update",
       description: null, installed_on: "2026-08-01T08:00:00Z", installed_by: null,
       client_application_id: null, support_url: null, result_code: null, hresult: null,
     }],
-    system_reboot_required: true,
     scanned_at: "2026-08-01T09:58:00Z",
-    snapshot_received_at: "2026-08-01T09:59:00Z",
-  });
-  assert.equal(correlated?.state, "update_correlated");
-  assert.match(correlated?.summary ?? "", /correlation, not proof/i);
+    sources: sourcesOf({ windows_update: true }),
+    verdict: "update_caused",
+  }));
+  assert.equal(correlated?.state, "update_caused");
+  assert.equal(correlated?.correlation.state, "update_correlated");
+  assert.match(correlated?.correlation.summary ?? "", /correlation, not proof/i);
 
-  const noEvidence = rebootCorrelationPresentation(sourceDetail, {
-    reboot_flagged_updates: [], recent_installs: [], system_reboot_required: false,
-    scanned_at: null, snapshot_received_at: "2026-08-01T09:59:00Z",
+  const noEvidence = rebootCorrelationPresentation(detail, causeWith({
+    system_reboot_required: false,
+    sources: sourcesOf({ windows_update: true }),
+    verdict: "update_caused",
+  }));
+  assert.equal(noEvidence?.correlation.state, "no_evidence");
+  assert.match(noEvidence?.correlation.summary ?? "", /does not rule out/i);
+
+  // A categorical verdict does not need an inventory snapshot to stand.
+  const noSnapshot = rebootCorrelationPresentation(detail, null);
+  assert.equal(noSnapshot?.state, "update_caused");
+  assert.equal(noSnapshot?.correlation.state, "unavailable");
+});
+
+test("reboot verdict derives only from the sources that are set", () => {
+  assert.equal(rebootVerdictFromSources(null), "unknown");
+  assert.equal(rebootVerdictFromSources(sourcesOf()), "unknown");
+  assert.equal(rebootVerdictFromSources(sourcesOf({ windows_update: true })), "update_caused");
+  assert.equal(
+    rebootVerdictFromSources(sourcesOf({ component_based_servicing: true })),
+    "not_update_caused",
+  );
+  assert.equal(
+    rebootVerdictFromSources(sourcesOf({ pending_file_rename: true })),
+    "not_update_caused",
+  );
+  assert.equal(
+    rebootVerdictFromSources(sourcesOf({
+      component_based_servicing: true, windows_update: true, pending_file_rename: true,
+    })),
+    "update_caused",
+  );
+});
+
+test("no file path can reach the rendered reboot detail", () => {
+  const detail = monitoringAlertDetailFromUnknown({
+    ...alert,
+    events: [], observations: [], reboot_cause: null,
+    last_result_detail: {
+      reason: "reboot_pending",
+      pending_file_rename_count: 2,
+      pending_file_rename_paths: ["C:\\Users\\alice\\AppData\\tmp"],
+      sources: {
+        component_based_servicing: false, windows_update: false,
+        pending_file_rename: true,
+        paths: ["C:\\Users\\alice\\AppData\\tmp"],
+      },
+    },
   });
-  assert.equal(noEvidence?.state, "no_evidence");
-  assert.match(noEvidence?.summary ?? "", /does not rule out/i);
-  assert.equal(rebootCorrelationPresentation(null, null), null);
+  assert.ok(detail);
+  assert.deepEqual(detail.last_result_detail?.sources, {
+    component_based_servicing: false, windows_update: false, pending_file_rename: true,
+  });
+  assert.equal(detail.last_result_detail?.pending_file_rename_count, 2);
+  assert.doesNotMatch(JSON.stringify(detail.last_result_detail), /Users|alice|AppData/);
 });
 
 test("alert action input requires an idempotency key and bounded version", () => {
