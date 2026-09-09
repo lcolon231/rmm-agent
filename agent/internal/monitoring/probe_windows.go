@@ -65,8 +65,14 @@ func (platformProbe) RebootPending(ctx context.Context) (RebootStatus, bool, str
 		`$wu = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'; ` +
 		`$item = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue; ` +
 		`$pfr = $null -ne $item; $count = -1; ` +
-		`if ($pfr) { try { $entries = @($item.PendingFileRenameOperations); $count = 0; ` +
-		`for ($i = 0; $i -lt $entries.Count; $i += 2) { if (-not [string]::IsNullOrEmpty($entries[$i])) { $count++ } } } catch { $count = -1 } }; ` +
+		// The count stays -1 until the whole walk succeeds. A property getter
+		// that fails yields $null rather than raising, so an unreadable value
+		// must be tested for directly -- catch alone would let a failed query
+		// report zero, which reads as "no renames queued" rather than
+		// "unknown".
+		`if ($pfr) { $entries = $null; try { $entries = $item.PendingFileRenameOperations } catch { $entries = $null }; ` +
+		`if ($null -ne $entries) { $list = @($entries); $n = 0; ` +
+		`for ($i = 0; $i -lt $list.Count; $i += 2) { if (-not [string]::IsNullOrEmpty($list[$i])) { $n++ } }; $count = $n } }; ` +
 		`@($cbs.ToString().ToLowerInvariant(), $wu.ToString().ToLowerInvariant(), $pfr.ToString().ToLowerInvariant(), $count.ToString()) -join ([string][char]10)`
 	out, err := powerShell(ctx, script)
 	if err != nil {
