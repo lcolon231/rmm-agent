@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 set -e
 
 # This script helps initialize the ideas directory for the idea-refine skill.
