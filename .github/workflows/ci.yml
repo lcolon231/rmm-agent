@@ -45,6 +45,13 @@ jobs:
       - run: go vet ./...
       - run: go build ./...
       - run: go test ./...
+      # The Windows probe embeds a PowerShell script that nothing else runs:
+      # go test never calls RebootPending, which needs a real registry. This
+      # parses and executes the script against stubbed registry state, so a
+      # defect in it fails here rather than on an endpoint.
+      - name: reboot probe script behavior
+        shell: pwsh
+        run: pwsh -File test/reboot_probe_script.ps1
 
   agent-windows:
     name: agent (Go, Windows)
