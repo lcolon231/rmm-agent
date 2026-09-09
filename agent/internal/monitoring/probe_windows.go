@@ -52,15 +52,29 @@ func (platformProbe) ServiceState(ctx context.Context, name string) (string, boo
 	return strings.ToLower(out), true, "sample_collected"
 }
 
-func (platformProbe) RebootPending(ctx context.Context) (bool, bool, string) {
-	script := `$pending=(Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or ($null -ne (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue)); $pending.ToString().ToLowerInvariant()`
+func (platformProbe) RebootPending(ctx context.Context) (RebootStatus, bool, string) {
+	// Report each source separately rather than ORing them: only the
+	// WindowsUpdate key means an installed update is waiting on a restart.
+	//
+	// PendingFileRenameOperations is counted in place and its paths are never
+	// emitted -- they routinely contain user names, and result detail is meant
+	// to stay safe to forward to alert email and third-party webhooks. The
+	// count is best-effort: it emits -1 on any failure so that a count error
+	// cannot flip a working check to unknown.
+	script := `$cbs = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'; ` +
+		`$wu = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'; ` +
+		`$item = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue; ` +
+		`$pfr = $null -ne $item; $count = -1; ` +
+		`if ($pfr) { try { $entries = @($item.PendingFileRenameOperations); $count = 0; ` +
+		`for ($i = 0; $i -lt $entries.Count; $i += 2) { if (-not [string]::IsNullOrEmpty($entries[$i])) { $count++ } } } catch { $count = -1 } }; ` +
+		`@($cbs.ToString().ToLowerInvariant(), $wu.ToString().ToLowerInvariant(), $pfr.ToString().ToLowerInvariant(), $count.ToString()) -join ([string][char]10)`
 	out, err := powerShell(ctx, script)
 	if err != nil {
-		return false, false, "reboot_probe_failed"
+		return RebootStatus{}, false, "reboot_probe_failed"
 	}
-	value, err := strconv.ParseBool(out)
-	if err != nil {
-		return false, false, "reboot_probe_invalid"
+	status, ok := parseRebootProbeOutput(out)
+	if !ok {
+		return RebootStatus{}, false, "reboot_probe_invalid"
 	}
-	return value, true, "sample_collected"
+	return status, true, "sample_collected"
 }

@@ -77,10 +77,13 @@ added to `AlertOut` or the alerts list:
 
 - `last_result_detail` is the stored result detail for the alert's latest
   `reboot_pending` result; it is `null` for other check types.
-- `reboot_cause` is server-derived update correlation evidence with
-  `reboot_flagged_updates`, `recent_installs`, `system_reboot_required`,
-  `scanned_at`, and `snapshot_received_at`. It is `null` for a non-reboot
-  alert, a missing policy revision, or when no update inventory exists.
+- `reboot_cause` carries the categorical restart cause plus correlated update
+  evidence: `verdict`, `sources`, `reboot_flagged_updates`, `recent_installs`,
+  `system_reboot_required`, `scanned_at`, and `snapshot_received_at`. It is
+  `null` for a non-reboot alert, a missing policy revision, or when the agent
+  reported no sources *and* no update inventory exists. When sources are
+  reported but no inventory is stored, the verdict still stands and the
+  correlation fields are empty with a `null` `snapshot_received_at`.
 
 `recent_installs` contains at most ten entries, newest first, whose install
 timestamps fall between seven days before the alert first opened and the time
@@ -90,11 +93,23 @@ correlation evidence only: proximity to an alert does not establish that an
 update caused the pending restart. Reading an alert uses the latest stored
 `windows_updates` snapshot and never starts an update scan.
 
-Older agents do not report a `sources` key in result detail. Its absence means
-the cause is unknown and the dashboard says "Cause unavailable" while showing
-any correlated inventory beneath it. It must never be interpreted as "not
-update-related." A later agent capability may provide source attribution
-without changing this evidence contract.
+`verdict` is one of `update_caused`, `not_update_caused`, or `unknown`, derived
+solely from `sources` — the three Windows reboot-required registry signals the
+agent reports individually. Only `windows_update` means an installed update is
+waiting on a restart; `component_based_servicing` or `pending_file_rename`
+without it is `not_update_caused`. Correlated inventory never promotes a verdict.
+
+`sources` also carries a best-effort `pending_file_rename_count`. It is a count
+and never a path: `PendingFileRenameOperations` lists paths that routinely
+contain user names, and this payload is meant to stay safe to forward to alert
+email and third-party webhooks. The paths are deliberately never collected by
+the agent, so no redaction step stands between them and a webhook.
+
+Categorical cause reporting requires **agent 0.1.8 or later**. Agents before it
+report no `sources` key, so `sources` is `null`, `verdict` is `unknown`, and the
+dashboard says "Cause unavailable" while still showing any correlated inventory
+beneath it, labelled as correlation. Absence of `sources` must never be
+interpreted as "not update-related."
 
 Operator-or-higher technicians may use:
 

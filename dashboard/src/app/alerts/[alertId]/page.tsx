@@ -83,19 +83,37 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ al
       {rebootPresentation ? (
         <section className={`enrollment-panel reboot-correlation-panel ${rebootPresentation.state}`}>
           <header>
-            <div><span>Restart attribution</span><h2>Windows Update correlation</h2></div>
+            <div><span>Restart attribution</span><h2>Pending restart cause</h2></div>
             <PackageCheck size={19} />
           </header>
           <div className="reboot-correlation-status">
             <strong>{rebootPresentation.title}</strong>
             <p>{rebootPresentation.summary}</p>
           </div>
-          {alert.reboot_cause ? (
+          {rebootPresentation.sources ? (
+            <dl className="reboot-source-meta">
+              <div><dt>Windows Update</dt><dd>{rebootPresentation.sources.windows_update ? "Restart required" : "Not set"}</dd></div>
+              <div><dt>Component-based servicing</dt><dd>{rebootPresentation.sources.component_based_servicing ? "Restart required" : "Not set"}</dd></div>
+              <div>
+                <dt>Pending file renames</dt>
+                <dd>{!rebootPresentation.sources.pending_file_rename
+                  ? "Not set"
+                  : rebootPresentation.sources.pending_file_rename_count === null
+                    ? "Restart required · count unavailable"
+                    : `Restart required · ${rebootPresentation.sources.pending_file_rename_count} queued`}</dd>
+              </div>
+            </dl>
+          ) : null}
+          <div className={`reboot-correlation-note-block ${rebootPresentation.correlation.state}`}>
+            <strong>Correlation · {rebootPresentation.correlation.title}</strong>
+            <p>{rebootPresentation.correlation.summary}</p>
+          </div>
+          {alert.reboot_cause?.snapshot_received_at ? (
             <>
               <dl className="reboot-correlation-meta">
                 <div><dt>System reboot flag</dt><dd>{alert.reboot_cause.system_reboot_required === null ? "Unavailable" : alert.reboot_cause.system_reboot_required ? "Reported" : "Not reported"}</dd></div>
                 <div><dt>Update scan</dt><dd>{alert.reboot_cause.scanned_at ? formatMonitoringTimestamp(alert.reboot_cause.scanned_at) : "Unavailable"}</dd></div>
-                <div><dt>Snapshot received</dt><dd>{formatMonitoringTimestamp(alert.reboot_cause.snapshot_received_at)}</dd></div>
+                <div><dt>Snapshot received</dt><dd>{formatMonitoringTimestamp(alert.reboot_cause.snapshot_received_at ?? "")}</dd></div>
               </dl>
               <div className="reboot-correlation-evidence">
                 <article>

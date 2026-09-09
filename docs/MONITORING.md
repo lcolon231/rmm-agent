@@ -70,25 +70,88 @@ can have stale scan evidence. Keep both signals visible rather than treating one
 as a substitute for the other. See `docs/PATCH-COMPLIANCE.md` for the compliance
 state contract.
 
-### Pending-restart update correlation
+### Pending-restart cause
 
-Opening a `reboot_pending` alert correlates it with the endpoint's latest stored
-`windows_updates` inventory. The detail response includes missing updates that
-were individually flagged `reboot_required`, plus up to ten updates installed
-inside the seven-day window preceding the alert. It also includes the inventory
-scan and receipt timestamps so technicians can judge evidence freshness.
+Windows sets three independent reboot-required signals, and only one of them
+means an installed update is waiting on a restart:
+
+| Registry source | `sources` key | Means an update is waiting |
+|---|---|---|
+| `...\Component Based Servicing\RebootPending` | `component_based_servicing` | No |
+| `...\WindowsUpdate\Auto Update\RebootRequired` | `windows_update` | **Yes** |
+| `...\Session Manager!PendingFileRenameOperations` | `pending_file_rename` | No |
+
+The agent reports which of the three are set rather than whether any is. The
+`reboot_pending` result detail carries them as a `sources` object alongside a
+top-level `pending_file_rename_count`:
+
+```json
+{
+  "check_type": "reboot_pending",
+  "reason": "reboot_pending",
+  "sources": {
+    "component_based_servicing": false,
+    "windows_update": true,
+    "pending_file_rename": false
+  },
+  "pending_file_rename_count": 0
+}
+```
+
+From that the server states a categorical `verdict` on the alert detail:
+`update_caused` when `windows_update` is set, `not_update_caused` when another
+source is set without it, and `unknown` otherwise. The dashboard renders the
+verdict as the headline of the restart-attribution panel.
+
+**Required agent version: 0.1.8 or later.** Source reporting needs an agent
+release; there is no server-side substitute for reading the endpoint's own
+registry. Endpoints on 0.1.7 or earlier send no `sources` key, keep the
+`unknown` verdict, and read as "Cause unavailable". Absence of `sources` must
+never be treated as evidence that the restart is not update-related.
+
+#### File paths are never collected
+
+`PendingFileRenameOperations` lists file paths that routinely contain user
+names (`C:\Users\<name>\...`) and sometimes installer temp paths that
+disclose internal software. `CheckResult.detail` is the alert payload operators
+and integrations read, and is meant to stay safe to forward to alert email and
+third-party webhooks, so a path there would leave the tenant boundary — while
+adding almost nothing to triage, since knowing a file-rename restart is pending
+is the actionable fact. The agent counts the entries in place and reports only
+`pending_file_rename_count`; no code path returns a path, and `redaction.py` is
+not relied on here because its pattern matching could not reliably strip a user
+name from an arbitrary path.
+
+The count is best-effort. The presence test stays the authority for status, so a
+failed count query omits the key rather than flipping a working check to
+`unknown`; an absent key is never read as zero.
+
+#### Correlated update activity
+
+Separately from the verdict, opening a `reboot_pending` alert correlates it with
+the endpoint's latest stored `windows_updates` inventory. The detail response
+includes missing updates that were individually flagged `reboot_required`, plus
+up to ten updates installed inside the seven-day window preceding the alert. It
+also includes the inventory scan and receipt timestamps so technicians can judge
+evidence freshness.
 
 This read path never dispatches `scan_updates`; correlation is available only
-from inventory already stored by a prior scan. A missing snapshot therefore
-produces no cause block. A deleted policy revision also produces no cause block
+from inventory already stored by a prior scan. A missing snapshot produces no
+correlation evidence — though a reported `sources` object still yields a
+verdict, because the verdict is a property of the endpoint's registry state and
+needs no inventory. A deleted policy revision produces no cause block at all,
 because the server can no longer safely resolve the alert's check type.
 
-Inventory timing is supporting evidence, not a causal verdict. In particular,
-agents deployed before reboot-source reporting have no `sources` key in their
-result detail. The dashboard labels those alerts "Cause unavailable" even when
-it can list nearby update activity. Absence of `sources` must never be treated
-as evidence that the restart is not update-related. The alert's lifecycle,
-severity, suppression, and notification behavior are unchanged.
+Inventory timing is supporting evidence, not a causal verdict, and the dashboard
+labels it as correlation wherever it appears.
+
+#### Status is unchanged
+
+Reporting sources moves no status. Pending is still `critical`, any source set
+is still pending, and a failed or unsupported probe is still `unknown` with
+`reboot_probe_failed`. Alert lifecycle, severity, suppression, and notification
+behavior are unchanged, and the added detail keys cost well under 512 bytes
+against the 16 KiB result-detail cap.
 
 Numeric checks evaluate critical before warning and support `gt`, `gte`, `lt`,
 and `lte`. CPU, memory, and disk results must remain in the inclusive 0–100
