@@ -6,7 +6,7 @@ import "context"
 type Probe interface {
 	DiskPercent(context.Context, string) (float64, bool, string)
 	ServiceState(context.Context, string) (string, bool, string)
-	RebootPending(context.Context) (bool, bool, string)
+	RebootPending(context.Context) (RebootStatus, bool, string)
 }
 
 type platformProbe struct{}

@@ -136,18 +136,44 @@ export type RebootRecentInstall = {
   hresult: string | null;
 };
 
+/** Which Windows reboot-required registry sources the endpoint reported set.
+ *
+ * Only `windows_update` means an installed update is waiting on a restart.
+ * `pending_file_rename_count` is a count and never a path: the paths behind it
+ * routinely contain user names and are deliberately never collected. */
+export type RebootSources = {
+  component_based_servicing: boolean;
+  windows_update: boolean;
+  pending_file_rename: boolean;
+  pending_file_rename_count: number | null;
+};
+
+/** Categorical restart cause. `unknown` covers agents that predate source
+ * reporting; it is never inferred from silence. */
+export type RebootCauseVerdict = "update_caused" | "not_update_caused" | "unknown";
+
 export type RebootCause = {
   reboot_flagged_updates: RebootFlaggedUpdate[];
   recent_installs: RebootRecentInstall[];
   system_reboot_required: boolean | null;
   scanned_at: string | null;
-  snapshot_received_at: string;
+  snapshot_received_at: string | null;
+  sources: RebootSources | null;
+  verdict: RebootCauseVerdict;
 };
 
+/** The categorical verdict, plus the correlated update evidence kept plainly
+ * labelled as correlation so the two are never read as one claim. */
 export type RebootCorrelationPresentation = {
-  state: "unavailable" | "update_correlated" | "no_evidence";
+  state: RebootCauseVerdict;
   title: string;
   summary: string;
+  sources: RebootSources | null;
+  correlation: {
+    state: "unavailable" | "update_correlated" | "no_evidence";
+    title: string;
+    summary: string;
+  };
 };
 
 export type MonitoringAlertDetail = MonitoringAlert & {
@@ -479,6 +505,38 @@ function rebootRecentInstallFromUnknown(value: unknown): RebootRecentInstall | n
   };
 }
 
+function isVerdict(value: unknown): value is RebootCauseVerdict {
+  return value === "update_caused" || value === "not_update_caused" || value === "unknown";
+}
+
+/** Reads the reported sources, or null when the key is absent or malformed --
+ * that is an agent predating source reporting, not a negative answer. The
+ * count degrades on its own: an invalid count never discards the flags. */
+function rebootSourcesFromUnknown(value: unknown): RebootSources | null {
+  if (!isRecord(value)
+      || typeof value.component_based_servicing !== "boolean"
+      || typeof value.windows_update !== "boolean"
+      || typeof value.pending_file_rename !== "boolean") return null;
+  const count = value.pending_file_rename_count;
+  return {
+    component_based_servicing: value.component_based_servicing,
+    windows_update: value.windows_update,
+    pending_file_rename: value.pending_file_rename,
+    pending_file_rename_count:
+      Number.isInteger(count) && (count as number) >= 0 ? (count as number) : null,
+  };
+}
+
+/** The categorical cause implied by the reported sources. Only the
+ * WindowsUpdate key means an installed update is waiting on a restart; sources
+ * with nothing set are contradictory and stay unknown. */
+export function rebootVerdictFromSources(sources: RebootSources | null): RebootCauseVerdict {
+  if (sources === null) return "unknown";
+  if (sources.windows_update) return "update_caused";
+  if (sources.component_based_servicing || sources.pending_file_rename) return "not_update_caused";
+  return "unknown";
+}
+
 function rebootCauseFromUnknown(value: unknown): RebootCause | null {
   if (!isRecord(value)
       || !Array.isArray(value.reboot_flagged_updates)
@@ -486,17 +544,21 @@ function rebootCauseFromUnknown(value: unknown): RebootCause | null {
       || value.recent_installs.length > 10
       || !nullableBoolean(value.system_reboot_required)
       || !nullableTimestamp(value.scanned_at)
-      || !isTimestamp(value.snapshot_received_at)) return null;
+      || !nullableTimestamp(value.snapshot_received_at)) return null;
   const rebootFlaggedUpdates = value.reboot_flagged_updates.map(rebootFlaggedUpdateFromUnknown);
   const recentInstalls = value.recent_installs.map(rebootRecentInstallFromUnknown);
   if (!rebootFlaggedUpdates.every((item): item is RebootFlaggedUpdate => item !== null)
       || !recentInstalls.every((item): item is RebootRecentInstall => item !== null)) return null;
+  const sources = value.sources === undefined || value.sources === null
+    ? null : rebootSourcesFromUnknown(value.sources);
   return {
     reboot_flagged_updates: rebootFlaggedUpdates,
     recent_installs: recentInstalls,
     system_reboot_required: value.system_reboot_required,
     scanned_at: value.scanned_at,
     snapshot_received_at: value.snapshot_received_at,
+    sources,
+    verdict: isVerdict(value.verdict) ? value.verdict : "unknown",
   };
 }
 
@@ -509,11 +571,10 @@ function rebootResultDetailFromUnknown(value: unknown): Record<string, unknown> 
       && (value.pending_file_rename_count as number) >= 0) {
     detail.pending_file_rename_count = value.pending_file_rename_count;
   }
-  const sources = value.sources;
-  if (isRecord(sources)
-      && typeof sources.component_based_servicing === "boolean"
-      && typeof sources.windows_update === "boolean"
-      && typeof sources.pending_file_rename === "boolean") {
+  const sources = rebootSourcesFromUnknown(value.sources);
+  if (sources !== null) {
+    // Only the three flags cross into the rendered detail. The count stays a
+    // top-level key so an absent one is never read as a zero.
     detail.sources = {
       component_based_servicing: sources.component_based_servicing,
       windows_update: sources.windows_update,
@@ -641,27 +702,11 @@ export function monitoringAlertDetailFromUnknown(value: unknown): MonitoringAler
   };
 }
 
-export function rebootCorrelationPresentation(
-  detail: Record<string, unknown> | null,
-  cause: RebootCause | null,
-): RebootCorrelationPresentation | null {
-  if (detail === null && cause === null) return null;
-  const sources = detail?.sources;
-  const sourceReportingAvailable = isRecord(sources)
-    && typeof sources.component_based_servicing === "boolean"
-    && typeof sources.windows_update === "boolean"
-    && typeof sources.pending_file_rename === "boolean";
-  if (!sourceReportingAvailable) {
+function rebootCorrelationNote(cause: RebootCause | null): RebootCorrelationPresentation["correlation"] {
+  if (cause === null || cause.snapshot_received_at === null) {
     return {
       state: "unavailable",
-      title: "Cause unavailable",
-      summary: "Agent predates cause reporting. Correlated update evidence is shown when available.",
-    };
-  }
-  if (cause === null) {
-    return {
-      state: "unavailable",
-      title: "Cause unavailable",
+      title: "No correlation available",
       summary: "No Windows Update inventory snapshot is available for correlation.",
     };
   }
@@ -677,6 +722,72 @@ export function rebootCorrelationPresentation(
     title: "No correlated update activity",
     summary: "No update activity was found in the 7-day correlation window. This does not rule out an update cause.",
   };
+}
+
+/** The restart attribution panel: a categorical verdict from the endpoint's own
+ * reboot sources, alongside correlated update activity that stays labelled as
+ * correlation. Agents that predate source reporting keep the unknown path. */
+export function rebootCorrelationPresentation(
+  detail: Record<string, unknown> | null,
+  cause: RebootCause | null,
+): RebootCorrelationPresentation | null {
+  if (detail === null && cause === null) return null;
+  const correlation = rebootCorrelationNote(cause);
+  // The server sends the verdict alongside the sources it read; fall back to
+  // the same rule over the raw detail when no cause was derived at all.
+  const sources = cause?.sources ?? rebootSourcesFromUnknown(detail?.sources);
+  const verdict = cause?.sources ? cause.verdict : rebootVerdictFromSources(sources);
+  if (sources === null) {
+    return {
+      state: "unknown",
+      title: "Cause unavailable",
+      summary: "Agent predates cause reporting. Correlated update evidence is shown when available.",
+      sources: null,
+      correlation,
+    };
+  }
+  if (verdict === "update_caused") {
+    return {
+      state: "update_caused",
+      title: "Update-caused restart",
+      summary: "The endpoint reports the Windows Update restart flag: an installed update is waiting on a restart.",
+      sources,
+      correlation,
+    };
+  }
+  if (verdict === "not_update_caused") {
+    return {
+      state: "not_update_caused",
+      title: "Not an update restart",
+      summary: `No Windows Update restart flag is set. The restart is pending from ${describeRebootSources(sources)}.`,
+      sources,
+      correlation,
+    };
+  }
+  return {
+    state: "unknown",
+    title: "Cause unavailable",
+    summary: "The endpoint reported no restart source set, so no cause can be stated.",
+    sources,
+    correlation,
+  };
+}
+
+/** Names the sources that are set, for the categorical summary line. The
+ * file-rename count is reported without its paths: those routinely contain
+ * user names and are deliberately never collected. */
+export function describeRebootSources(sources: RebootSources): string {
+  const parts: string[] = [];
+  if (sources.component_based_servicing) parts.push("component-based servicing");
+  if (sources.windows_update) parts.push("Windows Update");
+  if (sources.pending_file_rename) {
+    parts.push(sources.pending_file_rename_count === null
+      ? "pending file renames"
+      : `${sources.pending_file_rename_count} pending file rename${sources.pending_file_rename_count === 1 ? "" : "s"}`);
+  }
+  if (parts.length === 0) return "no reported source";
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 export function alertAssigneesFromUnknown(value: unknown): AlertAssignee[] | null {

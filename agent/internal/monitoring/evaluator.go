@@ -33,7 +33,7 @@ type probeCache struct {
 	remaining int
 	disks     map[string]probeNumber
 	services  map[string]probeString
-	reboot    *probeBool
+	reboot    *probeReboot
 }
 
 type probeNumber struct {
@@ -48,8 +48,8 @@ type probeString struct {
 	reason string
 }
 
-type probeBool struct {
-	value  bool
+type probeReboot struct {
+	value  RebootStatus
 	ok     bool
 	reason string
 }
@@ -117,6 +117,18 @@ func (e *Evaluator) Evaluate(ctx context.Context, assignments []Assignment, samp
 		}
 		state.LastEvaluated = now
 		e.store.Checks[definition.Key] = state
+		detail := map[string]any{
+			"check_type": definition.Type,
+			"reason":     reason,
+			"raw_status": raw,
+			"hysteresis": map[string]any{
+				"pending_status": state.PendingStatus,
+				"pending_count":  state.PendingCount,
+			},
+		}
+		for key, item := range rebootDetail(definition, cache) {
+			detail[key] = item
+		}
 		e.store.Pending = append(e.store.Pending, Result{
 			ID:               id,
 			PolicyID:         assignment.PolicyID,
@@ -124,16 +136,8 @@ func (e *Evaluator) Evaluate(ctx context.Context, assignments []Assignment, samp
 			CheckKey:         definition.Key,
 			Status:           stable,
 			Value:            value,
-			Detail: map[string]any{
-				"check_type": definition.Type,
-				"reason":     reason,
-				"raw_status": raw,
-				"hysteresis": map[string]any{
-					"pending_status": state.PendingStatus,
-					"pending_count":  state.PendingCount,
-				},
-			},
-			EvaluatedAt: now,
+			Detail:           detail,
+			EvaluatedAt:      now,
 		})
 		written++
 	}
@@ -204,7 +208,7 @@ func (e *Evaluator) rawStatus(ctx context.Context, cache *probeCache, definition
 			return "unknown", nil, probe.reason
 		}
 		value := 0.0
-		if probe.value {
+		if probe.value.Sources.Any() {
 			value = 1
 			return "critical", &value, "reboot_pending"
 		}
@@ -244,18 +248,29 @@ func (e *Evaluator) service(ctx context.Context, cache *probeCache, name string)
 	return result
 }
 
-func (e *Evaluator) reboot(ctx context.Context, cache *probeCache) probeBool {
+func (e *Evaluator) reboot(ctx context.Context, cache *probeCache) probeReboot {
 	if cache.reboot != nil {
 		return *cache.reboot
 	}
 	if cache.remaining <= 0 {
-		return probeBool{reason: "probe_budget_exhausted"}
+		return probeReboot{reason: "probe_budget_exhausted"}
 	}
 	cache.remaining--
 	value, ok, reason := e.probe.RebootPending(ctx)
-	result := probeBool{value: value, ok: ok, reason: reason}
+	result := probeReboot{value: value, ok: ok, reason: reason}
 	cache.reboot = &result
 	return result
+}
+
+// rebootDetail carries the reboot source breakdown alongside the result of a
+// reboot check whose probe succeeded on this pass. The sources ride along as
+// evidence only: status is decided in rawStatus from the same reading, and
+// nothing here can change it.
+func rebootDetail(definition Definition, cache *probeCache) map[string]any {
+	if definition.Type != "reboot_pending" || cache.reboot == nil || !cache.reboot.ok {
+		return nil
+	}
+	return cache.reboot.value.Detail()
 }
 
 func classifyNumeric(value float64, threshold Threshold) string {

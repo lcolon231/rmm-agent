@@ -25,13 +25,16 @@ drill is still required. Do not describe a tagged artifact as production-ready. 
 
 1. Make sure `main` is green (the CI workflow runs the Go and Python suites on
    every push/PR).
-2. Copy [`release-notes/TEMPLATE.json`](../release-notes/TEMPLATE.json) to
+2. Read [`release-notes/PENDING.md`](../release-notes/PENDING.md) for facts
+   merged since the last tag that this release must state, such as a minimum
+   agent version for a new capability.
+3. Copy [`release-notes/TEMPLATE.json`](../release-notes/TEMPLATE.json) to
    `release-notes/<tag>.json` and fill every release-specific field. The record
    names the server tag, agent and installer versions, Alembic and protocol
    compatibility, known limitations, upgrade and rollback procedures, security
    impact, immutable last-known-good component digests, verified backup, and
    retained rollback evidence.
-3. Run the same preflight used by the release workflow:
+4. Run the same preflight used by the release workflow:
 
    ```bash
    python3 server/scripts/validate_release_notes.py \
@@ -43,7 +46,7 @@ drill is still required. Do not describe a tagged artifact as production-ready. 
    Placeholder text, missing fields, mutable identifiers, abbreviated commits,
    and invalid digests fail validation. Confirm the named rollback backup has
    passed `verify_restore.py`.
-4. Commit the completed manifest, make sure `main` is green, then tag and push:
+5. Commit the completed manifest, make sure `main` is green, then tag and push:
 
    ```bash
    git checkout main && git pull
@@ -51,7 +54,7 @@ drill is still required. Do not describe a tagged artifact as production-ready. 
    git push origin v0.1.0
    ```
 
-5. The workflow revalidates the manifest before tests or builds, cross-builds
+6. The workflow revalidates the manifest before tests or builds, cross-builds
    with the version stamped in
    (`-ldflags "-X main.version=<tag without v>"`), and publishes a GitHub
    Release with:

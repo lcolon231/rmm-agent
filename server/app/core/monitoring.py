@@ -115,19 +115,49 @@ class EffectiveCheck:
     source_policy_name: str
 
 
+#: Categorical restart causes. ``unknown`` is the honest answer for an agent
+#: that predates reboot-source reporting; it is never inferred from silence.
+REBOOT_CAUSE_UPDATE = "update_caused"
+REBOOT_CAUSE_NOT_UPDATE = "not_update_caused"
+REBOOT_CAUSE_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class RebootSources:
+    """Which Windows reboot-required registry sources the agent reported set.
+
+    Only ``windows_update`` means an installed update is waiting on a restart;
+    that distinction is the whole reason these are reported separately.
+
+    ``pending_file_rename_count`` is a count and never a path. The registry
+    value lists file paths that routinely contain user names, and this payload
+    is meant to stay safe to forward to alert email and third-party webhooks,
+    so a path here would leave the tenant boundary. The count is also
+    best-effort and is ``None`` when the agent could not produce one.
+    """
+
+    component_based_servicing: bool
+    windows_update: bool
+    pending_file_rename: bool
+    pending_file_rename_count: int | None = None
+
+
 @dataclass(frozen=True)
 class RebootCause:
-    """Update inventory correlated with a pending-restart alert.
+    """Why a restart is pending, plus correlated update inventory.
 
-    This deliberately carries evidence only. Source-based causal attribution is
-    a separate agent capability, and older agents do not report those sources.
+    ``verdict`` is categorical and derives only from agent-reported sources.
+    The update lists remain correlation evidence and are never promoted to a
+    cause: an agent that predates source reporting yields ``unknown``.
     """
 
     reboot_flagged_updates: list[dict]
     recent_installs: list[dict]
     system_reboot_required: bool | None
     scanned_at: datetime | None
-    snapshot_received_at: datetime
+    snapshot_received_at: datetime | None
+    sources: RebootSources | None = None
+    verdict: str = REBOOT_CAUSE_UNKNOWN
 
 
 async def current_revision(
@@ -787,24 +817,74 @@ def _inventory_datetime(value: object) -> datetime | None:
     return None
 
 
+def reboot_sources_from_detail(detail: dict | None) -> RebootSources | None:
+    """Read the agent-reported reboot sources out of a check result detail.
+
+    Returns ``None`` when the key is absent or malformed — that is an agent
+    predating source reporting, not a negative answer. The count is separately
+    best-effort: a missing or invalid count leaves the sources usable.
+    """
+    if not isinstance(detail, dict):
+        return None
+    raw = detail.get("sources")
+    if not isinstance(raw, dict):
+        return None
+    flags: dict[str, bool] = {}
+    for key in ("component_based_servicing", "windows_update", "pending_file_rename"):
+        value = raw.get(key)
+        if not isinstance(value, bool):
+            return None
+        flags[key] = value
+    count = detail.get("pending_file_rename_count")
+    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+        count = None
+    return RebootSources(**flags, pending_file_rename_count=count)
+
+
+def reboot_verdict(sources: RebootSources | None) -> str:
+    """The categorical cause implied by the reported sources.
+
+    Only the WindowsUpdate registry key means an installed update is waiting on
+    a restart. Sources that report nothing set are contradictory for a pending
+    alert and stay ``unknown`` rather than being read as a negative.
+    """
+    if sources is None:
+        return REBOOT_CAUSE_UNKNOWN
+    if sources.windows_update:
+        return REBOOT_CAUSE_UPDATE
+    if sources.component_based_servicing or sources.pending_file_rename:
+        return REBOOT_CAUSE_NOT_UPDATE
+    return REBOOT_CAUSE_UNKNOWN
+
+
 def derive_reboot_cause(
     snapshot: AgentInventorySnapshot | None,
     detail: dict | None,
     since: datetime,
 ) -> RebootCause | None:
-    """Correlate a pending reboot with recent update activity.
+    """State why a restart is pending, and correlate it with update activity.
 
-    Returns ``None`` when no update snapshot exists. An absent ``sources`` key
-    means the agent predates cause reporting; this layer therefore returns only
-    correlation evidence and never manufactures a negative causal verdict.
+    The verdict is categorical and comes only from agent-reported sources; the
+    update lists stay correlation evidence. Returns ``None`` only when there is
+    nothing to say at all — no sources and no update snapshot. An agent that
+    predates source reporting still yields correlation with an ``unknown``
+    verdict, exactly as it did before this layer.
     """
-    if snapshot is None:
+    sources = reboot_sources_from_detail(detail)
+    if snapshot is None and sources is None:
         return None
-
-    # ``detail`` is intentionally accepted at this seam so source attribution
-    # can extend the same payload later. Layer 2 must remain evidence-only even
-    # when the key is absent on every currently deployed agent.
-    del detail
+    if snapshot is None:
+        # The verdict is a property of the endpoint's registry state, not of
+        # the update inventory, so it stands on its own without a snapshot.
+        return RebootCause(
+            reboot_flagged_updates=[],
+            recent_installs=[],
+            system_reboot_required=None,
+            scanned_at=None,
+            snapshot_received_at=None,
+            sources=sources,
+            verdict=reboot_verdict(sources),
+        )
 
     payload = snapshot.payload if isinstance(snapshot.payload, dict) else {}
     missing = payload.get("missing")
@@ -842,6 +922,8 @@ def derive_reboot_cause(
         ),
         scanned_at=_inventory_datetime(payload.get("scanned_at")),
         snapshot_received_at=_utc(snapshot.received_at),
+        sources=sources,
+        verdict=reboot_verdict(sources),
     )
 
 

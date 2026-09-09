@@ -11,12 +11,12 @@ import (
 )
 
 type fakeProbe struct {
-	diskValue     float64
-	diskOK        bool
-	serviceState  string
-	serviceOK     bool
-	rebootPending bool
-	rebootOK      bool
+	diskValue    float64
+	diskOK       bool
+	serviceState string
+	serviceOK    bool
+	rebootStatus RebootStatus
+	rebootOK     bool
 }
 
 func (p fakeProbe) DiskPercent(context.Context, string) (float64, bool, string) {
@@ -25,8 +25,8 @@ func (p fakeProbe) DiskPercent(context.Context, string) (float64, bool, string) 
 func (p fakeProbe) ServiceState(context.Context, string) (string, bool, string) {
 	return p.serviceState, p.serviceOK, "fake_service"
 }
-func (p fakeProbe) RebootPending(context.Context) (bool, bool, string) {
-	return p.rebootPending, p.rebootOK, "fake_reboot"
+func (p fakeProbe) RebootPending(context.Context) (RebootStatus, bool, string) {
+	return p.rebootStatus, p.rebootOK, "fake_reboot"
 }
 
 func number(value float64) *float64 { return &value }
@@ -115,12 +115,16 @@ func TestEvaluatorCadenceHysteresisAndDurableOutbox(t *testing.T) {
 func TestEvaluatorUnavailableStateChecksAndStaleSamples(t *testing.T) {
 	store := newTestStore(t)
 	evaluator := NewEvaluator(store, fakeProbe{
-		diskValue:     97,
-		diskOK:        true,
-		serviceState:  "stopped",
-		serviceOK:     true,
-		rebootPending: true,
-		rebootOK:      true,
+		diskValue:    97,
+		diskOK:       true,
+		serviceState: "stopped",
+		serviceOK:    true,
+		rebootStatus: RebootStatus{
+			Sources:                RebootSources{ComponentBasedServicing: true, PendingFileRename: true},
+			PendingFileRenameCount: 2,
+			CountKnown:             true,
+		},
+		rebootOK: true,
 	})
 	now := time.Date(2026, 8, 2, 6, 0, 0, 0, time.UTC)
 	cpu := assignment("cpu", "cpu")
