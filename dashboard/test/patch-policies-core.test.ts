@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildToggleBody,
   effectivePatchPolicyFromUnknown,
   formatPatchAction,
   formatPatchScope,
@@ -110,4 +111,31 @@ test("patchPolicyFromUnknown rejects an out-of-range reboot delay", () => {
     reboot_policy: "never", reboot_delay_seconds: 10,
     reboot_requires_no_user: true, max_install_attempts: 1,
   }), null);
+});
+
+test("buildToggleBody re-sends the loaded revision with enabled flipped", () => {
+  const detail = {
+    id: "p1", name: "Baseline", scope: "global" as const, scope_id: null,
+    enabled: true, created_at: "2026-09-09T10:00:00Z", current_version: 2,
+    rule_count: 1, default_action: "approve" as const,
+    require_maintenance_window: true, reboot_policy: "if_required" as const,
+    reboot_delay_seconds: 900, reboot_requires_no_user: false,
+    max_install_attempts: 3,
+    rules: [{
+      key: "sec", action: "approve" as const,
+      match: { classifications: ["Security"], severities: null, kb_ids: null },
+      defer_days: null,
+    }],
+    revisions: [],
+  };
+  assert.deepEqual(buildToggleBody(detail, false), {
+    enabled: false,
+    default_action: "approve",
+    require_maintenance_window: true,
+    reboot_policy: "if_required",
+    reboot_delay_seconds: 900,
+    reboot_requires_no_user: false,
+    max_install_attempts: 3,
+    rules: detail.rules,
+  });
 });
