@@ -16,8 +16,10 @@ Run just this file:  pytest tests/test_shell_sessions.py -q
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import base64
+import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -513,6 +515,86 @@ async def test_output_limit_fails_session_and_audits_only_metadata(client, monke
     assert status_response.json()["status"] == "failed"
     assert status_response.json()["close_reason"] == "output_limit"
     assert "shell_session.failed" in await _audit_actions()
+
+
+# --------------------------------------------------------------------------- #
+# Prompt activation: an operator's output poll must reflect the agent attaching
+# within about a second, not a full long-poll timeout (the "waiting to attach"
+# stall). Activation carries no frame, so the poll is woken and re-reads status.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_relay_wake_releases_blocked_output_reader():
+    from app.core.shell_relay import SessionRelay
+
+    relay = SessionRelay(
+        input_seq=0,
+        output_seq=0,
+        max_input_bytes=1024,
+        max_output_bytes=1024,
+        max_frames=8,
+    )
+    # A reader long-polling for output with no frames buffered blocks until it is
+    # woken; wake() must return it promptly with an empty batch, well under the
+    # 30s timeout it was given.
+    reader = asyncio.create_task(
+        relay.read("output", after=0, ack=0, limit=64, timeout=30.0)
+    )
+    await asyncio.sleep(0.05)
+    assert not reader.done()
+    await relay.wake()
+    frames = await asyncio.wait_for(reader, timeout=2.0)
+    assert frames == []
+
+
+@pytest.mark.asyncio
+async def test_pending_output_poll_returns_before_full_timeout(client, monkeypatch):
+    # A large full timeout would make a naive poll hang; the pending path must use
+    # the short pending timeout instead and return the still-pending session.
+    monkeypatch.setattr(settings, "shell_session_poll_timeout_seconds", 600)
+    monkeypatch.setattr(settings, "shell_session_pending_poll_timeout_seconds", 0.2)
+    op = await _auth(client, "sh-op@nodelink.test", "op-pass")
+    agent_id = await _enroll(client, op)
+    session_id = (await _open(client, op, agent_id)).json()["id"]
+
+    started = time.monotonic()
+    r = await client.get(
+        f"/agents/{agent_id}/shell-sessions/{session_id}/output?after=0&ack=0",
+        headers=op,
+    )
+    elapsed = time.monotonic() - started
+    assert r.status_code == 200
+    assert r.json()["session"]["status"] == "pending"
+    assert r.json()["frames"] == []
+    assert elapsed < 5, f"pending poll blocked for {elapsed:.1f}s"
+
+
+@pytest.mark.asyncio
+async def test_output_poll_reflects_activation_when_agent_attaches(client, monkeypatch):
+    # Keep the pending poll long so only the activation wake — not the short
+    # pending timeout — can end the in-flight poll quickly. This is the fix for
+    # the operator seeing "waiting for the endpoint to attach" for a full timeout.
+    monkeypatch.setattr(settings, "shell_session_pending_poll_timeout_seconds", 30.0)
+    op = await _auth(client, "sh-op@nodelink.test", "op-pass")
+    agent_id, agent_auth = await _enroll_identity(client, op)
+    session_id = (await _open(client, op, agent_id)).json()["id"]
+
+    poll = asyncio.create_task(
+        client.get(
+            f"/agents/{agent_id}/shell-sessions/{session_id}/output?after=0&ack=0",
+            headers=op,
+        )
+    )
+    # Let the poll reach the relay and block before the agent attaches.
+    await asyncio.sleep(0.2)
+    assert not poll.done()
+    attached = await client.post("/agents/me/shell-sessions/attach", headers=agent_auth)
+    assert attached.json()["session"]["status"] == "active"
+
+    response = await asyncio.wait_for(poll, timeout=5.0)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session"]["status"] == "active"
+    assert body["frames"] == []
 
 
 @pytest.mark.asyncio

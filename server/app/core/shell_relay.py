@@ -146,6 +146,18 @@ class SessionRelay:
                 return []
             return queue.after(after, limit)
 
+    async def wake(self) -> None:
+        """Release any blocked reader without appending a frame.
+
+        A lifecycle transition (for example the agent attaching and flipping the
+        session to active) produces no frame, so a reader long-polling for
+        output would otherwise wait a full poll timeout before its caller can
+        observe the new status. Waking lets that poll return promptly with an
+        empty batch; the caller re-reads the authoritative status from the row.
+        """
+        async with self.condition:
+            self.condition.notify_all()
+
     async def close(self) -> None:
         async with self.condition:
             self.closed = True

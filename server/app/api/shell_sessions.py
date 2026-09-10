@@ -393,16 +393,31 @@ async def read_shell_output(
     if row.status in _TERMINAL_STATES:
         return ShellFrameBatch(session=row, frames=[])
     relay = await _relay_for(row)
+    # A pending session cannot produce output until the agent attaches, and that
+    # transition wakes this poll rather than sending a frame. Poll briefly while
+    # pending so the operator sees the session go active within about a second;
+    # once active, hold the full long-poll waiting for real output.
+    timeout = (
+        settings.shell_session_pending_poll_timeout_seconds
+        if row.status == ShellSessionStatus.pending
+        else settings.shell_session_poll_timeout_seconds
+    )
     try:
         frames = await relay.read(
             "output",
             after=after,
             ack=ack,
             limit=64,
-            timeout=settings.shell_session_poll_timeout_seconds,
+            timeout=timeout,
         )
     except Exception as exc:
         raise _relay_http_error(exc)
+    if not frames:
+        # No frame arrived: the wait ended on a wake or the poll timeout. Re-read
+        # so a lifecycle change committed by another request (the agent attaching,
+        # or the sweeper timing the session out) is reflected in the returned
+        # status now instead of after another poll round-trip.
+        await db.refresh(row)
     return ShellFrameBatch(session=row, frames=_frames_out(frames))
 
 
@@ -498,6 +513,11 @@ async def attach_shell_session(
             detail={"session_id": row.id, "capability_version": row.capability_version},
             **_agent_evidence(request, agent),
         )
+        # Commit before waking so an operator's blocked output poll re-reads the
+        # now-active status instead of racing the still-open transaction and
+        # seeing pending. expire_on_commit is off, so returning the row is safe.
+        await db.commit()
+        await relay.wake()
     return ShellAgentAttachOut(session=row)
 
 

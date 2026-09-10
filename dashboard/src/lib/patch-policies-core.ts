@@ -35,6 +35,8 @@ export type PatchApprovalPolicy = {
   default_action: PatchDefaultAction;
   require_maintenance_window: boolean;
   reboot_policy: RebootPolicy;
+  reboot_delay_seconds: number;
+  reboot_requires_no_user: boolean;
   max_install_attempts: number;
 };
 
@@ -139,6 +141,10 @@ export function patchPolicyFromUnknown(value: unknown): PatchApprovalPolicy | nu
     || !defaults.has(value.default_action as PatchDefaultAction)
     || typeof value.require_maintenance_window !== "boolean"
     || !rebootPolicies.has(value.reboot_policy as RebootPolicy)
+    || !Number.isInteger(value.reboot_delay_seconds)
+    || (value.reboot_delay_seconds as number) < 60
+    || (value.reboot_delay_seconds as number) > 3600
+    || typeof value.reboot_requires_no_user !== "boolean"
     || !Number.isInteger(value.max_install_attempts)
     || (value.max_install_attempts as number) < 1
   ) {
@@ -159,6 +165,8 @@ export function patchPolicyFromUnknown(value: unknown): PatchApprovalPolicy | nu
     default_action: value.default_action as PatchDefaultAction,
     require_maintenance_window: value.require_maintenance_window,
     reboot_policy: value.reboot_policy as RebootPolicy,
+    reboot_delay_seconds: value.reboot_delay_seconds as number,
+    reboot_requires_no_user: value.reboot_requires_no_user as boolean,
     max_install_attempts: value.max_install_attempts as number,
   };
 }
@@ -243,6 +251,41 @@ export function effectivePatchPolicyFromUnknown(value: unknown): EffectivePatchP
     default_action: defaults.has(defaultAction as PatchDefaultAction) ? (defaultAction as PatchDefaultAction) : null,
     require_maintenance_window: value.require_maintenance_window === true,
     decisions,
+  };
+}
+
+export type PatchPolicyRevisionBody = {
+  rules: PatchRule[];
+  default_action: PatchDefaultAction;
+  require_maintenance_window: boolean;
+  reboot_policy: RebootPolicy;
+  reboot_delay_seconds: number;
+  reboot_requires_no_user: boolean;
+  max_install_attempts: number;
+};
+
+export type PatchPolicyCreateBody = PatchPolicyRevisionBody & {
+  name: string;
+  scope: PatchScope;
+  scope_id: string | null;
+  enabled: boolean;
+};
+
+export type PatchPolicyToggleBody = PatchPolicyRevisionBody & { enabled: boolean };
+
+export function buildToggleBody(
+  detail: PatchApprovalPolicyDetail,
+  enabled: boolean,
+): PatchPolicyToggleBody {
+  return {
+    enabled,
+    default_action: detail.default_action,
+    require_maintenance_window: detail.require_maintenance_window,
+    reboot_policy: detail.reboot_policy,
+    reboot_delay_seconds: detail.reboot_delay_seconds,
+    reboot_requires_no_user: detail.reboot_requires_no_user,
+    max_install_attempts: detail.max_install_attempts,
+    rules: detail.rules,
   };
 }
 
