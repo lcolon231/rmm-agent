@@ -5,6 +5,8 @@ import { LoaderCircle, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import styles from "./patch-policy-manager.module.css";
+
 import { formatMonitoringTimestamp } from "@/lib/monitoring-core";
 import {
   formatPatchScope,
@@ -124,18 +126,79 @@ export function PatchPolicyManager({
     <>
       {canAdmin ? (
         <section className="enrollment-panel">
-          <header><div><span>New policy</span><h2>Create a patch approval policy</h2><small>An empty rule set lets every update fall to the default action. Add rules later.</small></div><Plus size={19} /></header>
-          <form onSubmit={create}>
-            <label><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder="Baseline" required /></label>
-            <label><span>Scope</span><select value={scope} onChange={(e) => setScope(e.target.value as PatchScope)}>{scopeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
-            {scope !== "global" ? <label><span>{formatPatchScope(scope)} id</span><input value={scopeId} onChange={(e) => setScopeId(e.target.value)} maxLength={36} placeholder="target id" required /></label> : null}
-            <label><span>Default action</span><select value={defaultAction} onChange={(e) => setDefaultAction(e.target.value as PatchDefaultAction)}><option value="deny">Deny unmatched updates</option><option value="approve">Approve unmatched updates</option></select></label>
-            <label><input type="checkbox" checked={requireWindow} onChange={(e) => setRequireWindow(e.target.checked)} /><span>Require an active maintenance window to install</span></label>
-            <label><span>Reboot policy</span><select value={rebootPolicy} onChange={(e) => setRebootPolicy(e.target.value as RebootPolicy)}><option value="never">Never</option><option value="if_required">If required</option><option value="forced">Forced</option></select></label>
-            <label><span>Reboot delay (seconds)</span><input type="number" min={60} max={3600} value={rebootDelay} onChange={(e) => setRebootDelay(Number(e.target.value))} /></label>
-            <label><input type="checkbox" checked={rebootRequiresNoUser} onChange={(e) => setRebootRequiresNoUser(e.target.checked)} /><span>Only reboot when no user is signed in</span></label>
-            <label><span>Max install attempts</span><input type="number" min={1} max={5} value={maxAttempts} onChange={(e) => setMaxAttempts(Number(e.target.value))} /></label>
-            <button type="submit" disabled={busy === "create"}>{busy === "create" ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />} Create policy</button>
+          <header>
+            <div>
+              <span>New policy</span>
+              <h2>Create a patch approval policy</h2>
+              <small>New policies apply the default action to every update.</small>
+            </div>
+            <Plus aria-hidden="true" size={19} />
+          </header>
+          <form className={styles.form} onSubmit={create}>
+            <fieldset className={styles.group}>
+              <legend>Policy settings</legend>
+              <div className={styles.grid}>
+                <label className={styles.field}>
+                  <span>Policy name</span>
+                  <input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder="e.g. Workstation baseline" required />
+                </label>
+                <label className={styles.field}>
+                  <span>Scope</span>
+                  <select value={scope} onChange={(e) => setScope(e.target.value as PatchScope)}>
+                    {scopeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </label>
+                {scope !== "global" ? (
+                  <label className={styles.field}>
+                    <span>{formatPatchScope(scope)} ID</span>
+                    <input value={scopeId} onChange={(e) => setScopeId(e.target.value)} maxLength={36} placeholder="Target ID" required />
+                  </label>
+                ) : null}
+                <label className={styles.field}>
+                  <span>Default action</span>
+                  <select value={defaultAction} onChange={(e) => setDefaultAction(e.target.value as PatchDefaultAction)}>
+                    <option value="deny">Deny unmatched updates</option>
+                    <option value="approve">Approve unmatched updates</option>
+                  </select>
+                </label>
+              </div>
+              <label className={styles.check}>
+                <input type="checkbox" checked={requireWindow} onChange={(e) => setRequireWindow(e.target.checked)} />
+                <span>Require an active maintenance window to install</span>
+              </label>
+            </fieldset>
+            <fieldset className={styles.group}>
+              <legend>Installation &amp; reboot</legend>
+              <div className={styles.grid}>
+                <label className={styles.field}>
+                  <span>Reboot policy</span>
+                  <select value={rebootPolicy} onChange={(e) => setRebootPolicy(e.target.value as RebootPolicy)}>
+                    <option value="never">Never</option>
+                    <option value="if_required">If required</option>
+                    <option value="forced">Forced</option>
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span>Reboot delay (seconds)</span>
+                  <input type="number" min={60} max={3600} value={rebootDelay} onChange={(e) => setRebootDelay(Number(e.target.value))} />
+                </label>
+                <label className={styles.field}>
+                  <span>Max install attempts</span>
+                  <input type="number" min={1} max={5} value={maxAttempts} onChange={(e) => setMaxAttempts(Number(e.target.value))} />
+                </label>
+              </div>
+              <label className={styles.check}>
+                <input type="checkbox" checked={rebootRequiresNoUser} onChange={(e) => setRebootRequiresNoUser(e.target.checked)} />
+                <span>Only reboot when no user is signed in</span>
+              </label>
+            </fieldset>
+            <div className={styles.footer}>
+              <p>The policy will be enabled when created.</p>
+              <button className={styles.submit} type="submit" disabled={busy === "create"}>
+                {busy === "create" ? <LoaderCircle aria-hidden="true" className="spin" size={15} /> : <Plus aria-hidden="true" size={16} />}
+                Create policy
+              </button>
+            </div>
           </form>
         </section>
       ) : null}
@@ -158,8 +221,10 @@ export function PatchPolicyManager({
                     <td>{formatMonitoringTimestamp(policy.created_at)}</td>
                     {canAdmin ? (
                       <td>
-                        <button type="button" onClick={() => toggle(policy)} disabled={Boolean(busy)}>{policy.enabled ? "Disable" : "Enable"}</button>
-                        <button className="danger" type="button" onClick={() => remove(policy)} disabled={Boolean(busy)}><Trash2 size={13} /> Delete</button>
+                        <div className={styles.actions}>
+                          <button type="button" onClick={() => toggle(policy)} disabled={Boolean(busy)}>{policy.enabled ? "Disable" : "Enable"}</button>
+                          <button className={styles.delete} type="button" onClick={() => remove(policy)} disabled={Boolean(busy)}><Trash2 aria-hidden="true" size={13} /> Delete</button>
+                        </div>
                       </td>
                     ) : null}
                   </tr>
