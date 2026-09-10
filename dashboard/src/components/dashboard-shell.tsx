@@ -73,6 +73,7 @@ const navItems = [
   { label: "Monitoring", icon: HeartPulse, count: null, href: "/monitoring" },
   { label: "Maintenance", icon: CalendarClock, count: null, href: "/maintenance-windows" },
   { label: "Patch compliance", icon: Shield, count: null, href: "/patch-compliance" },
+  { label: "Patch policies", icon: Shield, count: null, href: "/patch-policies" },
   { label: "Approvals", icon: UserCheck, count: null, href: "/approvals" },
   { label: "Audit", icon: ShieldCheck, count: null, href: "/audit" },
   { label: "Administration", icon: Settings, count: null, href: "/enrollment" },

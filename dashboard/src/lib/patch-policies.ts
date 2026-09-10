@@ -5,10 +5,13 @@ import "server-only";
 import {
   effectivePatchPolicyFromUnknown,
   patchPolicyDetailFromUnknown,
+  patchPolicyFromUnknown,
   patchPolicyListFromUnknown,
   type EffectivePatchPolicy,
   type PatchApprovalPolicy,
   type PatchApprovalPolicyDetail,
+  type PatchPolicyCreateBody,
+  type PatchPolicyToggleBody,
 } from "@/lib/patch-policies-core";
 import { nodelinkApiRequest } from "@/lib/nodelink-api";
 
@@ -46,4 +49,44 @@ export async function getAgentEffectivePatchPolicy(
   const effective = effectivePatchPolicyFromUnknown(value);
   if (!effective) throw new Error("The management service returned an invalid effective patch policy.");
   return effective;
+}
+
+export async function createPatchPolicy(
+  sessionToken: string,
+  input: PatchPolicyCreateBody,
+): Promise<PatchApprovalPolicy> {
+  const value = await nodelinkApiRequest<unknown>("/api/v1/patch-approval/policies", {
+    body: JSON.stringify(input), headers: { "Content-Type": "application/json" },
+    method: "POST", sessionToken,
+  });
+  const policy = patchPolicyFromUnknown(value);
+  if (!policy) throw new Error("The management service returned an invalid patch approval policy.");
+  return policy;
+}
+
+export async function revisePatchPolicy(
+  sessionToken: string,
+  policyId: string,
+  input: PatchPolicyToggleBody,
+): Promise<PatchApprovalPolicy> {
+  const value = await nodelinkApiRequest<unknown>(
+    `/api/v1/patch-approval/policies/${encodeURIComponent(policyId)}`,
+    {
+      body: JSON.stringify(input), headers: { "Content-Type": "application/json" },
+      method: "PUT", sessionToken,
+    },
+  );
+  const policy = patchPolicyFromUnknown(value);
+  if (!policy) throw new Error("The management service returned an invalid patch approval policy.");
+  return policy;
+}
+
+export async function deletePatchPolicy(
+  sessionToken: string,
+  policyId: string,
+): Promise<void> {
+  await nodelinkApiRequest<unknown>(
+    `/api/v1/patch-approval/policies/${encodeURIComponent(policyId)}`,
+    { method: "DELETE", sessionToken },
+  );
 }
