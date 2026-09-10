@@ -102,6 +102,8 @@ function createMockApi() {
 
     if (method === "GET" && url.pathname === "/api/v1/auth/me") {
       sendJson(response, operator);
+    } else if (method === "GET" && url.pathname === "/api/v1/patch-approval/policies") {
+      sendJson(response, []);
     } else if (method === "GET" && url.pathname === "/api/v1/enrollment-dashboard") {
       sendJson(response, {
         total_agents: 1,
@@ -208,6 +210,7 @@ async function fetchPage(origin, path, cookie, expectedText) {
   const body = await response.text();
   assert(body.includes(expectedText), `${path} did not render ${JSON.stringify(expectedText)}`);
   assert(!body.includes(smokeToken), `${path} exposed the one-time plaintext token`);
+  return body;
 }
 
 const mockApi = createMockApi();
@@ -272,6 +275,11 @@ try {
   await fetchPage(dashboardOrigin, `/enrollment/agents/${agent.id}`, cookie, agent.name);
   await fetchPage(dashboardOrigin, "/enrollment/audit", cookie, "Audit log");
 
+  const patchPolicies = await fetchPage(dashboardOrigin, "/patch-policies", cookie, "Create a patch approval policy");
+  assert(patchPolicies.includes('aria-label="Primary navigation"'), "Patch policies must render inside the dashboard navigation");
+  assert(patchPolicies.includes('aria-current="page"'), "Patch policies must mark the active navigation item");
+  assert(patchPolicies.includes("Policy settings") && patchPolicies.includes("Installation &amp; reboot"), "Patch policy fields must render in labeled groups");
+
   const csrfFailure = await fetch(`${dashboardOrigin}/api/enrollment-tokens`, {
     body: "{}",
     headers: { "Content-Type": "application/json", Cookie: cookie },
@@ -313,7 +321,7 @@ try {
   }
 
   await fetchPage(dashboardOrigin, "/enrollment/tokens", cookie, "enr_…moke");
-  console.log("Production smoke passed: auth, enrollment pages, create/revoke routes, and token non-disclosure.");
+  console.log("Production smoke passed: auth, enrollment pages, patch policy layout, create/revoke routes, and token non-disclosure.");
 } finally {
   const nextExit = once(next, "exit");
   next.kill();
