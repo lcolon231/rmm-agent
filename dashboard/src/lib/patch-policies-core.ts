@@ -254,6 +254,41 @@ export function effectivePatchPolicyFromUnknown(value: unknown): EffectivePatchP
   };
 }
 
+export type PatchPolicyRevisionBody = {
+  rules: PatchRule[];
+  default_action: PatchDefaultAction;
+  require_maintenance_window: boolean;
+  reboot_policy: RebootPolicy;
+  reboot_delay_seconds: number;
+  reboot_requires_no_user: boolean;
+  max_install_attempts: number;
+};
+
+export type PatchPolicyCreateBody = PatchPolicyRevisionBody & {
+  name: string;
+  scope: PatchScope;
+  scope_id: string | null;
+  enabled: boolean;
+};
+
+export type PatchPolicyToggleBody = PatchPolicyRevisionBody & { enabled: boolean };
+
+export function buildToggleBody(
+  detail: PatchApprovalPolicyDetail,
+  enabled: boolean,
+): PatchPolicyToggleBody {
+  return {
+    enabled,
+    default_action: detail.default_action,
+    require_maintenance_window: detail.require_maintenance_window,
+    reboot_policy: detail.reboot_policy,
+    reboot_delay_seconds: detail.reboot_delay_seconds,
+    reboot_requires_no_user: detail.reboot_requires_no_user,
+    max_install_attempts: detail.max_install_attempts,
+    rules: detail.rules,
+  };
+}
+
 export function formatPatchScope(scope: PatchScope): string {
   return { global: "Global", client: "Client", site: "Site", agent: "Endpoint" }[scope];
 }
