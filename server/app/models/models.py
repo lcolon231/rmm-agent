@@ -444,7 +444,15 @@ class Operator(Base):
     # including for admins. A non-NULL scope is an explicit permission grant;
     # scope_id is required for site/agent scopes and NULL for global.
     script_execution_scope: Mapped[ScriptExecutionScope | None] = mapped_column(
-        Enum(ScriptExecutionScope), nullable=True
+        # ``values_callable`` keeps the stored labels on the enum *values*
+        # ("global"), matching the Postgres type created in migration 0010.
+        # Without it SQLAlchemy persists the member *names*, and the global
+        # scope would be written as "global_", which the type rejects.
+        Enum(
+            ScriptExecutionScope,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=True,
     )
     script_execution_scope_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True

@@ -42,7 +42,7 @@ def sqlite_url(path: Path) -> str:
 def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
     path = tmp_path / "assistant-migration.db"
     config = migration_config(sqlite_url(path))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0042"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0043"]
     command.upgrade(config, "0041")
     command.upgrade(config, "0042")
     with sqlite3.connect(path) as connection:
@@ -59,7 +59,7 @@ def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
         assert "operator_sessions" in tables
         assert "assistant_runs" not in tables
         assert "assistant_conversations" not in tables
-    command.upgrade(config, "0042")
+    command.upgrade(config, "0043")
     asyncio.run(_assert_current(sqlite_url(path)))
 
 

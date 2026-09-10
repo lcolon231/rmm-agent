@@ -27,6 +27,7 @@ from app.models.models import (  # noqa: E402
     Command,
     Operator,
     OperatorRole,
+    ScriptExecutionScope,
     Site,
 )
 from tests._tenancy import grant_all_memberships  # noqa: E402
@@ -340,3 +341,16 @@ async def test_revoke_restores_default_deny_and_endpoint_view_exposes_match(poli
     assert (
         await _dispatch(client, operator_auth, ids["agent_one"])
     ).status_code == 403
+
+
+def test_script_scope_column_stores_enum_values_not_member_names():
+    """Guard the Postgres label mismatch that broke global permission grants.
+
+    A bare ``Enum(ScriptExecutionScope)`` makes SQLAlchemy persist member
+    *names*, so the global scope was written as "global_" while the Postgres
+    type from migration 0010 only accepts "global". SQLite does not enforce
+    the label set, so nothing else in this suite can catch a regression here.
+    """
+    column_type = Operator.__table__.c.script_execution_scope.type
+    assert column_type.enums == [item.value for item in ScriptExecutionScope]
+    assert column_type._db_value_for_elem(ScriptExecutionScope.global_) == "global"
