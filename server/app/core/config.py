@@ -289,12 +289,16 @@ class Settings(BaseSettings):
     # lifetime caps total duration; the idle timeout ends a session with no I/O.
     # The output cap bounds total streamed bytes (fail closed on exceed). At most
     # one active session per agent is admitted. The poll timeout bounds how long
-    # a long-poll waits for a frame before returning empty.
+    # a long-poll waits for a frame before returning empty. While a session is
+    # still pending, the output long-poll uses the shorter pending timeout so an
+    # operator's view reflects the agent attaching within about a second rather
+    # than waiting a full poll timeout for a frame that cannot arrive yet.
     shell_session_max_lifetime_seconds: int = 1800
     shell_session_idle_timeout_seconds: int = 300
     shell_session_output_byte_limit: int = 1024 * 1024
     shell_session_max_concurrent_per_agent: int = 1
     shell_session_poll_timeout_seconds: int = 25
+    shell_session_pending_poll_timeout_seconds: float = 1.0
     shell_session_max_frame_bytes: int = 16 * 1024
     shell_session_relay_buffer_bytes: int = 128 * 1024
     shell_session_input_buffer_bytes: int = 64 * 1024
