@@ -60,3 +60,7 @@ Thumbs.db
 /.agents/skills/
 /.claude/skills/
 /skills-lock.json
+
+# Operator token cache (tools/ops) - never commit a live credential
+operator-token.txt
+nodelink-token.txt
