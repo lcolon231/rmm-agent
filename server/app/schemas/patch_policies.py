@@ -199,6 +199,8 @@ class PatchApprovalPolicyOut(BaseModel):
     default_action: str
     require_maintenance_window: bool
     reboot_policy: str
+    reboot_delay_seconds: int
+    reboot_requires_no_user: bool
     max_install_attempts: int
 
 
