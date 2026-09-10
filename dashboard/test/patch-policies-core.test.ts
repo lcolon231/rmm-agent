@@ -8,6 +8,7 @@ import {
   formatPatchAction,
   formatPatchScope,
   patchPolicyDetailFromUnknown,
+  patchPolicyFromUnknown,
   patchPolicyListFromUnknown,
 } from "../src/lib/patch-policies-core.ts";
 
@@ -23,6 +24,8 @@ const policy = {
   default_action: "deny",
   require_maintenance_window: true,
   reboot_policy: "if_required",
+  reboot_delay_seconds: 300,
+  reboot_requires_no_user: false,
   max_install_attempts: 2,
 };
 
@@ -85,4 +88,26 @@ test("formatters map scope and action to labels", () => {
   assert.equal(formatPatchScope("agent"), "Endpoint");
   assert.equal(formatPatchScope("site"), "Site");
   assert.equal(formatPatchAction("defer"), "Defer");
+});
+
+test("patchPolicyFromUnknown captures reboot round-trip fields", () => {
+  const parsed = patchPolicyFromUnknown({
+    id: "p1", name: "Baseline", scope: "global", scope_id: null,
+    enabled: true, created_at: "2026-09-09T10:00:00Z", current_version: 1,
+    rule_count: 0, default_action: "deny", require_maintenance_window: false,
+    reboot_policy: "if_required", reboot_delay_seconds: 900,
+    reboot_requires_no_user: false, max_install_attempts: 3,
+  });
+  assert.equal(parsed?.reboot_delay_seconds, 900);
+  assert.equal(parsed?.reboot_requires_no_user, false);
+});
+
+test("patchPolicyFromUnknown rejects an out-of-range reboot delay", () => {
+  assert.equal(patchPolicyFromUnknown({
+    id: "p1", name: "Baseline", scope: "global", scope_id: null,
+    enabled: true, created_at: "2026-09-09T10:00:00Z", current_version: 1,
+    rule_count: 0, default_action: "deny", require_maintenance_window: false,
+    reboot_policy: "never", reboot_delay_seconds: 10,
+    reboot_requires_no_user: true, max_install_attempts: 1,
+  }), null);
 });

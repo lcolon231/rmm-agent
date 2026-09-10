@@ -35,6 +35,8 @@ export type PatchApprovalPolicy = {
   default_action: PatchDefaultAction;
   require_maintenance_window: boolean;
   reboot_policy: RebootPolicy;
+  reboot_delay_seconds: number;
+  reboot_requires_no_user: boolean;
   max_install_attempts: number;
 };
 
@@ -139,6 +141,10 @@ export function patchPolicyFromUnknown(value: unknown): PatchApprovalPolicy | nu
     || !defaults.has(value.default_action as PatchDefaultAction)
     || typeof value.require_maintenance_window !== "boolean"
     || !rebootPolicies.has(value.reboot_policy as RebootPolicy)
+    || !Number.isInteger(value.reboot_delay_seconds)
+    || (value.reboot_delay_seconds as number) < 60
+    || (value.reboot_delay_seconds as number) > 3600
+    || typeof value.reboot_requires_no_user !== "boolean"
     || !Number.isInteger(value.max_install_attempts)
     || (value.max_install_attempts as number) < 1
   ) {
@@ -159,6 +165,8 @@ export function patchPolicyFromUnknown(value: unknown): PatchApprovalPolicy | nu
     default_action: value.default_action as PatchDefaultAction,
     require_maintenance_window: value.require_maintenance_window,
     reboot_policy: value.reboot_policy as RebootPolicy,
+    reboot_delay_seconds: value.reboot_delay_seconds as number,
+    reboot_requires_no_user: value.reboot_requires_no_user as boolean,
     max_install_attempts: value.max_install_attempts as number,
   };
 }
