@@ -33,5 +33,18 @@ services:
         sync: false          # set in the Render dashboard (secret)
       - key: DATABASE_URL
         sync: false          # secret Supabase Session pooler URL (port 5432), never the HTTPS API URL
+      # Alert delivery. With the provider disabled the offline sweeper still
+      # flips endpoint status and writes an agent.offline audit event, but
+      # nobody is told — an endpoint can stop reporting for weeks unnoticed.
+      # The three vars below are required for delivery; the remaining
+      # EMAIL_ALERT_* knobs keep their defaults from app/core/config.py.
       - key: EMAIL_ALERT_PROVIDER
-        value: disabled      # enable Resend only after adding the secret/config in Render
+        value: resend
+      - key: EMAIL_ALERT_RESEND_API_KEY
+        sync: false          # secret Resend API key, set in the Render dashboard
+      - key: EMAIL_ALERT_SENDER
+        sync: false          # verified Resend sender, e.g. alerts@<your-domain>
+      - key: EMAIL_ALERT_RECIPIENTS
+        sync: false          # comma-separated on-call list (max 50)
+      - key: EMAIL_ALERT_DASHBOARD_BASE_URL
+        sync: false          # optional; without it alert mail carries ids, not links
