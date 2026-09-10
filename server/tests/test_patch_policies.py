@@ -159,6 +159,50 @@ async def test_crud_scope_authorization_and_duplicate(client):
 
 
 @pytest.mark.asyncio
+async def test_policy_responses_preserve_current_reboot_settings(client):
+    """Dashboard saves and toggles require the stored settings in every summary."""
+    op = await auth(client)
+    _, site_id, _ = await enroll(client, op)
+    settings = {
+        "reboot_policy": "if_required",
+        "reboot_delay_seconds": 720,
+        "reboot_requires_no_user": False,
+        "max_install_attempts": 3,
+    }
+    created = await client.post("/patch-approval/policies", headers=op, json={
+        "name": "Reboot response contract", "scope": "site", "scope_id": site_id,
+        "rules": [], "default_action": "deny", **settings,
+    })
+    assert created.status_code == 201, created.text
+    policy_id = created.json()["id"]
+
+    async def assert_responses(response, expected):
+        detail = await client.get(f"/patch-approval/policies/{policy_id}", headers=op)
+        listed = await client.get("/patch-approval/policies", headers=op)
+        assert detail.status_code == listed.status_code == 200
+        summary = next(item for item in listed.json() if item["id"] == policy_id)
+        for payload in (response.json(), detail.json(), summary):
+            assert {key: payload.get(key) for key in expected} == expected
+        current = detail.json()["revisions"][0]
+        assert {key: current[key] for key in expected} == expected
+
+    await assert_responses(created, settings)
+    changed = {**settings, "reboot_delay_seconds": 900, "reboot_requires_no_user": True}
+    revised = await client.put(f"/patch-approval/policies/{policy_id}", headers=op,
+                               json={"rules": [], "default_action": "deny", **changed})
+    assert revised.status_code == 200, revised.text
+    await assert_responses(revised, changed)
+
+    # Dashboard enable/disable round-trips these exact values into a new revision.
+    toggled = await client.put(f"/patch-approval/policies/{policy_id}", headers=op,
+                              json={"rules": [], "default_action": "deny", "enabled": False,
+                                    **{key: revised.json()[key] for key in changed}})
+    assert toggled.status_code == 200, toggled.text
+    assert toggled.json()["enabled"] is False
+    await assert_responses(toggled, changed)
+
+
+@pytest.mark.asyncio
 async def test_effective_resolution_prefers_most_specific(client):
     op = await auth(client)
     org_id, site_id, agent_id = await enroll(client, op)

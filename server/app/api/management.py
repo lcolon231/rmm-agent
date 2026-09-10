@@ -2832,6 +2832,8 @@ async def _patch_policy_out(
             revision.require_maintenance_window if revision is not None else False
         ),
         reboot_policy=revision.reboot_policy if revision is not None else "never",
+        reboot_delay_seconds=revision.reboot_delay_seconds if revision is not None else 300,
+        reboot_requires_no_user=revision.reboot_requires_no_user if revision is not None else True,
         max_install_attempts=revision.max_install_attempts if revision is not None else 2,
     )
 
