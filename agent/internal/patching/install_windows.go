@@ -107,7 +107,9 @@ try {
     
     $uResult = $installRes.GetUpdateResult($i)
     $hr = ('0x{0:X8}' -f ($uResult.HResult -band 0xFFFFFFFF))
-    $result.results += [ordered]@{ identifier = $kbStr; result_code = [int]$uResult.ResultCode; hresult = $hr }
+    $uReboot = [bool]$uResult.RebootRequired
+    $result.results += [ordered]@{ identifier = $kbStr; result_code = [int]$uResult.ResultCode; hresult = $hr; reboot_required = $uReboot }
+    if ($uReboot) { $result.reboot_required = $true }
     if ($uResult.ResultCode -eq 2) { # 2 = OperationResultCode.orcSucceeded
       $result.installed_kbs += $kbStr
     } else {

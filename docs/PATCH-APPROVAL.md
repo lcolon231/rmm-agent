@@ -95,7 +95,13 @@ A policy revision also carries installation and reboot behavior:
 - The **agent** retries updates that fail with a retryable code up to
   `max_attempts` (WUA installs are idempotent per update, so nothing
   double-installs) and reports **per-update outcomes** (`identifier`,
-  `result_code`, `hresult`, `attempts`). After installing it applies the reboot
+  `result_code`, `hresult`, `attempts`, `reboot_required`). The per-update
+  `reboot_required` is WUA's own flag for that package: a cumulative or
+  servicing-stack update reports `result_code` 2 once it is *staged*, and is
+  only live after the restart, so the dashboard labels those installed KBs
+  "pending restart" while definition and MSRT updates show as done. Agents
+  older than this field omit it and the dashboard falls back to the
+  aggregate flag. After installing it applies the reboot
   decision: consent wins first — if `requires_no_user` and a user is present the
   reboot is **deferred**; `if_required` is a no-op when no reboot is pending;
   otherwise the reboot is **scheduled** via the same `shutdown.exe /r` mechanism

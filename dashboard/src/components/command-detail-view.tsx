@@ -75,20 +75,40 @@ function UpdateInstallResult({
   result: InstallUpdatesResultView;
 }) {
   const failed = result.status === "failed" || result.failedKBs.length > 0;
+  // Succeeded updates that WUA flagged as pending a restart are only staged;
+  // older agents omit the per-update flag, so the set is empty for them.
+  const stagedKBs = new Set(
+    result.results
+      .filter((outcome) => outcome.resultCode === 2 && outcome.rebootRequired === true)
+      .map((outcome) => outcome.identifier),
+  );
   return (
     <div className={`windows-update-command-result ${failed ? "failed" : "succeeded"}`}>
       <header>
         {failed ? <AlertTriangle aria-hidden="true" size={21} /> : <CheckCircle2 aria-hidden="true" size={21} />}
         <div>
           <strong>{result.message}</strong>
-          <span>{result.rebootRequired ? "The endpoint reports that a restart is required." : "No restart requirement was reported."}</span>
+          <span>
+            {result.rebootRequired
+              ? stagedKBs.size
+                ? `A restart is required to finish ${stagedKBs.size} of ${result.installedKBs.length} installed update(s).`
+                : "The endpoint reports that a restart is required."
+              : "No restart requirement was reported."}
+          </span>
         </div>
       </header>
       <div className="windows-update-result-columns">
         <section>
           <span>Installed · {result.installedKBs.length}</span>
           {result.installedKBs.length ? (
-            <ul>{result.installedKBs.map((kbID) => <li key={kbID}><code>{kbID}</code></li>)}</ul>
+            <ul>
+              {result.installedKBs.map((kbID) => (
+                <li key={kbID}>
+                  <code>{kbID}</code>
+                  {stagedKBs.has(kbID) ? <span className="windows-update-staged-badge">pending restart</span> : null}
+                </li>
+              ))}
+            </ul>
           ) : <p>None reported.</p>}
         </section>
         <section className={result.failedKBs.length ? "failed" : ""}>

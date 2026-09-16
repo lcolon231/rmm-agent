@@ -242,6 +242,8 @@ export type InstallUpdateOutcome = {
   resultCode: number;
   hresult: string | null;
   attempts: number;
+  /** WUA's per-update flag; null when an older agent omitted it. */
+  rebootRequired: boolean | null;
 };
 
 export type InstallRebootView = {
@@ -295,6 +297,7 @@ export function installUpdatesResultFromUnknown(value: unknown): InstallUpdatesR
         resultCode: item.result_code,
         hresult: typeof item.hresult === "string" ? item.hresult : null,
         attempts: typeof item.attempts === "number" ? item.attempts : 1,
+        rebootRequired: typeof item.reboot_required === "boolean" ? item.reboot_required : null,
       });
     }
   }

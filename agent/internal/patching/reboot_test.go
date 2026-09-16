@@ -105,3 +105,31 @@ func TestInstallWithRetryStopsAtMaxAttempts(t *testing.T) {
 		t.Fatalf("expected persistent failure, got %+v", res)
 	}
 }
+
+// A per-update reboot flag survives the retry merge and implies the aggregate
+// flag, so the dashboard can tell a staged cumulative update from a live one.
+func TestInstallWithRetryPreservesPerUpdateRebootRequired(t *testing.T) {
+	original := installOnce
+	t.Cleanup(func() { installOnce = original })
+
+	installOnce = func(_ context.Context, _ InstallTargets) (InstallResult, error) {
+		return InstallResult{
+			Status:       "success",
+			InstalledKBs: []string{"KB5126104", "KB5129195"},
+			Results: []UpdateOutcome{
+				{Identifier: "KB5126104", ResultCode: 2},
+				{Identifier: "KB5129195", ResultCode: 2, RebootRequired: true},
+			},
+		}, nil
+	}
+	res, err := InstallWithRetry(context.Background(), InstallTargets{KBIDs: []string{"KB5126104", "KB5129195"}}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.RebootRequired {
+		t.Fatalf("aggregate reboot_required must follow the per-update flag: %+v", res)
+	}
+	if len(res.Results) != 2 || res.Results[0].RebootRequired || !res.Results[1].RebootRequired {
+		t.Fatalf("per-update reboot flags not preserved: %+v", res.Results)
+	}
+}
