@@ -1,0 +1,14 @@
+{
+  "format": "nodelink-backup-manifest",
+  "version": 1,
+  "created_at_utc": "20260916T050559Z",
+  "database": "nodelink_rehearsal",
+  "schema_revision": "0044",
+  "postgres_server_version": "18.4",
+  "pg_dump_version": "18.4",
+  "encryption": "aes-256-cbc, pbkdf2, 600000 iterations, salted",
+  "encrypted_file": "nodelink-backup-20260916T050559Z.dump.enc",
+  "encrypted_sha256": "d6a8f3a7d3548a0752b281d5826fa45bf89e5489ec94950c45aed2d23eab870c",
+  "encrypted_bytes": 187648,
+  "plaintext_sha256": "3442cce555d828d0c761e0f6bda5a8669b4b6b397958176249127a00b79ebd82"
+}

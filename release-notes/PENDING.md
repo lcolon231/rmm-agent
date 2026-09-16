@@ -11,26 +11,16 @@ cleared, so this file lists only what no manifest carries yet.
 
 ## Carried
 
-**Support-chat tray (next tag must state):** a system-tray launcher for support
-chat landed after v0.1.9 (`specs/SPEC-support-chat-tray.md`). The next manifest
-must state: it requires the agent version that first ships it; it is Windows-only
-(`rmm-agent tray`, no-op elsewhere); the installer now creates an all-users
-Startup shortcut "NodeLink Support" that launches the tray at logon as a
-non-elevated process, removed on uninstall; it adds no server change, no
-migration, and no `agent/go.mod` dependency (native `Shell_NotifyIcon`); and it
-makes the existing `#24` unsigned-artifact limitation more visible because the
-tray is a persistent user-session process rather than a transient CLI. No new
-credential or network surface — it is only a launcher for the shipped
-`chatpipe.Request` flow.
+Nothing pending. The support-chat tray launcher
+(`specs/SPEC-support-chat-tray.md`) — agent 0.1.10 required, Windows-only
+(`rmm-agent tray`), the all-users Startup shortcut, no migration, no server
+change, no `agent/go.mod` dependency, and the more-visible `#24` unsigned-artifact
+limitation from a persistent user-session process — is stated in
+[`v0.1.10.json`](v0.1.10.json) and needs no further carry-forward. The v0.1.9
+facts are stated in [`v0.1.9.json`](v0.1.9.json).
 
-The v0.1.9 facts — endpoint support chat from #234 (agent 0.1.9 required,
-Windows-only, operator dashboard deferred to #235, migration 0044), per-update
-`reboot_required` from #256 (agent 0.1.9 required), and the #248
-global-script-grant repair (migration 0043) — are stated in
-[`v0.1.9.json`](v0.1.9.json) and need no further carry-forward.
-
-Note for whoever cuts the next tag: v0.1.9's rollback and evidence records were
-rehearsed against a disposable database. The pre-migration 0042 backup it names
-is the rehearsal's, not the live deployment's, so take and verify a fresh
-backup of the real database before promoting and repoint
+Note for whoever cuts the next tag: v0.1.10's rollback and evidence records were
+rehearsed against a disposable database. Because v0.1.10 adds no migration its
+rollback is restore-free; a tag that does add a migration must again take and
+verify a fresh backup of the real database before promoting and repoint
 `rollback.target.database.backup_manifest` at it.

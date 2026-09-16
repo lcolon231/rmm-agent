@@ -1,0 +1,144 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "v0.1.10",
+    "title": "NodeLink v0.1.10 adds a system-tray launcher for support chat",
+    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after the sole repository owner reviewed and accepted the release evidence. This is a small feature release on top of v0.1.9. Its only change is a Windows system-tray launcher for the endpoint support chat shipped in v0.1.9: a new `rmm-agent tray` subcommand shows the NodeLink shield emblem in the notification area, and clicking it opens a support conversation through the exact same local service pipe as `rmm-agent chat`. The installer now creates an all-users Startup shortcut so the tray appears at logon. There is no server change, no database migration, no new command kind or capability, and no new agent dependency. The operator dashboard to read and reply to conversations remains issue #235 and is still not in this release, so the tray opens and stores a conversation but there is not yet an in-product responder. It is not approved for multi-tenant or high-availability claims."
+  },
+  "server": {
+    "tag": "v0.1.10",
+    "deployment": "Deploy source from the exact commit bound to v0.1.10 by the release workflow. There is no server-side change in this release and no migration: the schema head stays at 0044 from v0.1.9. The tray is an agent-only launcher and reaches the server only through the service's existing agent-authenticated support-chat route, so support chat still requires support_chat_base_url to be set to the deployment's HTTPS browser origin for a conversation to open."
+  },
+  "agent": {
+    "version": "0.1.10",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "0.1.10",
+    "filename": "NodeLinkAgentSetup-0.1.10.exe"
+  },
+  "database": {
+    "alembic_revision": "0044",
+    "compatible_from": [
+      "0001",
+      "0012",
+      "0029",
+      "0035",
+      "0042",
+      "0044"
+    ],
+    "migration_policy": "Migrations are forward-only. v0.1.10 adds no revision: the head stays at 0044, the same schema v0.1.9 shipped. A v0.1.9 database at 0044 needs no migration for this release. Older databases upgrade forward to 0044 exactly as documented for v0.1.9 (0042 through 0044 for a v0.1.8 database, and the earlier guarded-adoption paths for v0.1.2 and the unversioned public v0.1.1). Never edit a revision or perform an in-place downgrade."
+  },
+  "protocols": {
+    "command_envelopes": [
+      "command-v3"
+    ],
+    "mixed_version_behavior": "command-v3 is unchanged from v0.1.9 and no command kind, envelope, or capability is added or removed, so a v0.1.9 and a v0.1.10 agent are protocol-identical and a mixed fleet needs no staging. The tray is a local launcher: it wraps the same parameterless named-pipe request the v0.1.9 `rmm-agent chat` subcommand already makes, so it changes nothing on the wire between agent and server. Support chat still advertises the support-chat-v1 capability introduced in v0.1.9. Roll the server out before the agent as usual, though this release carries no server change."
+  },
+  "known_limitations": [
+    "The tray is a launcher only. It opens the same endpoint support chat shipped in v0.1.9, whose operator dashboard to read and reply is issue #235 and is still not in this release. A conversation opened from the tray is stored, redacted, and retained but has no in-product responder yet, so the tray must not be presented to end users as live help until #235 ships.",
+    "The tray is Windows-only and requires an interactive desktop session with a default browser, exactly like `rmm-agent chat`. `rmm-agent tray` returns an unsupported error on non-Windows builds, and clicking the icon with no logged-on user or no configured support_chat_base_url shows a balloon tip and opens nothing rather than failing loudly.",
+    "The tray is a persistent user-session process launched at each logon by an all-users Startup shortcut, so it makes the existing #24 unsigned-artifact limitation more visible than a transient CLI does: SmartScreen or antivirus may flag a long-running unsigned executable. This is not a new risk class; the artifacts are still verified by checksum and build-provenance attestation, and Authenticode signing remains the open item behind #24.",
+    "support_chat_base_url must be set to the deployment's HTTPS browser origin for the tray to open a conversation; with it unset the agent conversation endpoint returns 503 and the tray reports the failure in a balloon tip.",
+    "#24: Windows agent and installer artifacts are not Authenticode signed, so SmartScreen or antivirus warnings remain possible. Signed self-update artifacts use the existing Ed25519 command-signing trust, not Authenticode.",
+    "#84: Enrollment rate limits, counters, and metrics are process-local; no multi-worker or high-availability protection claim is made.",
+    "#126: Empty deployments must bootstrap the first client and site through the existing administrative API before using enrollment.",
+    "Endpoint inventory, monitoring, patching, remediation, self-update, support chat, and the support-chat tray are Windows-first; Linux and macOS remain development-only builds with reduced or absent collectors and no self-update or support-chat support.",
+    "Alert email and signed webhook delivery are best-effort with process-local state; alert delivery is inert until an operator configures a provider and assigns a monitoring policy containing an offline check.",
+    "#179: an agent's reported version refreshes only on a successful authenticated heartbeat, so an offline, quarantined, or unauthenticated endpoint keeps displaying its last recorded version.",
+    "Agent self-update is disabled by default and must be explicitly enrolled into a channel and targeted by an admin-authorized rollout; it never applies itself without an operator-published, signed release.",
+    "Bounded credential reattachment is limited by agent_credential_reattach_window_seconds, 30 days by default; an endpoint powered off longer than that window still requires manual re-enrollment.",
+    "This manifest's backup, restore, and rollback rehearsal evidence was produced against a disposable local PostgreSQL cluster seeded with a representative dataset (server/tests/test_backup_restore.py shape), not a production database. Because v0.1.10 adds no migration, a rollback to v0.1.9 needs no database restore at all, so this evidence documents the restore-free rollback path rather than a pre-migration recovery point."
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "Pause enrollment, command dispatch, scheduled-task execution, agent self-update rollouts, server promotion, and external agent rollout automation.",
+      "Because v0.1.10 adds no migration, no pre-migration backup is required to preserve a rollback path; a routine verified backup of the live 0044 database remains good practice.",
+      "Confirm the HTTPS public URL, server-only dashboard API URL, and support_chat_base_url (if support chat is enabled) are configured; none change in this release.",
+      "Verify every release artifact checksum and GitHub build-provenance attestation, and confirm each agent binary reports 0.1.10 via `rmm-agent version -expect 0.1.10` rather than the unstamped 0.1.0-dev fallback."
+    ],
+    "steps": [
+      "No `alembic upgrade` is required: the schema head is already 0044 from v0.1.9. Confirm the startup revision guard reports 0044.",
+      "Deploy the server and dashboard from the workflow-bound v0.1.10 source commit; both are unchanged from v0.1.9 apart from the version stamp.",
+      "Deploy the checksum-verified Windows agent or installer to one owned canary endpoint before expanding the rollout; the installer upgrades in place and now also creates the all-users Startup shortcut that launches the tray at logon.",
+      "Leave every agent's update_channel unset (the default) until self-update has been separately qualified on the pilot topology."
+    ],
+    "verification": [
+      "Confirm Alembic current still reports 0044 and that health, readiness, metrics, login, and production configuration checks pass over verified HTTPS.",
+      "Confirm the upgraded canary endpoint keeps its agent ID and credentials and reports agent version 0.1.10 after its first heartbeat.",
+      "On the canary desktop, confirm the NodeLink Support tray icon appears in the notification area after logon, that clicking it opens the /chat page in the default browser, that the right-click menu offers Open and Exit, and that stopping the service makes a click show a balloon tip instead of failing silently.",
+      "Confirm the chat token still appears only in the URL fragment and in no server or agent log, unchanged from v0.1.9.",
+      "Confirm heartbeat, audit sequence, token revocation, and agent revocation behavior are unchanged."
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "v0.1.10 adds no database migration, so a rollback to v0.1.9 is a redeploy with no database restore and no data loss. The current schema (0044) already equals the v0.1.9 target schema (0044). This was rehearsed for this tag with server/scripts/plan_release_rollback.py, and the retained plan records status ready, action redeploy_without_database_restore, and restore_required false.",
+      "To roll back, pause rollout and agent self-update, redeploy the v0.1.9 server, dashboard, and agent/installer artifacts, and let endpoints pick up the v0.1.9 binary; no database action is taken.",
+      "Rolling back removes the support-chat tray and its Startup shortcut; the underlying support chat shipped in v0.1.9 (the `rmm-agent chat` CLI, the pipe, the server routes) is unaffected because the tray only launches it.",
+      "If artifact, audit, or startup verification fails, keep promotion blocked and continue with a reviewed forward fix rather than a rollback, since no schema pressure forces one."
+    ],
+    "target": {
+      "server": {
+        "tag": "v0.1.9",
+        "commit": "1e5f8ea8782687a2ff8de2a4844fe27932f59c6b"
+      },
+      "agent": {
+        "version": "0.1.9",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "b75ea90a436c64432d4008deba4048f96b62102c8fa0ef0a6e0ebcbf25ff52b7",
+          "rmm-agent-linux-amd64": "c4051c7e92d8246e4a326fe7b92ff6e4ede6ae91f2b61c9ba13bab65b408a8a1",
+          "rmm-agent-darwin-arm64": "e91339cd3a5588f622839aa263a7b212a9f6a7f57bd5b34a568c343a325edacf"
+        }
+      },
+      "installer": {
+        "filename": "NodeLinkAgentSetup-0.1.9.exe",
+        "sha256": "e6392f0150bbd67bb5c9a44626a097126d47412d1df8b8fc4c647457fa1ab1a6"
+      },
+      "database": {
+        "alembic_revision": "0044",
+        "backup_manifest": {
+          "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/0f8ab42d5c69626763d1201cf74f5047890f7dc1/release-notes/evidence/v0.1.10/nodelink-backup-20260916T050559Z.manifest.json",
+          "sha256": "9a3037d015ebb00dbb002a961f28b3b7b636cd58df858766e58186a57a1323a0"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "command-v3"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "v0.1.10 is a UX-only launcher release. The system-tray icon introduces no new credential, no new network surface, no new server route, no new command kind or capability, and no schema change. It reuses the v0.1.9 support-chat security model unchanged and reaches the server only through the existing INTERACTIVE-only service pipe. The single new consideration is that the tray is a persistent user-session process, which makes the already-documented unsigned-artifact limitation more visible.",
+    "fixed_vulnerabilities": [
+      "No security vulnerability is fixed by v0.1.10; it is a launcher-only release. It changes no authorization, TLS, signing, audit, redaction, or retention behavior and reuses the v0.1.9 support-chat model verbatim: a SHA-256 conversation-scoped chat token compared with hmac.compare_digest, scrub_text redaction on write, and a named pipe ACL'd to INTERACTIVE with remote clients rejected."
+    ],
+    "new_risks": [
+      "The tray is a persistent user-session process launched at every logon, so the open #24 unsigned-artifact limitation is more visible than for a transient CLI: SmartScreen or antivirus may flag a long-running unsigned executable. It is mitigated only by checksum and build-provenance verification until Authenticode signing lands, exactly as for the other agent artifacts.",
+      "The tray holds no credential, opens no network connection of its own, and reaches the server exclusively through the existing agent-authenticated service pipe, so it adds no attack surface beyond the presence of the process itself. A local interactive user can only open a conversation for their own session, which the pipe's INTERACTIVE-only ACL already admits.",
+      "The all-users Startup shortcut runs the tray for every interactive user; each session gets its own single-instance tray and cannot open a chat for another user's session.",
+      "#24 and #84 remain open, unchanged by this release."
+    ],
+    "operator_actions": [
+      "Verify every artifact checksum and build-provenance attestation before deploying, and brief users that the tray's persistent presence may make an unsigned-binary SmartScreen or antivirus prompt more likely until Authenticode signing lands.",
+      "Set support_chat_base_url to the HTTPS browser origin if support chat is enabled; with it unset the tray reports the failure in a balloon and opens nothing.",
+      "On a canary desktop, manually verify the tray before broad rollout: the icon appears at logon, clicking opens the chat, the menu works, and stopping the service produces a balloon rather than a silent failure.",
+      "Leave every agent's update_channel unset after upgrading until self-update has been separately qualified on the pilot topology."
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/0f8ab42d5c69626763d1201cf74f5047890f7dc1/release-notes/evidence/v0.1.10/restore-verification-0044.json",
+      "sha256": "e5ef55938b7eeb5e4bd391fd54a64c2865333b9e8782fccbbc6519194046c195"
+    },
+    "rollback_rehearsal": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/0f8ab42d5c69626763d1201cf74f5047890f7dc1/release-notes/evidence/v0.1.10/rollback-plan-v0110-to-v019.json",
+      "sha256": "99095f7ece1e02e5d5b8f48555c234e98464305044bbc0b38c541390530e1e00"
+    }
+  }
+}
