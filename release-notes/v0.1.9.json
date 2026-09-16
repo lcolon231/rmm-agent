@@ -1,0 +1,153 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "v0.1.9",
+    "title": "NodeLink v0.1.9 adds endpoint support chat and repairs global script grants",
+    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after the sole repository owner reviewed and accepted the release evidence. This is a feature release on top of v0.1.8. Its headline change is endpoint support chat (issue #234): a person at an enrolled Windows endpoint opens NodeLink Support, the agent service mediates the request over a local named pipe, opens a conversation with its own agent credential, and launches the default browser at a short-lived, conversation-scoped chat URL. This half of the feature -- the endpoint capability, the server conversation and message storage, redaction on write, tokening, and retention -- ships here; the operator dashboard to read and reply to conversations is issue #235 and is deliberately not in this release. The release also carries per-update reboot_required patch reporting (issue #256), the live patch-approval-policies dashboard, a shell-session attach-latency fix (issue #249), and the migration 0043 repair that makes a global arbitrary-script permission grant work on PostgreSQL (issue #248). It adds Alembic revisions 0043 and 0044. It is not approved for multi-tenant or high-availability claims."
+  },
+  "server": {
+    "tag": "v0.1.9",
+    "deployment": "Deploy source from the exact commit bound to v0.1.9 by the release workflow. Apply Alembic revisions 0043 and 0044, merged since v0.1.8's 0042, before the server serves traffic. Support chat adds two token-authorized route groups -- an agent-authenticated router at /api/v1/support/agent that opens a conversation and returns a complete browser URL, and an endpoint-token router at /api/v1/support/chat for message polling, sending, notice acknowledgment, and token refresh. Support chat is inert until support_chat_base_url is set to the deployment's HTTPS browser origin: with it unset or non-HTTPS the agent conversation endpoint returns 503 support_chat_unavailable rather than minting an unusable URL. No new command kind or command envelope is introduced."
+  },
+  "agent": {
+    "version": "0.1.9",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "0.1.9",
+    "filename": "NodeLinkAgentSetup-0.1.9.exe"
+  },
+  "database": {
+    "alembic_revision": "0044",
+    "compatible_from": [
+      "0001",
+      "0012",
+      "0029",
+      "0035",
+      "0042"
+    ],
+    "migration_policy": "Migrations are forward-only. v0.1.9 adds two revisions since v0.1.8's 0042: 0043 (normalize the scriptexecutionscope enum label 'global_' to its member value 'global' so a global arbitrary-script grant is accepted on PostgreSQL) and 0044 (support_conversations and support_messages tables for endpoint support chat). 0044 is purely additive -- two new tables, no existing column dropped or narrowed and no existing row rewritten. 0043 is a forward-only repair: on PostgreSQL it renames the enum value in place and on SQLite it updates any row written under the old label. A v0.1.8 database at 0042 runs both revisions with alembic upgrade head; a v0.1.5 database at 0029 upgrades forward through 0035 and 0042 first; a v0.1.2 database upgrades from 0012 and an unversioned public v0.1.1 database must pass guarded schema adoption at 0001 before upgrading. Never edit a revision or perform an in-place downgrade. The 0043 PostgreSQL enum-value rename cannot be reversed in place, so crossing back below 0044 requires the exact-revision restore procedure in docs/ROLLBACK.md rather than an Alembic downgrade."
+  },
+  "protocols": {
+    "command_envelopes": [
+      "command-v3"
+    ],
+    "mixed_version_behavior": "command-v3 is unchanged from v0.1.8 and no command kind is added or removed, so a v0.1.8 and a v0.1.9 agent are protocol-identical and a mixed fleet needs no staging. Support chat introduces no command kind or envelope: the agent service opens a conversation over its existing authenticated bearer, and the end-user browser is authorized by a separate short-lived chat token, all over ordinary HTTPS polling. A v0.1.9 agent advertises a new support-chat-v1 capability at enrollment and renewal; an older server ignores it and a v0.1.8 agent simply never serves the chat pipe. Per-update reboot_required (issue #256) travels inside the existing bounded install/scan result detail a v0.1.9 agent already sends; an older server stores it without interpreting it, and a v0.1.8 agent reports only the aggregate reboot_required. Roll the server out before the agent, as for every change that adds server-side reads."
+  },
+  "known_limitations": [
+    "Support chat in v0.1.9 ships only the endpoint and server-storage half of the feature. A user can open a conversation and send messages, which are stored, redacted, sequence-numbered, and retained, but the operator dashboard to read and reply is issue #235 and is not in this release. A conversation opened under v0.1.9 has no in-product responder yet, so support chat must not be advertised to end users as live help until #235 ships.",
+    "Support chat is Windows-only and requires an interactive desktop session with a default browser. The service launches the browser with CreateProcessAsUser into the active console session; with nobody logged on there is nothing to launch and the request is a non-fatal skip. RDP and fast-user-switching multi-session behavior are untested: the issue #233 spike verified only the single unlocked console, the locked console, and the no-user cases. On the documented WTSGetActiveConsoleSessionId behavior an RDP-only user may receive nothing and a fast user switch may send the browser to whoever holds the physical console, so both remain open risks on multi-session hosts.",
+    "The chat token is the entire security boundary for the unauthenticated /chat page. It is short-lived (support_chat_token_ttl_seconds, default 900), scoped to exactly one conversation, stored only as a SHA-256 hash, and delivered solely in the URL fragment, which the page removes from browser history on load and which is never sent in a Referer header or written to an access log. A user who closes the browser tab loses the conversation window; an abandoned URL left in history is inert within the token TTL.",
+    "Support chat is inert until support_chat_base_url is configured to the deployment's HTTPS browser origin. If it is unset, malformed, or not HTTPS, the agent conversation endpoint returns 503 support_chat_unavailable rather than minting a URL that would not load, so no chat can be opened until an operator sets it.",
+    "Support chat message bodies are treated as incidental PHI: they are redacted with scrub_text at write time so a pasted credential never lands in the database in plaintext, retained for support_chat_retention_days (default 30) after a conversation closes, and never entered into the audit hash chain. Only lifecycle events are audited, without bodies. The consent notice the page requires before the first message is a recording and monitoring disclosure governed by state law and employment policy, not a HIPAA authorization, and the 30-day default is a minimum-necessary choice rather than a regulatory requirement.",
+    "Per-update reboot_required reporting (issue #256) requires agent 0.1.9. An endpoint still running 0.1.8 or earlier reports only the aggregate reboot_required for an install, not the per-update breakdown.",
+    "#24: Windows agent and installer artifacts are not Authenticode signed, so SmartScreen or antivirus warnings remain possible. Signed self-update artifacts use the existing Ed25519 command-signing trust, not Authenticode; an optional Authenticode signer-thumbprint pin is available once a certificate exists.",
+    "#84: Enrollment rate limits, counters, and metrics are process-local; no multi-worker or high-availability protection claim is made.",
+    "#126: Empty deployments must bootstrap the first client and site through the existing administrative API before using enrollment.",
+    "Endpoint inventory, monitoring checks, alerting, patching, remediation, self-update, and now support chat are Windows-first; Linux and macOS remain development-only builds with reduced or absent collectors and no self-update or support-chat support. Support chat returns an unsupported result on non-Windows agents.",
+    "Alert email and signed webhook delivery are best-effort with process-local state; there is no multi-worker delivery deduplication or high-availability guarantee. Alert delivery is inert until an operator configures a provider and assigns a monitoring policy containing an offline check.",
+    "#179: an agent's reported version refreshes only on a successful authenticated heartbeat, so an offline, quarantined, or unauthenticated endpoint keeps displaying its last recorded version. Because support-chat and per-update reboot reporting are gated on agent version, an endpoint whose displayed version is stale may be more or less capable than the dashboard shows.",
+    "Agent self-update is disabled by default (per-agent update_channel is nullable and unset) and must be explicitly enrolled into a channel and targeted by an admin-authorized rollout; it never applies itself without an operator-published, signed release.",
+    "Bounded credential reattachment is limited by agent_credential_reattach_window_seconds, 30 days by default, measured from credential expiry. An endpoint powered off longer than that window still requires manual re-enrollment, and the refusal is deliberately indistinguishable from revocation, quarantine, or an unknown credential.",
+    "This manifest's backup, restore, and rollback rehearsal evidence was produced against a disposable local PostgreSQL cluster seeded with a representative dataset (server/tests/test_backup_restore.py shape), not a production database, and has no external immutable audit-anchor receipt because anchor publication is opt-in and was not configured for the rehearsal. The named pre-migration 0042 backup is the rehearsal's, not the live deployment's."
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "Pause enrollment, command dispatch, scheduled-task execution, agent self-update rollouts, server promotion, and external agent rollout automation.",
+      "Take a fresh encrypted backup of the live v0.1.8 (schema 0042) database with deploy/backup/nodelink-backup.sh and verify its manifest checksums. This release migrates 0042 to 0044, so this is the pre-migration recovery point and the only supported way back to v0.1.8.",
+      "Confirm Python 3.12, PostgreSQL, command signing keys, production secrets, trusted-proxy settings, the HTTPS public URL, and the server-only dashboard API URL are configured, and set support_chat_base_url to the HTTPS browser origin if support chat is to be enabled.",
+      "Verify every release artifact checksum and GitHub build-provenance attestation, and confirm each agent binary reports 0.1.9 via `rmm-agent version -expect 0.1.9` rather than the unstamped 0.1.0-dev fallback."
+    ],
+    "steps": [
+      "Run `alembic upgrade head` against the v0.1.8 database to apply revisions 0043 and 0044; the startup revision guard must report 0044 before serving traffic.",
+      "For a v0.1.5 database at 0029, upgrade forward through 0035 and 0042 first and then continue to 0044; for a v0.1.2 database upgrade from 0012, and for an unversioned public v0.1.1 database run guarded adoption to 0001 first.",
+      "Deploy the server and dashboard together from the workflow-bound v0.1.9 source commit, and set support_chat_base_url to the HTTPS browser origin if enabling support chat.",
+      "Deploy the checksum-verified Windows agent or installer to one owned canary endpoint before expanding the rollout; the installer upgrades an enrolled endpoint in place without an enrollment token.",
+      "Leave every agent's update_channel unset (the default) until self-update has been separately qualified on the pilot topology."
+    ],
+    "verification": [
+      "Confirm Alembic current reports 0044 and that health, readiness, metrics, login, and production configuration checks pass over verified HTTPS.",
+      "Confirm the upgraded canary endpoint keeps its agent ID and credentials and reports agent version 0.1.9 after its first heartbeat.",
+      "With support_chat_base_url set, run `rmm-agent chat` on the canary and confirm the default browser opens the /chat page, a conversation row appears, the notice must be acknowledged before a message can be sent, and the chat token appears only in the URL fragment and in no server or agent log.",
+      "Confirm the support-chat named pipe rejects a remote client and a non-interactive caller (the shipped chatpipe tests assert both), and that the chat URL never returns across the pipe to the calling user process.",
+      "On an endpoint with pending updates, confirm a v0.1.9 agent reports reboot_required per update, and confirm a global arbitrary-script permission grant now succeeds on PostgreSQL where it failed under v0.1.8 (issue #248).",
+      "Confirm heartbeat, audit sequence, expected metric deltas, token revocation, agent revocation, and post-revocation authentication rejection."
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "Prefer a forward fix. v0.1.9 adds revisions 0043 and 0044 on top of v0.1.8's 0042; if the current database is still at 0042 because the server redeploy failed before migrating, the planner resolves to redeploy_without_database_restore and no restore is needed.",
+      "If the database has already migrated to 0044, a component rollback to v0.1.8 requires restoring the retained pre-migration 0042 backup, because 0043 renames a PostgreSQL enum value that cannot be reversed in place and 0044's tables would have to be dropped, and there is no Alembic downgrade. This was rehearsed for this tag with server/scripts/plan_release_rollback.py against a 0042 recovery point, and the retained plan records status ready, action restore_backup_then_redeploy, restore_required true, and data_loss_accepted true.",
+      "Before rolling back, pause rollout, agent self-update, and writers, and name the decision maker; restoring the pre-migration backup discards every write made after that backup, including any support-chat conversations and messages and any MFA, administrative session, approval, and dashboard assistant records created under v0.1.9.",
+      "Rolling back removes endpoint support chat: the /chat page and the agent chat pipe stop functioning, and any stored conversations are discarded with the restore. No monitoring alert state depends on support chat, so no alert changes state as a result.",
+      "If artifact, audit, or startup verification fails, keep promotion blocked and continue with a reviewed forward fix."
+    ],
+    "target": {
+      "server": {
+        "tag": "v0.1.8",
+        "commit": "dae40230a4e5faf757b1c4a360bcaf2484a55331"
+      },
+      "agent": {
+        "version": "0.1.8",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "6fe23253526f69173096784610de153c8758a6e638f13a7c01ff8ca544cf1c5a",
+          "rmm-agent-linux-amd64": "4085125e51df929a99e9025d8385b079ce4f98959d69237cbffe6a39010e9ff4",
+          "rmm-agent-darwin-arm64": "958c5a6ffa91fc53de73bef09202cee2e7ae6a1f46271b48738ab0aa97e07ee3"
+        }
+      },
+      "installer": {
+        "filename": "NodeLinkAgentSetup-0.1.8.exe",
+        "sha256": "1cd035a565967cd0ca3f2b55ab81e75854c498d9e05ca5ecc73ae739c56e5fcd"
+      },
+      "database": {
+        "alembic_revision": "0042",
+        "backup_manifest": {
+          "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/8d8acc99f0e712757d4b9acf8914aa42a2ea0456/release-notes/evidence/v0.1.9/nodelink-backup-20260916T033010Z.manifest.json",
+          "sha256": "bd44779cc4ca04875560550d936fea462eb008f08a06a9d7e9fde9ea822792a7"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "command-v3"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "v0.1.9's headline support chat introduces exactly one new credential, the short-lived conversation-scoped chat token, and one new local attack surface, the agent's named pipe. Both are tightly bounded and no existing authorization, TLS, signing, or audit behavior changes. The feature adds an unauthenticated /chat browser route that is reachable only with a valid, unexpired, conversation-scoped token, and it keeps chat message bodies out of the audit hash chain and scrubs them on write. Revision 0043 corrects a functional authorization-management defect rather than an exposure.",
+    "fixed_vulnerabilities": [
+      "#248: a global arbitrary-script permission grant failed on PostgreSQL because SQLAlchemy persisted the enum member name ('global_') while the database type used the member value ('global'), so the grant raised an invalid-enum error and surfaced as a generic unavailable action. Revision 0043 normalizes the label so the grant is accepted. This was a functional defect that denied a legitimate least-privilege grant, not an access-control bypass that allowed an illegitimate one.",
+      "Support chat scrubs message bodies with scrub_text before persistence, so a credential a user pastes into a chat -- a realistic event -- is redacted before it reaches the database and never enters the audit hash chain, keeping incidental secrets and PHI out of durable storage and out of alert or webhook payloads."
+    ],
+    "new_risks": [
+      "The /chat route is unauthenticated by design and reachable by anyone presenting a valid, unexpired, conversation-scoped chat token, which is the entire boundary for the end-user side. The token is secrets.token_urlsafe(32), stored only as a SHA-256 hash, compared with hmac.compare_digest, scoped to one conversation and one agent, expires by default in 900 seconds, is rotated on refresh, is rate-limited, and is delivered only in a URL fragment that is stripped from browser history and never sent in a Referer header.",
+      "The agent service now serves a local named pipe, \\\\.\\pipe\\nodelink-agent-chat, which is the whole authorization surface for opening a conversation. It is ACL'd to INTERACTIVE only, sets PIPE_REJECT_REMOTE_CLIENTS so it is not reachable over SMB, carries a single parameterless message, discards any extra client bytes, and never returns the chat URL or token across the pipe. A local interactive user can open a conversation for their own endpoint by design, because they are the person to be helped; per-session rate limits bound abuse.",
+      "Support chat message bodies are incidental PHI retained up to support_chat_retention_days (default 30) after a conversation closes, and every retained day is breach-notification scope. Bodies are redacted at write and kept out of the audit chain, retention is a configurable setting, and a value of 0 disables body retention.",
+      "v0.1.9 ships support chat without its operator side (issue #235), so a conversation a user opens is stored but cannot be answered in-product until that release. An operator who treats support chat as live help before #235 would mislead end users.",
+      "Revision 0044 adds two tables but no new authorization; a rollback to v0.1.8 drops them and discards any conversations and messages created under v0.1.9.",
+      "#24 remains open because Windows artifacts are unsigned and require checksum and provenance verification, and #84 remains open because enrollment limiting and counters are process-local."
+    ],
+    "operator_actions": [
+      "Set support_chat_base_url to the deployment's HTTPS browser origin before enabling support chat; with it unset the agent endpoint returns 503 and chat is inert, and it must never point at a non-HTTPS origin.",
+      "Take and verify a fresh encrypted backup of the live 0042 database before promoting. This release migrates the schema, so that pre-migration backup is the only supported way back to v0.1.8; repoint rollback.target.database.backup_manifest at that real backup, because the one named in this manifest is the disposable rehearsal's.",
+      "Because independent second-operator review is not available, the sole release operator must personally verify the complete v0.1.9 evidence index, retained digests, preflight result, and green release checks before tagging.",
+      "Tell endpoint users that a support-chat conversation opened under v0.1.9 is recorded and retained but not yet answerable in-product until the operator dashboard (issue #235) ships; do not advertise support chat as live help yet.",
+      "Leave every agent's update_channel unset after upgrading; do not enroll endpoints into a self-update channel until the rollout, health-check, and rollback behavior has been separately qualified on the pilot topology.",
+      "Configure an alert delivery provider and assign a monitoring policy containing an offline check before relying on this release to tell anyone that an endpoint has stopped reporting, and re-enroll by hand any endpoint already stranded on a lapsed credential, enumerating candidates by last_seen_at rather than reported agent version."
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/8d8acc99f0e712757d4b9acf8914aa42a2ea0456/release-notes/evidence/v0.1.9/restore-verification-0042.json",
+      "sha256": "14b99af967cbc2bd6847bcbd903a1e0c539cdb1dd3416dde6fe8a8b180d6b434"
+    },
+    "rollback_rehearsal": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/8d8acc99f0e712757d4b9acf8914aa42a2ea0456/release-notes/evidence/v0.1.9/rollback-plan-v019-to-v018.json",
+      "sha256": "0fd248482f75973168c82e6b7ba14123f66eecc450afe9745ccb4518f81af150"
+    }
+  }
+}
