@@ -46,6 +46,7 @@ const (
 	// provides; the server fails closed and never dispatches agent_self_update
 	// or agent_update_rollback to an agent that has not advertised it.
 	AgentSelfUpdateCapabilityV1 = "agent-self-update-v1"
+	SupportChatCapabilityV1     = "support-chat-v1"
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
@@ -79,7 +80,7 @@ func SupportedCapabilitiesWith(chocolateyEnabled bool) []string {
 	// Self-update commits through a Windows service restart, so only Windows
 	// builds advertise it. Elsewhere the server keeps failing closed.
 	if runtime.GOOS == "windows" {
-		caps = append(caps, AgentSelfUpdateCapabilityV1)
+		caps = append(caps, AgentSelfUpdateCapabilityV1, SupportChatCapabilityV1)
 	}
 	if chocolateyEnabled {
 		caps = append(caps, ChocolateyProviderCapabilityV1)

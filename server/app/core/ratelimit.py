@@ -74,3 +74,9 @@ enrollment_limiter = LoginRateLimiter(
     max_failures=settings.enrollment_rate_limit_attempts,
     window_seconds=settings.enrollment_rate_limit_window_seconds,
 )
+
+# Count authenticated chat requests, including polls, per token; conversation
+# keys additionally prevent refresh from resetting the message-send budget.
+support_chat_limiter = LoginRateLimiter(max_failures=90, window_seconds=60)
+support_chat_send_limiter = LoginRateLimiter(max_failures=20, window_seconds=60)
+support_chat_open_limiter = LoginRateLimiter(max_failures=6, window_seconds=60)

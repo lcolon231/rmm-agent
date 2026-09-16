@@ -27,6 +27,7 @@ from app.api import (
     scheduled_tasks,
     script_library,
     shell_sessions,
+    support_chat,
 )
 from app.core import metrics
 from app.core.config import settings
@@ -96,6 +97,8 @@ app = FastAPI(
 )
 
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(support_chat.router, prefix="/api/v1")
+app.include_router(support_chat.agent_router, prefix="/api/v1")
 app.include_router(assistant.router, prefix="/api/v1")
 app.include_router(mfa.router, prefix="/api/v1")
 app.include_router(admin_sessions.router, prefix="/api/v1")

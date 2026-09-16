@@ -47,6 +47,51 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class SupportConversationStatus(str, enum.Enum):
+    open = "open"
+    closed = "closed"
+
+
+class SupportParty(str, enum.Enum):
+    end_user = "end_user"
+    technician = "technician"
+
+
+class SupportConversation(Base):
+    __tablename__ = "support_conversations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"))
+    status: Mapped[SupportConversationStatus] = mapped_column(Enum(SupportConversationStatus, native_enum=False), default=SupportConversationStatus.open)
+    opened_by: Mapped[SupportParty] = mapped_column(Enum(SupportParty, native_enum=False), default=SupportParty.end_user)
+    subject: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_by_operator_id: Mapped[str | None] = mapped_column(ForeignKey("operators.id", ondelete="SET NULL"))
+    token_hash: Mapped[str] = mapped_column(String(64))
+    token_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    notice_version: Mapped[str | None] = mapped_column(String(32))
+    notice_acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        Index("ix_support_agent_status", "agent_id", "status"),
+        Index("ix_support_client_status", "client_id", "status"),
+    )
+
+
+class SupportMessage(Base):
+    __tablename__ = "support_messages"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("support_conversations.id", ondelete="CASCADE"))
+    seq: Mapped[int] = mapped_column(Integer)
+    sender: Mapped[SupportParty] = mapped_column(Enum(SupportParty, native_enum=False))
+    operator_id: Mapped[str | None] = mapped_column(ForeignKey("operators.id", ondelete="SET NULL"))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (UniqueConstraint("conversation_id", "seq", name="uq_support_message_seq"),)
+
+
 class OperatorRole(str, enum.Enum):
     """What a human operator may do. Ordered from least to most privilege.
 

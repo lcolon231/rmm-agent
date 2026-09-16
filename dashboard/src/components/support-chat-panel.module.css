@@ -1,0 +1,23 @@
+.page { min-height: 100vh; background: #f4f2fa; padding: 40px 16px; color: #242137; }
+.panel { max-width: 700px; margin: auto; background: white; border: 1px solid #e2ddef; border-radius: 18px; overflow: hidden; box-shadow: 0 12px 40px #3120520c; }
+.panel header { padding: 28px; border-bottom: 1px solid #ece8f3; }
+.brand { color: #6d43bf; font-size: 12px; font-weight: 800; letter-spacing: .18em; }
+.panel h1 { font-size: 30px; margin: 8px 0; }
+.panel h2 { font-size: 19px; }
+.panel p { line-height: 1.6; }
+.notice { background: #f5f1fc; margin: 24px; padding: 20px; border-radius: 12px; }
+.panel button { background: #6941b5; color: white; border: 0; border-radius: 8px; padding: 12px 18px; cursor: pointer; font: inherit; font-weight: 600; }
+.panel button:disabled { opacity: .45; cursor: default; }
+.panel button:focus-visible, .panel textarea:focus-visible { outline: 3px solid #9a7cda; outline-offset: 3px; }
+.messages { list-style: none; padding: 24px; margin: 0; display: flex; flex-direction: column; gap: 16px; max-height: 55vh; overflow-y: auto; }
+.messages li { padding: 14px 18px; border-radius: 12px; max-width: 88%; overflow-wrap: anywhere; }
+.messages p { white-space: pre-wrap; margin: 6px 0; }
+.messages time { font-size: 12px; opacity: .65; }
+.own { background: #f0eafa; align-self: flex-end; }
+.reply { background: #f0f2f5; align-self: flex-start; }
+.composer { border-top: 1px solid #ece8f3; padding: 24px; display: grid; gap: 12px; }
+.composer label { font-weight: 600; }
+.composer textarea { resize: vertical; padding: 12px; border: 1px solid #cdc5dd; border-radius: 8px; font: inherit; }
+.composer button { justify-self: end; }
+.error { margin: 20px 24px; color: #972e36; }
+@media (max-width: 540px) { .page { padding: 0; } .panel { border-radius: 0; min-height: 100vh; } }

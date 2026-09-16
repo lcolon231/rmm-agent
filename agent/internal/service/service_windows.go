@@ -47,6 +47,7 @@ func RunService(version string) error {
 
 	logger.Printf("NodeLink RMM agent %s starting as Windows service", version)
 	agent := NewAgent(cfgPath, version, logger)
+	agent.supportChat = true
 	if err := svc.Run(serviceName, &handler{agent: agent, log: logger}); err != nil {
 		logger.Printf("service failed: %v", err)
 		return err

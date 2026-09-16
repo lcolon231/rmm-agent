@@ -1307,6 +1307,9 @@ def scrub_text(text: str) -> str:
     path there is no verification that depends on the exact text."""
     if not text:
         return text
+    # Support-chat URLs are bearer credentials, including the short `t` field
+    # in a fragment (fragments never go to HTTP access logs, but may be pasted).
+    text = re.sub(r"https?://[^\s<>\"']+/chat[?#][^\s<>\"']*", REDACTED, text, flags=re.IGNORECASE)
     text = _PEM_PRIVATE_KEY.sub(REDACTED, text)
     text = _BEARER.sub("Bearer " + REDACTED, text)
     text = _JWT.sub(REDACTED, text)
