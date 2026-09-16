@@ -534,6 +534,18 @@ type SelfUpdateOutcome struct {
 	Attempts        int    `json:"attempts,omitempty"`
 }
 
+// OpenSupportChat returns the server-built URL. Never wrap its response/errors
+// into logs: even an error body or redirect can contain the chat credential.
+func (c *Client) OpenSupportChat(ctx context.Context) (string, error) {
+	var out struct {
+		URL string `json:"url"`
+	}
+	if err := c.do(ctx, "POST", "/api/v1/support/agent/conversations", struct{}{}, &out, true); err != nil {
+		return "", fmt.Errorf("support chat request failed")
+	}
+	return out.URL, nil
+}
+
 // ReportSelfUpdate submits a resolved self-update attempt. The server records
 // the evidence and feeds it into the staged rollout's halt rule.
 func (c *Client) ReportSelfUpdate(ctx context.Context, outcome SelfUpdateOutcome) error {

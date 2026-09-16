@@ -81,6 +81,8 @@ type Agent struct {
 	// run executes a verified command. It is a field so tests can substitute a
 	// stub rather than spawning real processes; production uses executor.RunContext.
 	run func(ctx context.Context, kind, script string) executor.Result
+	// Enabled only by the SCM wrapper, never a foreground or one-shot process.
+	supportChat bool
 }
 
 // NewAgent builds a runtime that reads config (and persists identity) at
@@ -233,6 +235,12 @@ func (a *Agent) loop(ctx, execCtx context.Context) error {
 		sess = s
 	}
 	b.Reset()
+	if a.supportChat {
+		chatCtx, stopChat := context.WithCancel(ctx)
+		chatDone := make(chan struct{})
+		go func() { defer close(chatDone); a.serveSupportChat(chatCtx, sess) }()
+		defer func() { stopChat(); <-chatDone }()
+	}
 	// Resolve any self-update this process was restarted for before the first
 	// beat: an unhealthy new build must be rolled back promptly, and the outcome
 	// is what lets the server halt a bad staged rollout.

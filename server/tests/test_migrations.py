@@ -42,7 +42,7 @@ def sqlite_url(path: Path) -> str:
 def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
     path = tmp_path / "assistant-migration.db"
     config = migration_config(sqlite_url(path))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0043"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0044"]
     command.upgrade(config, "0041")
     command.upgrade(config, "0042")
     with sqlite3.connect(path) as connection:
@@ -59,7 +59,7 @@ def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
         assert "operator_sessions" in tables
         assert "assistant_runs" not in tables
         assert "assistant_conversations" not in tables
-    command.upgrade(config, "0043")
+    command.upgrade(config, "head")
     asyncio.run(_assert_current(sqlite_url(path)))
 
 
@@ -69,6 +69,26 @@ async def _assert_current(url: str) -> None:
         await ensure_schema_current(engine)
     finally:
         await engine.dispose()
+
+
+def test_support_chat_migration_reverses_without_touching_existing_rows(tmp_path: Path):
+    path = tmp_path / "support-migration.db"
+    config = migration_config(sqlite_url(path))
+    command.upgrade(config, "0043")
+    command.upgrade(config, "head")
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0044"
+        columns = {r[1] for r in connection.execute("PRAGMA table_info(support_conversations)")}
+        assert {"notice_version", "notice_acknowledged_at", "token_hash", "client_id"} <= columns
+        indexes = {r[1] for r in connection.execute("PRAGMA index_list(support_conversations)")}
+        assert {"ix_support_agent_status", "ix_support_client_status"} <= indexes
+    command.downgrade(config, "-1")
+    with sqlite3.connect(path) as connection:
+        tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "support_messages" not in tables and "support_conversations" not in tables
+        assert "agents" in tables and "assistant_conversations" in tables
+    command.upgrade(config, "head")
+    asyncio.run(_assert_current(sqlite_url(path)))
 
 
 def test_fresh_database_upgrades_to_head(tmp_path: Path):
