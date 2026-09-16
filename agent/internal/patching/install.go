@@ -75,6 +75,11 @@ type UpdateOutcome struct {
 	ResultCode int    `json:"result_code"`
 	HResult    string `json:"hresult,omitempty"`
 	Attempts   int    `json:"attempts"`
+	// RebootRequired is WUA's per-update IUpdateInstallationResult.RebootRequired:
+	// a "succeeded" cumulative or servicing-stack package is only staged until
+	// the endpoint restarts, so the aggregate flag alone cannot say which KBs
+	// are actually live.
+	RebootRequired bool `json:"reboot_required"`
 }
 
 // RebootOutcome records the post-install reboot decision (issue #53).
@@ -174,6 +179,9 @@ func assembleInstallResult(
 	for _, identifier := range order {
 		outcome := outcomes[identifier]
 		res.Results = append(res.Results, outcome)
+		// A per-update reboot flag always implies the aggregate, even if the
+		// platform script omitted the top-level flag.
+		res.RebootRequired = res.RebootRequired || outcome.RebootRequired
 		if outcome.ResultCode == 2 {
 			res.InstalledKBs = append(res.InstalledKBs, identifier)
 		} else {

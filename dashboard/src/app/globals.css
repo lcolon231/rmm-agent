@@ -3069,6 +3069,8 @@ textarea:focus-visible,
 .windows-update-result-columns li { padding: 4px 7px; background: #f2f0f8; border-radius: 3px; }
 .windows-update-result-columns code { font: 10px var(--font-data); }
 .windows-update-result-columns p { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
+.windows-update-result-columns li { display: inline-flex; align-items: center; gap: 6px; }
+.windows-update-staged-badge { padding: 1px 5px; background: var(--amber-soft); color: var(--amber); border-radius: 3px; font-size: 9px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
 .windows-update-rescan-prompt { display: flex; align-items: center; gap: 7px; margin: 0; padding: 11px 15px; color: var(--slate); font-size: 10px; background: #f8f7fb; border-top: 1px solid var(--line); }
 .windows-update-rescan-prompt a { margin-left: auto; color: var(--blue); font-weight: 750; white-space: nowrap; }
 .windows-update-toolbar input:focus-visible,

@@ -227,10 +227,29 @@ test("parses per-update outcomes and the reboot decision (issue #53)", () => {
   }));
   assert.ok(result);
   assert.equal(result.results[0].attempts, 2);
+  // Older agents omit the per-update reboot flag; it must not read as false.
+  assert.equal(result.results[0].rebootRequired, null);
   assert.equal(result.reboot?.decision, "scheduled");
   assert.equal(result.reboot?.delaySeconds, 300);
 
   // A malformed per-update row or reboot object fails the whole parse.
   assert.equal(installUpdatesResultFromUnknown({ status: "success", installed_kbs: [], failed_kbs: [], reboot_required: false, results: [{ identifier: 5 }] }), null);
   assert.equal(installUpdatesResultFromUnknown({ status: "success", installed_kbs: [], failed_kbs: [], reboot_required: false, reboot: { policy: "x" } }), null);
+});
+
+test("parses the per-update reboot_required flag so staged updates are distinguishable", () => {
+  const result = installUpdatesResultFromUnknown({
+    status: "success",
+    installed_kbs: ["KB5126104", "KB5129195"],
+    failed_kbs: [],
+    reboot_required: true,
+    results: [
+      { identifier: "KB5126104", result_code: 2, hresult: "0x00000000", attempts: 1, reboot_required: false },
+      { identifier: "KB5129195", result_code: 2, hresult: "0x00000000", attempts: 1, reboot_required: true },
+    ],
+    message: "Installed 2 update(s), 0 failed.",
+  });
+  assert.ok(result);
+  assert.equal(result.results[0].rebootRequired, false);
+  assert.equal(result.results[1].rebootRequired, true);
 });
