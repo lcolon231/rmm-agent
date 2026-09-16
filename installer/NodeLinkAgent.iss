@@ -101,6 +101,15 @@ Source: "{#AgentExe}"; DestDir: "{app}"; DestName: "rmm-agent.exe"; Flags: ignor
 ; The same release binary is extracted to {tmp} only for the read-only upgrade
 ; preflight that runs before ssInstall changes the service or install dir.
 Source: "{#AgentExe}"; DestDir: "{tmp}"; DestName: "{#UpgradeValidatorExe}"; Flags: dontcopy
+; Logo used for the NodeLink Support tray Startup shortcut. The tray binary also
+; embeds this icon for the notification area; this copy is only for the shortcut.
+Source: "..\agent\internal\chattray\nodelink.ico"; DestDir: "{app}"; DestName: "nodelink.ico"; Flags: ignoreversion
+
+[Icons]
+; All-users Startup shortcut: launches the NodeLink Support tray for every user
+; at logon, as a non-elevated process (the chat pipe admits INTERACTIVE only).
+; Inno removes it automatically on uninstall.
+Name: "{commonstartup}\NodeLink Support"; Filename: "{app}\rmm-agent.exe"; Parameters: "tray"; IconFilename: "{app}\nodelink.ico"; Comment: "Start a NodeLink Support chat"
 
 [UninstallRun]
 ; Stop + deregister the service while rmm-agent.exe still exists on disk.

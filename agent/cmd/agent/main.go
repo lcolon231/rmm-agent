@@ -24,6 +24,7 @@ import (
 	"syscall"
 
 	"github.com/lcolon231/rmm/agent/internal/chatpipe"
+	"github.com/lcolon231/rmm/agent/internal/chattray"
 	"github.com/lcolon231/rmm/agent/internal/config"
 	"github.com/lcolon231/rmm/agent/internal/service"
 )
@@ -61,6 +62,15 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("NodeLink Support opened in your browser.")
+	case "tray":
+		if len(args) != 0 {
+			fmt.Fprintln(os.Stderr, "usage: rmm-agent tray")
+			os.Exit(2)
+		}
+		if err := chattray.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "run":
 		runForeground(args)
 	case "enroll":
@@ -297,6 +307,8 @@ Usage:
   rmm-agent uninstall                      Remove the Windows service (idempotent)
   rmm-agent start                          Start the installed Windows service
   rmm-agent stop                           Stop the running Windows service
+  rmm-agent chat                           Open a NodeLink Support chat (Windows)
+  rmm-agent tray                           Show the NodeLink Support tray icon (Windows)
 
 Enrollment tokens are never accepted as command-line values. Use an environment
 variable populated by a secret manager, a mode-0600 secret file, standard input,
