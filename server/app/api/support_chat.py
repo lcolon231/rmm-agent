@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.ratelimit import support_chat_limiter, support_chat_open_limiter, support_chat_send_limiter
 from app.core.security import hash_token
 from app.core.tenant_scope import assert_client_action, assert_client_visible, client_id_filter
+from app.core.tenant_scope import assert_agent_visible
 from app.models.models import (
     Agent,
     AgentTrustState,
@@ -23,6 +24,7 @@ from app.models.models import (
     SupportParty,
 )
 from app.schemas.support_chat import MessageIn, MessageOut, NoticeIn
+from app.schemas.support_chat import TechnicianConversationOpenIn
 
 
 def no_store(response: Response):
@@ -109,6 +111,41 @@ async def refresh(conversation=Depends(authorized)):
 operator_router = APIRouter(prefix="/support", tags=["support-chat"])
 
 NOT_FOUND = "Conversation not found"
+SUPPORT_CHAT_CAPABILITY = "support-chat-v1"
+
+
+@operator_router.post("/conversations", status_code=201)
+async def open_technician_chat(
+    body: TechnicianConversationOpenIn,
+    operator: Operator = Depends(require_role(OperatorRole.operator)),
+    db: AsyncSession = Depends(get_db),
+):
+    agent = await db.scalar(
+        select(Agent)
+        .where(Agent.id == body.agent_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if agent is None:
+        raise HTTPException(404, detail="Agent not found")
+    await assert_agent_visible(
+        operator,
+        agent,
+        db,
+        minimum=ClientRole.client_operator,
+        detail="Agent not found",
+    )
+    if agent.trust_state != AgentTrustState.active:
+        core.fail("agent_untrusted", 409)
+    if SUPPORT_CHAT_CAPABILITY not in (agent.supported_capabilities or []):
+        core.fail("unsupported", 409)
+    limit(support_chat_open_limiter, agent.id)
+    conversation = await core.open_technician_conversation(db, agent)
+    return {
+        "conversation_id": conversation.id,
+        "status": conversation.status,
+        "opened_by": conversation.opened_by,
+    }
 
 
 def _summary(conversation, endpoint, unread):

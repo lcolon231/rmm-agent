@@ -192,6 +192,15 @@ Select-String -Path "$env:ProgramData\NodeLink\logs\rmm-agent.log" -Pattern "nle
 #   -> should be False (no match)
 ```
 
+# The discoverable Start-menu shortcut exists once and runs the chat command.
+$SupportShortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\NodeLink Support.lnk"
+Test-Path $SupportShortcut                                        # True
+$Shell = New-Object -ComObject WScript.Shell
+$Shortcut = $Shell.CreateShortcut($SupportShortcut)
+$Shortcut.TargetPath -eq "C:\Program Files\NodeLink\Agent\rmm-agent.exe" # True
+$Shortcut.Arguments -eq "chat"                                  # True
+(Get-ChildItem (Split-Path $SupportShortcut) -Filter "NodeLink Support.lnk").Count # 1
+
 **Verify on the server/dashboard:**
 
 - The new endpoint appears **under the intended site** (matching `site_id`).
@@ -333,6 +342,10 @@ $AfterExeVersion = & "$AgentDir\rmm-agent.exe" version   # the upgraded version
 & "$AgentDir\rmm-agent.exe" version -expect 0.1.4        # exits 0 only on an exact match
 ```
 
+$Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($SupportShortcut)
+$Shortcut.Arguments -eq "chat"                                  # True
+(Get-ChildItem (Split-Path $SupportShortcut) -Filter "NodeLink Support.lnk").Count # 1
+# Launch it from Start as the signed-in standard user; no UAC prompt appears.
 5. On the dashboard/API, confirm the same agent ID reports a new heartbeat and
    that `agent_version` now shows the upgraded version — no re-enrollment and no
    inventory change required. Record it next to the executable version:
@@ -370,6 +383,7 @@ Get-Service NodeLinkAgent -ErrorAction SilentlyContinue          # gone
 Test-Path "C:\Program Files\NodeLink\Agent"                       # False (or empty)
 ```
 
+Test-Path $SupportShortcut                                        # False
 The runtime files (`config.json`, `identity.json`, `seen_commands.json`,
 `monitoring_state.json`) are removed. The endpoint may remain visible on the
 server as last-seen/offline (expected — uninstall does not delete server-side

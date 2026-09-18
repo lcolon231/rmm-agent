@@ -406,6 +406,9 @@ type HeartbeatAck struct {
 	// MonitoringChecks is the current revision-pinned effective policy. Older
 	// servers omit it, which safely evaluates nothing.
 	MonitoringChecks []monitoring.Assignment `json:"monitoring_checks"`
+	// ChatLaunchRequested is an opaque credential-bearing browser URL. Older
+	// servers omit it and older agents ignore the additive response field.
+	ChatLaunchRequested string `json:"chat_launch_requested"`
 }
 
 // PendingResultNotice tells the server that execution has finished locally but

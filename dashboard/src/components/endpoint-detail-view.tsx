@@ -21,6 +21,7 @@ import type { DashboardOperator } from "@/lib/dashboard-auth-core";
 import type { EndpointDetailData, EndpointTelemetrySample } from "@/lib/endpoint-detail";
 import { SHELL_SESSION_CAPABILITY } from "@/lib/shell-session-core";
 import { ShellSessionPanel } from "@/components/shell-session-panel";
+import { SupportChatLaunchButton } from "@/components/support-chat-launch-button";
 import { RemoteDesktopPanel } from "@/components/remote-desktop-panel";
 import {
   buildMetricPath,
@@ -168,6 +169,12 @@ export function EndpointDetailView({ endpoint, operator }: { endpoint: EndpointD
             <Link className="detail-console-link" href={`/assistant?client_id=${encodeURIComponent(endpoint.client_id)}&endpoint_id=${encodeURIComponent(endpoint.id)}`}>
               Investigate with AI
             </Link>
+            <SupportChatLaunchButton
+              endpointId={endpoint.id}
+              capable={endpoint.supported_capabilities.includes("support-chat-v1")}
+              trusted={endpoint.trust_state === "active"}
+              canOpen={operator.role !== "readonly"}
+            />
           </div>
         </section>
 

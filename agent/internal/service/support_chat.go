@@ -38,3 +38,22 @@ func (a *Agent) openSupportChat(ctx context.Context, create func(context.Context
 	a.log.Print("support chat: browser launched")
 	return nil
 }
+
+func (a *Agent) handleChatLaunch(raw string) {
+	if raw == "" {
+		a.lastChatLaunch = ""
+		return
+	}
+	if raw == a.lastChatLaunch {
+		return
+	}
+	if a.openChatURL == nil {
+		a.openChatURL = chatlaunch.Open
+	}
+	if err := a.openChatURL(raw); err != nil {
+		a.log.Print("support chat: heartbeat browser launch failed")
+		return
+	}
+	a.lastChatLaunch = raw
+	a.log.Print("support chat: heartbeat browser launched")
+}
