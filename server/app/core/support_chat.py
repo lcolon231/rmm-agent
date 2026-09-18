@@ -96,7 +96,12 @@ async def open_conversation(db: AsyncSession, agent: Agent):
 
 
 async def append_message(db, conversation, body, *, sender=SupportParty.end_user, operator_id=None):
-    require_open(conversation)
+    if conversation.status is not SupportConversationStatus.open:
+        fail("conversation_closed", 409)
+    # Idle reaps an abandoned end-user session; it must not block a technician
+    # replying later, which is normal support behavior and itself re-activity.
+    if sender is SupportParty.end_user and is_idle(conversation):
+        fail("conversation_closed", 409)
     # The consent notice gates the end user's first message; a technician reply
     # is not consenting to recording, so it is not subject to that gate.
     if sender is SupportParty.end_user and (conversation.notice_version != settings.support_chat_notice_version or not conversation.notice_acknowledged_at):
