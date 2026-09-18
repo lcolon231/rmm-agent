@@ -26,6 +26,7 @@ import {
   Laptop,
   ListChecks,
   Menu,
+  MessagesSquare,
   Monitor,
   RefreshCw,
   Search,
@@ -42,7 +43,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { AuditAnchorRecord, AuditChainVerification, AuditEventRecord } from "@/lib/audit-core";
 import type { NavigationData } from "@/lib/client-navigation";
@@ -67,6 +68,7 @@ const navItems = [
   { label: "Endpoints", icon: Monitor, count: null, href: "/endpoints" },
   { label: "AI assistant", icon: Bot, count: null, href: "/assistant" },
   { label: "Alerts", icon: AlertTriangle, count: null, href: "/alerts" },
+  { label: "Support chat", icon: MessagesSquare, count: null, href: "/support" },
   { label: "Automation", icon: Bot, count: null, href: "/scripts" },
   { label: "Tasks", icon: ListChecks, count: null, href: "/tasks" },
   { label: "Schedules", icon: Clock3, count: null, href: "/schedules" },
@@ -148,6 +150,24 @@ function Sidebar({
   selectedSiteId,
   selectionError,
 }: SidebarProps) {
+  // Poll the cheap unread-count route so the Support chat badge stays current
+  // without a full navigation refresh.
+  const [supportUnread, setSupportUnread] = useState(0);
+  useEffect(() => {
+    let stopped = false;
+    async function poll() {
+      try {
+        const response = await fetch("/api/support/unread-count", { cache: "no-store" });
+        if (response.ok) {
+          const data = await response.json();
+          if (!stopped && Number.isInteger(data?.unread)) setSupportUnread(data.unread);
+        }
+      } catch { /* transient; next tick retries */ }
+    }
+    void poll();
+    const timer = setInterval(poll, 10000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, []);
   return (
     <>
       <button
@@ -239,6 +259,7 @@ function Sidebar({
             .filter((item) => !item.adminOnly || operator.role === "admin")
             .map(({ label, icon: Icon, count, href }) => {
               const isActive = activePath === href || (href !== "/" && activePath.startsWith(`${href}/`));
+              const badge = href === "/support" ? supportUnread : count;
               return (
                 <Link
                   aria-current={isActive ? "page" : undefined}
@@ -249,7 +270,7 @@ function Sidebar({
                 >
                   <Icon size={19} />
                   <span>{label}</span>
-                  {count ? <span className="nav-count">{count}</span> : null}
+                  {badge ? <span className="nav-count">{badge}</span> : null}
                   {label === "Administration" ? <ChevronRight className="nav-chevron" size={15} /> : null}
                 </Link>
               );

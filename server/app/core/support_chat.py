@@ -95,9 +95,11 @@ async def open_conversation(db: AsyncSession, agent: Agent):
     return {"conversation_id": conversation.id, "url": url, "token_expires_at": conversation.token_expires_at}
 
 
-async def append_message(db, conversation, body):
+async def append_message(db, conversation, body, *, sender=SupportParty.end_user, operator_id=None):
     require_open(conversation)
-    if conversation.notice_version != settings.support_chat_notice_version or not conversation.notice_acknowledged_at:
+    # The consent notice gates the end user's first message; a technician reply
+    # is not consenting to recording, so it is not subject to that gate.
+    if sender is SupportParty.end_user and (conversation.notice_version != settings.support_chat_notice_version or not conversation.notice_acknowledged_at):
         fail("notice_required", 409)
     if not body.strip():
         fail("message_empty")
@@ -110,7 +112,7 @@ async def append_message(db, conversation, body):
     if count >= settings.support_chat_max_messages:
         fail("message_limit")
     seq = (await db.scalar(select(func.max(SupportMessage.seq)).where(SupportMessage.conversation_id == conversation.id)) or 0) + 1
-    message = SupportMessage(conversation_id=conversation.id, seq=seq, sender=SupportParty.end_user, body=scrubbed)
+    message = SupportMessage(conversation_id=conversation.id, seq=seq, sender=sender, operator_id=operator_id, body=scrubbed)
     db.add(message)
     conversation.last_message_at = now()
     if not conversation.subject:

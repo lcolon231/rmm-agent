@@ -14,10 +14,22 @@ from sqlalchemy import select, func
 from app.main import app
 from app.core.config import Settings, settings
 from app.core.database import Base, engine, AsyncSessionLocal
-from app.core.security import hash_token
+from app.core.security import hash_token, hash_password
 from app.core import support_chat as core
 from app.core.ratelimit import support_chat_limiter, support_chat_send_limiter, support_chat_open_limiter
-from app.models.models import Agent, AgentTrustState, Client, Site, SupportConversation, SupportMessage
+from app.models.models import (
+    Agent,
+    AgentTrustState,
+    Client,
+    ClientRole,
+    Operator,
+    OperatorClientMembership,
+    OperatorRole,
+    Site,
+    SupportConversation,
+    SupportConversationStatus,
+    SupportMessage,
+)
 
 
 @pytest.fixture
@@ -199,3 +211,96 @@ async def test_limits_requests_and_origin_is_required_for_configuration(env, mon
 def test_configuration_bounds(field, value):
     from pydantic import ValidationError
     with pytest.raises(ValidationError): Settings(**{field: value})
+
+
+# --- Operator (technician) side (#235) --------------------------------------
+
+@pytest.fixture
+async def ops(env):
+    """env plus a technician (member of the chat tenant) and an outsider operator
+    (member of a different tenant only), for the operator routes."""
+    api, ids, tenant = env
+    async with AsyncSessionLocal() as db:
+        tech = Operator(email="tech@nodelink.test", password_hash=hash_password("pw"), role=OperatorRole.operator)
+        outsider = Operator(email="outsider@nodelink.test", password_hash=hash_password("pw"), role=OperatorRole.operator)
+        other = Client(name="Other tenant")
+        db.add_all([tech, outsider, other])
+        await db.flush()
+        db.add(OperatorClientMembership(operator_id=tech.id, client_id=tenant, role=ClientRole.client_operator, granted_by="test-seed", reason="test-seed"))
+        db.add(OperatorClientMembership(operator_id=outsider.id, client_id=other.id, role=ClientRole.client_operator, granted_by="test-seed", reason="test-seed"))
+        await db.commit()
+    return api, ids, tenant
+
+
+async def login(api, email="tech@nodelink.test", password="pw"):
+    response = await api.post("/auth/login", json={"email": email, "password": password})
+    assert response.status_code == 200, response.text
+    return {"Authorization": "Bearer " + response.json()["access_token"]}
+
+
+async def test_operator_sees_conversation_and_badge_clears_on_open(ops):
+    api, _, cid_tenant = ops
+    path, auth, cid = await opened(api)
+    await acknowledge(api, path, auth)
+    await api.post(path + "/messages", headers=auth, json={"body": "my vpn keeps dropping"})
+    tech = await login(api)
+    assert (await api.get("/support/unread-count", headers=tech)).json()["unread"] == 1
+    listing = (await api.get("/support/conversations", headers=tech)).json()["conversations"]
+    assert len(listing) == 1
+    assert listing[0]["id"] == cid and listing[0]["endpoint"] == "CHAT-0"
+    assert listing[0]["unread"] == 1 and listing[0]["status"] == "open"
+    transcript = (await api.get(f"/support/conversations/{cid}", headers=tech)).json()
+    assert [m["sender"] for m in transcript["messages"]] == ["end_user"]
+    assert transcript["messages"][0]["body"] == "my vpn keeps dropping"
+    # Opening the transcript marks the messages read, clearing the nav badge.
+    assert (await api.get("/support/unread-count", headers=tech)).json()["unread"] == 0
+
+
+async def test_empty_state_for_operator_with_no_visible_conversations(ops):
+    api, _, _ = ops
+    tech = await login(api)
+    assert (await api.get("/support/conversations", headers=tech)).json()["conversations"] == []
+    assert (await api.get("/support/unread-count", headers=tech)).json()["unread"] == 0
+
+
+async def test_operator_reply_reaches_user_with_identity(ops):
+    api, _, _ = ops
+    path, auth, cid = await opened(api)
+    await acknowledge(api, path, auth)
+    await api.post(path + "/messages", headers=auth, json={"body": "hi"})
+    tech = await login(api)
+    reply = await api.post(f"/support/conversations/{cid}/messages", headers=tech, json={"body": "hello from support"})
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["sender"] == "technician"
+    # The reply reaches the end user's browser on its next poll.
+    tail = (await api.get(path + "/messages?after=0", headers=auth)).json()["messages"]
+    assert any(m["sender"] == "technician" and m["body"] == "hello from support" for m in tail)
+    # Participant identity is visible on the technician message.
+    transcript = (await api.get(f"/support/conversations/{cid}", headers=tech)).json()
+    tech_msgs = [m for m in transcript["messages"] if m["sender"] == "technician"]
+    assert tech_msgs and tech_msgs[0]["operator_email"] == "tech@nodelink.test"
+
+
+async def test_cross_tenant_operator_gets_404_and_empty_list(ops):
+    api, _, _ = ops
+    path, auth, cid = await opened(api)
+    await acknowledge(api, path, auth)
+    await api.post(path + "/messages", headers=auth, json={"body": "hi"})
+    outsider = await login(api, "outsider@nodelink.test")
+    assert (await api.get("/support/conversations", headers=outsider)).json()["conversations"] == []
+    assert (await api.get("/support/unread-count", headers=outsider)).json()["unread"] == 0
+    assert (await api.get(f"/support/conversations/{cid}", headers=outsider)).status_code == 404
+    assert (await api.post(f"/support/conversations/{cid}/messages", headers=outsider, json={"body": "x"})).status_code == 404
+    assert (await api.post(f"/support/conversations/{cid}/close", headers=outsider)).status_code == 404
+
+
+async def test_operator_close_invalidates_end_user_token(ops):
+    api, _, _ = ops
+    path, auth, cid = await opened(api)
+    await acknowledge(api, path, auth)
+    tech = await login(api)
+    assert (await api.post(f"/support/conversations/{cid}/close", headers=tech)).status_code == 200
+    assert (await api.get(path + "/messages", headers=auth)).status_code == 403
+    async with AsyncSessionLocal() as db:
+        row = await db.get(SupportConversation, cid)
+        assert row.status == SupportConversationStatus.closed and row.closed_by_operator_id and row.token_hash == ""
