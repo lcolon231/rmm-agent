@@ -13,8 +13,8 @@ HIPAA-supporting controls and defensible compliance evidence.
 
 | Area | Current state |
 | --- | --- |
-| Latest tagged release | `v0.1.7` (server schema `0035`) |
-| Schema on `main` | Alembic revision `0037` (`0036` MeshCentral, `0037` tenant-scoped authorization) |
+| Latest tagged release | `v0.1.11` (server schema `0044`) |
+| Schema on `main` | Alembic revision `0044` (`0037` tenant-scoped authorization, `0042` pending-reboot reason, `0044` endpoint support chat) |
 | Primary support target | Windows agent and Windows service |
 | Server | FastAPI management and agent APIs with PostgreSQL; SQLite is limited to development and tests |
 | Dashboard | Authenticated Next.js interface backed entirely by live API data: operations overview, endpoints, inventory, command console, interactive shell, alerts, monitoring policies, maintenance windows, scheduled tasks, script library, patch policies and compliance, enrollment, audit evidence, and operator administration. No panel is fixture-backed |
@@ -219,6 +219,16 @@ The code in this repository currently provides:
   contained agent PowerShell process, reconnect semantics, and fail-closed
   limits. This is a separate transport from signed command polling, which
   remains the compatibility path. See `docs/SHELL-SESSIONS.md`.
+- Endpoint support chat (issues #234/#235/#236): the machine's user opens a
+  redacted, consent-gated support conversation from a Windows system-tray
+  launcher, and a technician can start one from the endpoint's dashboard detail
+  page — the agent opens it in the interactive browser session on its next
+  heartbeat, gated by the `support-chat-launch-v1` capability so the button
+  never lights up for an agent that cannot act on it. Technicians read, reply
+  to, and close conversations from an in-product operator dashboard with an
+  unread badge. The chat token lives only in the URL fragment, message bodies
+  are `scrub_text`-redacted on write, and the launch is INTERACTIVE-only.
+  Requires `support_chat_base_url`; Windows-first.
 - Loss-safe agent credential renewal and bounded reattach: server-enforced
   expiry with a short rotation overlap, plus active-only recovery when a
   powered-off endpoint returns within the configurable lapse window. Revoked,
@@ -404,14 +414,21 @@ result, reporting a failed command for work that had already succeeded. No
 schema, command-kind, protocol, or authorization change — a `v0.1.6` and a
 `v0.1.7` agent are protocol-identical.
 
-Since `v0.1.7`, `main` has added dashboard management of the maintenance windows
+Since `v0.1.7`, `main` added dashboard management of the maintenance windows
 that power actions require, the MeshCentral remote desktop integration (#62,
 schema `0036`, disabled by default pending live end-to-end verification), and
 the first Milestone-3 work: tenant-scoped authorization with per-tenant roles
 (#66, schema `0037`) and deterministic tenant evidence bundles and signed
-evidence packages (#79/#80). Running `main` therefore requires `alembic upgrade
-head` to `0037` and a rebuilt Windows agent; the tagged `v0.1.7` release remains
-at `0035`.
+evidence packages (#79/#80).
+
+The tagged releases then continued: `v0.1.8` (schema `0042`) records why a
+Windows restart is pending; `v0.1.9` (schema `0044`) adds endpoint support chat
+and repairs global script grants; `v0.1.10` adds the support-chat system-tray
+launcher; and `v0.1.11` completes the support-chat loop with the in-product
+operator responder dashboard (#235) and technician-initiated launch (#236),
+gated on the new `support-chat-launch-v1` capability. Running `main` requires
+`alembic upgrade head` to `0044` and a rebuilt Windows agent; the tagged
+`v0.1.11` release ships `0044`.
 
 ## Planned
 
@@ -422,10 +439,10 @@ at `0035`.
   policies and installation, software deployment, endpoint operations,
   interactive shell, signed staged agent self-update with automatic rollback
   (`docs/AGENT-SELF-UPDATE.md`), and the MeshCentral integration (shipped
-  disabled by default, pending live end-to-end verification). Remaining:
-  technician-to-end-user chat (a chat window on the endpoint so the machine's
-  user can talk to the technician from their computer) and command
-  cancellation.
+  disabled by default, pending live end-to-end verification), and
+  technician-to-end-user chat (endpoint support chat with an in-product operator
+  responder dashboard and technician-initiated launch, `v0.1.9`–`v0.1.11`).
+  Remaining: command cancellation.
 - **Milestone 3 — Compliance Productization:** started — tenant-scoped
   authorization (#66) and deterministic JSON/CSV/PDF/signed-ZIP evidence
   bundles and packages (#79/#80), and approval workflows with two-person
@@ -449,9 +466,10 @@ The repository does **not** currently contain:
   package management, software deployment, service and process management,
   agent self-update, tenant membership administration, and evidence
   bundle/package export are still API-only with no UI.
-- Technician-to-end-user chat, streaming command output, or command
-  cancellation. Signed command polling
-  remains the compatibility path; interactive PowerShell now uses its own
+- Streaming command output or command cancellation. Technician-to-end-user chat
+  *is* implemented as endpoint support chat (`v0.1.9`–`v0.1.11`: tray launcher,
+  operator responder dashboard, and technician-initiated launch). Signed command
+  polling remains the compatibility path; interactive PowerShell now uses its own
   bounded long-poll transport, contained agent process, and endpoint terminal
   (`docs/SHELL-SESSIONS.md`).
 - Complete hardware, software, Windows Defender, BitLocker, Secure Boot, or TPM
