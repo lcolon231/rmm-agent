@@ -112,6 +112,12 @@ operator_router = APIRouter(prefix="/support", tags=["support-chat"])
 
 NOT_FOUND = "Conversation not found"
 SUPPORT_CHAT_CAPABILITY = "support-chat-v1"
+# Technician-initiated launch requires the agent to act on the heartbeat's
+# chat_launch_requested field (issue #236). support-chat-v1 (#234) only covers
+# the end-user pipe launch, so gating the button on it lit up an enabled-but-dead
+# control for any agent that predated the heartbeat handler. Gate on the launch
+# capability, which only #236+ agents advertise.
+SUPPORT_CHAT_LAUNCH_CAPABILITY = "support-chat-launch-v1"
 
 
 @operator_router.post("/conversations", status_code=201)
@@ -137,7 +143,7 @@ async def open_technician_chat(
     )
     if agent.trust_state != AgentTrustState.active:
         core.fail("agent_untrusted", 409)
-    if SUPPORT_CHAT_CAPABILITY not in (agent.supported_capabilities or []):
+    if SUPPORT_CHAT_LAUNCH_CAPABILITY not in (agent.supported_capabilities or []):
         core.fail("unsupported", 409)
     limit(support_chat_open_limiter, agent.id)
     conversation = await core.open_technician_conversation(db, agent)

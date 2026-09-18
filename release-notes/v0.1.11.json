@@ -1,0 +1,143 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "v0.1.11",
+    "title": "NodeLink v0.1.11 ships the support-chat operator dashboard and technician-initiated launch",
+    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after the sole repository owner reviewed and accepted the release evidence. This is a feature release on top of v0.1.10 that completes the support-chat loop. It adds the in-product operator responder dashboard (issue #235): a technician can list, read, reply to, and close endpoint support conversations from the dashboard, and an unread badge tracks end-user messages. It also adds technician-initiated launch (issue #236): from an endpoint's detail page a technician can start a support conversation, and the agent opens the chat in the endpoint's interactive browser session on its next heartbeat. A distinct support-chat-launch-v1 agent capability now gates that button so it only appears for agents that actually carry the launch handler. There is no database migration: the schema head stays at 0044 from v0.1.9. There is no new command kind or command envelope. It is not approved for multi-tenant or high-availability claims."
+  },
+  "server": {
+    "tag": "v0.1.11",
+    "deployment": "Deploy source from the exact commit bound to v0.1.11 by the release workflow. v0.1.11 has server-side changes relative to v0.1.10: the operator support-chat routes (list, transcript, reply, close, unread count) and the technician conversation-open route, plus a heartbeat ack that now carries an optional chat_launch_requested field for an agent that advertises support-chat-launch-v1. There is no migration; the schema head stays at 0044. Support chat still requires support_chat_base_url to be set to the deployment's HTTPS browser origin for a conversation to open. Roll the server and dashboard out before the agent as usual."
+  },
+  "agent": {
+    "version": "0.1.11",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "0.1.11",
+    "filename": "NodeLinkAgentSetup-0.1.11.exe"
+  },
+  "database": {
+    "alembic_revision": "0044",
+    "compatible_from": [
+      "0001",
+      "0012",
+      "0029",
+      "0035",
+      "0042",
+      "0044"
+    ],
+    "migration_policy": "Migrations are forward-only. v0.1.11 adds no revision: the head stays at 0044, the same schema v0.1.9 and v0.1.10 shipped. A v0.1.10 database at 0044 needs no migration for this release. Older databases upgrade forward to 0044 exactly as documented for v0.1.9 and v0.1.10 (0042 through 0044 for a v0.1.8 database, and the earlier guarded-adoption paths for v0.1.2 and the unversioned public v0.1.1). Never edit a revision or perform an in-place downgrade."
+  },
+  "protocols": {
+    "command_envelopes": [
+      "command-v3"
+    ],
+    "mixed_version_behavior": "command-v3 is unchanged from v0.1.10 and no command kind or envelope is added or removed, so signed command delivery is protocol-identical across a mixed fleet. The one wire addition is an optional chat_launch_requested field on the heartbeat ack, which a v0.1.10 agent simply ignores as an unknown field. Support chat now advertises two distinct capabilities: support-chat-v1 (the end-user pipe launcher shipped in v0.1.9 and v0.1.10) and the new support-chat-launch-v1 (technician-initiated launch, this release). The dashboard button and the server technician-open route gate on support-chat-launch-v1, so an endpoint still running a v0.1.10 or earlier agent never shows the technician button and is refused a technician launch with support_chat_unsupported rather than being handed a launch URL nothing acts on. Roll the server and dashboard out before the agent."
+  },
+  "known_limitations": [
+    "Technician-initiated launch requires an interactive desktop session with a default browser on the endpoint, exactly like the end-user launcher. With no logged-on user, no configured support_chat_base_url, or a non-Windows build, the agent opens nothing; the technician still sees the conversation in the dashboard but the endpoint browser will not appear until an interactive session exists.",
+    "The technician button is gated on the support-chat-launch-v1 capability, which only 0.1.11+ Windows agents advertise. An endpoint on a v0.1.10 or earlier agent will not show the button until its agent is upgraded; this is intentional so the control never lights up for an agent that cannot act on it.",
+    "Support chat remains Windows-first. The launcher, tray, and technician launch return an unsupported error on non-Windows builds; Linux and macOS remain development-only agent builds with reduced or absent collectors and no self-update or support-chat support.",
+    "support_chat_base_url must be set to the deployment's HTTPS browser origin for any conversation to open; with it unset the agent conversation endpoint and the technician-open route return 503 and nothing opens.",
+    "#24: Windows agent and installer artifacts are not Authenticode signed, so SmartScreen or antivirus warnings remain possible. Signed self-update artifacts use the existing Ed25519 command-signing trust, not Authenticode.",
+    "#84: Enrollment rate limits, counters, and metrics are process-local; no multi-worker or high-availability protection claim is made.",
+    "#126: Empty deployments must bootstrap the first client and site through the existing administrative API before using enrollment.",
+    "Endpoint inventory, monitoring, patching, remediation, self-update, and support chat are Windows-first; Linux and macOS remain development-only builds.",
+    "Alert email and signed webhook delivery are best-effort with process-local state; alert delivery is inert until an operator configures a provider and assigns a monitoring policy containing an offline check.",
+    "#179: an agent's reported version refreshes only on a successful authenticated heartbeat, so an offline, quarantined, or unauthenticated endpoint keeps displaying its last recorded version.",
+    "Agent self-update is disabled by default and must be explicitly enrolled into a channel and targeted by an admin-authorized rollout; it never applies itself without an operator-published, signed release.",
+    "Bounded credential reattachment is limited by agent_credential_reattach_window_seconds, 30 days by default; an endpoint powered off longer than that window still requires manual re-enrollment.",
+    "This manifest documents a restore-free rollback: because v0.1.11 adds no migration, a rollback to v0.1.10 needs no database restore. The referenced backup manifest and restore-verification are the v0.1.10 rollback target's own 0044 recovery-point evidence, produced against a disposable local PostgreSQL cluster rather than a production database, and the rollback rehearsal for this tag records action redeploy_without_database_restore with restore_required false."
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "Pause enrollment, command dispatch, scheduled-task execution, agent self-update rollouts, server promotion, and external agent rollout automation.",
+      "Because v0.1.11 adds no migration, no pre-migration backup is required to preserve a rollback path; a routine verified backup of the live 0044 database remains good practice.",
+      "Confirm the HTTPS public URL, server-only dashboard API URL, and support_chat_base_url (support chat is required for this release's features) are configured and reachable over HTTPS.",
+      "Verify every release artifact checksum and GitHub build-provenance attestation, and confirm each agent binary reports 0.1.11 via `rmm-agent version -expect 0.1.11` rather than the unstamped 0.1.0-dev fallback."
+    ],
+    "steps": [
+      "No `alembic upgrade` is required: the schema head is already 0044 from v0.1.9. Confirm the startup revision guard reports 0044.",
+      "Deploy the server and dashboard from the workflow-bound v0.1.11 source commit before touching agents, so the operator routes and heartbeat launch field are live first.",
+      "Deploy the checksum-verified Windows agent or installer to one owned canary endpoint before expanding the rollout; the installer upgrades in place and the agent keeps its identity and credentials.",
+      "Leave every agent's update_channel unset (the default) until self-update has been separately qualified on the pilot topology."
+    ],
+    "verification": [
+      "Confirm Alembic current still reports 0044 and that health, readiness, metrics, login, and production configuration checks pass over verified HTTPS.",
+      "Confirm the upgraded canary endpoint keeps its agent ID and credentials and reports agent version 0.1.11 after its first heartbeat.",
+      "On the canary endpoint detail page, confirm the Start support chat button is enabled, that clicking it opens a conversation and the endpoint's interactive browser navigates to the /chat page, and that the technician can read and reply from the operator dashboard.",
+      "Confirm an endpoint still on a v0.1.10 agent does not show the technician button and that a direct technician-open call for it is refused with support_chat_unsupported.",
+      "Confirm the chat token still appears only in the URL fragment and in no server or agent log, and that heartbeat, audit sequence, token revocation, and agent revocation behavior are unchanged."
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "v0.1.11 adds no database migration, so a rollback to v0.1.10 is a redeploy with no database restore and no data loss. The current schema (0044) already equals the v0.1.10 target schema (0044). This was rehearsed for this tag with server/scripts/plan_release_rollback.py, and the retained plan records status ready, action redeploy_without_database_restore, and restore_required false.",
+      "To roll back, pause rollout and agent self-update, redeploy the v0.1.10 server, dashboard, and agent/installer artifacts, and let endpoints pick up the v0.1.10 binary; no database action is taken.",
+      "Rolling back removes the operator responder dashboard and the technician launch button, and drops the support-chat-launch-v1 capability from downgraded agents; the underlying support chat and the v0.1.10 tray launcher are unaffected. Conversations already stored remain readable once a v0.1.11 server is restored.",
+      "If artifact, audit, or startup verification fails, keep promotion blocked and continue with a reviewed forward fix rather than a rollback, since no schema pressure forces one."
+    ],
+    "target": {
+      "server": {
+        "tag": "v0.1.10",
+        "commit": "0416cac43b21fce1a62c0d8ee394c2228183df78"
+      },
+      "agent": {
+        "version": "0.1.10",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "f9180979a4f150dfe73c819e9f9a69394e44bdcb5b518119a28e4214d6494f21",
+          "rmm-agent-linux-amd64": "2ac1798e2392f534c6d0adf92955347d94905190187b747d5f85fa49e2eab84f",
+          "rmm-agent-darwin-arm64": "5f23129401341f9a9db77d355882fcb1c350a75477a0d25646b94b9e51c02be0"
+        }
+      },
+      "installer": {
+        "filename": "NodeLinkAgentSetup-0.1.10.exe",
+        "sha256": "d4d4dcd16e64a233b53e90172b60d0c9fc307f2d93609baec01bd7f50a83037c"
+      },
+      "database": {
+        "alembic_revision": "0044",
+        "backup_manifest": {
+          "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/0f8ab42d5c69626763d1201cf74f5047890f7dc1/release-notes/evidence/v0.1.10/nodelink-backup-20260916T050559Z.manifest.json",
+          "sha256": "9a3037d015ebb00dbb002a961f28b3b7b636cd58df858766e58186a57a1323a0"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "command-v3"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "v0.1.11 completes the support-chat feature with an operator responder dashboard and technician-initiated launch. It adds no new credential type, no new command kind or envelope, and no schema change. Technician actions reuse the existing operator authentication and the same tenant boundary as shell sessions, so a technician only sees and acts on endpoints in their client memberships. The endpoint launch reuses the v0.1.9 support-chat security model: a conversation-scoped chat token carried only in the URL fragment, scrub_text redaction on write, and the INTERACTIVE-only launch in the endpoint's own session.",
+    "fixed_vulnerabilities": [
+      "No security vulnerability is fixed by v0.1.11. It changes no authorization primitive, TLS, signing, audit, redaction, or retention behavior. The support-chat-launch-v1 capability gate is a correctness fix for an enabled-but-inert dashboard control, not a security fix, and it narrows rather than widens what the button offers."
+    ],
+    "new_risks": [
+      "The technician can now initiate a browser launch in the endpoint's interactive session. The launch is still bounded by the existing model: the URL is a conversation-scoped credential valid only until its short TTL, the agent validates it is an HTTPS /chat URL before opening, and only an operator with a client membership over the endpoint can start the conversation. No new network surface or credential store is introduced.",
+      "The operator dashboard renders end-user-authored message bodies. Those bodies are redacted with scrub_text on write and rendered as text, so a conversation cannot inject markup or script into the responder view; retention and redaction are unchanged from v0.1.9.",
+      "#24 and #84 remain open, unchanged by this release. Windows agent and installer artifacts remain unsigned pending Authenticode."
+    ],
+    "operator_actions": [
+      "Verify every artifact checksum and build-provenance attestation before deploying, and continue to expect an unsigned-binary SmartScreen or antivirus prompt until Authenticode signing lands under #24.",
+      "Set support_chat_base_url to the HTTPS browser origin before rollout; without it both the end-user and technician launch paths return 503 and open nothing.",
+      "Deploy the server and dashboard before agents so the operator routes and the heartbeat launch field are live before any agent advertises support-chat-launch-v1.",
+      "On a canary endpoint, verify the technician launch opens the chat and that an older-agent endpoint correctly hides the button before broad rollout, and leave update_channel unset until self-update is separately qualified."
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/0f8ab42d5c69626763d1201cf74f5047890f7dc1/release-notes/evidence/v0.1.10/restore-verification-0044.json",
+      "sha256": "e5ef55938b7eeb5e4bd391fd54a64c2865333b9e8782fccbbc6519194046c195"
+    },
+    "rollback_rehearsal": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/a0e74ab2c391f67b68bae8afe03ed7d9f97d914b/release-notes/evidence/v0.1.11/rollback-plan-v0111-to-v0110.json",
+      "sha256": "77de7d29446a8003eff53e8dfdea5801ff5986b04b88a20c7fd472de80477dc7"
+    }
+  }
+}
