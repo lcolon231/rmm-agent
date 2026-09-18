@@ -47,6 +47,14 @@ const (
 	// or agent_update_rollback to an agent that has not advertised it.
 	AgentSelfUpdateCapabilityV1 = "agent-self-update-v1"
 	SupportChatCapabilityV1     = "support-chat-v1"
+	// SupportChatLaunchCapabilityV1 names technician-initiated support chat: the
+	// agent opens a browser in the interactive session when a heartbeat ack
+	// carries chat_launch_requested (issue #236). It is distinct from
+	// SupportChatCapabilityV1, which only covers the end-user-initiated pipe
+	// launch (#234); an agent that advertises support-chat-v1 but predates this
+	// handler would show an enabled dashboard button that silently does nothing,
+	// so the server and dashboard gate the technician launch on THIS capability.
+	SupportChatLaunchCapabilityV1 = "support-chat-launch-v1"
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
@@ -80,7 +88,7 @@ func SupportedCapabilitiesWith(chocolateyEnabled bool) []string {
 	// Self-update commits through a Windows service restart, so only Windows
 	// builds advertise it. Elsewhere the server keeps failing closed.
 	if runtime.GOOS == "windows" {
-		caps = append(caps, AgentSelfUpdateCapabilityV1, SupportChatCapabilityV1)
+		caps = append(caps, AgentSelfUpdateCapabilityV1, SupportChatCapabilityV1, SupportChatLaunchCapabilityV1)
 	}
 	if chocolateyEnabled {
 		caps = append(caps, ChocolateyProviderCapabilityV1)

@@ -171,7 +171,7 @@ export function EndpointDetailView({ endpoint, operator }: { endpoint: EndpointD
             </Link>
             <SupportChatLaunchButton
               endpointId={endpoint.id}
-              capable={endpoint.supported_capabilities.includes("support-chat-v1")}
+              capable={endpoint.supported_capabilities.includes("support-chat-launch-v1")}
               trusted={endpoint.trust_state === "active"}
               canOpen={operator.role !== "readonly"}
             />

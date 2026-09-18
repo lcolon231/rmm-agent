@@ -45,9 +45,19 @@ async def technician_env(monkeypatch):
         site = Site(client_id=tenant.id, name="HQ")
         db.add(site)
         await db.flush()
+        # index 0: technician-launch capable (advertises the #236 launch handler)
+        # index 1: no capabilities at all
+        # index 2: end-user chat only (support-chat-v1) but NOT launch-capable, so
+        #          a technician launch must be refused -- this guards the #236
+        #          capability-gating fix against regressing to support-chat-v1.
+        capabilities = {
+            0: ["support-chat-v1", "support-chat-launch-v1"],
+            1: [],
+            2: ["support-chat-v1"],
+        }
         agents = [
             Agent(site_id=site.id, hostname=f"CHAT-{index}", token_hash=hash_token(f"agent-{index}"),
-                  supported_capabilities=["support-chat-v1"] if index != 1 else [])
+                  supported_capabilities=capabilities[index])
             for index in range(3)
         ]
         technician = Operator(
@@ -108,6 +118,17 @@ async def test_technician_open_refuses_unsupported_and_cross_tenant(technician_e
     )
     assert refused.status_code == 409
     assert refused.json()["detail"]["code"] == "support_chat_unsupported"
+
+    # An agent that advertises only support-chat-v1 (end-user pipe launch, #234)
+    # but not support-chat-launch-v1 (#236) cannot act on a heartbeat launch, so
+    # the technician launch must be refused rather than lighting a dead button.
+    end_user_only = await api.post(
+        "/support/conversations",
+        headers=tech,
+        json={"agent_id": agent_ids[2]},
+    )
+    assert end_user_only.status_code == 409
+    assert end_user_only.json()["detail"]["code"] == "support_chat_unsupported"
 
     outsider = await login(api, "outsider@nodelink.test")
     hidden = await api.post(
