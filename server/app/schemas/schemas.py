@@ -477,6 +477,10 @@ class HeartbeatAck(BaseModel):
     # refresh interval. Empty means "nothing to send" — the common case, so a
     # steady-state endpoint transfers no inventory bytes at all.
     inventory_requested: list[str] = Field(default_factory=list)
+    # Complete, short-lived browser URL for an unacknowledged conversation
+    # opened by a technician. Additive and nullable so older agents ignore it
+    # and a steady-state heartbeat carries no chat data.
+    chat_launch_requested: str | None = None
     monitoring_checks: list["AgentCheckAssignment"] = Field(default_factory=list)
 
 

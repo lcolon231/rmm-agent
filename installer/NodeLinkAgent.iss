@@ -110,6 +110,11 @@ Source: "..\agent\internal\chattray\nodelink.ico"; DestDir: "{app}"; DestName: "
 ; at logon, as a non-elevated process (the chat pipe admits INTERACTIVE only).
 ; Inno removes it automatically on uninstall.
 Name: "{commonstartup}\NodeLink Support"; Filename: "{app}\rmm-agent.exe"; Parameters: "tray"; IconFilename: "{app}\nodelink.ico"; Comment: "Start a NodeLink Support chat"
+; All-users Start-menu shortcut: the interactive user explicitly asks the
+; service to create a conversation and launch the browser in that user's
+; session. A fixed name makes install and upgrade idempotent; Inno removes it
+; automatically on uninstall.
+Name: "{commonprograms}\NodeLink Support"; Filename: "{app}\rmm-agent.exe"; Parameters: "chat"; IconFilename: "{app}\nodelink.ico"; Comment: "Open a NodeLink Support chat"
 
 [UninstallRun]
 ; Stop + deregister the service while rmm-agent.exe still exists on disk.

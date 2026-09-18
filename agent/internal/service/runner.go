@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/lcolon231/rmm/agent/internal/chatlaunch"
 	"io"
 	"log"
 	"math/rand"
@@ -83,6 +84,10 @@ type Agent struct {
 	run func(ctx context.Context, kind, script string) executor.Result
 	// Enabled only by the SCM wrapper, never a foreground or one-shot process.
 	supportChat bool
+	// openChatURL is injectable so heartbeat behavior is tested without opening
+	// a real browser. lastChatLaunch suppresses duplicate tabs across beats.
+	openChatURL    func(string) error
+	lastChatLaunch string
 }
 
 // NewAgent builds a runtime that reads config (and persists identity) at
@@ -96,6 +101,7 @@ func NewAgent(configPath, version string, logger *log.Logger) *Agent {
 		backoffInitial: 1 * time.Second,
 		backoffMax:     5 * time.Minute,
 		run:            executor.RunContext,
+		openChatURL:    chatlaunch.Open,
 	}
 }
 
@@ -507,6 +513,7 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 		a.log.Printf("server restored this agent from quarantine; resuming normal operation")
 		s.quarantined = false
 	}
+	a.handleChatLaunch(ack.ChatLaunchRequested)
 	// Upload only what the server asked for. A failure here is logged and
 	// retried on the next beat rather than failing the check-in: inventory is
 	// evidence, not control flow, and losing a beat over it would also delay

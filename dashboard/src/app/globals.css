@@ -2150,6 +2150,11 @@ select:focus-visible {
   background: rgb(132 78 238 / 18%);
   border: 1px solid rgb(162 115 242 / 45%);
   border-radius: 999px;
+
+.detail-chat-launch { display: flex; max-width: 290px; align-items: flex-end; flex-direction: column; gap: 4px; }
+.detail-chat-launch button { cursor: pointer; font-family: inherit; }
+.detail-chat-launch button:disabled { cursor: not-allowed; opacity: .55; }
+.detail-chat-launch small { color: #f6a6a6; font-size: 10px; text-align: right; }
 }
 
 .command-queue-meter {

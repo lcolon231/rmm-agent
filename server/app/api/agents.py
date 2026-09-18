@@ -15,6 +15,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_agent_for_credential_reattach, get_current_agent
+from app.core import support_chat as support_chat_core
+from app.models.models import SupportConversation, SupportConversationStatus, SupportParty
 from app.core import audit, inventory, metrics, monitoring
 from app.core.clientip import client_ip
 from app.core.command_envelope import (
@@ -549,11 +551,27 @@ async def heartbeat(
             if len(pending) >= batch:
                 break
 
+
+    chat_launch_requested = None
+    launch_conversation = await db.scalar(
+        select(SupportConversation)
+        .where(
+            SupportConversation.agent_id == agent.id,
+            SupportConversation.opened_by == SupportParty.technician,
+            SupportConversation.status == SupportConversationStatus.open,
+            SupportConversation.notice_acknowledged_at.is_(None),
+        )
+        .order_by(SupportConversation.created_at.asc())
+        .limit(1)
+    )
+    if launch_conversation is not None:
+        chat_launch_requested = support_chat_core.technician_launch_url(launch_conversation)
     return HeartbeatAck(
         ok=True,
         pending_commands=[CommandOut.model_validate(c) for c in pending],
         command_public_keys=public_key_bundle_pem(),
         trust_state=agent.trust_state,
+        chat_launch_requested=chat_launch_requested,
         inventory_requested=inventory_requested,
         monitoring_checks=[
             AgentCheckAssignment(

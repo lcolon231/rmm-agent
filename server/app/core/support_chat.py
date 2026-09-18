@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Chat write boundary. Callers own transactions and acquire row locks first."""
 from datetime import datetime, timedelta, timezone
+import base64
+import hashlib
 import hmac
 import secrets
 from urllib.parse import urlencode, urlsplit
@@ -42,6 +44,26 @@ def rotate(conversation):
     conversation.token_hash = hash_token(token)
     conversation.token_expires_at = now() + timedelta(seconds=settings.support_chat_token_ttl_seconds)
     return token
+
+
+def technician_launch_url(conversation):
+    """Return a reconstructable credential URL without storing plaintext."""
+    if not conversation.token_expires_at or utc(conversation.token_expires_at) <= now():
+        conversation.token_expires_at = now() + timedelta(
+            seconds=settings.support_chat_token_ttl_seconds
+        )
+    material = (
+        f"support-chat-launch-v1:{conversation.id}:"
+        f"{utc(conversation.token_expires_at).isoformat()}"
+    ).encode("utf-8")
+    digest = hmac.new(
+        settings.secret_key.encode("utf-8"), material, hashlib.sha256
+    ).digest()
+    token = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    conversation.token_hash = hash_token(token)
+    return base_url() + "/chat#" + urlencode(
+        {"c": conversation.id, "t": token, "expires": conversation.token_expires_at.isoformat()}
+    )
 
 
 def verify(conversation, token):
@@ -93,6 +115,54 @@ async def open_conversation(db: AsyncSession, agent: Agent):
     # A fragment never reaches access logs or the Referer header.
     url = origin + "/chat#" + urlencode({"c": conversation.id, "t": token, "expires": conversation.token_expires_at.isoformat()})
     return {"conversation_id": conversation.id, "url": url, "token_expires_at": conversation.token_expires_at}
+
+
+async def open_technician_conversation(
+    db: AsyncSession, agent: Agent
+) -> SupportConversation:
+    """Open or reuse the single conversation for an endpoint."""
+    base_url()
+    conversations = list(
+        (
+            await db.scalars(
+                select(SupportConversation)
+                .where(
+                    SupportConversation.agent_id == agent.id,
+                    SupportConversation.status == SupportConversationStatus.open,
+                )
+                .with_for_update()
+            )
+        ).all()
+    )
+    active = []
+    for conversation in conversations:
+        if is_idle(conversation):
+            conversation.status = SupportConversationStatus.closed
+            conversation.closed_at = now()
+            conversation.token_hash = ""
+        else:
+            active.append(conversation)
+    if len(active) > settings.support_chat_max_open_per_agent:
+        fail("open_limit")
+    if active:
+        return active[0]
+
+    client_id = await db.scalar(select(Site.client_id).where(Site.id == agent.site_id))
+    if client_id is None:
+        fail("agent_unassigned", 409)
+    conversation = SupportConversation(
+        agent_id=agent.id,
+        client_id=client_id,
+        opened_by=SupportParty.technician,
+    )
+    # Supply non-null values for the initial INSERT; after the generated ID is
+    # available the random token is replaced by the reconstructable one.
+    rotate(conversation)
+    db.add(conversation)
+    await db.flush()
+    technician_launch_url(conversation)
+    await db.flush()
+    return conversation
 
 
 async def append_message(db, conversation, body, *, sender=SupportParty.end_user, operator_id=None):
