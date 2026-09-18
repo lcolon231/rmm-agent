@@ -294,6 +294,26 @@ async def test_cross_tenant_operator_gets_404_and_empty_list(ops):
     assert (await api.post(f"/support/conversations/{cid}/close", headers=outsider)).status_code == 404
 
 
+async def test_technician_can_reply_to_idle_open_conversation(ops):
+    api, _, _ = ops
+    path, auth, cid = await opened(api)
+    await acknowledge(api, path, auth)
+    await api.post(path + "/messages", headers=auth, json={"body": "my vpn keeps dropping"})
+    # Push the conversation past the idle window without closing it (the common
+    # case for a technician answering later); the DB status stays open.
+    async with AsyncSessionLocal() as db:
+        row = await db.get(SupportConversation, cid)
+        row.last_message_at = core.now() - timedelta(seconds=settings.support_chat_idle_close_seconds + 60)
+        await db.commit()
+    tech = await login(api)
+    # The end user's stale session is treated as closed...
+    assert (await api.post(path + "/messages", headers=auth, json={"body": "hello?"})).status_code == 409
+    # ...but the technician can still reply, which re-activates the conversation.
+    reply = await api.post(f"/support/conversations/{cid}/messages", headers=tech, json={"body": "sorry for the delay"})
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["sender"] == "technician"
+
+
 async def test_operator_close_invalidates_end_user_token(ops):
     api, _, _ = ops
     path, auth, cid = await opened(api)
