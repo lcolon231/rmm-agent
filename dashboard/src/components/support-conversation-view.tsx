@@ -100,9 +100,9 @@ export function SupportConversationView({ conversationId, initial }: { conversat
           <h1>{endpoint}</h1>
           <p>{initial.subject ?? "Support conversation"}</p>
         </div>
-        <div>
+        <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
           <Link href="/support" className="monitoring-readonly-note">← All conversations</Link>
-          <button onClick={() => void close()} disabled={status === "closed"}>{status === "closed" ? "Closed" : "Close conversation"}</button>
+          <button type="button" onClick={() => void close()} disabled={status === "closed"}>{status === "closed" ? "Closed" : "Close conversation"}</button>
         </div>
       </header>
 
