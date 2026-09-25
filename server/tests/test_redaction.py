@@ -1240,6 +1240,28 @@ PRODUCER_DETAILS = {
         "scheduled_for": "2026-08-07T00:00:00+00:00",
         "detected_at": "2026-08-08T12:00:00+00:00",
     },
+    "support_chat.opened": {
+        "conversation_id": ID1,
+        "opened_by": "end_user",
+        "message_count": 0,
+    },
+    "support_chat.token_minted": {
+        "conversation_id": ID1,
+        "reason": "open",
+        "token_expires_at": "2026-09-25T00:15:00+00:00",
+        "message_count": 0,
+    },
+    "support_chat.notice_acknowledged": {
+        "conversation_id": ID1,
+        "notice_version": "1",
+        "message_count": 0,
+    },
+    "support_chat.technician_joined": {"conversation_id": ID1, "message_count": 2},
+    "support_chat.closed": {
+        "conversation_id": ID1,
+        "reason": "idle",
+        "message_count": 2,
+    },
     "meshcentral.launch_requested": {
         "launch_id": ID1,
         "agent_id": ID2,

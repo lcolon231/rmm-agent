@@ -47,6 +47,11 @@ and SHA-256/Merkle roots—remains readable.
 | `shell_session.closed` | `api/shell_sessions.py` operator close | `session_id`, `status`, `reason`, `output_bytes_total`, `frames_in`, `frames_out` |
 | `shell_session.timed_out` | `core/tasks.py` shell session sweep | `session_id`, `reason`, `output_bytes_total`, `frames_in`, `frames_out` |
 | `shell_session.failed` | `api/shell_sessions.py` fail-closed transport/process/output termination | `session_id`, `reason`, `output_bytes_total`, `output_bytes_limit`, `frames_in`, `frames_out` |
+| `support_chat.opened` | `core/support_chat.py` new conversation, end-user or technician-initiated (issue #237) | `conversation_id`, `opened_by`, `message_count` |
+| `support_chat.token_minted` | `core/support_chat.py` chat credential issued on open, refresh, or technician launch; the token itself is never recorded | `conversation_id`, `reason`, `token_expires_at`, `message_count` |
+| `support_chat.notice_acknowledged` | `api/support_chat.py` end user acknowledged the recording and retention notice | `conversation_id`, `notice_version`, `message_count` |
+| `support_chat.technician_joined` | `core/support_chat.py` a technician's first reply in a conversation | `conversation_id`, `message_count` |
+| `support_chat.closed` | `core/support_chat.py` operator close or idle close; invalidates the chat token | `conversation_id`, `reason`, `message_count` |
 | `meshcentral.launch_requested` | `api/meshcentral.py` authorized remote-desktop launch record created (issue #62) | `launch_id`, `agent_id`, `meshcentral_node_id`, `mapping_id` |
 | `meshcentral.session_launched` | `api/meshcentral.py` MeshCentral minted a scoped single-device access URL | `launch_id`, `agent_id`, `meshcentral_node_id`, `mapping_id`, `expires_at`, `meshcentral_session_ref`, `reason_sha256`, `reason_bytes` |
 | `meshcentral.launch_denied` | `api/meshcentral.py` fail-closed launch refusal | `launch_id`, `agent_id`, `reason`, `policy`, `trust_state` |

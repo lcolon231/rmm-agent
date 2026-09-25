@@ -565,7 +565,17 @@ async def heartbeat(
         .limit(1)
     )
     if launch_conversation is not None:
+        previous_expiry = launch_conversation.token_expires_at
         chat_launch_requested = support_chat_core.technician_launch_url(launch_conversation)
+        # The launch URL is re-derived on every beat; only a lapsed token that
+        # was re-minted with a new expiry is a new credential worth auditing.
+        if launch_conversation.token_expires_at != previous_expiry:
+            await support_chat_core.audit_token_minted(
+                db,
+                launch_conversation,
+                "technician_launch",
+                actor=f"agent:{agent.id}",
+            )
     return HeartbeatAck(
         ok=True,
         pending_commands=[CommandOut.model_validate(c) for c in pending],

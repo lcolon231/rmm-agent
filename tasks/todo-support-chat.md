@@ -437,14 +437,14 @@ populate it when an open technician-initiated conversation exists.
 `support_chat_retention_days` (default 30), then the emptied conversations.
 
 **Acceptance criteria:**
-- [ ] Existing conventions: `synchronize_session=False`, caller owns the transaction, `0` disables pruning
-- [ ] Deletes messages of a conversation closed beyond the cutoff; leaves an **open** conversation of the same age untouched
-- [ ] Audit events for the conversation survive pruning — a test asserts this
-- [ ] `PruneResult` reports the counts
+- [x] Existing conventions: `synchronize_session=False`, caller owns the transaction, `0` disables pruning
+- [x] Deletes messages of a conversation closed beyond the cutoff; leaves an **open** conversation of the same age untouched
+- [x] Audit events for the conversation survive pruning — a test asserts this
+- [x] `PruneResult` reports the counts
 
 **Verification:**
-- [ ] `cd server && pytest -q tests/test_support_chat.py`
-- [ ] `cd server && pytest -q` — existing retention tests unaffected
+- [x] `cd server && pytest -q tests/test_support_chat.py`
+- [x] `cd server && pytest -q` — existing retention tests unaffected
 
 **Dependencies:** Task 1
 
@@ -463,13 +463,13 @@ populate it when an open technician-initiated conversation exists.
 `support_chat_idle_close_seconds` from the existing sweep in `core/tasks.py`.
 
 **Acceptance criteria:**
-- [ ] Fires at the boundary; no-op before it
-- [ ] Closing invalidates the token
-- [ ] One indexed query, not a per-agent scan
+- [x] Fires at the boundary; no-op before it
+- [x] Closing invalidates the token
+- [x] One indexed query, not a per-agent scan
 
 **Verification:**
-- [ ] `cd server && pytest -q tests/test_support_chat.py`
-- [ ] `cd server && pytest -q`
+- [x] `cd server && pytest -q tests/test_support_chat.py`
+- [x] `cd server && pytest -q`
 
 **Dependencies:** Task 2
 
@@ -488,13 +488,13 @@ populate it when an open technician-initiated conversation exists.
 technician joined, conversation closed, and token minted. Lifecycle only.
 
 **Acceptance criteria:**
-- [ ] Events carry conversation id, agent id, message count, and for the acknowledgment the notice version
-- [ ] A test asserts **no message body** appears in any audit event
-- [ ] `verify_chain` passes with support-chat events in the chain
+- [x] Events carry conversation id, agent id, message count, and for the acknowledgment the notice version
+- [x] A test asserts **no message body** appears in any audit event
+- [x] `verify_chain` passes with support-chat events in the chain
 
 **Verification:**
-- [ ] `cd server && pytest -q tests/test_support_chat.py`
-- [ ] `cd server && pytest -q` — audit chain tests green
+- [x] `cd server && pytest -q tests/test_support_chat.py`
+- [x] `cd server && pytest -q` — audit chain tests green
 
 **Dependencies:** Tasks 3, 5, 9
 
@@ -513,13 +513,13 @@ technician joined, conversation closed, and token minted. Lifecycle only.
 the README names it the source of truth for completion claims.
 
 **Acceptance criteria:**
-- [ ] Covers the pipe's threat model, the auth model, the six bounds, retention, and what is deliberately out of scope
-- [ ] States plainly that the consent notice is a recording disclosure, **not** a HIPAA authorization, and that the 30-day default is a minimum-necessary choice rather than a regulatory requirement
-- [ ] `docs/RETENTION.md` table gains the support-chat row
-- [ ] `docs/ARCHITECTURE.md` reflects the feature and its Windows-only constraint
+- [x] Covers the pipe's threat model, the auth model, the six bounds, retention, and what is deliberately out of scope
+- [x] States plainly that the consent notice is a recording disclosure, **not** a HIPAA authorization, and that the 30-day default is a minimum-necessary choice rather than a regulatory requirement
+- [x] `docs/RETENTION.md` table gains the support-chat row
+- [x] `docs/ARCHITECTURE.md` reflects the feature and its Windows-only constraint
 
 **Verification:**
-- [ ] Manual read-through against shipped behavior
+- [x] Manual read-through against shipped behavior
 
 **Dependencies:** Tasks 1-16
 

@@ -324,3 +324,202 @@ async def test_operator_close_invalidates_end_user_token(ops):
     async with AsyncSessionLocal() as db:
         row = await db.get(SupportConversation, cid)
         assert row.status == SupportConversationStatus.closed and row.closed_by_operator_id and row.token_hash == ""
+
+
+# --- Governance (#237): idle close, retention, lifecycle audit --------------
+
+from app.core import audit
+from app.core.retention import prune_expired
+from app.models.models import AuditEvent
+
+
+async def chat_events(cid=None):
+    async with AsyncSessionLocal() as db:
+        rows = (await db.scalars(select(AuditEvent).where(AuditEvent.action.like("support_chat.%")).order_by(AuditEvent.seq))).all()
+    return [e for e in rows if cid is None or e.detail["conversation_id"] == cid]
+
+
+async def age(cid, **fields):
+    async with AsyncSessionLocal() as db:
+        row = await db.get(SupportConversation, cid)
+        for key, value in fields.items():
+            setattr(row, key, value)
+        await db.commit()
+
+
+async def test_idle_sweep_closes_at_boundary_and_invalidates_token(env, monkeypatch):
+    api, _, _ = env
+    path, auth, cid = await opened(api)
+    await acknowledge(api, path, auth)
+    async with AsyncSessionLocal() as db:
+        row = await db.get(SupportConversation, cid)
+        boundary = core.utc(row.created_at) + timedelta(seconds=settings.support_chat_idle_close_seconds)
+    async with AsyncSessionLocal() as db:
+        assert await core.close_idle(db, boundary - timedelta(seconds=1)) == 0
+        await db.commit()
+        assert (await db.get(SupportConversation, cid)).status == SupportConversationStatus.open
+    async with AsyncSessionLocal() as db:
+        assert await core.close_idle(db, boundary) == 1
+        await db.commit()
+    async with AsyncSessionLocal() as db:
+        row = await db.get(SupportConversation, cid)
+        assert row.status == SupportConversationStatus.closed and row.token_hash == "" and row.closed_at
+        assert row.closed_by_operator_id is None
+    # The old token no longer authorizes anything.
+    assert (await api.get(path + "/messages", headers=auth)).status_code == 403
+    closed = [e for e in await chat_events(cid) if e.action == "support_chat.closed"]
+    assert len(closed) == 1 and closed[0].actor == "system"
+    assert closed[0].detail == {"conversation_id": cid, "reason": "idle", "message_count": 0}
+    # A second sweep is a no-op.
+    async with AsyncSessionLocal() as db:
+        assert await core.close_idle(db, boundary + timedelta(hours=1)) == 0
+
+
+async def test_idle_sweep_leaves_a_request_awaiting_a_technician_open(ops):
+    api, _, _ = ops
+    path, auth, cid = await opened(api)
+    await acknowledge(api, path, auth)
+    await api.post(path + "/messages", headers=auth, json={"body": "my vpn keeps dropping"})
+    late = core.now() + timedelta(seconds=settings.support_chat_idle_close_seconds + 60)
+    async with AsyncSessionLocal() as db:
+        assert await core.close_idle(db, late) == 0
+        await db.commit()
+    tech = await login(api)
+    reply = await api.post(f"/support/conversations/{cid}/messages", headers=tech, json={"body": "on it"})
+    assert reply.status_code == 200, reply.text
+    # The reply restarts the idle clock; once the user goes quiet after it, it closes.
+    async with AsyncSessionLocal() as db:
+        assert await core.close_idle(db, core.now() + timedelta(seconds=settings.support_chat_idle_close_seconds - 60)) == 0
+        assert await core.close_idle(db, late) == 1
+        await db.commit()
+
+
+async def test_idle_sweep_is_a_single_query(env):
+    api, _, _ = env
+    for agent in (0, 1):
+        await opened(api, agent)
+    statements = []
+
+    def count(conn, cursor, statement, *args):
+        if statement.lstrip().upper().startswith("SELECT") and "support_conversations" in statement:
+            statements.append(statement)
+
+    from sqlalchemy import event
+    event.listen(engine.sync_engine, "before_cursor_execute", count)
+    try:
+        async with AsyncSessionLocal() as db:
+            await core.close_idle(db, core.now())
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", count)
+    assert len(statements) == 1
+
+
+async def test_retention_prunes_closed_transcripts_and_keeps_open_and_audit(ops):
+    api, _, _ = ops
+    tech = await login(api)
+    old = core.now() - timedelta(days=settings.support_chat_retention_days + 1)
+    conversations = {}
+    for agent in (0, 1):
+        path, auth, cid = await opened(api, agent)
+        await acknowledge(api, path, auth)
+        await api.post(path + "/messages", headers=auth, json={"body": f"transcript body {agent}"})
+        conversations[agent] = cid
+    closing, staying = conversations[0], conversations[1]
+    assert (await api.post(f"/support/conversations/{closing}/close", headers=tech)).status_code == 200
+    await age(closing, created_at=old, closed_at=old)
+    await age(staying, created_at=old, last_message_at=old)
+    before = await chat_events(closing)
+
+    async with AsyncSessionLocal() as db:
+        result = await prune_expired(db, settings)
+        await db.commit()
+    assert result.support_chat_messages_deleted == 1
+    assert result.support_chat_conversations_deleted == 1
+    async with AsyncSessionLocal() as db:
+        assert await db.get(SupportConversation, closing) is None
+        assert await db.get(SupportConversation, staying) is not None
+        remaining = (await db.scalars(select(SupportMessage.conversation_id))).all()
+        assert remaining == [staying]
+        # The lifecycle record outlives the transcript, and the chain still verifies.
+        ok, broken = await audit.verify_chain(db)
+        assert ok, broken
+    after = await chat_events(closing)
+    assert [e.id for e in after] == [e.id for e in before]
+    assert {e.action for e in after} >= {"support_chat.opened", "support_chat.notice_acknowledged", "support_chat.closed"}
+
+
+async def test_retention_keeps_recently_closed_and_zero_disables(ops, monkeypatch):
+    api, _, _ = ops
+    tech = await login(api)
+    path, auth, cid = await opened(api)
+    await acknowledge(api, path, auth)
+    await api.post(path + "/messages", headers=auth, json={"body": "hello"})
+    await api.post(f"/support/conversations/{cid}/close", headers=tech)
+    async with AsyncSessionLocal() as db:
+        result = await prune_expired(db, settings)
+        await db.commit()
+    assert result.support_chat_messages_deleted == 0
+    await age(cid, closed_at=core.now() - timedelta(days=settings.support_chat_retention_days + 1))
+    monkeypatch.setattr(settings, "support_chat_retention_days", 0)
+    async with AsyncSessionLocal() as db:
+        result = await prune_expired(db, settings)
+        await db.commit()
+        assert await db.get(SupportConversation, cid) is not None
+    assert result.support_chat_messages_deleted == result.support_chat_conversations_deleted == 0
+
+
+async def test_lifecycle_audit_events_carry_no_message_body(ops):
+    api, ids, _ = ops
+    path, auth, cid = await opened(api)
+    await acknowledge(api, path, auth)
+    # Acknowledging again is not a second consent event.
+    await acknowledge(api, path, auth)
+    body = "patient Jane Roe DOB 1970-01-01 cannot print"
+    await api.post(path + "/messages", headers=auth, json={"body": body})
+    refreshed = await api.post(path + "/refresh", headers=auth)
+    auth = {"Authorization": "Bearer " + refreshed.json()["token"]}
+    tech = await login(api)
+    for text in ("looking now", "try again please"):
+        assert (await api.post(f"/support/conversations/{cid}/messages", headers=tech, json={"body": text})).status_code == 200
+    assert (await api.post(f"/support/conversations/{cid}/close", headers=tech)).status_code == 200
+    # Closing an already-closed conversation records nothing further.
+    assert (await api.post(f"/support/conversations/{cid}/close", headers=tech)).status_code == 200
+
+    events = await chat_events(cid)
+    assert [e.action for e in events] == [
+        "support_chat.opened",
+        "support_chat.token_minted",
+        "support_chat.notice_acknowledged",
+        "support_chat.token_minted",
+        "support_chat.technician_joined",
+        "support_chat.closed",
+    ]
+    by_action = {e.action: e for e in events}
+    assert all(e.agent_id == ids[0] for e in events)
+    assert by_action["support_chat.opened"].actor == f"agent:{ids[0]}"
+    assert by_action["support_chat.notice_acknowledged"].detail["notice_version"] == settings.support_chat_notice_version
+    assert by_action["support_chat.notice_acknowledged"].actor == "support_chat:end_user"
+    assert [e.detail["reason"] for e in events if e.action == "support_chat.token_minted"] == ["open", "refresh"]
+    joined = by_action["support_chat.technician_joined"]
+    assert joined.actor == "tech@nodelink.test" and joined.actor_user_id
+    assert joined.detail["message_count"] == 2
+    assert by_action["support_chat.closed"].detail == {"conversation_id": cid, "reason": "operator", "message_count": 3}
+    token = auth["Authorization"].split()[1]
+    for event_row in events:
+        stored = str(event_row.detail)
+        for secret in (body, "Jane Roe", "looking now", "try again", token):
+            assert secret not in stored
+    async with AsyncSessionLocal() as db:
+        ok, broken = await audit.verify_chain(db)
+        assert ok, broken
+
+
+async def test_reopen_after_idle_audits_the_idle_close(env, monkeypatch):
+    api, _, _ = env
+    path, auth, cid = await opened(api)
+    await age(cid, created_at=core.now() - timedelta(seconds=settings.support_chat_idle_close_seconds + 1))
+    _, _, fresh = await opened(api)
+    assert fresh != cid
+    closed = [e for e in await chat_events(cid) if e.action == "support_chat.closed"]
+    assert len(closed) == 1 and closed[0].detail["reason"] == "idle"
+    assert [e.action for e in await chat_events(fresh)] == ["support_chat.opened", "support_chat.token_minted"]

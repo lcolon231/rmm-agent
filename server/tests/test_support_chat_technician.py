@@ -191,3 +191,38 @@ async def test_end_user_open_never_populates_heartbeat_launch(technician_env):
     )
     assert heartbeat.status_code == 200, heartbeat.text
     assert heartbeat.json()["chat_launch_requested"] is None
+
+
+async def test_technician_launch_audits_open_and_only_new_tokens(technician_env):
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.core import support_chat as core
+    from app.models.models import AuditEvent
+
+    api, agent_ids = technician_env
+    tech = await login(api)
+    opened = await api.post("/support/conversations", headers=tech, json={"agent_id": agent_ids[0]})
+    assert opened.status_code == 201, opened.text
+    conversation_id = opened.json()["conversation_id"]
+    agent_auth = {"Authorization": "Bearer agent-0"}
+
+    async def events():
+        async with AsyncSessionLocal() as db:
+            rows = (await db.scalars(select(AuditEvent).where(AuditEvent.action.like("support_chat.%")).order_by(AuditEvent.seq))).all()
+        return [(e.action, e.detail.get("reason"), e.actor) for e in rows]
+
+    # Re-deriving the same launch URL on every beat mints nothing new.
+    for _ in range(2):
+        assert (await api.post("/heartbeat", headers=agent_auth, json={})).status_code == 200
+    assert await events() == [
+        ("support_chat.opened", None, "tech@nodelink.test"),
+        ("support_chat.token_minted", "technician_launch", "tech@nodelink.test"),
+    ]
+    async with AsyncSessionLocal() as db:
+        conversation = await db.get(SupportConversation, conversation_id)
+        conversation.token_expires_at = core.now() - timedelta(seconds=1)
+        await db.commit()
+    assert (await api.post("/heartbeat", headers=agent_auth, json={})).status_code == 200
+    assert (await events())[-1] == ("support_chat.token_minted", "technician_launch", f"agent:{agent_ids[0]}")

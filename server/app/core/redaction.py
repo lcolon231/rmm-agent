@@ -188,6 +188,19 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "frames_in",
         "frames_out",
     ),
+    # Support chat lifecycle (issue #237). Identifiers, counts, reason codes,
+    # and versions only — message bodies, subjects, and chat tokens never enter
+    # the chain, so transcripts can age out under retention while the record
+    # that a conversation happened is kept.
+    "support_chat.opened": _schema("conversation_id", "opened_by", "message_count"),
+    "support_chat.token_minted": _schema(
+        "conversation_id", "reason", "token_expires_at", "message_count"
+    ),
+    "support_chat.notice_acknowledged": _schema(
+        "conversation_id", "notice_version", "message_count"
+    ),
+    "support_chat.technician_joined": _schema("conversation_id", "message_count"),
+    "support_chat.closed": _schema("conversation_id", "reason", "message_count"),
     # MeshCentral remote-desktop launch lifecycle (issue #62). Metadata only —
     # the minted login URL/cookie and MeshCentral admin credential are never
     # recorded in an audit detail, a log line, or an error message. NodeLink's

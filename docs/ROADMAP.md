@@ -163,8 +163,9 @@ Workstreams, in order:
    workstream 4: sessions initiated or accepted endpoint-side, participant
    identity on every message, complete audit of session lifecycle,
    bounded/retained transcripts, and no remote-control capability piggybacked on
-   the chat channel. Specified and scheduled (issues #233, #234, #235, #236,
-   #237); see [`../specs/SPEC-support-chat.md`](../specs/SPEC-support-chat.md).
+   the chat channel. **Implemented** (issues #233–#237); see
+   [`SUPPORT-CHAT.md`](SUPPORT-CHAT.md) and
+   [`../specs/SPEC-support-chat.md`](../specs/SPEC-support-chat.md).
 
    The endpoint-side surface is a browser page that the service launches into
    the logged-on user's session, **not** a native chat window. The agent runs in

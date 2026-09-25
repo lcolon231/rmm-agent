@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from uuid import UUID
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_agent, require_role
 from app.core import support_chat as core
+from app.core.clientip import client_ip
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.ratelimit import support_chat_limiter, support_chat_open_limiter, support_chat_send_limiter
@@ -36,6 +37,20 @@ agent_router = APIRouter(prefix="/support/agent", dependencies=[Depends(no_store
 router = APIRouter(prefix="/support/chat", dependencies=[Depends(no_store)])
 
 
+def evidence(request: Request, actor: str, actor_user_id: str | None = None):
+    return {
+        "actor": actor,
+        "actor_user_id": actor_user_id,
+        "source_ip": client_ip(request),
+        "user_agent": request.headers.get("user-agent", "")[:500] or None,
+    }
+
+
+# The person at the endpoint is unauthenticated beyond the conversation-scoped
+# token, so the chain names the role rather than an identity it cannot prove.
+END_USER = "support_chat:end_user"
+
+
 def limit(limiter, key):
     if limiter.retry_after(key) is not None:
         core.fail("rate_limited", 429)
@@ -43,12 +58,12 @@ def limit(limiter, key):
 
 
 @agent_router.post("/conversations")
-async def open_chat(agent: Agent = Depends(get_current_agent), db: AsyncSession = Depends(get_db)):
+async def open_chat(request: Request, agent: Agent = Depends(get_current_agent), db: AsyncSession = Depends(get_db)):
     agent = await db.scalar(select(Agent).where(Agent.id == agent.id).with_for_update().execution_options(populate_existing=True))
     if agent.trust_state != AgentTrustState.active:
         core.fail("agent_untrusted", 403)
     limit(support_chat_open_limiter, agent.id)
-    return await core.open_conversation(db, agent)
+    return await core.open_conversation(db, agent, **evidence(request, f"agent:{agent.id}"))
 
 
 async def authorized(conversation_id: UUID, authorization: str | None = Header(default=None), db: AsyncSession = Depends(get_db)):
@@ -81,13 +96,14 @@ async def messages(after: int = Query(default=0, ge=0), conversation=Depends(aut
 
 
 @router.post("/{conversation_id}/notice")
-async def notice(body: NoticeIn, conversation=Depends(authorized)):
+async def notice(body: NoticeIn, request: Request, conversation=Depends(authorized), db: AsyncSession = Depends(get_db)):
     core.require_open(conversation)
     if body.notice_version != settings.support_chat_notice_version:
         core.fail("notice_version", 409)
     if conversation.notice_version != body.notice_version or not conversation.notice_acknowledged_at:
         conversation.notice_version = body.notice_version
         conversation.notice_acknowledged_at = core.now()
+        await core.audit_notice_acknowledged(db, conversation, **evidence(request, END_USER))
     return {"notice_acknowledged": True}
 
 
@@ -98,9 +114,10 @@ async def send(body: MessageIn, conversation=Depends(authorized), db: AsyncSessi
 
 
 @router.post("/{conversation_id}/refresh")
-async def refresh(conversation=Depends(authorized)):
+async def refresh(request: Request, conversation=Depends(authorized), db: AsyncSession = Depends(get_db)):
     core.require_open(conversation)
     token = core.rotate(conversation)
+    await core.audit_token_minted(db, conversation, "refresh", **evidence(request, END_USER))
     return {"token": token, "token_expires_at": conversation.token_expires_at}
 
 
@@ -123,6 +140,7 @@ SUPPORT_CHAT_LAUNCH_CAPABILITY = "support-chat-launch-v1"
 @operator_router.post("/conversations", status_code=201)
 async def open_technician_chat(
     body: TechnicianConversationOpenIn,
+    request: Request,
     operator: Operator = Depends(require_role(OperatorRole.operator)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -146,7 +164,9 @@ async def open_technician_chat(
     if SUPPORT_CHAT_LAUNCH_CAPABILITY not in (agent.supported_capabilities or []):
         core.fail("unsupported", 409)
     limit(support_chat_open_limiter, agent.id)
-    conversation = await core.open_technician_conversation(db, agent)
+    conversation = await core.open_technician_conversation(
+        db, agent, **evidence(request, operator.email, operator.id)
+    )
     return {
         "conversation_id": conversation.id,
         "status": conversation.status,
@@ -263,18 +283,22 @@ async def transcript(conversation_id: UUID, operator: Operator = Depends(require
 
 
 @operator_router.post("/conversations/{conversation_id}/messages", response_model=MessageOut)
-async def reply(conversation_id: UUID, body: MessageIn, operator: Operator = Depends(require_role(OperatorRole.operator)), db: AsyncSession = Depends(get_db)):
+async def reply(conversation_id: UUID, body: MessageIn, request: Request, operator: Operator = Depends(require_role(OperatorRole.operator)), db: AsyncSession = Depends(get_db)):
     conversation = await _visible_conversation(conversation_id, operator, db, minimum=ClientRole.client_operator)
-    return await core.append_message(db, conversation, body.body, sender=SupportParty.technician, operator_id=operator.id)
+    message = await core.append_message(db, conversation, body.body, sender=SupportParty.technician, operator_id=operator.id)
+    await core.join(db, conversation, operator, **evidence(request, operator.email, operator.id))
+    return message
 
 
 @operator_router.post("/conversations/{conversation_id}/close")
-async def close_conversation(conversation_id: UUID, operator: Operator = Depends(require_role(OperatorRole.operator)), db: AsyncSession = Depends(get_db)):
+async def close_conversation(conversation_id: UUID, request: Request, operator: Operator = Depends(require_role(OperatorRole.operator)), db: AsyncSession = Depends(get_db)):
     conversation = await _visible_conversation(conversation_id, operator, db, minimum=ClientRole.client_operator)
-    if conversation.status != SupportConversationStatus.closed:
-        conversation.status = SupportConversationStatus.closed
-        conversation.closed_at = core.now()
-        conversation.closed_by_operator_id = operator.id
-        conversation.token_hash = ""  # invalidate the end user's chat token
+    await core.close(
+        db,
+        conversation,
+        reason="operator",
+        operator_id=operator.id,
+        **evidence(request, operator.email, operator.id),
+    )
     await db.flush()
     return {"status": "closed"}

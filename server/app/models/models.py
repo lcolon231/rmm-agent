@@ -76,6 +76,9 @@ class SupportConversation(Base):
     __table_args__ = (
         Index("ix_support_agent_status", "agent_id", "status"),
         Index("ix_support_client_status", "client_id", "status"),
+        # Serves the idle sweep (status = open) and retention (status = closed
+        # AND closed_at < cutoff) without scanning conversations per agent.
+        Index("ix_support_status_closed_at", "status", "closed_at"),
     )
 
 

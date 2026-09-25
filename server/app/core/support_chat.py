@@ -8,9 +8,10 @@ import secrets
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import audit
 from app.core.config import settings
 from app.core.redaction import scrub_text
 from app.core.security import hash_token
@@ -77,12 +78,143 @@ def is_idle(conversation):
     return utc(conversation.last_message_at or conversation.created_at) + timedelta(seconds=settings.support_chat_idle_close_seconds) <= now()
 
 
+async def message_count(db, conversation_id):
+    return int(await db.scalar(select(func.count()).select_from(SupportMessage).where(SupportMessage.conversation_id == conversation_id)) or 0)
+
+
+# Lifecycle audit (issue #237). Every event carries identifiers, counts, and
+# versions only: a message body, subject, or chat token never enters the chain,
+# so transcripts can age out under retention while the record that a
+# conversation happened, who joined it, and when it closed is kept forever.
+
+async def audit_opened(db, conversation, **evidence):
+    await audit.record(
+        db,
+        action="support_chat.opened",
+        agent_id=conversation.agent_id,
+        detail={
+            "conversation_id": conversation.id,
+            "opened_by": SupportParty(conversation.opened_by).value,
+            "message_count": await message_count(db, conversation.id),
+        },
+        **evidence,
+    )
+
+
+async def audit_token_minted(db, conversation, reason, **evidence):
+    await audit.record(
+        db,
+        action="support_chat.token_minted",
+        agent_id=conversation.agent_id,
+        detail={
+            "conversation_id": conversation.id,
+            "reason": reason,
+            "token_expires_at": utc(conversation.token_expires_at).isoformat(),
+            "message_count": await message_count(db, conversation.id),
+        },
+        **evidence,
+    )
+
+
+async def audit_notice_acknowledged(db, conversation, **evidence):
+    await audit.record(
+        db,
+        action="support_chat.notice_acknowledged",
+        agent_id=conversation.agent_id,
+        detail={
+            "conversation_id": conversation.id,
+            "notice_version": conversation.notice_version,
+            "message_count": await message_count(db, conversation.id),
+        },
+        **evidence,
+    )
+
+
+async def join(db, conversation, operator, **evidence):
+    """Audit a technician's first reply in a conversation as joining it.
+
+    Called after the reply is appended, so a refused reply never records a join.
+    """
+    replies = await db.scalar(select(func.count()).select_from(SupportMessage).where(
+        SupportMessage.conversation_id == conversation.id,
+        SupportMessage.operator_id == operator.id,
+    ))
+    if replies != 1:
+        return
+    await audit.record(
+        db,
+        action="support_chat.technician_joined",
+        agent_id=conversation.agent_id,
+        detail={
+            "conversation_id": conversation.id,
+            "message_count": await message_count(db, conversation.id),
+        },
+        **evidence,
+    )
+
+
+async def close(db, conversation, *, reason, operator_id=None, **evidence):
+    """Close a conversation, invalidate its token, and audit it. Idempotent."""
+    if conversation.status == SupportConversationStatus.closed:
+        return False
+    conversation.status = SupportConversationStatus.closed
+    conversation.closed_at = now()
+    conversation.closed_by_operator_id = operator_id
+    conversation.token_hash = ""  # invalidate the end user's chat token
+    evidence.setdefault("agent_id", conversation.agent_id)
+    await audit.record(
+        db,
+        action="support_chat.closed",
+        detail={
+            "conversation_id": conversation.id,
+            "reason": reason,
+            "message_count": await message_count(db, conversation.id),
+        },
+        **evidence,
+    )
+    return True
+
+
+async def close_idle(db, at=None):
+    """Close open conversations idle past the bound, from the background sweep.
+
+    One query over the ``(status, closed_at)`` index selects the candidates. A
+    conversation whose latest message is the end user's is skipped: it is a
+    request still waiting on a technician, and closing it would both drop the
+    request and refuse the late technician reply that ``append_message``
+    deliberately allows. The technician's reply restarts the idle clock, so the
+    conversation closes normally once the end user goes quiet after it.
+    """
+    cutoff = (at or now()) - timedelta(seconds=settings.support_chat_idle_close_seconds)
+    last_sender = (
+        select(SupportMessage.sender)
+        .where(SupportMessage.conversation_id == SupportConversation.id)
+        .order_by(SupportMessage.seq.desc())
+        .limit(1)
+        .correlate(SupportConversation)
+        .scalar_subquery()
+    )
+    idle = (await db.scalars(
+        select(SupportConversation)
+        .where(
+            SupportConversation.status == SupportConversationStatus.open,
+            func.coalesce(SupportConversation.last_message_at, SupportConversation.created_at) <= cutoff,
+            or_(last_sender.is_(None), last_sender != SupportParty.end_user),
+        )
+        .with_for_update(skip_locked=True)
+    )).all()
+    closed = 0
+    for conversation in idle:
+        closed += await close(db, conversation, reason="idle", actor="system")
+    return closed
+
+
 def require_open(conversation):
     if conversation.status != SupportConversationStatus.open or is_idle(conversation):
         fail("conversation_closed", 409)
 
 
-async def open_conversation(db: AsyncSession, agent: Agent):
+async def open_conversation(db: AsyncSession, agent: Agent, **evidence):
     origin = base_url()
     # The caller locks the agent, serializing even the first open (no chat row yet).
     conversations = list((await db.scalars(select(SupportConversation).where(
@@ -92,13 +224,12 @@ async def open_conversation(db: AsyncSession, agent: Agent):
     active = []
     for conversation in conversations:
         if is_idle(conversation):
-            conversation.status = SupportConversationStatus.closed
-            conversation.closed_at = now()
-            conversation.token_hash = ""
+            await close(db, conversation, reason="idle", actor="system")
         else:
             active.append(conversation)
     if len(active) > settings.support_chat_max_open_per_agent:
         fail("open_limit")
+    created = not active
     if active:
         conversation = active[0]
     else:
@@ -112,13 +243,16 @@ async def open_conversation(db: AsyncSession, agent: Agent):
     conversation.notice_version = None
     conversation.notice_acknowledged_at = None
     await db.flush()
+    if created:
+        await audit_opened(db, conversation, **evidence)
+    await audit_token_minted(db, conversation, "open", **evidence)
     # A fragment never reaches access logs or the Referer header.
     url = origin + "/chat#" + urlencode({"c": conversation.id, "t": token, "expires": conversation.token_expires_at.isoformat()})
     return {"conversation_id": conversation.id, "url": url, "token_expires_at": conversation.token_expires_at}
 
 
 async def open_technician_conversation(
-    db: AsyncSession, agent: Agent
+    db: AsyncSession, agent: Agent, **evidence
 ) -> SupportConversation:
     """Open or reuse the single conversation for an endpoint."""
     base_url()
@@ -137,9 +271,7 @@ async def open_technician_conversation(
     active = []
     for conversation in conversations:
         if is_idle(conversation):
-            conversation.status = SupportConversationStatus.closed
-            conversation.closed_at = now()
-            conversation.token_hash = ""
+            await close(db, conversation, reason="idle", actor="system")
         else:
             active.append(conversation)
     if len(active) > settings.support_chat_max_open_per_agent:
@@ -162,6 +294,8 @@ async def open_technician_conversation(
     await db.flush()
     technician_launch_url(conversation)
     await db.flush()
+    await audit_opened(db, conversation, **evidence)
+    await audit_token_minted(db, conversation, "technician_launch", **evidence)
     return conversation
 
 
