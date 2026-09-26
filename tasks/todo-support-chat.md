@@ -457,19 +457,25 @@ populate it when an open technician-initiated conversation exists.
 
 ---
 
-## Task 15: Idle auto-close
+## Task 15: Idle auto-close — superseded
+
+**Superseded during #237:** there is no idle auto-close. Only a technician closes
+a conversation, a quiet conversation stays open and is continued when the user
+contacts support again, and a contact after a close starts a new conversation.
+`support_chat_idle_close_seconds` was removed. The original task is kept below
+for the record.
 
 **Description:** Close conversations idle beyond
 `support_chat_idle_close_seconds` from the existing sweep in `core/tasks.py`.
 
 **Acceptance criteria:**
-- [x] Fires at the boundary; no-op before it
-- [x] Closing invalidates the token
-- [x] One indexed query, not a per-agent scan
+- [ ] Fires at the boundary; no-op before it
+- [ ] Closing invalidates the token
+- [ ] One indexed query, not a per-agent scan
 
 **Verification:**
-- [x] `cd server && pytest -q tests/test_support_chat.py`
-- [x] `cd server && pytest -q`
+- [ ] `cd server && pytest -q tests/test_support_chat.py`
+- [ ] `cd server && pytest -q`
 
 **Dependencies:** Task 2
 

@@ -8,7 +8,7 @@ import secrets
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import audit
@@ -72,10 +72,6 @@ def verify(conversation, token):
         fail("token_invalid", 403)
     if utc(conversation.token_expires_at) <= now():
         fail("token_expired", 401)
-
-
-def is_idle(conversation):
-    return utc(conversation.last_message_at or conversation.created_at) + timedelta(seconds=settings.support_chat_idle_close_seconds) <= now()
 
 
 async def message_count(db, conversation_id):
@@ -154,7 +150,12 @@ async def join(db, conversation, operator, **evidence):
 
 
 async def close(db, conversation, *, reason, operator_id=None, **evidence):
-    """Close a conversation, invalidate its token, and audit it. Idempotent."""
+    """Close a conversation, invalidate its token, and audit it. Idempotent.
+
+    Only a technician closes a conversation; there is no idle auto-close, so an
+    unanswered request is never dropped. The end user contacting support again
+    continues an open conversation, or starts a new one once this has closed.
+    """
     if conversation.status == SupportConversationStatus.closed:
         return False
     conversation.status = SupportConversationStatus.closed
@@ -175,58 +176,20 @@ async def close(db, conversation, *, reason, operator_id=None, **evidence):
     return True
 
 
-async def close_idle(db, at=None):
-    """Close open conversations idle past the bound, from the background sweep.
-
-    One query over the ``(status, closed_at)`` index selects the candidates. A
-    conversation whose latest message is the end user's is skipped: it is a
-    request still waiting on a technician, and closing it would both drop the
-    request and refuse the late technician reply that ``append_message``
-    deliberately allows. The technician's reply restarts the idle clock, so the
-    conversation closes normally once the end user goes quiet after it.
-    """
-    cutoff = (at or now()) - timedelta(seconds=settings.support_chat_idle_close_seconds)
-    last_sender = (
-        select(SupportMessage.sender)
-        .where(SupportMessage.conversation_id == SupportConversation.id)
-        .order_by(SupportMessage.seq.desc())
-        .limit(1)
-        .correlate(SupportConversation)
-        .scalar_subquery()
-    )
-    idle = (await db.scalars(
-        select(SupportConversation)
-        .where(
-            SupportConversation.status == SupportConversationStatus.open,
-            func.coalesce(SupportConversation.last_message_at, SupportConversation.created_at) <= cutoff,
-            or_(last_sender.is_(None), last_sender != SupportParty.end_user),
-        )
-        .with_for_update(skip_locked=True)
-    )).all()
-    closed = 0
-    for conversation in idle:
-        closed += await close(db, conversation, reason="idle", actor="system")
-    return closed
-
-
 def require_open(conversation):
-    if conversation.status != SupportConversationStatus.open or is_idle(conversation):
+    if conversation.status != SupportConversationStatus.open:
         fail("conversation_closed", 409)
 
 
 async def open_conversation(db: AsyncSession, agent: Agent, **evidence):
     origin = base_url()
     # The caller locks the agent, serializing even the first open (no chat row yet).
-    conversations = list((await db.scalars(select(SupportConversation).where(
+    # An open conversation is continued however long it has been quiet; only a
+    # technician's close ends it, after which the next contact starts a new one.
+    active = list((await db.scalars(select(SupportConversation).where(
         SupportConversation.agent_id == agent.id,
         SupportConversation.status == SupportConversationStatus.open,
     ).with_for_update())).all())
-    active = []
-    for conversation in conversations:
-        if is_idle(conversation):
-            await close(db, conversation, reason="idle", actor="system")
-        else:
-            active.append(conversation)
     if len(active) > settings.support_chat_max_open_per_agent:
         fail("open_limit")
     created = not active
@@ -256,7 +219,7 @@ async def open_technician_conversation(
 ) -> SupportConversation:
     """Open or reuse the single conversation for an endpoint."""
     base_url()
-    conversations = list(
+    active = list(
         (
             await db.scalars(
                 select(SupportConversation)
@@ -268,12 +231,6 @@ async def open_technician_conversation(
             )
         ).all()
     )
-    active = []
-    for conversation in conversations:
-        if is_idle(conversation):
-            await close(db, conversation, reason="idle", actor="system")
-        else:
-            active.append(conversation)
     if len(active) > settings.support_chat_max_open_per_agent:
         fail("open_limit")
     if active:
@@ -301,10 +258,6 @@ async def open_technician_conversation(
 
 async def append_message(db, conversation, body, *, sender=SupportParty.end_user, operator_id=None):
     if conversation.status is not SupportConversationStatus.open:
-        fail("conversation_closed", 409)
-    # Idle reaps an abandoned end-user session; it must not block a technician
-    # replying later, which is normal support behavior and itself re-activity.
-    if sender is SupportParty.end_user and is_idle(conversation):
         fail("conversation_closed", 409)
     # The consent notice gates the end user's first message; a technician reply
     # is not consenting to recording, so it is not subject to that gate.

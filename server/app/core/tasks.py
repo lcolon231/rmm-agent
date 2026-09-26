@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from app.core import audit, metrics, monitoring, support_chat
+from app.core import audit, metrics, monitoring
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.shell_relay import registry as shell_relay_registry
@@ -45,9 +45,6 @@ async def _sweep_once() -> None:
                 agent_id=agent.id,
                 detail={"last_seen_at": last_seen.isoformat() if last_seen else None},
             )
-        # Close abandoned support-chat conversations (issue #237) on the same
-        # cadence, invalidating their tokens with an audit event each.
-        await support_chat.close_idle(db)
         active_agents = (
             await db.execute(
                 select(Agent).where(Agent.trust_state == AgentTrustState.active)

@@ -83,7 +83,7 @@ async def authorized(conversation_id: UUID, authorization: str | None = Header(d
 
 @router.get("/{conversation_id}/messages")
 async def messages(after: int = Query(default=0, ge=0), conversation=Depends(authorized), db: AsyncSession = Depends(get_db)):
-    closed = conversation.status == "closed" or core.is_idle(conversation)
+    closed = conversation.status == "closed"
     acknowledged = conversation.notice_version == settings.support_chat_notice_version and conversation.notice_acknowledged_at is not None
     # Do not disclose a transcript in a newly opened browser before consent.
     tail = [] if not acknowledged else (await db.scalars(select(SupportMessage).where(

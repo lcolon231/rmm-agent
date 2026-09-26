@@ -25,7 +25,7 @@ text only and cannot trigger any endpoint action.
 4. The end-user page shows the recording and retention notice. The composer is
    disabled until the user acknowledges it.
 5. Technicians see the conversation on the dashboard's Support Chat page with an
-   unread badge, reply, and close it.
+   unread badge, reply, and close it when the issue is resolved.
 
 A technician can also start a conversation from the endpoint's detail page. The
 server records the request and the agent opens the browser on its next heartbeat
@@ -47,7 +47,7 @@ The chat token is the only new credential this feature adds. It is
 that the heartbeat can reconstruct). Only its SHA-256 is stored, it is compared
 in constant time, it is scoped to one conversation, it expires after
 `support_chat_token_ttl_seconds`, and it is rate-limited per token. Closing a
-conversation, whether by a technician or the idle sweep, clears the stored hash,
+conversation, which only a technician can do, clears the stored hash,
 so the old URL stops working immediately. Quarantining or revoking the endpoint
 also stops its chat tokens from working.
 
@@ -68,27 +68,25 @@ All of these are enforced by the server.
 | Messages per conversation | `support_chat_max_messages` | 500 (max 500) |
 | Open conversations per endpoint | `support_chat_max_open_per_agent` | 1 (max 1) |
 | Chat token lifetime | `support_chat_token_ttl_seconds` | 900 (60–900) |
-| Idle auto-close | `support_chat_idle_close_seconds` | 3600 (min 60) |
 | Message body retention after close | `support_chat_retention_days` | 30 (`0` disables pruning) |
 
-## Idle close
+## Closing and contacting again
 
-The offline sweep in `core/tasks.py` runs every heartbeat interval. It closes
-open conversations with no message for `support_chat_idle_close_seconds`. The
-candidates come from a single query on the `(status, closed_at)` index. Each
-close invalidates the token and records a `support_chat.closed` audit event
-with `reason = "idle"`.
+Only a technician closes a conversation. There is no idle auto-close: a
+conversation stays open however long it has been quiet, so an unanswered
+request is never dropped and either side can pick it up later.
 
-The sweep skips a conversation whose latest message is from the end user. That
-conversation is a request still waiting for a technician, and closing it would
-drop the request and block the late reply that technicians are allowed to send.
-The technician's reply restarts the idle clock, and the conversation closes
-normally once the end user goes quiet after it. From the end user's side, a
-conversation past the idle window is already treated as closed: the page shows
-it closed and refuses new messages. Opening chat again starts a fresh
-conversation and closes the idle one, which is also audited with
-`reason = "idle"`. Otherwise an unanswered request stays in the technician's queue until someone
-answers or closes it.
+- **Contacting support while a conversation is open** continues it. The user
+  gets a fresh link and acknowledges the notice again in the new browser, and
+  the existing transcript is still there.
+- **Contacting support after a technician closed it** starts a new
+  conversation. The closed one keeps its transcript until retention deletes it.
+
+Closing invalidates the chat link immediately and records a
+`support_chat.closed` audit event with `reason = "operator"`. Because retention
+applies only to closed conversations, a conversation nobody closes is kept
+until someone does. Closing resolved conversations is part of the technician
+workflow, and open conversations stay at the top of the Support Chat list.
 
 ## Retention
 
@@ -142,7 +140,7 @@ a chat token. The full field contract is in [`AUDIT-EVENTS.md`](AUDIT-EVENTS.md)
 | `support_chat.token_minted` | A chat token is issued (`reason`: `open`, `refresh`, or `technician_launch`, with `token_expires_at`) | Agent, end user, or technician |
 | `support_chat.notice_acknowledged` | The end user acknowledges the notice (`notice_version`) | `support_chat:end_user` |
 | `support_chat.technician_joined` | A technician's first reply in a conversation | The technician |
-| `support_chat.closed` | A technician closes it (`reason = "operator"`) or it goes idle (`reason = "idle"`) | The technician or `system` |
+| `support_chat.closed` | A technician closes it (`reason = "operator"`) | The technician |
 
 The end user is authenticated only by the conversation-scoped token, so the
 chain records the role (`support_chat:end_user`) rather than an identity it

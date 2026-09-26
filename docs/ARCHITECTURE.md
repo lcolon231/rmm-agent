@@ -541,7 +541,7 @@ to one agent and denormalizes that agent's `client_id` for tenant filtering, and
 at most one is open per endpoint. It stores only a SHA-256 of the current chat
 token. `SupportMessage` rows have a per-conversation `seq` cursor and a body
 that is `scrub_text`-redacted on write (Alembic `0044`; `0045` adds the
-`(status, closed_at)` index for the idle sweep and retention). Transcripts are
+`(status, closed_at)` index for retention). Transcripts are
 deleted `support_chat_retention_days` after close. Lifecycle is recorded only
 in the audit chain (§9).
 
@@ -1015,10 +1015,10 @@ Governance (#237): message bodies are incidental PHI and are deleted
 conversations are never pruned. The `support_chat.*` lifecycle events are opened,
 token minted, notice acknowledged, technician joined, and closed. They carry
 identifiers, counts, reason codes, and the notice version, never a body, subject,
-or token, so they outlive the transcript in the never-pruned chain. The offline
-sweep closes idle conversations with one indexed query, skipping a conversation
-whose latest message is an end-user request still awaiting a technician. The
-consent notice is a recording disclosure, not a HIPAA authorization. See
+or token, so they outlive the transcript in the never-pruned chain. Only a
+technician closes a conversation; there is no idle auto-close. The user
+contacting support again continues an open conversation, or starts a new one
+after a close. The consent notice is a recording disclosure, not a HIPAA authorization. See
 `docs/SUPPORT-CHAT.md`.
 
 ### Remote desktop (MeshCentral, issue #62)
