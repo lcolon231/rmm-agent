@@ -563,6 +563,13 @@ async def heartbeat(
         )
         .order_by(SupportConversation.created_at.asc())
         .limit(1)
+        # technician_launch_url rewrites token_hash, so serialize with a
+        # concurrent close: without the row lock a heartbeat that read the row
+        # before the close committed could write the old hash back onto the
+        # closed conversation and revive its token. Under the lock the close
+        # wins, the row is re-read, and it no longer matches status == open.
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if launch_conversation is not None:
         previous_expiry = launch_conversation.token_expires_at

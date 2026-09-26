@@ -226,3 +226,20 @@ async def test_technician_launch_audits_open_and_only_new_tokens(technician_env)
         await db.commit()
     assert (await api.post("/heartbeat", headers=agent_auth, json={})).status_code == 200
     assert (await events())[-1] == ("support_chat.token_minted", "technician_launch", f"agent:{agent_ids[0]}")
+
+
+async def test_heartbeat_after_close_never_revives_the_launch_token(technician_env):
+    api, agent_ids = technician_env
+    tech = await login(api)
+    opened = await api.post("/support/conversations", headers=tech, json={"agent_id": agent_ids[0]})
+    conversation_id = opened.json()["conversation_id"]
+    agent_auth = {"Authorization": "Bearer agent-0"}
+    launch_url = (await api.post("/heartbeat", headers=agent_auth, json={})).json()["chat_launch_requested"]
+    token = parse_qs(urlsplit(launch_url).fragment)["t"][0]
+    assert (await api.post(f"/support/conversations/{conversation_id}/close", headers=tech)).status_code == 200
+    after = await api.post("/heartbeat", headers=agent_auth, json={})
+    assert after.json()["chat_launch_requested"] is None
+    async with AsyncSessionLocal() as db:
+        assert (await db.get(SupportConversation, conversation_id)).token_hash == ""
+    denied = await api.get(f"/support/chat/{conversation_id}/messages", headers={"Authorization": "Bearer " + token})
+    assert denied.status_code == 403
