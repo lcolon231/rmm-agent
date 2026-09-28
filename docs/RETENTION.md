@@ -20,6 +20,7 @@ settings. The pruners physically do not target those tables.
 | Heartbeats / telemetry | DB (`heartbeats`) | Agents × heartbeat rate | Pruned after `telemetry_retention_days` (default 30) | `retention.prune_expired` |
 | Command results (output) | DB (`commands.stdout/stderr`) | Command volume × output size | Per-stream capture cap (256 KiB/384 KiB); **text** cleared after `command_output_retention_days` (default 90), row + metadata kept | Agent cap + retention |
 | Command rows (metadata) | DB (`commands`) | Command volume | Retained (accountability); observable backlog | Observability |
+| Support chat transcripts | DB (`support_messages`, `support_conversations`) | Endpoint-user conversations | Messages **and** the conversation row deleted `support_chat_retention_days` (default 30) after the conversation **closes**; open conversations are never pruned. Lifecycle audit events are kept ([`SUPPORT-CHAT.md`](SUPPORT-CHAT.md)) | `retention.prune_expired` |
 | Audit events | DB (`audit_events`) | Audited actions | **Never pruned** (compliance chain) | Observability only |
 | Merkle anchors + receipts | DB (`audit_anchors`, `anchor_publications`) | Anchor cadence | **Never pruned**; unpublished backlog is alerted | Observability + lag alert |
 | Encrypted backups | Off-host (operator-managed) | Backup schedule | Pruned **only** after verified off-host retention + key custody (manual) | Operator policy |
@@ -40,6 +41,16 @@ separate retention clock. A future message-body feature would require a distinct
 shorter retention clock for the sensitive body; that is out of scope for the
 metadata-only v1. See [`EVENT-LOG-ACCESS.md`](EVENT-LOG-ACCESS.md).
 
+### Why support chat transcripts are *deleted*, not cleared
+
+A support chat transcript (issue #237) is free text typed at an endpoint and can
+incidentally contain PHI. Unlike a command row, the conversation row itself holds
+no metadata that the audit chain lacks. Its accountability record is the
+`support_chat.*` lifecycle events, which never held a message body. So past
+`support_chat_retention_days` after close, the messages are deleted and then the
+emptied conversation row is deleted. Only closed conversations qualify. See
+[`SUPPORT-CHAT.md`](SUPPORT-CHAT.md) for why the default is 30 days.
+
 ## Configuration
 
 All settings live in `server/app/core/config.py` (environment variables):
@@ -48,6 +59,7 @@ All settings live in `server/app/core/config.py` (environment variables):
 |---|---|---|
 | `telemetry_retention_days` | 30 | Delete heartbeats older than this. `0` disables (unbounded — not recommended). |
 | `command_output_retention_days` | 90 | Clear command output text older than this. `0` disables. |
+| `support_chat_retention_days` | 30 | Delete support chat transcripts this long after the conversation closes. `0` disables. A minimum-necessary choice, not a regulatory requirement. |
 | `retention_sweep_interval_seconds` | 86400 | How often the retention sweep runs. |
 | `retention_disk_path` | `/` | Filesystem whose free space is reported/alerted. |
 | `heartbeat_backlog_alert` | 5,000,000 | Alert when total heartbeat rows exceed this. |

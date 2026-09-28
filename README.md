@@ -14,7 +14,7 @@ HIPAA-supporting controls and defensible compliance evidence.
 | Area | Current state |
 | --- | --- |
 | Latest tagged release | `v0.1.11` (server schema `0044`) |
-| Schema on `main` | Alembic revision `0044` (`0037` tenant-scoped authorization, `0042` pending-reboot reason, `0044` endpoint support chat) |
+| Schema on `main` | Alembic revision `0045` (`0037` tenant-scoped authorization, `0042` pending-reboot reason, `0044` endpoint support chat, `0045` support chat lifecycle index) |
 | Primary support target | Windows agent and Windows service |
 | Server | FastAPI management and agent APIs with PostgreSQL; SQLite is limited to development and tests |
 | Dashboard | Authenticated Next.js interface backed entirely by live API data: operations overview, endpoints, inventory, command console, interactive shell, alerts, monitoring policies, maintenance windows, scheduled tasks, script library, patch policies and compliance, enrollment, audit evidence, and operator administration. No panel is fixture-backed |
@@ -228,7 +228,11 @@ The code in this repository currently provides:
   to, and close conversations from an in-product operator dashboard with an
   unread badge. The chat token lives only in the URL fragment, message bodies
   are `scrub_text`-redacted on write, and the launch is INTERACTIVE-only.
-  Requires `support_chat_base_url`; Windows-first.
+  Governance (#237): transcripts are deleted 30 days after close
+  (`support_chat_retention_days`), only a technician closes a conversation
+  (contacting support again after a close starts a new one), and the lifecycle (opened, token minted, notice
+  acknowledged, technician joined, closed) is audited without message bodies.
+  Requires `support_chat_base_url`; Windows-first. See `docs/SUPPORT-CHAT.md`.
 - Loss-safe agent credential renewal and bounded reattach: server-enforced
   expiry with a short rotation overlap, plus active-only recovery when a
   powered-off endpoint returns within the configurable lapse window. Revoked,
@@ -426,9 +430,10 @@ Windows restart is pending; `v0.1.9` (schema `0044`) adds endpoint support chat
 and repairs global script grants; `v0.1.10` adds the support-chat system-tray
 launcher; and `v0.1.11` completes the support-chat loop with the in-product
 operator responder dashboard (#235) and technician-initiated launch (#236),
-gated on the new `support-chat-launch-v1` capability. Running `main` requires
-`alembic upgrade head` to `0044` and a rebuilt Windows agent; the tagged
-`v0.1.11` release ships `0044`.
+gated on the new `support-chat-launch-v1` capability. Since then, `main` adds
+support-chat governance (#237: transcript retention, technician-only close, lifecycle
+audit; schema `0045`). Running `main` requires `alembic upgrade head` to `0045`
+and a rebuilt Windows agent; the tagged `v0.1.11` release ships `0044`.
 
 ## Planned
 

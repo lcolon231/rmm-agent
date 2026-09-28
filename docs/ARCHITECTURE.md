@@ -536,6 +536,15 @@ history. Automatic and manual transitions serialize on the alert row; operator
 comments are scrubbed before operational storage and digest-only in the audit
 chain.
 
+`SupportConversation` is one endpoint user's chat with technicians. It belongs
+to one agent and denormalizes that agent's `client_id` for tenant filtering, and
+at most one is open per endpoint. It stores only a SHA-256 of the current chat
+token. `SupportMessage` rows have a per-conversation `seq` cursor and a body
+that is `scrub_text`-redacted on write (Alembic `0044`; `0045` adds the
+`(status, closed_at)` index for retention). Transcripts are
+deleted `support_chat_retention_days` after close. Lifecycle is recorded only
+in the audit chain (§9).
+
 `ApprovalPolicy` mirrors `MonitoringPolicy`/`PatchApprovalPolicy` scoping
 (`global`, `client`, `site`, `agent`) and resolves most-specific-wins among the
 policies that *name* the dispatched kind, so a narrow policy can add a
@@ -984,6 +993,33 @@ sensitive like command output and never enters the audit chain. The server uses 
 bounded in-memory, sequence/ack relay; the agent runs one contained line-oriented
 shell; and the endpoint detail page exposes a polling terminal. The signed command
 poll path remains the compatibility fallback. See `docs/SHELL-SESSIONS.md`.
+
+### Endpoint support chat (issues #233–#237)
+
+Support chat is technician-to-human text chat, not remote access. It gets no
+endpoint capability beyond opening a browser tab, and it runs on the same
+bounded HTTP polling as everything else. It is Windows-only. A logged-on user
+asks the agent service to open a conversation through a parameterless local
+named pipe (ACL: SYSTEM and `INTERACTIVE`, remote clients rejected). The service
+calls the server with its own agent credential and launches the user's browser
+at a URL whose fragment carries a short-lived, conversation-scoped chat token.
+A technician can also request a launch, which rides the heartbeat
+(`chat_launch_requested`) only for agents advertising `support-chat-launch-v1`.
+Four authorization surfaces stay separate: the pipe ACL, the agent credential,
+the chat token (hashed at rest, TTL-bound, rate-limited, invalidated on close),
+and the operator session under tenant membership, where cross-tenant access
+returns 404.
+
+Governance (#237): message bodies are incidental PHI and are deleted
+`support_chat_retention_days` (default 30) after a conversation closes. Open
+conversations are never pruned. The `support_chat.*` lifecycle events are opened,
+token minted, notice acknowledged, technician joined, and closed. They carry
+identifiers, counts, reason codes, and the notice version, never a body, subject,
+or token, so they outlive the transcript in the never-pruned chain. Only a
+technician closes a conversation; there is no idle auto-close. The user
+contacting support again continues an open conversation, or starts a new one
+after a close. The consent notice is a recording disclosure, not a HIPAA authorization. See
+`docs/SUPPORT-CHAT.md`.
 
 ### Remote desktop (MeshCentral, issue #62)
 

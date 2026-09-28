@@ -350,13 +350,17 @@ Every one of these is enforced server-side and returns `400` with a `code`:
 | Messages per conversation | `support_chat_max_messages` | 500 |
 | Open conversations per agent | `support_chat_max_open_per_agent` | 1 |
 | Token TTL seconds | `support_chat_token_ttl_seconds` | 900 |
-| Idle auto-close seconds | `support_chat_idle_close_seconds` | 3600 |
 | Message body retention days | `support_chat_retention_days` | 30 |
 
 One open conversation per endpoint keeps the model simple and matches the
-physical reality of one person at one machine. Idle conversations are closed by
-the existing sweep in `core/tasks.py`, which already runs every heartbeat
-interval.
+physical reality of one person at one machine.
+
+**Amended during #237: no idle auto-close.** Only a technician closes a
+conversation. An idle close would drop requests still waiting on a technician
+and refuse a late reply, so a quiet conversation stays open and the user
+contacting support again continues it. After a technician closes it, the next
+contact starts a new conversation. `support_chat_idle_close_seconds` was
+removed.
 
 ## Code Style
 
@@ -411,7 +415,8 @@ existing suite's convention.
 - Retention deletes messages of a conversation closed beyond the cutoff and
   leaves an open conversation of the same age untouched.
 - `support_chat_retention_days = 0` disables pruning.
-- Idle auto-close fires at the boundary and is a no-op before it.
+- A long-quiet conversation stays open, and contacting again continues it; after
+  a technician close, contacting again starts a new conversation.
 - Audit events are recorded for open/join/close and contain **no** message body.
 - Technician-initiated chat against an agent lacking the capability returns 409.
 

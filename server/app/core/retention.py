@@ -36,6 +36,9 @@ from app.models.models import (
     CheckResult,
     Command,
     Heartbeat,
+    SupportConversation,
+    SupportConversationStatus,
+    SupportMessage,
 )
 
 
@@ -50,6 +53,8 @@ class PruneResult:
     inventory_snapshots_deleted: int = 0
     check_results_deleted: int = 0
     assistant_conversations_deleted: int = 0
+    support_chat_messages_deleted: int = 0
+    support_chat_conversations_deleted: int = 0
 
 
 async def prune_expired(
@@ -103,13 +108,45 @@ async def prune_expired(
 
     from app.core.assistant.service import prune as prune_assistant
     assistant_deleted = await prune_assistant(db, now)
+
+    chat_messages_deleted = chat_conversations_deleted = 0
+    if s.support_chat_retention_days > 0:
+        chat_messages_deleted, chat_conversations_deleted = await _prune_support_chat(
+            db, now - timedelta(days=s.support_chat_retention_days)
+        )
     return PruneResult(
         heartbeats_deleted=heartbeats_deleted,
         command_outputs_cleared=command_outputs_cleared,
         inventory_snapshots_deleted=inventory_deleted,
         check_results_deleted=check_results_deleted,
         assistant_conversations_deleted=assistant_deleted,
+        support_chat_messages_deleted=chat_messages_deleted,
+        support_chat_conversations_deleted=chat_conversations_deleted,
     )
+
+
+async def _prune_support_chat(db: AsyncSession, cutoff: datetime) -> tuple[int, int]:
+    """Delete transcripts of support conversations closed before `cutoff`.
+
+    Message bodies are incidental PHI with no minimum retention (issue #237), so
+    they age out; the conversation's lifecycle audit events never held a body
+    and are untouched. Only *closed* conversations qualify: an open one is live
+    support, whatever its age. Messages go first, then the emptied rows.
+    """
+    expired = select(SupportConversation.id).where(
+        SupportConversation.status == SupportConversationStatus.closed,
+        SupportConversation.closed_at.is_not(None),
+        SupportConversation.closed_at < cutoff,
+    )
+    messages = await db.execute(
+        delete(SupportMessage).where(SupportMessage.conversation_id.in_(expired)),
+        execution_options={"synchronize_session": False},
+    )
+    conversations = await db.execute(
+        delete(SupportConversation).where(SupportConversation.id.in_(expired)),
+        execution_options={"synchronize_session": False},
+    )
+    return messages.rowcount or 0, conversations.rowcount or 0
 
 
 async def _prune_inventory_history(db: AsyncSession, keep: int) -> int:
@@ -224,6 +261,7 @@ async def storage_status(db: AsyncSession, s: Settings = settings) -> dict:
         "retention_policy": {
             "telemetry_retention_days": s.telemetry_retention_days,
             "command_output_retention_days": s.command_output_retention_days,
+            "support_chat_retention_days": s.support_chat_retention_days,
         },
         "heartbeats": {
             "count": heartbeat_count,
