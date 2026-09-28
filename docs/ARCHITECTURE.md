@@ -224,6 +224,9 @@ state, and separate search/history error codes); the full data travels in the
 inventory section. `install_updates` accepts bounded KB IDs and Windows Update
 GUIDs, or an explicit `install_all` flag. Empty or ambiguous selection fails
 closed. Update GUID selection supports driver and firmware updates without KBs.
+The endpoint's Windows Updates panel targets each update by its KB ID when valid
+and otherwise by its Update ID (issue #255); an update with neither stays
+unselectable.
 An agent that predates either kind rejects it at signature/kind validation, so a
 mixed-version fleet is safe.
 

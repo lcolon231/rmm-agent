@@ -49,6 +49,9 @@ export const WINDOWS_UPDATE_PAGE_SIZE = 25;
 export const WINDOWS_UPDATE_STALE_HOURS = 24;
 
 const KB_ID = /^KB[0-9]{4,10}$/i;
+// Windows Update identity GUID, the same shape the server and agent accept for
+// install_updates update_ids.
+const UPDATE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function str(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
@@ -160,6 +163,47 @@ export function normalizedKBID(value: string | null): string | null {
   if (!value) return null;
   const normalized = value.trim().toUpperCase();
   return KB_ID.test(normalized) ? normalized : null;
+}
+
+export function normalizedUpdateID(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return UPDATE_ID.test(normalized) ? normalized : null;
+}
+
+export type WindowsUpdateTarget = { value: string; kind: "kb" | "update_id" };
+
+/**
+ * The identifier a targeted install uses for this update: its KB number when
+ * valid, otherwise its Windows Update ID. Null when it has neither, in which
+ * case the update cannot be installed individually.
+ */
+export function windowsUpdateTarget(update: MissingUpdateView): WindowsUpdateTarget | null {
+  const kb = normalizedKBID(update.kb_id);
+  if (kb) return { value: kb, kind: "kb" };
+  const updateID = normalizedUpdateID(update.update_id);
+  return updateID ? { value: updateID, kind: "update_id" } : null;
+}
+
+/** Distinct install targets for these updates, in order, skipping untargetable ones. */
+export function windowsUpdateTargets(updates: MissingUpdateView[]): string[] {
+  const targets: string[] = [];
+  for (const update of updates) {
+    const target = windowsUpdateTarget(update);
+    if (target && !targets.includes(target.value)) targets.push(target.value);
+  }
+  return targets;
+}
+
+/** The updates whose install target is in the selection. */
+export function selectedWindowsUpdates(
+  updates: MissingUpdateView[],
+  selected: ReadonlySet<string>,
+): MissingUpdateView[] {
+  return updates.filter((update) => {
+    const target = windowsUpdateTarget(update);
+    return target !== null && selected.has(target.value);
+  });
 }
 
 export function isDriverUpdate(update: MissingUpdateView): boolean {

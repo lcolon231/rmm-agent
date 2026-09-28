@@ -4,14 +4,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildDispatchRequestBody,
+  validateDispatchInput,
+} from "../src/lib/command-console-core.ts";
+import {
   MAX_DISPLAY_MISSING,
   filterMissingWindowsUpdates,
   installUpdatesResultFromUnknown,
+  normalizedUpdateID,
+  selectedWindowsUpdates,
   summarizeWindowsUpdateSelection,
   summarizeWindowsUpdates,
   windowsUpdatePage,
   windowsUpdatePageCount,
   windowsUpdateScanIsStale,
+  windowsUpdateTarget,
+  windowsUpdateTargets,
   windowsUpdatesFromUnknown,
   type MissingUpdateView,
 } from "../src/lib/windows-updates-core.ts";
@@ -252,4 +260,99 @@ test("parses the per-update reboot_required flag so staged updates are distingui
   assert.ok(result);
   assert.equal(result.results[0].rebootRequired, false);
   assert.equal(result.results[1].rebootRequired, true);
+});
+
+// --- Selection by KB or Update ID (issue #255) -------------------------------
+
+const GUID_A = "aaaaaaaa-1111-2222-3333-444444444444";
+const GUID_B = "bbbbbbbb-1111-2222-3333-444444444444";
+
+test("normalizes Windows Update IDs and rejects malformed ones", () => {
+  assert.equal(normalizedUpdateID(`  ${GUID_A.toUpperCase()} `), GUID_A);
+  assert.equal(normalizedUpdateID(null), null);
+  assert.equal(normalizedUpdateID(""), null);
+  assert.equal(normalizedUpdateID("not-a-guid"), null);
+  assert.equal(normalizedUpdateID("aaaaaaaa-1111-2222-3333-44444444444"), null);
+  assert.equal(normalizedUpdateID(`{${GUID_A}}`), null);
+});
+
+test("targets the KB when valid, otherwise the Update ID, otherwise nothing", () => {
+  assert.deepEqual(
+    windowsUpdateTarget(missingUpdate({ kb_id: "kb5034123", update_id: GUID_A })),
+    { value: "KB5034123", kind: "kb" },
+  );
+  assert.deepEqual(
+    windowsUpdateTarget(missingUpdate({ kb_id: null, update_id: GUID_A.toUpperCase() })),
+    { value: GUID_A, kind: "update_id" },
+  );
+  assert.deepEqual(
+    windowsUpdateTarget(missingUpdate({ kb_id: "not-a-kb", update_id: GUID_A })),
+    { value: GUID_A, kind: "update_id" },
+  );
+  assert.equal(windowsUpdateTarget(missingUpdate({ kb_id: null, update_id: null })), null);
+  assert.equal(windowsUpdateTarget(missingUpdate({ kb_id: "bogus", update_id: "bogus" })), null);
+});
+
+test("collects distinct targets and maps a selection back to updates", () => {
+  const updates = [
+    missingUpdate({ title: "KB update", kb_id: "KB5034123", update_id: GUID_B }),
+    missingUpdate({ title: "Update-ID-only", kb_id: null, update_id: GUID_A }),
+    missingUpdate({ title: "Duplicate KB", kb_id: "kb5034123", update_id: null }),
+    missingUpdate({ title: "No identifier", kb_id: null, update_id: null }),
+  ];
+  assert.deepEqual(windowsUpdateTargets(updates), ["KB5034123", GUID_A]);
+  assert.deepEqual(
+    selectedWindowsUpdates(updates, new Set([GUID_A])).map((update) => update.title),
+    ["Update-ID-only"],
+  );
+  assert.deepEqual(
+    selectedWindowsUpdates(updates, new Set(["KB5034123"])).map((update) => update.title),
+    ["KB update", "Duplicate KB"],
+  );
+  // An update with no identifier can never be selected, even by a stray key.
+  assert.deepEqual(selectedWindowsUpdates(updates, new Set([""])), []);
+});
+
+test("a mixed selection dispatches kb_ids and update_ids, never install_all", () => {
+  const updates = [
+    missingUpdate({ kb_id: "KB5034123", update_id: GUID_B }),
+    missingUpdate({ kb_id: null, update_id: GUID_A }),
+  ];
+  const input = validateDispatchInput({
+    install_all: false,
+    kind: "install_updates",
+    script: "",
+    ttl_seconds: 3_600,
+    update_targets: windowsUpdateTargets(updates),
+  });
+  assert.ok(input);
+  assert.deepEqual(buildDispatchRequestBody(input).payload, {
+    kb_ids: ["KB5034123"],
+    update_ids: [GUID_A],
+  });
+
+  const updateIDOnly = validateDispatchInput({
+    install_all: false,
+    kind: "install_updates",
+    script: "",
+    ttl_seconds: 3_600,
+    update_targets: windowsUpdateTargets([updates[1]]),
+  });
+  assert.ok(updateIDOnly);
+  assert.deepEqual(buildDispatchRequestBody(updateIDOnly).payload, { kb_ids: [], update_ids: [GUID_A] });
+
+  // Selecting only updates with no identifier yields no targets, which must be
+  // refused rather than falling through to install_all.
+  const empty = windowsUpdateTargets([missingUpdate({ kb_id: null, update_id: null })]);
+  assert.deepEqual(empty, []);
+  assert.equal(
+    validateDispatchInput({
+      install_all: false,
+      kind: "install_updates",
+      script: "",
+      ttl_seconds: 3_600,
+      update_targets: empty,
+    }),
+    null,
+  );
 });

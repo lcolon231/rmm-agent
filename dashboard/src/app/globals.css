@@ -3033,6 +3033,8 @@ textarea:focus-visible,
 .windows-update-confirm-list li:last-child { border-bottom: 0; }
 .windows-update-confirm-list code { color: var(--blue); font: 750 10px var(--font-data); }
 .windows-update-confirm-list span { color: var(--slate); font-size: 10px; }
+.windows-update-confirm-list span small { display: block; margin-top: 3px; font-size: 9px; }
+.windows-update-confirm-list em { color: var(--slate); font-size: 9px; font-style: normal; }
 .windows-update-confirm-list b { padding: 3px 6px; color: #875005; font-size: 7px; text-transform: uppercase; background: var(--amber-soft); border-radius: 3px; }
 .windows-update-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; }
 .windows-update-confirm-actions button.danger { color: white; background: var(--red); border-color: var(--red); }
