@@ -15,7 +15,7 @@ import {
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
-import { validateDispatchInput, type DispatchInput } from "@/lib/command-console-core";
+import { MAX_UPDATE_TARGETS, validateDispatchInput, type DispatchInput } from "@/lib/command-console-core";
 import {
   formatInventoryTimestamp,
   statusExplanation,
@@ -27,11 +27,14 @@ import {
   filterMissingWindowsUpdates,
   isDriverUpdate,
   normalizedKBID,
+  normalizedUpdateID,
   summarizeWindowsUpdateSelection,
   WINDOWS_UPDATE_PAGE_SIZE,
   windowsUpdateClassifications,
   windowsUpdatePage,
   windowsUpdatePageCount,
+  windowsUpdateInstallTargets,
+  windowsUpdateSelectionKey,
   type MissingUpdateView,
   type WindowsUpdatesView,
 } from "@/lib/windows-updates-core";
@@ -62,7 +65,7 @@ export function WindowsUpdateInstallation({
   const [classification, setClassification] = useState("");
   const [excludeDrivers, setExcludeDrivers] = useState(true);
   const [page, setPage] = useState(1);
-  const [selectedKBs, setSelectedKBs] = useState<Set<string>>(new Set());
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [step, setStep] = useState<InstallationStep>({ name: "select" });
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -78,16 +81,19 @@ export function WindowsUpdateInstallation({
   const pageCount = windowsUpdatePageCount(filtered.length);
   const currentPage = Math.min(page, pageCount);
   const visibleUpdates = windowsUpdatePage(filtered, currentPage);
-  const visibleSelectable = visibleUpdates
-    .map((update) => normalizedKBID(update.kb_id))
-    .filter((value): value is string => value !== null);
+  const visibleSelectable = Array.from(new Set(visibleUpdates
+    .map(windowsUpdateSelectionKey)
+    .filter((value): value is string => value !== null)));
   const selectedUpdates = view.missing.filter((update) => {
-    const kbID = normalizedKBID(update.kb_id);
-    return kbID !== null && selectedKBs.has(kbID);
+    const key = windowsUpdateSelectionKey(update);
+    return key !== null && selectedKeys.has(key);
   });
   const selectedSummary = summarizeWindowsUpdateSelection(selectedUpdates);
   const driverCount = view.missing.filter(isDriverUpdate).length;
-  const noKBCount = view.missing.filter((update) => normalizedKBID(update.kb_id) === null).length;
+  const updateIDOnlyCount = view.missing.filter(
+    (update) => normalizedKBID(update.kb_id) === null && normalizedUpdateID(update.update_id) !== null,
+  ).length;
+  const unselectableCount = view.missing.filter((update) => windowsUpdateSelectionKey(update) === null).length;
   const tone = statusTone(sectionStatus);
   const scanCanBeUsed = (sectionStatus === "ok" || sectionStatus === "partial")
     && !view.error_code;
@@ -97,23 +103,23 @@ export function WindowsUpdateInstallation({
     setPage(1);
   }
 
-  function toggleUpdate(kbID: string, checked: boolean) {
-    setSelectedKBs((current) => {
+  function toggleUpdate(key: string, checked: boolean) {
+    setSelectedKeys((current) => {
       const next = new Set(current);
-      if (checked) next.add(kbID);
-      else next.delete(kbID);
+      if (checked) next.add(key);
+      else next.delete(key);
       return next;
     });
   }
 
   function toggleVisible() {
     const allSelected = visibleSelectable.length > 0
-      && visibleSelectable.every((kbID) => selectedKBs.has(kbID));
-    setSelectedKBs((current) => {
+      && visibleSelectable.every((key) => selectedKeys.has(key));
+    setSelectedKeys((current) => {
       const next = new Set(current);
-      for (const kbID of visibleSelectable) {
-        if (allSelected) next.delete(kbID);
-        else next.add(kbID);
+      for (const key of visibleSelectable) {
+        if (allSelected) next.delete(key);
+        else next.add(key);
       }
       return next;
     });
@@ -121,20 +127,30 @@ export function WindowsUpdateInstallation({
 
   function reviewSelection() {
     setError("");
-    const kbIDs = Array.from(selectedKBs);
+    // Targets come from the current scan rows, never the raw selection set, so
+    // an identifier that is no longer in the inventory cannot be dispatched.
+    const targets = windowsUpdateInstallTargets(selectedUpdates);
+    if (!scanCanBeUsed) {
+      setError("Run a successful Windows Update scan before installing from this inventory.");
+      return;
+    }
+    if (targets.length === 0) {
+      setError("Select at least one update with a KB ID or Windows Update ID before reviewing the install.");
+      return;
+    }
+    if (targets.length > MAX_UPDATE_TARGETS) {
+      setError(`Select at most ${MAX_UPDATE_TARGETS} update identifiers per install.`);
+      return;
+    }
     const input = validateDispatchInput({
       install_all: false,
       kind: "install_updates",
       script: "",
       ttl_seconds: 3_600,
-      update_targets: kbIDs,
+      update_targets: targets,
     });
-    if (!scanCanBeUsed) {
-      setError("Run a successful Windows Update scan before installing from this inventory.");
-      return;
-    }
-    if (!input || selectedUpdates.length === 0) {
-      setError("Select at least one KB-backed update before reviewing the install.");
+    if (!input || input.install_all || input.update_targets.length === 0) {
+      setError("The selected update identifiers could not be validated. Run a fresh scan and try again.");
       return;
     }
     setStep({ name: "confirm", input, updates: selectedUpdates });
@@ -153,7 +169,7 @@ export function WindowsUpdateInstallation({
         | { command?: { id: string }; error?: string }
         | null;
       if (response.ok && body?.command?.id) {
-        setSelectedKBs(new Set());
+        setSelectedKeys(new Set());
         setStep({ name: "dispatched", commandId: body.command.id, updateCount });
       } else {
         setError(body?.error ?? "The selected updates could not be dispatched. Try again.");
@@ -185,13 +201,20 @@ export function WindowsUpdateInstallation({
           <p className={summary.rebootCount > 0 ? "windows-update-reboot-warning" : "windows-update-confirm-note"}>
             {summary.rebootCount > 0
               ? "One or more selected updates may restart the endpoint or leave it requiring a restart. Save active work before dispatching."
-              : "Only the KB IDs listed below will be signed and sent. An empty selection cannot be dispatched."}
+              : "Only the KB IDs and Windows Update IDs listed below will be signed and sent. An empty selection cannot be dispatched."}
           </p>
           <ul className="windows-update-confirm-list">
             {step.updates.map((update, index) => (
-              <li key={`${update.kb_id}-${index}`}>
-                <code>{normalizedKBID(update.kb_id)}</code>
-                <span>{update.title}</span>
+              <li key={`${windowsUpdateSelectionKey(update)}-${index}`}>
+                <code>{normalizedKBID(update.kb_id) ?? "No KB"}</code>
+                <span>
+                  {update.title}
+                  <small>
+                    {normalizedUpdateID(update.update_id)
+                      ? <>Update ID <code>{normalizedUpdateID(update.update_id)}</code></>
+                      : "Update ID not reported"}
+                  </small>
+                </span>
                 {isDriverUpdate(update) ? <b>Driver</b> : null}
                 {update.reboot_required ? <b>Reboot</b> : null}
               </li>
@@ -224,7 +247,7 @@ export function WindowsUpdateInstallation({
           <div>
             <strong>{step.updateCount} selected update{step.updateCount === 1 ? "" : "s"} queued</strong>
             <span>
-              Follow the signed command for installed and failed KBs, reboot state, and the agent message. Run a fresh scan after it finishes.
+              Follow the signed command for installed and failed updates, reboot state, and the agent message. Run a fresh scan after it finishes.
             </span>
           </div>
           <Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands/${encodeURIComponent(step.commandId)}`}>
@@ -236,7 +259,7 @@ export function WindowsUpdateInstallation({
   }
 
   const allVisibleSelected = visibleSelectable.length > 0
-    && visibleSelectable.every((kbID) => selectedKBs.has(kbID));
+    && visibleSelectable.every((key) => selectedKeys.has(key));
 
   return (
     <section className="enrollment-panel inventory-card windows-update-workflow" id="windows-updates">
@@ -278,7 +301,8 @@ export function WindowsUpdateInstallation({
       <div className="windows-update-summary-strip">
         <span><strong>{view.missing.length}</strong> missing</span>
         <span><strong>{driverCount}</strong> drivers</span>
-        <span><strong>{noKBCount}</strong> without KB IDs</span>
+        <span><strong>{updateIDOnlyCount}</strong> by Update ID only</span>
+        <span><strong>{unselectableCount}</strong> without an installable ID</span>
         <span><strong>{view.missing.filter((update) => update.reboot_required).length}</strong> reboot flagged</span>
       </div>
 
@@ -289,7 +313,7 @@ export function WindowsUpdateInstallation({
           <input
             id="windows-update-search"
             onChange={(event) => updateFilters(() => setQuery(event.target.value))}
-            placeholder="Search title, KB, product, or severity"
+            placeholder="Search title, KB, Update ID, product, or severity"
             type="search"
             value={query}
           />
@@ -323,7 +347,7 @@ export function WindowsUpdateInstallation({
         <span>{selectedSummary.updateCount} selected · {selectedSummary.driverCount} drivers · {selectedSummary.rebootCount} reboot flagged</span>
         <button
           className="primary"
-          disabled={!canDispatch || !trusted || selectedKBs.size === 0 || !scanCanBeUsed}
+          disabled={!canDispatch || !trusted || selectedUpdates.length === 0 || !scanCanBeUsed}
           onClick={reviewSelection}
           type="button"
         >
@@ -360,22 +384,30 @@ export function WindowsUpdateInstallation({
             <tbody>
               {visibleUpdates.map((update, index) => {
                 const kbID = normalizedKBID(update.kb_id);
+                const updateID = normalizedUpdateID(update.update_id);
+                const key = windowsUpdateSelectionKey(update);
                 const driver = isDriverUpdate(update);
                 return (
-                  <tr className={kbID ? "" : "not-selectable"} key={`${update.update_id ?? update.kb_id ?? update.title}-${index}`}>
+                  <tr className={key ? "" : "not-selectable"} key={`${update.update_id ?? update.kb_id ?? update.title}-${index}`}>
                     <td>
                       <input
-                        aria-label={kbID ? `Select ${kbID}: ${update.title}` : `${update.title} cannot be selected because it has no KB ID`}
-                        checked={kbID ? selectedKBs.has(kbID) : false}
-                        disabled={!kbID}
-                        onChange={(event) => kbID && toggleUpdate(kbID, event.target.checked)}
+                        aria-label={key
+                          ? `Select ${kbID ?? `Update ID ${key}`}: ${update.title}`
+                          : `${update.title} cannot be selected because it has no valid KB ID or Windows Update ID`}
+                        checked={key ? selectedKeys.has(key) : false}
+                        disabled={!key}
+                        onChange={(event) => key && toggleUpdate(key, event.target.checked)}
                         type="checkbox"
                       />
                     </td>
                     <td>
                       <strong>{update.title}</strong>
                       <span>
-                        {kbID ? <code>{kbID}</code> : <em>No KB ID · not individually selectable</em>}
+                        {kbID
+                          ? <code>{kbID}</code>
+                          : updateID
+                            ? <code title="Installed by Windows Update ID">{updateID}</code>
+                            : <em>No valid KB ID or Update ID · cannot be installed from here</em>}
                         {driver ? <b>Driver</b> : null}
                         {update.priority_grade ? <b>{update.priority_grade}</b> : null}
                       </span>

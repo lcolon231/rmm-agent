@@ -49,6 +49,8 @@ export const WINDOWS_UPDATE_PAGE_SIZE = 25;
 export const WINDOWS_UPDATE_STALE_HOURS = 24;
 
 const KB_ID = /^KB[0-9]{4,10}$/i;
+// Mirrors the server's install_updates update_ids validation.
+const UPDATE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function str(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
@@ -160,6 +162,31 @@ export function normalizedKBID(value: string | null): string | null {
   if (!value) return null;
   const normalized = value.trim().toUpperCase();
   return KB_ID.test(normalized) ? normalized : null;
+}
+
+export function normalizedUpdateID(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return UPDATE_ID.test(normalized) ? normalized : null;
+}
+
+/**
+ * The identifier a missing update is selected and installed by: its KB ID when
+ * valid, otherwise its Windows Update ID (driver and firmware updates often
+ * have no KB). Null means the agent has no way to target the update.
+ */
+export function windowsUpdateSelectionKey(update: MissingUpdateView): string | null {
+  return normalizedKBID(update.kb_id) ?? normalizedUpdateID(update.update_id);
+}
+
+/** Unique install targets for the selected updates, in selection order. */
+export function windowsUpdateInstallTargets(updates: MissingUpdateView[]): string[] {
+  const targets: string[] = [];
+  for (const update of updates) {
+    const key = windowsUpdateSelectionKey(update);
+    if (key !== null && !targets.includes(key)) targets.push(key);
+  }
+  return targets;
 }
 
 export function isDriverUpdate(update: MissingUpdateView): boolean {

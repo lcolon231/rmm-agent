@@ -4,14 +4,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildDispatchRequestBody,
+  validateDispatchInput,
+} from "../src/lib/command-console-core.ts";
+import {
   MAX_DISPLAY_MISSING,
   filterMissingWindowsUpdates,
   installUpdatesResultFromUnknown,
+  normalizedUpdateID,
   summarizeWindowsUpdateSelection,
   summarizeWindowsUpdates,
   windowsUpdatePage,
   windowsUpdatePageCount,
+  windowsUpdateInstallTargets,
   windowsUpdateScanIsStale,
+  windowsUpdateSelectionKey,
   windowsUpdatesFromUnknown,
   type MissingUpdateView,
 } from "../src/lib/windows-updates-core.ts";
@@ -252,4 +259,100 @@ test("parses the per-update reboot_required flag so staged updates are distingui
   assert.ok(result);
   assert.equal(result.results[0].rebootRequired, false);
   assert.equal(result.results[1].rebootRequired, true);
+});
+
+test("selects by valid KB ID first, then by valid Windows Update ID (issue #255)", () => {
+  const guid = "ABCDEF01-2345-6789-ABCD-EF0123456789";
+  assert.equal(windowsUpdateSelectionKey(missingUpdate({ kb_id: "kb5000001" })), "KB5000001");
+  assert.equal(
+    windowsUpdateSelectionKey(missingUpdate({ kb_id: null, update_id: guid })),
+    "abcdef01-2345-6789-abcd-ef0123456789",
+  );
+  // An unusable KB value falls through to the Update ID rather than disabling the row.
+  assert.equal(
+    windowsUpdateSelectionKey(missingUpdate({ kb_id: "not-a-kb", update_id: guid })),
+    "abcdef01-2345-6789-abcd-ef0123456789",
+  );
+  assert.equal(normalizedUpdateID(`  ${guid}  `), "abcdef01-2345-6789-abcd-ef0123456789");
+});
+
+test("updates with neither a valid KB ID nor a valid Update ID stay unselectable", () => {
+  for (const update_id of [null, "", "12345678", "{12345678-1234-1234-1234-1234567890ab}", "zzzzzzzz-1234-1234-1234-1234567890ab"]) {
+    assert.equal(windowsUpdateSelectionKey(missingUpdate({ kb_id: null, update_id })), null);
+    assert.equal(windowsUpdateSelectionKey(missingUpdate({ kb_id: "KB12", update_id })), null);
+  }
+  assert.deepEqual(
+    windowsUpdateInstallTargets([missingUpdate({ kb_id: null, update_id: "bogus" })]),
+    [],
+  );
+});
+
+test("mixed selections dispatch KB IDs and Update IDs in their own payload fields", () => {
+  const driverGuid = "11111111-2222-3333-4444-555555555555";
+  const selected = [
+    missingUpdate({ kb_id: "KB5000001", update_id: "aaaaaaaa-0000-0000-0000-000000000001" }),
+    missingUpdate({ kb_id: null, update_id: driverGuid.toUpperCase(), classification: "Drivers" }),
+    // Same KB on a second row (e.g. another product) collapses to one target.
+    missingUpdate({ kb_id: "kb5000001", update_id: "aaaaaaaa-0000-0000-0000-000000000002" }),
+    missingUpdate({ kb_id: null, update_id: null }),
+  ];
+  const targets = windowsUpdateInstallTargets(selected);
+  assert.deepEqual(targets, ["KB5000001", driverGuid]);
+
+  const input = validateDispatchInput({
+    install_all: false,
+    kind: "install_updates",
+    script: "",
+    ttl_seconds: 3_600,
+    update_targets: targets,
+  });
+  assert.ok(input);
+  assert.equal(input.install_all, false);
+  assert.deepEqual(buildDispatchRequestBody(input).payload, {
+    kb_ids: ["KB5000001"],
+    update_ids: [driverGuid],
+  });
+});
+
+test("an Update-ID-only selection dispatches with an empty kb_ids list", () => {
+  const guid = "11111111-2222-3333-4444-555555555555";
+  const input = validateDispatchInput({
+    install_all: false,
+    kind: "install_updates",
+    script: "",
+    ttl_seconds: 3_600,
+    update_targets: windowsUpdateInstallTargets([missingUpdate({ kb_id: null, update_id: guid })]),
+  });
+  assert.ok(input);
+  assert.deepEqual(buildDispatchRequestBody(input).payload, { kb_ids: [], update_ids: [guid] });
+});
+
+test("an empty selection can neither dispatch nor fall back to install_all", () => {
+  const targets = windowsUpdateInstallTargets([missingUpdate({ kb_id: null, update_id: null })]);
+  assert.deepEqual(targets, []);
+  assert.equal(validateDispatchInput({
+    install_all: false,
+    kind: "install_updates",
+    script: "",
+    ttl_seconds: 3_600,
+    update_targets: targets,
+  }), null);
+});
+
+test("search, pagination, and selection summary treat Update-ID-only rows like KB rows", () => {
+  const guid = "11111111-2222-3333-4444-555555555555";
+  const updates = [
+    ...Array.from({ length: 30 }, (_, index) => missingUpdate({
+      title: `Update ${index + 1}`,
+      kb_id: `KB${5000000 + index}`,
+    })),
+    missingUpdate({ title: "Firmware", kb_id: null, update_id: guid, reboot_required: true }),
+  ];
+  const found = filterMissingWindowsUpdates(updates, { query: guid.slice(0, 8), classification: "", excludeDrivers: true });
+  assert.deepEqual(found.map((update) => update.title), ["Firmware"]);
+  assert.equal(windowsUpdatePage(updates, 2).at(-1)?.title, "Firmware");
+  assert.deepEqual(
+    summarizeWindowsUpdateSelection(updates.filter((update) => windowsUpdateSelectionKey(update) === guid)),
+    { updateCount: 1, driverCount: 0, rebootCount: 1 },
+  );
 });
