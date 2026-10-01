@@ -3007,7 +3007,7 @@ textarea:focus-visible,
 .windows-update-table td span { display: block; }
 .windows-update-table td strong { color: var(--ink); font-size: 10px; line-height: 1.45; }
 .windows-update-table td span { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.45; }
-.windows-update-table td span code { margin-right: 6px; color: var(--blue); font: 750 9px var(--font-data); }
+.windows-update-table td span code { margin-right: 6px; color: var(--blue); font: 750 9px var(--font-data); overflow-wrap: anywhere; }
 .windows-update-table td span em { margin-right: 6px; color: #8a590f; font-style: normal; font-weight: 750; }
 .windows-update-table td span b { display: inline-flex; margin: 2px 5px 0 0; padding: 2px 5px; color: #875005; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; background: var(--amber-soft); border-radius: 3px; }
 .windows-update-table td.warn { color: #9c2929; font-weight: 800; }
@@ -3032,7 +3032,9 @@ textarea:focus-visible,
 .windows-update-confirm-list li { display: grid; grid-template-columns: 105px 1fr auto auto; align-items: center; gap: 9px; padding: 9px 11px; border-bottom: 1px solid #ebe8f3; }
 .windows-update-confirm-list li:last-child { border-bottom: 0; }
 .windows-update-confirm-list code { color: var(--blue); font: 750 10px var(--font-data); }
-.windows-update-confirm-list span { color: var(--slate); font-size: 10px; }
+.windows-update-confirm-list span { min-width: 0; color: var(--slate); font-size: 10px; }
+.windows-update-confirm-list span small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; overflow-wrap: anywhere; }
+.windows-update-confirm-list span small code { font-size: 9px; }
 .windows-update-confirm-list b { padding: 3px 6px; color: #875005; font-size: 7px; text-transform: uppercase; background: var(--amber-soft); border-radius: 3px; }
 .windows-update-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; }
 .windows-update-confirm-actions button.danger { color: white; background: var(--red); border-color: var(--red); }
