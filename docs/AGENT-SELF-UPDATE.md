@@ -142,10 +142,26 @@ count. No hostname or endpoint identifier appears in that histogram.
 | `downgrade_refused` | Running a newer build than the release. |
 | `below_min_supported_version` | The release is below its own floor. |
 | `envelope_unsupported` | Cannot negotiate `command-v3`, so the metadata could not carry a key-identified signature. |
+| `approval_required` | An [approval policy](APPROVAL-WORKFLOWS.md) governs `agent_self_update` for this endpoint. |
 | `outside_rollout_stage` | Bucket is at or above the current stage. |
 | `already_attempted` | Has an attempt row for this release. |
 
 Every one of these is a refusal to act. There is no "assume it is fine" branch.
+
+### Approval policies
+
+An approval policy may name `agent_self_update`. A rollout cannot satisfy one:
+an approval binds one exact command for one endpoint, and a release is a single
+operator action across many. So an endpoint under such a policy is **skipped**
+with `approval_required` and an `agent_update.approval_refused` event naming the
+policy is written. No attempt row is recorded, so the endpoint is re-evaluated
+on every later advance and is updated once the policy is narrowed, disabled, or
+deleted. The release's own governance (signing, staging, canary halt) is not a
+substitute for the policy an administrator turned on, so the rollout does not
+override it.
+
+`agent_update_rollback` is dispatched through the ordinary command path and is
+already gated by an approval policy that names it.
 
 ## What the endpoint does
 
@@ -343,6 +359,7 @@ The outcome-report endpoint is authenticated as the **agent**, not an operator.
 | `agent_update.release_published` | A signed release is published |
 | `agent_update.rollout_advanced` | A stage is widened |
 | `agent_update.dispatched` | One endpoint is targeted |
+| `agent_update.approval_refused` | One endpoint is skipped because an approval policy governs it |
 | `agent_update.rollout_paused` / `.rollout_resumed` | Operator pause/resume |
 | `agent_update.rollout_halted` | Operator or canary halt |
 | `agent_update.halt_reason_recorded` | The operator's halt justification |

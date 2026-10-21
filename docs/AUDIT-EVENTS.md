@@ -93,6 +93,7 @@ and SHA-256/Merkle roots—remains readable.
 | `agent_update.release_published` | `api/agent_updates.py` signed agent release publication (issue #63) | `release_id`, `version`, `channel`, `platform`, `artifact_sha256`, `artifact_size_bytes`, `artifact_url_sha256`, `min_supported_version`, `signer_pinned`, `manifest_sha256`, `signing_key_id`, `failure_threshold_percent`, `min_attempts_before_halt` |
 | `agent_update.rollout_advanced` | `api/agent_updates.py` staged rollout widened (issue #63) | `release_id`, `version`, `channel`, `rollout_percent`, `dispatched`, `truncated` |
 | `agent_update.dispatched` | `api/agent_updates.py` signed self-update command queued for one endpoint (issue #63) | `release_id`, `command_id`, `version`, `channel`, `from_version`, `artifact_sha256`, `rollout_bucket` |
+| `agent_update.approval_refused` | `api/agent_updates.py` rollout skipped an endpoint whose `agent_self_update` is under an approval policy (issue #292) | `release_id`, `version`, `agent_id`, `policy_id`, `required_approvals` |
 | `agent_update.rollout_paused` | `api/agent_updates.py` rollout paused (issue #63) | `release_id`, `rollout_percent` |
 | `agent_update.rollout_resumed` | `api/agent_updates.py` rollout resumed (issue #63) | `release_id`, `rollout_percent` |
 | `agent_update.rollout_halted` | `api/agent_updates.py` rollout halted by operator or canary rule (issue #63) | `release_id`, `version`, `channel`, `reason`, `rollout_percent` |

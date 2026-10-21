@@ -440,6 +440,11 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "release_id", "command_id", "version", "channel", "from_version",
         "artifact_sha256", "rollout_bucket",
     ),
+    # A governed endpoint refused by the rollout (issue #292). Identifiers and
+    # counts only, the same shape as scheduled_task.approval_refused.
+    "agent_update.approval_refused": _schema(
+        "release_id", "version", "agent_id", "policy_id", "required_approvals",
+    ),
     "agent_update.rollout_paused": _schema("release_id", "rollout_percent"),
     "agent_update.rollout_resumed": _schema("release_id", "rollout_percent"),
     "agent_update.rollout_halted": _schema(

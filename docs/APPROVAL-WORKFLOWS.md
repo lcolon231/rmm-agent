@@ -189,9 +189,9 @@ nothing is queued.
 | `approval_request_limit_reached` | 429 | This operator already holds 50 open requests in the tenant |
 | `approval_policy_global_requires_platform_admin` | 403 | Only a platform admin may write a global policy |
 
-## The two bypasses, and how they are closed
+## The three bypasses, and how they are closed
 
-A control that can be walked around is not a control. Two other paths can put a
+A control that can be walked around is not a control. Three other paths can put a
 command on an endpoint, and both are handled explicitly.
 
 **Scheduled tasks.** An unattended run cannot obtain two-person authorization at
@@ -209,6 +209,18 @@ interactive session against it is refused with
 `shell_session_requires_approval`. Bounded, reviewable work goes through an
 approved command dispatch instead.
 
+**Agent self-update rollouts.** `agent_self_update` cannot be dispatched as an
+ordinary command; it is only queued by a release rollout
+(`POST /api/v1/agent-updates/releases/{id}/rollout`). An approval binds one
+command for one endpoint, and a rollout is one action across many, so there is
+no approval for it to spend. An endpoint whose `agent_self_update` is under a
+policy is therefore **skipped** with the coded reason `approval_required` in the
+rollout response, and an `agent_update.approval_refused` event naming the policy
+is written. The endpoint is re-evaluated on every later advance and is updated
+once the policy no longer governs it. `agent_update_rollback` goes through the
+ordinary dispatch path and is gated like any other kind (see
+[AGENT-SELF-UPDATE.md](AGENT-SELF-UPDATE.md)).
+
 MeshCentral remote-desktop launches are **not** gated by this capability. They
 are governed by their own authorization and launch records
 (see [MESHCENTRAL-INTEGRATION.md](MESHCENTRAL-INTEGRATION.md)); an approval
@@ -224,6 +236,7 @@ Every step writes to the hash-chained audit log
 - `approval_request.decision_recorded` / `.decision_denied`
 - `approval_gate.allowed` / `.denied`
 - `scheduled_task.approval_refused`
+- `agent_update.approval_refused`
 
 `approval_gate.allowed` carries the identities whose authority was still live at
 execution (`approver_operator_ids`) and the binding digest, which is the
