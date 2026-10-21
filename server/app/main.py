@@ -20,6 +20,7 @@ from app.api import (
     approvals,
     assistant,
     auth,
+    emergency_overrides,
     evidence,
     management,
     meshcentral,
@@ -107,6 +108,7 @@ app.include_router(agents.router, prefix="/api/v1")
 app.include_router(evidence.router, prefix="/api/v1")
 app.include_router(management.router, prefix="/api/v1")
 app.include_router(approvals.router, prefix="/api/v1")
+app.include_router(emergency_overrides.router, prefix="/api/v1")
 app.include_router(script_library.router, prefix="/api/v1")
 app.include_router(scheduled_tasks.router, prefix="/api/v1")
 app.include_router(shell_sessions.router, prefix="/api/v1")

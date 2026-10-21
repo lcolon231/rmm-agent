@@ -1052,6 +1052,10 @@ class CommandCreate(BaseModel):
     # no policy applies is refused rather than ignored, so a stale approval can
     # never be marked spent against an unrelated run.
     approval_request_id: str | None = Field(default=None, max_length=36)
+    # A justified emergency override (issue #65) standing in for the approval
+    # a policy requires. Mutually exclusive with ``approval_request_id``; the
+    # dispatcher refuses a request that cites both.
+    emergency_override_id: str | None = Field(default=None, max_length=36)
 
     @field_validator("payload")
     @classmethod

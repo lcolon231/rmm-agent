@@ -94,6 +94,9 @@ class ApprovalPolicyCreate(BaseModel):
         default=3600, ge=MIN_REQUEST_TTL_SECONDS, le=MAX_REQUEST_TTL_SECONDS
     )
     enabled: bool = True
+    # Opt-in for the justified emergency override (issue #65). Off unless an
+    # administrator says otherwise, per policy.
+    emergency_override_allowed: bool = False
 
     _distinct = field_validator("command_kinds")(_distinct_kinds)
 
@@ -121,6 +124,7 @@ class ApprovalPolicyUpdate(BaseModel):
         default=None, ge=MIN_REQUEST_TTL_SECONDS, le=MAX_REQUEST_TTL_SECONDS
     )
     enabled: bool | None = None
+    emergency_override_allowed: bool | None = None
 
     _distinct = field_validator("command_kinds")(_distinct_kinds)
 
@@ -133,6 +137,7 @@ class ApprovalPolicyUpdate(BaseModel):
                 "required_approvals",
                 "request_ttl_seconds",
                 "enabled",
+                "emergency_override_allowed",
             )
         ):
             raise ValueError("an update must change at least one field")
@@ -150,6 +155,7 @@ class ApprovalPolicyOut(BaseModel):
     required_approvals: int
     request_ttl_seconds: int
     enabled: bool
+    emergency_override_allowed: bool
     created_at: datetime
     created_by: str | None
     updated_at: datetime | None
