@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Build tasks/test-design-plan.{html,json} from data.py + evidence.json.
 
     python tasks/test-design/build.py

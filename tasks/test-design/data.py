@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Row, seam, and runner-change data for the NodeLink test-design matrix.
 
 Every row is a *proposed* test (design only). Rubric inputs are explicit fields
