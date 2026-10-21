@@ -57,3 +57,15 @@ export async function closeSupportConversation(sessionToken: string, conversatio
     { method: "POST", sessionToken, headers: { "Content-Type": "application/json" } },
   );
 }
+
+export async function startSupportConversation(
+  sessionToken: string,
+  endpointId: string,
+): Promise<{ conversation_id: string }> {
+  return nodelinkApiRequest<{ conversation_id: string }>("/api/v1/support/conversations", {
+    method: "POST",
+    sessionToken,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: endpointId }),
+  });
+}
