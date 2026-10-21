@@ -1,0 +1,258 @@
+{
+  "contract": "evidence-v1-invalid",
+  "notes": "Negative cases for evidence-bundle-v1.json and evidence-package-v1.json. Each case applies its mutations to a fresh copy of the golden vector: {path, value} sets, {path, delete: true} removes. When rederive_id is true the consumer recomputes the content-addressed id (bundle_id / package_id) after mutating, so the case reaches the check behind the id instead of failing on the id. error is a stable substring of the verifier's refusal.",
+  "bundle": [
+    {
+      "name": "tampered-record",
+      "mutations": [
+        {
+          "path": [
+            "records",
+            "tenant",
+            0,
+            "name"
+          ],
+          "value": "Other Tenant"
+        }
+      ],
+      "error": "section digest mismatch in tenant"
+    },
+    {
+      "name": "tampered-record-with-rederived-id",
+      "rederive_id": true,
+      "mutations": [
+        {
+          "path": [
+            "records",
+            "tenant",
+            0,
+            "name"
+          ],
+          "value": "Other Tenant"
+        }
+      ],
+      "error": "section digest mismatch in tenant"
+    },
+    {
+      "name": "injected-record",
+      "mutations": [
+        {
+          "path": [
+            "records",
+            "actors"
+          ],
+          "value": [
+            {
+              "actor": "user:mallory"
+            }
+          ]
+        }
+      ],
+      "error": "record count mismatch in actors"
+    },
+    {
+      "name": "wrong-bundle-id",
+      "mutations": [
+        {
+          "path": [
+            "manifest",
+            "bundle_id"
+          ],
+          "value": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "error": "bundle ID does not match the manifest"
+    },
+    {
+      "name": "manifest-rescoped-without-new-id",
+      "mutations": [
+        {
+          "path": [
+            "manifest",
+            "scope",
+            "tenant_id"
+          ],
+          "value": "00000000-0000-0000-0000-000000000080"
+        }
+      ],
+      "error": "bundle ID does not match the manifest"
+    },
+    {
+      "name": "missing-section",
+      "mutations": [
+        {
+          "path": [
+            "records",
+            "anchors"
+          ],
+          "delete": true
+        }
+      ],
+      "error": "bundle sections are missing or unknown"
+    },
+    {
+      "name": "unknown-section",
+      "mutations": [
+        {
+          "path": [
+            "records",
+            "extra"
+          ],
+          "value": []
+        }
+      ],
+      "error": "bundle sections are missing or unknown"
+    },
+    {
+      "name": "unsupported-version",
+      "mutations": [
+        {
+          "path": [
+            "version"
+          ],
+          "value": 2
+        }
+      ],
+      "error": "unsupported evidence bundle format"
+    },
+    {
+      "name": "claims-unexported-audit-range",
+      "rederive_id": true,
+      "mutations": [
+        {
+          "path": [
+            "manifest",
+            "scope",
+            "through_seq"
+          ],
+          "value": 5
+        }
+      ],
+      "error": "audit hash prefix does not reach through_seq"
+    }
+  ],
+  "package": [
+    {
+      "name": "tampered-file-digest",
+      "mutations": [
+        {
+          "path": [
+            "files",
+            0,
+            "sha256"
+          ],
+          "value": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "error": "package ID does not match the manifest"
+    },
+    {
+      "name": "wrong-package-id",
+      "mutations": [
+        {
+          "path": [
+            "package_id"
+          ],
+          "value": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "error": "package ID does not match the manifest"
+    },
+    {
+      "name": "rescoped-evidence-without-new-id",
+      "mutations": [
+        {
+          "path": [
+            "evidence",
+            "through_seq"
+          ],
+          "value": 41
+        }
+      ],
+      "error": "package ID does not match the manifest"
+    },
+    {
+      "name": "file-removed",
+      "rederive_id": true,
+      "mutations": [
+        {
+          "path": [
+            "files",
+            4
+          ],
+          "delete": true
+        }
+      ],
+      "error": "package file manifest is incomplete or unordered"
+    },
+    {
+      "name": "unexpected-manifest-field",
+      "rederive_id": true,
+      "mutations": [
+        {
+          "path": [
+            "comment"
+          ],
+          "value": "trust me"
+        }
+      ],
+      "error": "package manifest fields are invalid"
+    },
+    {
+      "name": "wrong-media-type",
+      "rederive_id": true,
+      "mutations": [
+        {
+          "path": [
+            "files",
+            1,
+            "media_type"
+          ],
+          "value": "text/html"
+        }
+      ],
+      "error": "package member media type is invalid"
+    },
+    {
+      "name": "non-integer-size",
+      "rederive_id": true,
+      "mutations": [
+        {
+          "path": [
+            "files",
+            0,
+            "size_bytes"
+          ],
+          "value": "4096"
+        }
+      ],
+      "error": "package file descriptor is invalid"
+    },
+    {
+      "name": "foreign-signing-context",
+      "rederive_id": true,
+      "mutations": [
+        {
+          "path": [
+            "signing",
+            "context"
+          ],
+          "value": "nodelink-command:v3"
+        }
+      ],
+      "error": "package signing algorithm or key is unsupported"
+    },
+    {
+      "name": "unsupported-version",
+      "mutations": [
+        {
+          "path": [
+            "version"
+          ],
+          "value": 2
+        }
+      ],
+      "error": "unsupported evidence package format"
+    }
+  ]
+}

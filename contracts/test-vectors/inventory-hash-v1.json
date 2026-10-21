@@ -1,0 +1,54 @@
+{
+  "contract": "inventory-hash-v1",
+  "notes": "Per-section inventory content hash (ARCHITECTURE.md §6.1). canonical_json is exactly what the agent's Go json.Marshal emits for payload_json decoded as the agent decodes it (integers as int64, other numbers as float64); sha256 is over its UTF-8 bytes. The server must produce the same bytes from json.loads(payload_json). Go escapes < > & U+2028 U+2029, emits other non-ASCII raw, and formats floats without a trailing .0 and with exponents only outside [1e-6, 1e21). Negative zero is deliberately absent: Go emits -0, which json.loads reads as the integer 0, so parity cannot hold for it on any server encoding (collectors do not produce it).",
+  "valid": [
+    {
+      "name": "empty",
+      "payload_json": "{}",
+      "canonical_json": "{}",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "key-order",
+      "payload_json": "{\"serial\": \"SN-1\", \"model\": \"X1\", \"manufacturer\": \"Contoso\"}",
+      "canonical_json": "{\"manufacturer\":\"Contoso\",\"model\":\"X1\",\"serial\":\"SN-1\"}",
+      "sha256": "9612511115788ec0db16a27fe35b7b32a614ba5237ef67f1783ccb68ed56de01"
+    },
+    {
+      "name": "non-ascii",
+      "payload_json": "{\"entries\": [{\"name\": \"Microsoft® Office\", \"publisher\": \"Société Générale\", \"version\": \"16.0\"}, {\"name\": \"東京 Tools 🚀\"}]}",
+      "canonical_json": "{\"entries\":[{\"name\":\"Microsoft® Office\",\"publisher\":\"Société Générale\",\"version\":\"16.0\"},{\"name\":\"東京 Tools 🚀\"}]}",
+      "sha256": "69d4908a33bb8f119fece0bc30bc9974984d16e9a87b912129185313e10585f7"
+    },
+    {
+      "name": "html",
+      "payload_json": "{\"name\": \"AT&T <Connect>\", \"path\": \"C:\\\\Program Files\\\\A&B\"}",
+      "canonical_json": "{\"name\":\"AT\\u0026T \\u003cConnect\\u003e\",\"path\":\"C:\\\\Program Files\\\\A\\u0026B\"}",
+      "sha256": "40674022c1729f8f8c3056da762513c8cad1f2dd8f774b9cef3fb30caa200d11"
+    },
+    {
+      "name": "separators-controls",
+      "payload_json": "{\"note\": \"a b c\", \"ctl\": \"tab\\there\\nnew\\u0001\\b\\f\\\"q\\\"\\\\\"}",
+      "canonical_json": "{\"ctl\":\"tab\\there\\nnew\\u0001\\b\\f\\\"q\\\"\\\\\",\"note\":\"a\\u2028b\\u2029c\"}",
+      "sha256": "1e7927c57103ea6180dd49c1a0ff1e5de062cf149b4979f8e253bc827b3bb370"
+    },
+    {
+      "name": "nested",
+      "payload_json": "{\"disks\": [[1, 2], [], [{\"b\": true, \"a\": null}]], \"Z\": {}, \"a\": [\"\"]}",
+      "canonical_json": "{\"Z\":{},\"a\":[\"\"],\"disks\":[[1,2],[],[{\"a\":null,\"b\":true}]]}",
+      "sha256": "b7393538ca9bf0e0f65b113a20ebf52590bc379075c51706478ccf77a56bd725"
+    },
+    {
+      "name": "large-ints",
+      "payload_json": "{\"total_bytes\": 17179869184, \"max\": 9223372036854775807, \"min\": -9223372036854775808, \"neg\": -1, \"zero\": 0}",
+      "canonical_json": "{\"max\":9223372036854775807,\"min\":-9223372036854775808,\"neg\":-1,\"total_bytes\":17179869184,\"zero\":0}",
+      "sha256": "c52bfd24909929cc0136e07808ceb3fca0c2a277be66aff9ac0296d38934944d"
+    },
+    {
+      "name": "floats",
+      "payload_json": "{\"pct\":47.5,\"whole\":100.0,\"small\":0.00005,\"tiny\":1e-7,\"big\":1e20,\"huge\":1e21,\"third\":0.3333333333333333}",
+      "canonical_json": "{\"big\":100000000000000000000,\"huge\":1e+21,\"pct\":47.5,\"small\":0.00005,\"third\":0.3333333333333333,\"tiny\":1e-7,\"whole\":100}",
+      "sha256": "47f647cb1cc742740e2d899edc37b10350edb1be9824b17804835ea3652ccbc6"
+    }
+  ]
+}
