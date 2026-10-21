@@ -64,7 +64,11 @@ def test_ci_compiles_the_installer_from_a_stamped_binary():
 
     assert '-ldflags "-X main.version=0.0.0-ci"' in workflow
     assert ".\\bin\\rmm-agent-windows-amd64.exe version -expect 0.0.0-ci" in workflow
-    assert "NODELINK_VERSION: 0.0.0-ci" in workflow
+    assert "$env:NODELINK_VERSION = '0.0.0-ci'" in workflow
+    # The upgrade-target installer is compiled from a second stamped binary,
+    # and its NODELINK_VERSION must match that binary's embedded version.
+    assert '-ldflags "-X main.version=0.0.1-ci"' in workflow
+    assert "$env:NODELINK_VERSION = '0.0.1-ci'" in workflow
 
 
 def test_installer_refuses_a_binary_that_disagrees_with_the_release_version():

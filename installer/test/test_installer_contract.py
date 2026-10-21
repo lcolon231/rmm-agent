@@ -106,6 +106,19 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("#define AgentExeToVerify AddBackslash(SourcePath) + AgentExe", source)
         self.assertIn('Source: "{#AgentExe}"; DestDir: "{app}"', source)
 
+    def test_only_ci_overrides_the_production_server_origin(self) -> None:
+        """CI compiles against a ``.invalid`` host so the lifecycle test never
+        points a running service at production (issue #288). A release build
+        must keep the compiled-in production origin."""
+        source = INSTALLER.read_text(encoding="utf-8")
+        workflows = INSTALLER.parents[1] / ".github" / "workflows"
+
+        self.assertIn("#ifndef ProductionServerURL", source)
+        release = (workflows / "release.yml").read_text(encoding="utf-8")
+        self.assertNotIn("ProductionServerURL", release)
+        ci = (workflows / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("/DProductionServerURL=https://nodelink-ci.invalid", ci)
+
 
 if __name__ == "__main__":
     unittest.main()
