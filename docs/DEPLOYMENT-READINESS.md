@@ -97,6 +97,11 @@ link to reproducible evidence in the release or pilot record.
       the command it authorized. Scheduled tasks and interactive shells are
       refused for a governed kind rather than routing around the control.
       Opt-in and inert until a policy exists (`docs/APPROVAL-WORKFLOWS.md`).
+      A policy may opt in to a justified emergency override: tenant-admin
+      only, payload-bound, single-use, expiring within an hour, emailed to
+      the alert recipients at activation, and reviewed afterwards by someone
+      else (`docs/EMERGENCY-OVERRIDES.md`). Configure alert email recipients
+      before opting any policy in, or every override is flagged unnotified.
 
 ### Agent identity and endpoint storage
 

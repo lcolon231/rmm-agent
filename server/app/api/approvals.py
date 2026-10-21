@@ -195,6 +195,7 @@ async def create_approval_policy(
         required_approvals=body.required_approvals,
         request_ttl_seconds=body.request_ttl_seconds,
         enabled=body.enabled,
+        emergency_override_allowed=body.emergency_override_allowed,
         created_by=operator.email,
     )
     db.add(policy)
@@ -222,6 +223,7 @@ async def create_approval_policy(
             "required_approvals": policy.required_approvals,
             "request_ttl_seconds": policy.request_ttl_seconds,
             "enabled": policy.enabled,
+            "emergency_override_allowed": policy.emergency_override_allowed,
         },
     )
     await db.commit()
@@ -251,6 +253,7 @@ async def update_approval_policy(
         "required_approvals": policy.required_approvals,
         "request_ttl_seconds": policy.request_ttl_seconds,
         "enabled": policy.enabled,
+        "emergency_override_allowed": policy.emergency_override_allowed,
     }
     if body.command_kinds is not None:
         policy.command_kinds = [kind.value for kind in body.command_kinds]
@@ -260,6 +263,8 @@ async def update_approval_policy(
         policy.request_ttl_seconds = body.request_ttl_seconds
     if body.enabled is not None:
         policy.enabled = body.enabled
+    if body.emergency_override_allowed is not None:
+        policy.emergency_override_allowed = body.emergency_override_allowed
     policy.updated_at = _now()
     policy.updated_by = operator.email
 
@@ -282,6 +287,8 @@ async def update_approval_policy(
             "request_ttl_seconds": policy.request_ttl_seconds,
             "previous_enabled": previous["enabled"],
             "enabled": policy.enabled,
+            "previous_emergency_override_allowed": previous["emergency_override_allowed"],
+            "emergency_override_allowed": policy.emergency_override_allowed,
         },
     )
     await db.commit()

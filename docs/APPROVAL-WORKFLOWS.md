@@ -88,6 +88,11 @@ cannot retroactively unlock work that is mid-review.
 `request_ttl_seconds` is clamped to between 60 seconds and 7 days regardless of
 what a policy asks for.
 
+`emergency_override_allowed` (default `false`) lets a tenant or platform
+administrator stand in for the approvers in an emergency, for one exact
+command, on the record. See [EMERGENCY-OVERRIDES.md](EMERGENCY-OVERRIDES.md).
+A policy that leaves it off cannot be overridden at all.
+
 ## Raising and deciding a request
 
 ```bash
@@ -254,11 +259,13 @@ previous behavior immediately, leaving the request and decision history intact
 for audit. Migrations are forward-only; crossing back below `0041` requires the
 exact-revision restore procedure in [ROLLBACK.md](ROLLBACK.md).
 
-**If approval is blocking urgent work.** A tenant administrator can disable the
-policy (`PATCH /approval-policies/{id}` with `{"enabled": false}`), which is
-itself audited as `approval_policy.updated`. A justified emergency override
-workflow that keeps the policy in force while recording the exception is
-tracked separately as issue #65 and is not implemented here.
+**If approval is blocking urgent work.** If the policy has opted in, a tenant
+administrator can activate a [justified emergency override](EMERGENCY-OVERRIDES.md)
+(issue #65): the policy stays in force, the exception is bound to one command,
+notified, single-use, and reviewed afterwards. If the policy has not opted in,
+the only way past it is to disable it (`PATCH /approval-policies/{id}` with
+`{"enabled": false}`), which is audited as `approval_policy.updated` rather
+than as a justified exception.
 
 ## Limits
 

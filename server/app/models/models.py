@@ -901,6 +901,12 @@ class Command(Base):
     approval_request_id: Mapped[str | None] = mapped_column(
         ForeignKey("approval_requests.id", ondelete="SET NULL"), index=True
     )
+    # Execution binding for a justified emergency override (#65): the run
+    # carries which exception record authorized it in place of an approval.
+    # Same NULL semantics and SET NULL rationale as ``approval_request_id``.
+    emergency_override_id: Mapped[str | None] = mapped_column(
+        ForeignKey("emergency_overrides.id", ondelete="SET NULL"), index=True
+    )
     # Forward-compat lifecycle/lineage for recurring scheduling (#49) and retries.
     # No producer populates these yet; they land now so scheduling/retry work
     # needs no second migration. planned_at is the scheduled fire time; attempt
@@ -2843,6 +2849,13 @@ class ApprovalPolicy(Base):
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="1"
     )
+    # Whether a justified emergency override (#65) may stand in for the
+    # approvals this policy requires. Off by default and per policy: a tenant
+    # that wants strict dual control never flips it, and deploying the override
+    # capability changes nothing until an administrator opts a policy in.
+    emergency_override_allowed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
@@ -3000,4 +3013,109 @@ class ApprovalDecision(Base):
         UniqueConstraint(
             "request_id", "operator_id", name="ux_approval_decision_one_per_operator"
         ),
+    )
+
+
+class EmergencyOverrideStatus(str, enum.Enum):
+    """Lifecycle of one justified emergency override (#65).
+
+    ``active`` and ``consumed`` are kept distinct for the same reason
+    ``approved`` and ``consumed`` are on an approval request: an override
+    authorizes exactly one dispatch, and a replay must be a detectable refusal
+    rather than an invisible second run.
+    """
+
+    active = "active"
+    consumed = "consumed"
+    expired = "expired"
+    revoked = "revoked"
+
+
+class EmergencyOverride(Base):
+    """A self-issued, single-use exception to an approval policy (#65).
+
+    This is the dual-control analogue of a break-glass login: the policy stays
+    in force, but one authorized person may stand in for the approvers for one
+    exact command, loudly, briefly, and on the record. The row is a *binding*
+    exactly like :class:`ApprovalRequest` -- ``payload_sha256`` covers the
+    agent, kind, and canonical payload, and dispatch recomputes it -- so an
+    override minted for one command cannot be spent on another.
+
+    What makes it an exception record rather than a bypass:
+
+    * Only a policy that opted in (``emergency_override_allowed``) can be
+      overridden, and only by a tenant or platform admin who could also have
+      run the command themselves.
+    * It expires quickly (minutes, bounded), is spent exactly once, and may be
+      revoked before use.
+    * Activation notifies people immediately; the outcome of that notification
+      is recorded here, so "was anyone told?" is answerable from data.
+    * Like a break-glass activation it stays *unreviewed* until a different
+      human signs it off. The queue of unreviewed overrides is the control's
+      accountability surface.
+
+    ``justification`` and ``review_note`` are operator prose: kept here for the
+    reviewer, only ever digested into the audit chain.
+    """
+
+    __tablename__ = "emergency_overrides"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Denormalized tenancy captured at activation, as on approval requests.
+    client_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    site_id: Mapped[str | None] = mapped_column(String(36))
+    kind: Mapped[CommandKind] = mapped_column(Enum(CommandKind), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The policy whose requirement this override stands in for, copied at
+    # activation so a later policy edit cannot retroactively change what was
+    # overridden.
+    policy_id: Mapped[str | None] = mapped_column(String(36))
+    required_approvals: Mapped[int] = mapped_column(Integer, nullable=False)
+    activated_by_operator_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.id", ondelete="SET NULL"), index=True
+    )
+    activated_by_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    justification: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[EmergencyOverrideStatus] = mapped_column(
+        Enum(
+            EmergencyOverrideStatus,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+        ),
+        nullable=False,
+        default=EmergencyOverrideStatus.active,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by_email: Mapped[str | None] = mapped_column(String(320))
+    revoke_reason: Mapped[str | None] = mapped_column(Text)
+    # Notification outcome. Exactly one of these is set after activation: the
+    # time the message was accepted by the provider, or a coded reason it was
+    # not. A failure never blocks the override; it is evidence for the review.
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notification_error: Mapped[str | None] = mapped_column(String(64))
+    notified_recipient_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    # Mandatory post-hoc review, mirroring BreakGlassActivation.
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by_email: Mapped[str | None] = mapped_column(String(320))
+    review_note: Mapped[str | None] = mapped_column(Text)
+    source_ip: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+
+    __table_args__ = (
+        Index("ix_emergency_overrides_client_status", "client_id", "status"),
+        # Drives the "what still needs review" queue.
+        Index("ix_emergency_overrides_unreviewed", "reviewed_at", "created_at"),
     )

@@ -296,7 +296,12 @@ The code in this repository currently provides:
   rather than by application logic. Scheduled tasks and interactive shell
   sessions are refused for a governed kind rather than dispatching around the
   control. With no policy configured the capability is inert and dispatch is
-  unchanged. A justified emergency override is not implemented.
+  unchanged. A justified emergency override (issue #65,
+  `docs/EMERGENCY-OVERRIDES.md`) lets a tenant or platform administrator stand
+  in for the approvers on a policy that has opted in: one exact command,
+  payload-bound, step-up gated, expiring within an hour, spent once, emailed to
+  the alert recipients at activation, and open until a different administrator
+  reviews it.
 - Client and site records, agent listing, command dispatch/history APIs, and an
   offline-status sweeper.
 - Agent quarantine/restore (operator) and terminal revocation (admin) with
@@ -507,12 +512,6 @@ The repository does **not** currently contain:
   certificate-based signing is
   missing). External audit-anchor publication ships (`docs/AUDIT-ANCHORING.md`)
   but the operator must configure and operate the destination.
-- A justified emergency override for approval workflows. Approval and
-  two-person authorization for sensitive commands *is* implemented
-  (`docs/APPROVAL-WORKFLOWS.md`), but the only way past a policy that is
-  blocking urgent work is for a tenant administrator to disable the policy,
-  which is audited as a policy change rather than as a recorded, justified
-  exception. A break-glass override that keeps the policy in force is planned.
 - Tenant-specific retention, OIDC/SAML federation, or legal hold.
   Tenant-scoped authorization with per-tenant roles
   (`docs/TENANT-AUTHORIZATION.md`) and signed compliance evidence exports

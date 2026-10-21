@@ -42,7 +42,7 @@ def sqlite_url(path: Path) -> str:
 def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
     path = tmp_path / "assistant-migration.db"
     config = migration_config(sqlite_url(path))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0045"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0046"]
     command.upgrade(config, "0041")
     command.upgrade(config, "0042")
     with sqlite3.connect(path) as connection:
@@ -75,7 +75,9 @@ def test_support_chat_migration_reverses_without_touching_existing_rows(tmp_path
     path = tmp_path / "support-migration.db"
     config = migration_config(sqlite_url(path))
     command.upgrade(config, "0043")
-    command.upgrade(config, "head")
+    # Stop at 0045: 0046 (emergency overrides) is forward-only, so the
+    # downgrade below must start from the last reversible revision.
+    command.upgrade(config, "0045")
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0045"
         columns = {r[1] for r in connection.execute("PRAGMA table_info(support_conversations)")}
@@ -939,3 +941,34 @@ def test_fresh_postgresql_install_reaches_head():
     asyncio.run(assert_empty())
     command.upgrade(migration_config(url), "head")
     asyncio.run(_assert_current(url))
+
+
+def test_emergency_override_migration_is_additive_and_forward_only(tmp_path: Path):
+    """0046 (issue #65): new table, two nullable/defaulted columns, no downgrade."""
+    path = tmp_path / "override-migration.db"
+    config = migration_config(sqlite_url(path))
+    command.upgrade(config, "0045")
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO approval_policies (id, name, scope, scope_id, command_kinds, "
+            "required_approvals, request_ttl_seconds, enabled, created_at) "
+            "VALUES ('p1', 'strict', 'global', NULL, '[\"powershell\"]', 2, 3600, 1, '2026-10-21')"
+        )
+        connection.commit()
+    command.upgrade(config, "head")
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0046"
+        tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "emergency_overrides" in tables
+        # An existing policy is not made overridable by applying the revision.
+        row = connection.execute(
+            "SELECT emergency_override_allowed FROM approval_policies WHERE id = 'p1'"
+        ).fetchone()
+        assert row[0] == 0
+        command_columns = {r[1] for r in connection.execute("PRAGMA table_info(commands)")}
+        assert "emergency_override_id" in command_columns
+        indexes = {r[1] for r in connection.execute("PRAGMA index_list(emergency_overrides)")}
+        assert {"ix_emergency_overrides_client_status", "ix_emergency_overrides_unreviewed"} <= indexes
+    with pytest.raises(RuntimeError, match="forward-only"):
+        command.downgrade(config, "0045")
+    asyncio.run(_assert_current(sqlite_url(path)))

@@ -42,6 +42,7 @@ from app.core import (
     anchor_publish,
     approvals as approvals_core,
     audit,
+    emergency_overrides as overrides_core,
     email_notifications,
     inventory,
     inventory_diff,
@@ -107,6 +108,8 @@ from app.models.models import (
     AgentMeshMapping,
     ApprovalRequest,
     ApprovalRequestStatus,
+    EmergencyOverride,
+    EmergencyOverrideStatus,
     MeshMappingOrigin,
     MeshMappingState,
     Alert,
@@ -344,11 +347,16 @@ async def _apply_approval_policy(
     payload: dict,
     approval_request_id: str | None,
     now: datetime,
-) -> str | None:
-    """Two-person authorization gate for a dispatch (issue #64).
+    emergency_override_id: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Two-person authorization gate for a dispatch (issues #64 and #65).
 
-    Returns the id of the approval this dispatch spent, or ``None`` when no
-    policy requires one. Raises a fail-closed ``409`` in every other case.
+    Returns ``(approval_request_id, emergency_override_id)``: the id of the
+    approval this dispatch spent, or the id of the justified emergency override
+    standing in for it, or ``(None, None)`` when no policy requires either.
+    Raises a fail-closed ``409`` in every other case. At most one of the two
+    is ever non-``None``: citing both is refused, because the run must carry a
+    single unambiguous authorization record.
 
     Ordering matters and is deliberate. The gate runs *before* any payload
     transform (power-operation windows, patch narrowing, package gating), so the
@@ -374,7 +382,12 @@ async def _apply_approval_policy(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"code": "approval_not_required"},
             )
-        return None
+        if emergency_override_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "emergency_override_not_required"},
+            )
+        return None, None
 
     base_detail = {
         "kind": kind.value,
@@ -382,6 +395,7 @@ async def _apply_approval_policy(
         "policy_id": policy.id,
         "required_approvals": policy.required_approvals,
         "approval_request_id": approval_request_id,
+        "emergency_override_id": emergency_override_id,
     }
 
     async def refuse(code: str, http_status: int = status.HTTP_409_CONFLICT):
@@ -402,6 +416,53 @@ async def _apply_approval_policy(
                 "required_approvals": policy.required_approvals,
             },
         )
+
+    if approval_request_id is not None and emergency_override_id is not None:
+        raise await refuse("approval_and_override_both_cited")
+
+    if emergency_override_id is not None:
+        # Justified emergency override (issue #65): one authorized person
+        # stands in for the approvers, for this exact command, once.
+        override = await db.get(EmergencyOverride, emergency_override_id)
+        if override is None or override.client_id != await tenant_scope.agent_client_id(
+            agent, db
+        ):
+            raise await refuse("emergency_override_not_found", status.HTTP_404_NOT_FOUND)
+        if overrides_core.expire_if_due(override, now):
+            await audit.record(
+                db,
+                action="emergency_override.expired",
+                actor="system",
+                agent_id=override.agent_id,
+                organization_id=override.client_id,
+                detail=overrides_core.audit_detail(override),
+            )
+        verdict = await overrides_core.consumption_refusal(
+            db,
+            override,
+            operator=operator,
+            agent=agent,
+            kind=kind,
+            payload=payload,
+            now=now,
+        )
+        if not verdict.allowed:
+            raise await refuse(verdict.reason)
+        await audit.record(
+            db,
+            action="approval_gate.allowed",
+            actor=operator.email,
+            actor_user_id=operator.id,
+            agent_id=agent.id,
+            organization_id=override.client_id,
+            detail={
+                **base_detail,
+                "reason": verdict.reason,
+                "payload_sha256": override.payload_sha256,
+                "approver_operator_ids": [],
+            },
+        )
+        return None, override.id
 
     if approval_request_id is None:
         raise await refuse("approval_required")
@@ -456,7 +517,31 @@ async def _apply_approval_policy(
             "approver_operator_ids": list(check.approver_ids),
         },
     )
-    return approval.id
+    return approval.id, None
+
+
+async def _spend_emergency_override(
+    db: AsyncSession, override_id: str, now: datetime
+) -> None:
+    """Mark a validated override consumed, exactly once (issue #65).
+
+    Same conditional-UPDATE shape as :func:`_spend_approval`, for the same
+    reason: under concurrency two dispatches citing one override serialize on
+    the row and the loser matches zero rows. Runs in the dispatch transaction.
+    """
+    spent = await db.execute(
+        update(EmergencyOverride)
+        .where(
+            EmergencyOverride.id == override_id,
+            EmergencyOverride.status == EmergencyOverrideStatus.active,
+        )
+        .values(status=EmergencyOverrideStatus.consumed, consumed_at=now)
+    )
+    if spent.rowcount != 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "emergency_override_already_consumed"},
+        )
 
 
 async def _spend_approval(
@@ -2011,7 +2096,7 @@ async def dispatch_command(
     now = _now()
     # Two-person authorization (issue #64). Evaluated against the operator's
     # submitted payload, before any server-side transform rewrites it.
-    approval_request_id = await _apply_approval_policy(
+    approval_request_id, emergency_override_id = await _apply_approval_policy(
         db,
         operator,
         agent,
@@ -2019,6 +2104,7 @@ async def dispatch_command(
         body.payload,
         body.approval_request_id,
         now,
+        emergency_override_id=body.emergency_override_id,
     )
     power_window_end: datetime | None = None
     try:
@@ -2146,6 +2232,8 @@ async def dispatch_command(
         # Every other gate has passed; spend the approval in the same
         # transaction that creates the command it authorized.
         await _spend_approval(db, approval_request_id, now)
+    if emergency_override_id is not None:
+        await _spend_emergency_override(db, emergency_override_id, now)
     key_id = active_signing_key().key_id if envelope_version == COMMAND_ENVELOPE_V3 else None
     expires_at = now + timedelta(seconds=body.ttl_seconds)
     if power_window_end is not None:
@@ -2171,6 +2259,8 @@ async def dispatch_command(
         script_parameter_value_set_id=body.script_parameter_value_set_id,
         # Execution binding (issue #64): the run carries the approval it spent.
         approval_request_id=approval_request_id,
+        # Execution binding (issue #65): the run carries the override it spent.
+        emergency_override_id=emergency_override_id,
     )
     db.add(cmd)
     await db.flush()  # persist before signing
