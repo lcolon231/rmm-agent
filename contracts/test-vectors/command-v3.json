@@ -1,6 +1,7 @@
 {
   "contract": "command-v3",
-  "notes": "The signing_key_id is part of the canonical signed bytes.",
+  "notes": "The public key is test-only; its private key was discarded after signing. signing_key_id is part of the canonical signed bytes, so every tampered[] case canonicalizes but must fail verification with valid[0]'s signature. Every invalid[] case is a complete envelope with exactly one field wrong.",
+  "public_key_b64": "ySjCz3AkrM/UKOG0iRgYAT5UvF5Rhmr5h7oe/r+EUAI=",
   "valid": [
     {
       "name": "key-identified-script",
@@ -10,17 +11,286 @@
         "command_id": "00000000-0000-0000-0000-000000000101",
         "agent_id": "10000000-0000-0000-0000-000000000101",
         "kind": "powershell",
-        "payload": { "script": "Get-Date" },
+        "payload": {
+          "script": "Get-Date"
+        },
         "issued_at": "2026-07-18T12:00:00Z",
         "expires_at": "2026-07-18T12:05:00Z",
         "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
         "signing_key_id": "key-2026-a"
       },
-      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000101\",\"command_id\":\"00000000-0000-0000-0000-000000000101\",\"envelope_version\":\"command-v3\",\"expires_at\":\"2026-07-18T12:05:00Z\",\"issued_at\":\"2026-07-18T12:00:00Z\",\"kind\":\"powershell\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"payload\":{\"script\":\"Get-Date\"},\"schema_version\":1,\"signing_key_id\":\"key-2026-a\"}"
+      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000101\",\"command_id\":\"00000000-0000-0000-0000-000000000101\",\"envelope_version\":\"command-v3\",\"expires_at\":\"2026-07-18T12:05:00Z\",\"issued_at\":\"2026-07-18T12:00:00Z\",\"kind\":\"powershell\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"payload\":{\"script\":\"Get-Date\"},\"schema_version\":1,\"signing_key_id\":\"key-2026-a\"}",
+      "signature_b64": "U3tomCWvaxZ/rzDhd6SaMfUpbnUyou6kWwusBdl+Ocj0chcywhDe8URcWSTyMumb2nEJdC+SAhKKnEvRWg4jBA=="
+    },
+    {
+      "name": "unicode-html-and-integer-boundaries",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000102",
+        "agent_id": "10000000-0000-0000-0000-000000000102",
+        "kind": "shell",
+        "payload": {
+          "args": [
+            "café",
+            "東京",
+            "a < b && c > d",
+            "line sep"
+          ],
+          "enabled": true,
+          "none": null,
+          "limits": {
+            "max": 9223372036854775807,
+            "min": -9223372036854775808
+          },
+          "nested": [
+            [],
+            {}
+          ]
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "BBBBBBBBBBBBBBBBBBBBBB",
+        "signing_key_id": "key_2026.b-overlap"
+      },
+      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000102\",\"command_id\":\"00000000-0000-0000-0000-000000000102\",\"envelope_version\":\"command-v3\",\"expires_at\":\"2026-07-18T12:05:00Z\",\"issued_at\":\"2026-07-18T12:00:00Z\",\"kind\":\"shell\",\"nonce\":\"BBBBBBBBBBBBBBBBBBBBBB\",\"payload\":{\"args\":[\"café\",\"東京\",\"a < b && c > d\",\"line\\u2028sep\"],\"enabled\":true,\"limits\":{\"max\":9223372036854775807,\"min\":-9223372036854775808},\"nested\":[[],{}],\"none\":null},\"schema_version\":1,\"signing_key_id\":\"key_2026.b-overlap\"}",
+      "signature_b64": "TawsMT7y95bpNR1K4DPKtpioQeuv/2+yKuJXZDnuZICLrKNcXAPqDUkMDkPywJzShwztloM5nf2I4+f5+L+6Dw=="
+    },
+    {
+      "name": "maximum-lifetime-with-microseconds",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000103",
+        "agent_id": "10000000-0000-0000-0000-000000000103",
+        "kind": "collect_inventory",
+        "payload": {},
+        "issued_at": "2026-07-18T12:00:00.123456Z",
+        "expires_at": "2026-07-19T12:00:00.123456Z",
+        "nonce": "CCCCCCCCCCCCCCCCCCCCCC",
+        "signing_key_id": "key-2026-a"
+      },
+      "canonical_json": "{\"agent_id\":\"10000000-0000-0000-0000-000000000103\",\"command_id\":\"00000000-0000-0000-0000-000000000103\",\"envelope_version\":\"command-v3\",\"expires_at\":\"2026-07-19T12:00:00.123456Z\",\"issued_at\":\"2026-07-18T12:00:00.123456Z\",\"kind\":\"collect_inventory\",\"nonce\":\"CCCCCCCCCCCCCCCCCCCCCC\",\"payload\":{},\"schema_version\":1,\"signing_key_id\":\"key-2026-a\"}",
+      "signature_b64": "1rQiUElToYgeOPQxZD1ltYZ36JLIR5MQ1+3e/Y+8Wyvx97B2jqyF65JxNj4kYfVYO3vxSohwZTquxQZ+QzFgBw=="
+    }
+  ],
+  "tampered": [
+    {
+      "name": "signing-key-id-swapped",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": {
+          "script": "Get-Date"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "key-2026-b"
+      },
+      "signature_b64": "U3tomCWvaxZ/rzDhd6SaMfUpbnUyou6kWwusBdl+Ocj0chcywhDe8URcWSTyMumb2nEJdC+SAhKKnEvRWg4jBA=="
+    },
+    {
+      "name": "payload-changed",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": {
+          "script": "Remove-Item C:\\ -Recurse"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "key-2026-a"
+      },
+      "signature_b64": "U3tomCWvaxZ/rzDhd6SaMfUpbnUyou6kWwusBdl+Ocj0chcywhDe8URcWSTyMumb2nEJdC+SAhKKnEvRWg4jBA=="
+    },
+    {
+      "name": "agent-retargeted",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000999",
+        "kind": "powershell",
+        "payload": {
+          "script": "Get-Date"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "key-2026-a"
+      },
+      "signature_b64": "U3tomCWvaxZ/rzDhd6SaMfUpbnUyou6kWwusBdl+Ocj0chcywhDe8URcWSTyMumb2nEJdC+SAhKKnEvRWg4jBA=="
+    },
+    {
+      "name": "expiry-extended",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": {
+          "script": "Get-Date"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T13:00:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "key-2026-a"
+      },
+      "signature_b64": "U3tomCWvaxZ/rzDhd6SaMfUpbnUyou6kWwusBdl+Ocj0chcywhDe8URcWSTyMumb2nEJdC+SAhKKnEvRWg4jBA=="
     }
   ],
   "invalid": [
-    { "name": "missing-key-id", "envelope": { "envelope_version": "command-v3", "schema_version": 1 }, "error": "missing_signing_key_id" },
-    { "name": "retired-key-is-not-a-wire-state", "envelope": { "envelope_version": "command-v3", "schema_version": 1, "signing_key_id": "key old" }, "error": "malformed_signing_key_id" }
+    {
+      "name": "missing-key-id",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": {
+          "script": "Get-Date"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "error": "missing_signing_key_id"
+    },
+    {
+      "name": "malformed-key-id",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": {
+          "script": "Get-Date"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "key old"
+      },
+      "error": "malformed_signing_key_id"
+    },
+    {
+      "name": "key-id-too-long",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": {
+          "script": "Get-Date"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+      },
+      "error": "malformed_signing_key_id"
+    },
+    {
+      "name": "downgrade-to-v1",
+      "envelope": {
+        "envelope_version": "command-v1",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": {
+          "script": "Get-Date"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "key-2026-a"
+      },
+      "error": "unsupported_version"
+    },
+    {
+      "name": "unknown-version",
+      "envelope": {
+        "envelope_version": "command-v4",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": {
+          "script": "Get-Date"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "key-2026-a"
+      },
+      "error": "unsupported_version"
+    },
+    {
+      "name": "unsupported-kind",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "format_disk",
+        "payload": {
+          "script": "Get-Date"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "key-2026-a"
+      },
+      "error": "unsupported_kind"
+    },
+    {
+      "name": "malformed-nonce",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": {
+          "script": "Get-Date"
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "short",
+        "signing_key_id": "key-2026-a"
+      },
+      "error": "malformed_nonce"
+    },
+    {
+      "name": "floating-point-payload",
+      "envelope": {
+        "envelope_version": "command-v3",
+        "schema_version": 1,
+        "command_id": "00000000-0000-0000-0000-000000000101",
+        "agent_id": "10000000-0000-0000-0000-000000000101",
+        "kind": "powershell",
+        "payload": {
+          "ratio": 0.5
+        },
+        "issued_at": "2026-07-18T12:00:00Z",
+        "expires_at": "2026-07-18T12:05:00Z",
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "signing_key_id": "key-2026-a"
+      },
+      "error": "floating_point_not_supported"
+    }
   ]
 }

@@ -7,8 +7,11 @@ path produces, and cross-language hash agreement with the Go agent.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -39,7 +42,15 @@ from app.models.models import (  # noqa: E402
 from app.schemas.inventory import (  # noqa: E402
     MAX_INVENTORY_SECTION_BYTES,
     MAX_SOFTWARE_ENTRIES,
+    canonical_inventory_bytes,
     inventory_content_hash,
+)
+
+_INVENTORY_HASH_VECTORS = (
+    Path(__file__).resolve().parents[2]
+    / "contracts"
+    / "test-vectors"
+    / "inventory-hash-v1.json"
 )
 
 
@@ -128,12 +139,22 @@ def _agent_client(token: str) -> httpx.AsyncClient:
 async def test_go_and_python_agree_on_the_canonical_content_hash(operator_client):
     """The heartbeat comparison is only meaningful if both sides hash alike.
 
-    These vectors are pinned identically in the Go package's test, so a change
-    to either canonicalization breaks a test rather than silently making every
-    section look permanently changed (or permanently unchanged).
+    The vectors are shared with the Go package's test, so a change to either
+    canonicalization breaks a test rather than silently making every section
+    look permanently changed (or permanently unchanged). The server hashes
+    json.loads of what the agent sent, which is what this reproduces.
     """
-    empty_digest = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
-    assert inventory_content_hash({}) == empty_digest
+    vectors = json.loads(_INVENTORY_HASH_VECTORS.read_text(encoding="utf-8"))
+    assert vectors["valid"]
+    for case in vectors["valid"]:
+        payload = json.loads(case["payload_json"])
+        canonical = canonical_inventory_bytes(payload)
+        assert canonical == case["canonical_json"].encode("utf-8"), case["name"]
+        assert hashlib.sha256(canonical).hexdigest() == case["sha256"], case["name"]
+        assert inventory_content_hash(payload) == case["sha256"], case["name"]
+        # The agent's own bytes must re-canonicalize to themselves, or a
+        # stored section would never match the agent's advertised hash.
+        assert canonical_inventory_bytes(json.loads(canonical)) == canonical
 
     # Key insertion order must not matter: Go map iteration is randomized.
     forward = inventory_content_hash(
@@ -211,6 +232,54 @@ async def test_a_status_change_alone_is_stored_as_a_change(operator_client):
             json=_submission([_section("cpu", {"name": "Xeon"}, status="unavailable")]),
         )
         assert degraded.json()["stored_sections"] == ["cpu"]
+
+
+def test_canonical_bytes_refuse_values_the_agent_cannot_have_encoded():
+    # Go's json.Marshal errors on non-finite floats and never emits a lone
+    # surrogate, so either can only come from a non-compliant client. Both
+    # must fail as ValueError (a 422), never hash to something arbitrary.
+    for bad in (float("nan"), float("inf"), float("-inf"), "\ud800"):
+        with pytest.raises(ValueError):
+            canonical_inventory_bytes({"value": bad})
+
+
+def test_size_bound_counts_utf8_bytes_like_the_agent():
+    # The agent trims a section to MaxSectionBytes measured on json.Marshal
+    # output. ASCII-escaping here inflated "é" from 2 bytes to 6, so a section
+    # the agent considered in-bounds could be refused as oversized.
+    assert len(canonical_inventory_bytes({"n": "é"})) == len('{"n":""}') + 2
+    assert len(canonical_inventory_bytes({"n": "<&>"})) == len('{"n":""}') + 18
+
+
+@pytest.mark.asyncio
+async def test_lone_surrogate_section_is_rejected_not_stored(operator_client):
+    # The refusal itself is what matters here. FastAPI's default 422 body
+    # echoes the offending input and cannot encode a lone surrogate, so the
+    # status is a 500 today; that is an app-wide response issue, not a
+    # storage one, and this asserts only that nothing was recorded.
+    _, token = await _enroll(operator_client)
+    body = json.dumps(_submission([_section("system", {"model": "\ud800"})]))
+    lenient = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://t/api/v1",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    async with lenient:
+        refused = await lenient.post(
+            "/agents/me/inventory",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+    assert refused.status_code >= 400
+
+    async with _agent_client(token) as agent:
+        accepted = await agent.post(
+            "/agents/me/inventory",
+            json=_submission([_section("system", {"model": "X1"})]),
+        )
+    assert accepted.status_code == 200, accepted.text
+    # Stored now, not "unchanged": the surrogate submission left nothing behind.
+    assert accepted.json()["stored_sections"] == ["system"]
 
 
 @pytest.mark.asyncio
