@@ -53,6 +53,11 @@ The normative manifest schema is
 [`contracts/evidence-package-v1.schema.json`](../contracts/evidence-package-v1.schema.json),
 with a golden logical vector at
 [`contracts/test-vectors/evidence-package-v1.json`](../contracts/test-vectors/evidence-package-v1.json).
+That vector is a bare manifest. `verify_package_manifest` checks it with the
+same code the archive verifier runs, and the `package` cases in
+[`contracts/test-vectors/evidence-v1-invalid.json`](../contracts/test-vectors/evidence-v1-invalid.json)
+cover a tampered file digest, a wrong `package_id`, a missing file, an
+unexpected field, a wrong media type, and a foreign signing context.
 The archive has exactly seven regular files in this order:
 
 | Path | Purpose |

@@ -684,15 +684,14 @@ def _load_ed25519_public_key(payload: bytes, label: str) -> tuple[Ed25519PublicK
     return key, der
 
 
-def verify_signed_package(
-    payload: bytes,
-    *,
-    trusted_public_key_pem: bytes | None = None,
-) -> PackageVerification:
-    """Verify archive shape, manifest, signature, trust pin, evidence, and PDF."""
-    members = read_archive(payload)
-    manifest = _load_canonical_object(members[MANIFEST_PATH], "package manifest")
-    signature = _load_canonical_object(members[SIGNATURE_PATH], "signature record")
+def verify_package_manifest(manifest: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Verify everything in a package manifest that needs no archive members.
+
+    Format, field set, file order and descriptor shape, the content-addressed
+    package_id, and signing metadata. Returns (package_id, signing). Split out
+    so the contract vector, which is a bare manifest, is checked by the same
+    code the archive verifier runs rather than by a test-only copy.
+    """
     if (
         manifest.get("format") != PACKAGE_FORMAT
         or type(manifest.get("version")) is not int
@@ -723,11 +722,8 @@ def verify_signed_package(
             or not _valid_sha256(item.get("sha256"))
         ):
             raise PackageVerificationError("package file descriptor is invalid")
-        content = members[path]
         if item.get("media_type") != _MEDIA_TYPES[path]:
             raise PackageVerificationError("package member media type is invalid")
-        if item.get("size_bytes") != len(content) or item.get("sha256") != _sha256(content):
-            raise PackageVerificationError("package member digest or size mismatch")
 
     package_id = manifest.get("package_id")
     base_manifest = {key: value for key, value in manifest.items() if key != "package_id"}
@@ -755,6 +751,23 @@ def verify_signed_package(
         or not _valid_sha256(signing.get("public_key_fingerprint_sha256"))
     ):
         raise PackageVerificationError("package signing algorithm or key is unsupported")
+    return package_id, signing
+
+
+def verify_signed_package(
+    payload: bytes,
+    *,
+    trusted_public_key_pem: bytes | None = None,
+) -> PackageVerification:
+    """Verify archive shape, manifest, signature, trust pin, evidence, and PDF."""
+    members = read_archive(payload)
+    manifest = _load_canonical_object(members[MANIFEST_PATH], "package manifest")
+    signature = _load_canonical_object(members[SIGNATURE_PATH], "signature record")
+    package_id, signing = verify_package_manifest(manifest)
+    for item in manifest["files"]:
+        content = members[item["path"]]
+        if item["size_bytes"] != len(content) or item["sha256"] != _sha256(content):
+            raise PackageVerificationError("package member digest or size mismatch")
 
     included_pem = members[PUBLIC_KEY_PATH]
     included_key, included_der = _load_ed25519_public_key(included_pem, "included key")

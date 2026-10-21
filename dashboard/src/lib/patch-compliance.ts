@@ -9,7 +9,7 @@ import {
   type ComplianceState,
   type ComplianceSummary,
 } from "@/lib/patch-compliance-core";
-import { nodelinkApiRequest } from "@/lib/nodelink-api";
+import { nodelinkApiRequest, nodelinkApiRequestRaw } from "@/lib/nodelink-api";
 
 type ComplianceScope = {
   clientId?: string;
@@ -66,4 +66,11 @@ export async function getComplianceList(
   const report = listFromUnknown(value);
   if (!report) throw new Error("The management service returned an invalid compliance report.");
   return report;
+}
+
+export function requestPatchComplianceExport(sessionToken: string, query: URLSearchParams) {
+  return nodelinkApiRequestRaw(`/api/v1/patch-compliance/export?${query}`, {
+    method: "GET",
+    sessionToken,
+  });
 }

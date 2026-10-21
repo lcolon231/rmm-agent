@@ -336,21 +336,28 @@ async def delete_approval_policy(
 # Requests
 # --------------------------------------------------------------------------- #
 async def _load_request(
-    request_id: str, operator: Operator, db: AsyncSession
+    request_id: str, operator: Operator, db: AsyncSession, *, lock: bool = False
 ) -> ApprovalRequest:
     """Load a request the operator may see, expiring it lazily if it is due.
 
     Cross-tenant and non-existent are the same 404, as everywhere else. Expiry
     is applied here rather than only in a sweeper so no read or action can
     observe a request as live past its deadline.
+
+    ``lock`` is for paths that decide from the loaded decisions (#286): two
+    approvers deciding at once must not each count only their own vote.
     """
-    approval = (
-        await db.execute(
-            select(ApprovalRequest)
-            .where(ApprovalRequest.id == request_id)
-            .options(selectinload(ApprovalRequest.decisions))
-        )
-    ).scalar_one_or_none()
+    query = (
+        select(ApprovalRequest)
+        .where(ApprovalRequest.id == request_id)
+        .options(selectinload(ApprovalRequest.decisions))
+    )
+    if lock:
+        # The selectinload of decisions runs after the lock is granted, so a
+        # second decider sees the first one's committed vote. populate_existing
+        # refreshes a request this session already holds in its identity map.
+        query = query.with_for_update().execution_options(populate_existing=True)
+    approval = (await db.execute(query)).scalar_one_or_none()
     if approval is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -648,7 +655,7 @@ async def _record_decision(
     rejection cannot be recorded by someone who would not have been allowed to
     approve.
     """
-    approval = await _load_request(request_id, operator, db)
+    approval = await _load_request(request_id, operator, db, lock=True)
     agent = await db.get(Agent, approval.agent_id)
     if agent is None:
         raise HTTPException(

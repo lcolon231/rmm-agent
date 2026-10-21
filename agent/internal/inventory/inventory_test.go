@@ -3,43 +3,109 @@
 package inventory
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
-// The digests below are SHA-256 over the canonical encoding the server also
-// produces (json.dumps(sort_keys=True, separators=(",", ":"))). They are
-// pinned here so a change to Go's encoder — or to this package — cannot
-// silently break hash agreement with the server. The Python side asserts the
-// same values in server/tests/test_inventory.py.
-func TestContentHashMatchesPinnedCrossLanguageVectors(t *testing.T) {
-	cases := []struct {
-		name    string
-		payload map[string]any
-		want    string
-	}{
-		{
-			name:    "empty payload",
-			payload: map[string]any{},
-			want:    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-		},
-		{
-			name:    "nil payload is treated as empty",
-			payload: nil,
-			want:    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-		},
+type hashVector struct {
+	Name          string `json:"name"`
+	PayloadJSON   string `json:"payload_json"`
+	CanonicalJSON string `json:"canonical_json"`
+	SHA256        string `json:"sha256"`
+}
+
+func loadHashVectors(t *testing.T) []hashVector {
+	t.Helper()
+	data, err := os.ReadFile("../../../contracts/test-vectors/inventory-hash-v1.json")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := ContentHash(tc.payload)
+	var file struct {
+		Valid []hashVector `json:"valid"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Valid) == 0 {
+		t.Fatal("inventory-hash-v1 has no vectors")
+	}
+	return file.Valid
+}
+
+// typedVectorValue gives vector numbers the types collectors produce:
+// normalized integer fields are int64 and everything else stays float64.
+func typedVectorValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			typed[key] = typedVectorValue(item)
+		}
+	case []any:
+		for i, item := range typed {
+			typed[i] = typedVectorValue(item)
+		}
+	case json.Number:
+		if n, err := typed.Int64(); err == nil {
+			return n
+		}
+		f, _ := typed.Float64()
+		return f
+	}
+	return value
+}
+
+// The shared vectors pin the exact bytes and digest. The server asserts the
+// same file in server/tests/test_inventory.py, so a canonicalization drift on
+// either side breaks a test instead of making every section resend forever.
+func TestContentHashMatchesSharedCrossLanguageVectors(t *testing.T) {
+	for _, tc := range loadHashVectors(t) {
+		t.Run(tc.Name, func(t *testing.T) {
+			dec := json.NewDecoder(strings.NewReader(tc.PayloadJSON))
+			dec.UseNumber()
+			var payload map[string]any
+			if err := dec.Decode(&payload); err != nil {
+				t.Fatalf("decode payload_json: %v", err)
+			}
+			payload = typedVectorValue(payload).(map[string]any)
+
+			encoded, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(encoded) != tc.CanonicalJSON {
+				t.Fatalf("canonical mismatch\n got: %s\nwant: %s", encoded, tc.CanonicalJSON)
+			}
+			sum := sha256.Sum256([]byte(tc.CanonicalJSON))
+			if hex.EncodeToString(sum[:]) != tc.SHA256 {
+				t.Fatalf("vector sha256 does not match its own canonical_json")
+			}
+			got, err := ContentHash(payload)
 			if err != nil {
 				t.Fatalf("ContentHash: %v", err)
 			}
-			if got != tc.want {
-				t.Fatalf("hash = %s, want %s", got, tc.want)
+			if got != tc.SHA256 {
+				t.Fatalf("hash = %s, want %s", got, tc.SHA256)
 			}
 		})
+	}
+}
+
+func TestContentHashTreatsNilPayloadAsEmpty(t *testing.T) {
+	got, err := ContentHash(nil)
+	if err != nil {
+		t.Fatalf("ContentHash: %v", err)
+	}
+	want, err := ContentHash(map[string]any{})
+	if err != nil {
+		t.Fatalf("ContentHash: %v", err)
+	}
+	if got != want {
+		t.Fatalf("nil payload hash = %s, want empty-payload hash %s", got, want)
 	}
 }
 
