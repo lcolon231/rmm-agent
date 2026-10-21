@@ -324,3 +324,135 @@ test("operator state handlers surface last-admin conflicts without internal deta
   assert.match(text, /retain at least one active administrator/i);
   assert.doesNotMatch(text, /internal|hidden/i);
 });
+
+
+// --------------------------------------------------------------------------- //
+// Coverage extension: every handler shares session, role, and error mapping
+// --------------------------------------------------------------------------- //
+type OpSession =
+  | { kind: "anonymous" } | { kind: "unavailable" }
+  | { kind: "authenticated"; operator: { role: "readonly" | "operator" | "admin" }; sessionToken: string };
+const opSentinel = "SENTINEL-must-not-leak";
+const reasonBody = { reason: "Audit reason text" };
+
+type OpCase = {
+  name: string;
+  method: string;
+  body?: unknown;
+  invalid?: unknown;
+  /** The handler returns a bare 204 on success instead of an operator record. */
+  noContent?: boolean;
+  /** The list handler has no same-origin check or body. */
+  readOnly?: boolean;
+  run: (req: Request, getSession: () => Promise<OpSession>, api: (...a: unknown[]) => Promise<unknown>) => Promise<Response>;
+};
+
+const opCases: OpCase[] = [
+  {
+    name: "list", method: "GET", readOnly: true,
+    run: (req, getSession, api) => handleListOperators(req, { getSession, listOperators: api as never }),
+  },
+  {
+    name: "create", method: "POST", body: { email: "a@example.com", password, role: "operator" },
+    invalid: { email: "nope", password: "x", role: "emperor" },
+    run: (req, getSession, api) => handleCreateOperator(req, { getSession, createOperator: api as never }),
+  },
+  {
+    name: "grant", method: "POST", body: { scope: "global", ...reasonBody }, invalid: { scope: "galaxy", reason: "x" },
+    run: (req, getSession, api) => handleGrantScriptPermission(req, "operator-1", { getSession, grantScriptPermission: api as never }),
+  },
+  {
+    name: "revoke permission", method: "DELETE", body: reasonBody, invalid: { reason: "x" },
+    run: (req, getSession, api) => handleRevokeScriptPermission(req, "operator-1", { getSession, revokeScriptPermission: api as never }),
+  },
+  {
+    name: "revoke tokens", method: "POST", noContent: true,
+    run: (req, getSession, api) => handleRevokeOperatorTokens(req, "operator-1", { getSession, revokeOperatorTokens: api as never }),
+  },
+  {
+    name: "change role", method: "PUT", body: { role: "admin", ...reasonBody }, invalid: { role: "emperor", reason: "x" },
+    run: (req, getSession, api) => handleChangeOperatorRole(req, "operator-1", { getSession, changeOperatorRole: api as never }),
+  },
+  {
+    name: "change status", method: "PUT", body: { disabled: true, ...reasonBody }, invalid: { disabled: "yes", reason: "x" },
+    run: (req, getSession, api) => handleChangeOperatorStatus(req, "operator-1", { getSession, changeOperatorStatus: api as never }),
+  },
+];
+
+for (const c of opCases) {
+  const make = (origin?: string) => request("/api/operators/operator-1", c.method, c.body, origin);
+  const upstreamOk = () => (c.name === "list" ? [upstreamOperator({ secret: opSentinel })]
+    : c.noContent ? undefined : upstreamOperator({ password_hash: opSentinel }));
+
+  test(`operator ${c.name}: no usable session never reaches the API`, async () => {
+    const sessions: Array<[number, () => Promise<OpSession>]> = [
+      [401, async () => ({ kind: "anonymous" })],
+      [503, async () => ({ kind: "unavailable" })],
+      [503, async () => { throw new Error("boom"); }],
+    ];
+    for (const [status, getSession] of sessions) {
+      let calls = 0;
+      const res = await c.run(make(), getSession, async () => { calls += 1; return upstreamOk(); });
+      assert.equal(res.status, status);
+      assert.equal(calls, 0);
+    }
+  });
+
+  test(`operator ${c.name}: non-admin roles are rejected without forwarding`, async () => {
+    let calls = 0;
+    for (const role of ["readonly", "operator"] as const) {
+      const res = await c.run(make(), async () => ({ kind: "authenticated", operator: { role }, sessionToken }), async () => { calls += 1; return upstreamOk(); });
+      assert.equal(res.status, 403);
+    }
+    assert.equal(calls, 0);
+  });
+
+  if (!c.readOnly) {
+    test(`operator ${c.name}: cross-origin is rejected without forwarding`, async () => {
+      let calls = 0;
+      const res = await c.run(make("https://evil.test"), adminSession, async () => { calls += 1; return upstreamOk(); });
+      assert.equal(res.status, 403);
+      assert.equal(calls, 0);
+    });
+  }
+
+  test(`operator ${c.name}: success is allowlisted and upstream failures are mapped`, async () => {
+    const ok = await c.run(make(), adminSession, async () => upstreamOk());
+    assert.equal(ok.status, c.noContent ? 204 : c.name === "create" ? 201 : 200);
+    assert.equal(ok.headers.get("cache-control"), "no-store");
+    assert.doesNotMatch(await ok.text(), new RegExp(`${opSentinel}|${sessionToken}`));
+
+    const expected: Array<[Record<string, unknown>, number]> = [
+      [{ status: 401 }, 401], [{ status: 403 }, 403], [{ status: 404 }, 404],
+      [{ status: 409 }, 409], [{ status: 409, code: "last_active_admin_required" }, 409],
+      [{ status: 400 }, 400], [{ status: 422 }, 400], [{ status: 500 }, 503], [{}, 503],
+    ];
+    for (const [fields, mapped] of expected) {
+      const res = await c.run(make(), adminSession, async () => { throw Object.assign(new Error(opSentinel), fields); });
+      // The describe helper owns the exact status for 400/422; only assert it is a client or availability error.
+      if (fields.status === 400 || fields.status === 422) assert.ok([400, 422].includes(res.status), String(res.status));
+      else assert.equal(res.status, mapped);
+      assert.doesNotMatch(await res.text(), new RegExp(`${opSentinel}|${sessionToken}`));
+    }
+    for (const thrown of [null, opSentinel]) {
+      assert.equal((await c.run(make(), adminSession, async () => { throw thrown; })).status, 503);
+    }
+    if (!c.noContent) {
+      const bad = await c.run(make(), adminSession, async () => ({ junk: opSentinel }));
+      assert.equal(bad.status, 502);
+      assert.doesNotMatch(await bad.text(), new RegExp(opSentinel));
+    }
+  });
+
+  if (c.invalid !== undefined) {
+    test(`operator ${c.name}: invalid bodies never reach the API`, async () => {
+      let calls = 0;
+      const api = async () => { calls += 1; return upstreamOk(); };
+      assert.equal((await c.run(request("/x", c.method, c.invalid), adminSession, api)).status, 400);
+      assert.equal((await c.run(request("/x", c.method, null), adminSession, api)).status, 400);
+      const raw = new Request(`${dashboardOrigin}/x`, { method: c.method, headers: { Origin: dashboardOrigin }, body: "{bad" });
+      assert.equal((await c.run(raw, adminSession, api)).status, 400);
+      assert.equal(calls, 0);
+    });
+  }
+}

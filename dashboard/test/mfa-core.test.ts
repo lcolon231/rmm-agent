@@ -24,7 +24,11 @@ import {
   handleLoginOptions,
   handleLoginVerify,
   handleRegisterCredential,
+  handleEmailFactorMutation,
   handleRegistrationOptions,
+  handleRenameCredential,
+  handleSendEmailCode,
+  handleStepUpOptions,
   handleRevokeCredential,
   handleStepUpVerify,
   loginOutcome,
@@ -599,4 +603,195 @@ test("every handler response forbids caching", async () => {
     },
   );
   assert.equal(result.response.headers.get("Cache-Control"), "no-store");
+});
+
+// --------------------------------------------------------------------------- //
+// Device rename, email factor, and step-up options (coverage extension)
+// --------------------------------------------------------------------------- //
+type UpstreamReply = { status: number; code?: string | null; body?: unknown };
+
+function recorder(reply: UpstreamReply) {
+  const calls: unknown[][] = [];
+  const fn = async (...args: unknown[]) => {
+    calls.push(args);
+    return reply;
+  };
+  return { calls, fn };
+}
+
+type MfaHandlerCase = {
+  name: string;
+  /** True when the handler authorises with the session cookie. */
+  usesSession: boolean;
+  successStatus: number;
+  path: string;
+  body?: unknown;
+  run: (
+    req: Request,
+    deps: {
+      getSession: () => Promise<
+        | { kind: "anonymous" }
+        | { kind: "unavailable" }
+        | { kind: "authenticated"; operator: { role: string }; sessionToken: string }
+      >;
+      getMfaToken: () => Promise<string | undefined>;
+    },
+    upstream: (...args: unknown[]) => Promise<UpstreamReply>,
+  ) => ReturnType<typeof handleRenameCredential>;
+};
+
+const mfaCases: MfaHandlerCase[] = [
+  {
+    name: "rename", usesSession: true, successStatus: 200, path: "/api/auth/mfa/credentials/c1",
+    body: { name: "Office key" },
+    run: (req, deps, upstream) => handleRenameCredential(req, "c1", { ...deps, rename: upstream }),
+  },
+  {
+    name: "send email code (session)", usesSession: true, successStatus: 200,
+    path: "/api/auth/mfa/email/enrol/send", body: {},
+    run: (req, deps, upstream) => handleSendEmailCode(req, { ...deps, send: upstream, credential: "session" }),
+  },
+  {
+    name: "send email code (mfa-token)", usesSession: false, successStatus: 200,
+    path: "/api/auth/mfa/email/send", body: {},
+    run: (req, deps, upstream) => handleSendEmailCode(req, { ...deps, send: upstream, credential: "mfa-token" }),
+  },
+  {
+    name: "email factor confirm", usesSession: true, successStatus: 200,
+    path: "/api/auth/mfa/email/confirm", body: { code: "123456" },
+    run: (req, deps, upstream) => handleEmailFactorMutation(req, { ...deps, mutate: upstream, payload: "code" }),
+  },
+  {
+    name: "email factor remove", usesSession: true, successStatus: 200,
+    path: "/api/auth/mfa/email/remove", body: { reason: "No longer needed" },
+    run: (req, deps, upstream) => handleEmailFactorMutation(req, { ...deps, mutate: upstream, payload: "reason" }),
+  },
+  {
+    name: "step-up options", usesSession: true, successStatus: 200,
+    path: "/api/auth/mfa/step-up/options",
+    run: (req, deps, upstream) => handleStepUpOptions(req, { ...deps, fetchOptions: upstream }),
+  },
+];
+
+function depsFor(c: MfaHandlerCase, state: "ok" | "anonymous" | "unavailable" | "throws") {
+  const getSession = state === "ok"
+    ? authenticatedSession
+    : state === "anonymous"
+      ? anonymousSession
+      : state === "unavailable"
+        ? unavailableSession
+        : async (): Promise<never> => { throw new Error("boom"); };
+  // The mfa-token credential must come from the cookie, never from the session.
+  return c.usesSession
+    ? { getSession, getMfaToken: withoutMfaToken }
+    : { getSession: authenticatedSession, getMfaToken: state === "ok" ? withMfaToken : withoutMfaToken };
+}
+
+for (const c of mfaCases) {
+  test(`mfa ${c.name}: refuses cross-origin without calling the API`, async () => {
+    const up = recorder({ status: 200, body: {} });
+    const result = await c.run(request(c.path, c.body, "https://evil.test"), depsFor(c, "ok"), up.fn);
+    assert.equal(result.response.status, 403);
+    assert.deepEqual(result.cookies, []);
+    assert.equal(up.calls.length, 0);
+  });
+
+  test(`mfa ${c.name}: missing credential is rejected without calling the API`, async () => {
+    const up = recorder({ status: 200, body: {} });
+    const result = await c.run(request(c.path, c.body), depsFor(c, "anonymous"), up.fn);
+    assert.equal(result.response.status, 401);
+    assert.equal(up.calls.length, 0);
+    if (c.usesSession) {
+      const unavailable = await c.run(request(c.path, c.body), depsFor(c, "unavailable"), up.fn);
+      assert.equal(unavailable.response.status, 503);
+      const throws = await c.run(request(c.path, c.body), depsFor(c, "throws"), up.fn);
+      assert.equal(throws.response.status, 503);
+      assert.equal(up.calls.length, 0);
+    }
+  });
+
+  test(`mfa ${c.name}: success forwards the right credential and never echoes it`, async () => {
+    const up = recorder({ status: c.successStatus, body: { ok: true, state: "enabled" } });
+    const result = await c.run(request(c.path, c.body), depsFor(c, "ok"), up.fn);
+    assert.equal(result.response.status, c.successStatus);
+    assert.equal(up.calls.length, 1);
+    assert.equal(up.calls[0][0], c.usesSession ? sessionToken : mfaToken);
+    assert.equal(result.response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(result.cookies, []);
+    assert.doesNotMatch(JSON.stringify(await result.response.json()), /sentinel/);
+  });
+
+  test(`mfa ${c.name}: maps upstream statuses`, async () => {
+    const expected: Array<[number, number]> = [
+      [400, 400], [401, 401], [403, 403], [429, 429], [404, 503], [409, 503], [500, 503],
+    ];
+    for (const [status, mapped] of expected) {
+      const up = recorder({ status, code: null, body: { detail: "upstream-sentinel-detail" } });
+      const result = await c.run(request(c.path, c.body), depsFor(c, "ok"), up.fn);
+      assert.equal(result.response.status, mapped);
+      assert.doesNotMatch(JSON.stringify(await result.response.json()), /sentinel/);
+    }
+  });
+}
+
+test("mfa rename and email handlers refuse invalid bodies before the API", async () => {
+  const rename = recorder({ status: 200 });
+  const deps = { getSession: authenticatedSession, getMfaToken: withoutMfaToken };
+  for (const body of [{}, { name: "" }, { name: "x".repeat(65) }, { name: 5 }, null]) {
+    const result = await handleRenameCredential(request("/r", body), "c1", { ...deps, rename: rename.fn });
+    assert.equal(result.response.status, 400);
+  }
+  const garbage = new Request(`${dashboardOrigin}/r`, {
+    method: "POST", headers: { Origin: dashboardOrigin }, body: "not json",
+  });
+  assert.equal((await handleRenameCredential(garbage, "c1", { ...deps, rename: rename.fn })).response.status, 400);
+
+  const mutate = recorder({ status: 200 });
+  for (const body of [{}, { code: "12" }, { code: 123456 }, null]) {
+    const result = await handleEmailFactorMutation(request("/e", body), { ...deps, mutate: mutate.fn, payload: "code" });
+    assert.equal(result.response.status, 400);
+  }
+  for (const body of [{}, { reason: "no" }, { reason: 5 }]) {
+    const result = await handleEmailFactorMutation(request("/e", body), { ...deps, mutate: mutate.fn, payload: "reason" });
+    assert.equal(result.response.status, 400);
+  }
+  assert.equal(rename.calls.length + mutate.calls.length, 0);
+});
+
+test("mfa rename and email handlers forward only validated, trimmed payloads", async () => {
+  const deps = { getSession: authenticatedSession, getMfaToken: withoutMfaToken };
+  const rename = recorder({ status: 200, body: { id: "c1" } });
+  await handleRenameCredential(request("/r", { name: "  Desk key  ", extra: "drop" }), "c1", { ...deps, rename: rename.fn });
+  assert.deepEqual(rename.calls[0], [sessionToken, "c1", { name: "Desk key" }]);
+
+  const code = recorder({ status: 200, body: {} });
+  await handleEmailFactorMutation(request("/e", { code: "123 456", extra: "drop" }), { ...deps, mutate: code.fn, payload: "code" });
+  assert.deepEqual(code.calls[0], [sessionToken, { code: "123456" }]);
+
+  const reason = recorder({ status: 200, body: {} });
+  await handleEmailFactorMutation(request("/e", { reason: "  Left the company ", code: "drop" }), { ...deps, mutate: reason.fn, payload: "reason" });
+  assert.deepEqual(reason.calls[0], [sessionToken, { reason: "Left the company" }]);
+});
+
+test("an email-code login verifies a validated code and swaps cookies", async () => {
+  const deps = { getSession: anonymousSession, getMfaToken: withMfaToken, kind: "email_code" as const };
+  const bad = recorder({ status: 200, body: { access_token: upgradedToken } });
+  const rejected = await handleLoginVerify(request("/v", { code: "abc" }), { ...deps, verify: bad.fn });
+  assert.equal(rejected.response.status, 400);
+  assert.equal(bad.calls.length, 0);
+
+  const ok = recorder({ status: 200, body: { access_token: upgradedToken, refresh: "leak-sentinel" } });
+  const result = await handleLoginVerify(request("/v", { code: "123 456" }), { ...deps, verify: ok.fn });
+  assert.equal(result.response.status, 200);
+  assert.deepEqual(ok.calls[0], [mfaToken, { code: "123456" }]);
+  assert.equal(result.cookies[0].value, upgradedToken);
+  assert.doesNotMatch(JSON.stringify(await result.response.json()), /sentinel/);
+});
+
+test("step-up options returns upstream options only on 200", async () => {
+  const up = recorder({ status: 200, body: { publicKey: { challenge: "abc" } } });
+  const result = await handleStepUpOptions(request("/s"), {
+    getSession: authenticatedSession, getMfaToken: withoutMfaToken, fetchOptions: up.fn,
+  });
+  assert.deepEqual(await result.response.json(), { publicKey: { challenge: "abc" } });
 });

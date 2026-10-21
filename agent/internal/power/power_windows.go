@@ -12,7 +12,8 @@ import (
 	"time"
 )
 
-func commandContext(ctx context.Context, name string, args ...string) ([]byte, error) {
+// commandContext is a var so tests can record argv without running programs.
+var commandContext = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	return exec.CommandContext(bounded, name, args...).CombinedOutput()
