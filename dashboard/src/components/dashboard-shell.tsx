@@ -77,6 +77,7 @@ const navItems = [
   { label: "Patch compliance", icon: Shield, count: null, href: "/patch-compliance" },
   { label: "Patch policies", icon: Shield, count: null, href: "/patch-policies" },
   { label: "Approvals", icon: UserCheck, count: null, href: "/approvals" },
+  { label: "Emergency overrides", icon: Siren, count: null, href: "/emergency-overrides" },
   { label: "Audit", icon: ShieldCheck, count: null, href: "/audit" },
   { label: "Administration", icon: Settings, count: null, href: "/enrollment" },
   { label: "Operators", icon: Users, count: null, href: "/operators", adminOnly: true },
