@@ -5,6 +5,8 @@ import test from "node:test";
 
 import {
   NodelinkApiError,
+  extractNodelinkErrorCode,
+  requestNodelinkApiRaw,
   requestNodelinkApi,
 } from "../src/lib/nodelink-api-core.ts";
 import { getNodelinkHealth } from "../src/lib/nodelink-health-core.ts";
@@ -134,4 +136,83 @@ test("reports a degraded health state without exposing upstream failure details"
   });
 
   assert.equal(health, "degraded");
+});
+
+test("extractNodelinkErrorCode reads only a string detail.code", () => {
+  assert.equal(extractNodelinkErrorCode({ detail: { code: "mfa_required" } }), "mfa_required");
+  for (const body of [null, undefined, "x", 5, {}, { detail: null }, { detail: "x" }, { detail: {} }, { detail: { code: 7 } }]) {
+    assert.equal(extractNodelinkErrorCode(body), null);
+  }
+});
+
+test("typed errors carry the machine code but never the upstream body", async () => {
+  await assert.rejects(
+    () => requestNodelinkApi("/api/v1/agents", { sessionToken: "t" }, {
+      fetchImpl: async () => Response.json({ detail: { code: "step_up_required", secret: "SENTINEL" } }, { status: 403 }),
+      runtimeConfig: getRuntimeConfig({ NODE_ENV: "test" }),
+    }),
+    (error: unknown) => error instanceof NodelinkApiError && error.status === 403
+      && error.code === "step_up_required" && !error.message.includes("SENTINEL"),
+  );
+  const plain = new NodelinkApiError(500);
+  assert.equal(plain.code, null);
+  assert.equal(plain.name, "NodelinkApiError");
+});
+
+test("requestNodelinkApi rejects relative paths before fetching", async () => {
+  let called = false;
+  await assert.rejects(
+    () => requestNodelinkApi("api/v1/agents", { sessionToken: "t" }, {
+      fetchImpl: async () => { called = true; return new Response(); },
+      runtimeConfig: getRuntimeConfig({ NODE_ENV: "test" }),
+    }),
+    /must start with '\/'/,
+  );
+  assert.equal(called, false);
+});
+
+test("requestNodelinkApi honours a caller-supplied abort signal and merges headers", async () => {
+  const controller = new AbortController();
+  let init: RequestInit | undefined;
+  await requestNodelinkApi("/api/v1/x", {
+    sessionToken: "t", signal: controller.signal, headers: { "X-Trace": "1" },
+  }, {
+    fetchImpl: async (_input, received) => { init = received; return Response.json({}); },
+    runtimeConfig: getRuntimeConfig({ NODE_ENV: "test" }),
+  });
+  assert.equal(init?.signal, controller.signal);
+  assert.equal(new Headers(init?.headers).get("X-Trace"), "1");
+  assert.equal(new Headers(init?.headers).get("Accept"), "application/json");
+});
+
+test("requestNodelinkApiRaw returns the response untouched and validates its inputs", async () => {
+  const upstream = new Response("zip-bytes", { status: 418 });
+  let init: RequestInit | undefined;
+  let url = "";
+  const config = getRuntimeConfig({ NODE_ENV: "test" });
+  const response = await requestNodelinkApiRaw("/api/v1/installer", {
+    sessionToken: "token", method: "POST", headers: { "X-Trace": "1" },
+  }, {
+    fetchImpl: async (input, received) => { url = String(input); init = received; return upstream; },
+    runtimeConfig: config,
+  });
+  assert.equal(response, upstream);
+  assert.equal(url, "http://127.0.0.1:8000/api/v1/installer");
+  assert.equal(init?.cache, "no-store");
+  assert.equal(init?.method, "POST");
+  assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer token");
+  assert.equal(new Headers(init?.headers).get("X-Trace"), "1");
+  assert.ok(init?.signal instanceof AbortSignal);
+
+  const controller = new AbortController();
+  await requestNodelinkApiRaw("/x", { sessionToken: "token", signal: controller.signal }, {
+    fetchImpl: async (_input, received) => { init = received; return upstream; }, runtimeConfig: config,
+  });
+  assert.equal(init?.signal, controller.signal);
+
+  let called = false;
+  const deps = { fetchImpl: async () => { called = true; return upstream; }, runtimeConfig: config };
+  await assert.rejects(() => requestNodelinkApiRaw("x", { sessionToken: "token" }, deps), /must start with '\/'/);
+  await assert.rejects(() => requestNodelinkApiRaw("/x", { sessionToken: "  " }, deps), /server-managed operator session/);
+  assert.equal(called, false);
 });

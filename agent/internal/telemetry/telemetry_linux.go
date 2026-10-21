@@ -5,11 +5,8 @@
 package telemetry
 
 import (
-	"bufio"
 	"context"
 	"os"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -19,14 +16,7 @@ func osVersion() string {
 	if err != nil {
 		return ""
 	}
-	sc := bufio.NewScanner(strings.NewReader(string(data)))
-	for sc.Scan() {
-		line := sc.Text()
-		if strings.HasPrefix(line, "PRETTY_NAME=") {
-			return strings.Trim(strings.TrimPrefix(line, "PRETTY_NAME="), `"`)
-		}
-	}
-	return ""
+	return parseOSReleasePrettyName(string(data))
 }
 
 // cpuTimes returns (idle, total) jiffies from /proc/stat.
@@ -35,23 +25,7 @@ func cpuTimes() (idle, total uint64) {
 	if err != nil {
 		return 0, 0
 	}
-	line := strings.SplitN(string(data), "\n", 2)[0]
-	fields := strings.Fields(line)
-	if len(fields) < 5 || fields[0] != "cpu" {
-		return 0, 0
-	}
-	var vals []uint64
-	for _, f := range fields[1:] {
-		v, _ := strconv.ParseUint(f, 10, 64)
-		vals = append(vals, v)
-	}
-	for i, v := range vals {
-		total += v
-		if i == 3 || i == 4 { // idle + iowait
-			idle += v
-		}
-	}
-	return idle, total
+	return parseProcStatCPU(string(data))
 }
 
 func collect(ctx context.Context) Sample {
@@ -108,21 +82,7 @@ func meminfo() (total, avail uint64) {
 	if err != nil {
 		return 0, 0
 	}
-	sc := bufio.NewScanner(strings.NewReader(string(data)))
-	for sc.Scan() {
-		fields := strings.Fields(sc.Text())
-		if len(fields) < 2 {
-			continue
-		}
-		v, _ := strconv.ParseUint(fields[1], 10, 64)
-		switch fields[0] {
-		case "MemTotal:":
-			total = v
-		case "MemAvailable:":
-			avail = v
-		}
-	}
-	return total, avail
+	return parseMeminfo(string(data))
 }
 
 func uptimeSeconds() (int64, bool) {
@@ -130,14 +90,5 @@ func uptimeSeconds() (int64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	fields := strings.Fields(string(data))
-	if len(fields) == 0 {
-		return 0, false
-	}
-	f, err := strconv.ParseFloat(fields[0], 64)
-	return int64(f), err == nil
-}
-
-func round2(f float64) float64 {
-	return float64(int(f*100+0.5)) / 100
+	return parseUptime(string(data))
 }

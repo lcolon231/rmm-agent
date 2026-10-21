@@ -8,7 +8,6 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -45,7 +44,8 @@ func collect(ctx context.Context) Sample {
 	}
 }
 
-func psOutput(ctx context.Context, script string) (string, error) {
+// psOutput runs a PowerShell script; a var so tests can substitute a fake.
+var psOutput = func(ctx context.Context, script string) (string, error) {
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive",
 		"-ExecutionPolicy", "Bypass", "-Command", script)
 	out, err := cmd.Output()
@@ -57,8 +57,7 @@ func psFloat(ctx context.Context, script string) (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	f, err := strconv.ParseFloat(strings.TrimSpace(strings.ReplaceAll(out, ",", ".")), 64)
-	return f, err == nil
+	return parseLocaleFloat(out)
 }
 
 func cpuPercent(ctx context.Context) (float64, bool) {
@@ -86,8 +85,4 @@ func loggedInUser(ctx context.Context) string {
 		return os.Getenv("USERNAME")
 	}
 	return strings.TrimSpace(out)
-}
-
-func round2(f float64) float64 {
-	return float64(int(f*100+0.5)) / 100
 }
