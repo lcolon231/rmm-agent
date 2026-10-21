@@ -820,6 +820,9 @@ class Command(Base):
         # Global task-run history (issue #50) orders newest-first across every
         # endpoint and filters by created_at range; index the sort/range key.
         Index("ix_commands_created_at", "created_at"),
+        # Replay protection: a signed nonce is single-use per agent (alembic
+        # 0003/0012). Declared here too so create_all-based tests enforce it.
+        Index("ux_commands_agent_nonce", "agent_id", "nonce", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -1026,7 +1029,6 @@ class AgentMeshMapping(Base):
         Enum(MeshMappingState),
         default=MeshMappingState.active,
         nullable=False,
-        index=True,
     )
     origin: Mapped[MeshMappingOrigin] = mapped_column(
         Enum(MeshMappingOrigin), default=MeshMappingOrigin.manual, nullable=False
@@ -1105,6 +1107,10 @@ class AuditEvent(Base):
     in docs/threat-model.md.
     """
     __tablename__ = "audit_events"
+    __table_args__ = (
+        # Tenant-filtered audit-timeline reads (alembic 0037).
+        Index("ix_audit_events_org_ts", "organization_id", "ts", "id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     # Strictly monotonic position in the chain, assigned in a serialized

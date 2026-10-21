@@ -8,13 +8,14 @@ import os
 import sqlite3
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.schema_revision import (
@@ -972,3 +973,198 @@ def test_emergency_override_migration_is_additive_and_forward_only(tmp_path: Pat
     with pytest.raises(RuntimeError, match="forward-only"):
         command.downgrade(config, "0045")
     asyncio.run(_assert_current(sqlite_url(path)))
+
+
+# --------------------------------------------------------------------------- #
+# Dialect-parametrized migration checks (issue #286)
+# --------------------------------------------------------------------------- #
+@pytest.fixture(
+    params=["sqlite", pytest.param("postgresql", marks=pytest.mark.postgres)]
+)
+def empty_database_url(request, tmp_path: Path) -> str:
+    """An empty database on each dialect; PostgreSQL only with TEST_POSTGRES_URL."""
+    if request.param == "sqlite":
+        return sqlite_url(tmp_path / "empty.db")
+    return request.getfixturevalue("pg_database_factory")()
+
+
+def _execute(url: str, statements: list[tuple[str, dict]]) -> None:
+    async def run() -> None:
+        engine = create_async_engine(url)
+        try:
+            async with engine.begin() as connection:
+                for sql, params in statements:
+                    await connection.execute(text(sql), params)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def _scalars(url: str, *queries: str) -> tuple:
+    async def run() -> tuple:
+        engine = create_async_engine(url)
+        try:
+            async with engine.connect() as connection:
+                return tuple([await connection.scalar(text(query)) for query in queries])
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(run())
+
+
+_SEED_TIME = datetime(2026, 7, 29, 12, 0, tzinfo=timezone.utc)
+_INSERT_CLIENT = "INSERT INTO clients (id, name, created_at) VALUES (:id, :name, :now)"
+_INSERT_SITE = (
+    "INSERT INTO sites (id, client_id, name, created_at) "
+    "VALUES (:id, :client_id, :name, :now)"
+)
+
+
+@pytest.mark.parametrize(
+    "site_names",
+    [
+        ("HQ", " hq "),  # equal only after lower(trim())
+        ("Branch", "Branch"),  # exact duplicates
+    ],
+)
+def test_normalized_name_migration_refuses_duplicate_site_names(
+    empty_database_url: str, site_names: tuple[str, str]
+):
+    config = migration_config(empty_database_url)
+    command.upgrade(config, "0012")
+    _execute(
+        empty_database_url,
+        [
+            (_INSERT_CLIENT, {"id": "client-a", "name": "North Clinic", "now": _SEED_TIME}),
+            (_INSERT_CLIENT, {"id": "client-b", "name": "South Clinic", "now": _SEED_TIME}),
+            (_INSERT_SITE, {"id": "site-1", "client_id": "client-a", "name": site_names[0], "now": _SEED_TIME}),
+            (_INSERT_SITE, {"id": "site-2", "client_id": "client-a", "name": site_names[1], "now": _SEED_TIME}),
+            # The same name under another client is not ambiguous and is not counted.
+            (_INSERT_SITE, {"id": "site-3", "client_id": "client-b", "name": site_names[0], "now": _SEED_TIME}),
+        ],
+    )
+
+    with pytest.raises(
+        RuntimeError, match=r"0 duplicate client group\(s\), 1 duplicate site group\(s\)"
+    ):
+        command.upgrade(config, "head")
+
+    # The refusal leaves the database at 0012 with every row intact.
+    assert _scalars(
+        empty_database_url,
+        "SELECT version_num FROM alembic_version",
+        "SELECT count(*) FROM sites",
+    ) == ("0012", 3)
+
+
+def test_normalized_name_migration_refuses_duplicate_client_names_on_each_dialect(
+    empty_database_url: str,
+):
+    config = migration_config(empty_database_url)
+    command.upgrade(config, "0012")
+    _execute(
+        empty_database_url,
+        [
+            (_INSERT_CLIENT, {"id": "client-a", "name": "North Clinic", "now": _SEED_TIME}),
+            (_INSERT_CLIENT, {"id": "client-b", "name": " north clinic ", "now": _SEED_TIME}),
+        ],
+    )
+    with pytest.raises(
+        RuntimeError, match=r"1 duplicate client group\(s\), 0 duplicate site group\(s\)"
+    ):
+        command.upgrade(config, "head")
+
+
+def _index_shape(url: str) -> dict[str, set[tuple[tuple[str, ...], bool]]]:
+    """Per table: every indexed column set and whether it is unique.
+
+    Names are ignored and a UNIQUE constraint counts the same as a unique
+    index: drift in semantics is what matters, and the ORM and the migrations
+    legitimately spell some of these differently. A non-unique index over a
+    column set that is also unique adds nothing and is dropped. Expression
+    indexes compare by PostgreSQL's canonical expression text; SQLite cannot
+    reflect them, so only the PostgreSQL run covers them.
+    """
+
+    def reflect(sync_connection):
+        inspector = inspect(sync_connection)
+        shape = {}
+        for table in inspector.get_table_names():
+            if table == "alembic_version":
+                continue
+            entries = set()
+            for index in inspector.get_indexes(table):
+                expressions = index.get("expressions") or index["column_names"]
+                entries.add(
+                    (tuple(str(item) for item in expressions), bool(index["unique"]))
+                )
+            for constraint in inspector.get_unique_constraints(table):
+                entries.add((tuple(constraint["column_names"]), True))
+            unique_sets = {columns for columns, unique in entries if unique}
+            shape[table] = {
+                (columns, unique)
+                for columns, unique in entries
+                if unique or columns not in unique_sets
+            }
+        return shape
+
+    async def run():
+        engine = create_async_engine(url)
+        try:
+            async with engine.connect() as connection:
+                return await connection.run_sync(reflect)
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(run())
+
+
+@pytest.fixture(
+    params=["sqlite", pytest.param("postgresql", marks=pytest.mark.postgres)]
+)
+def database_pair(request, tmp_path: Path) -> tuple[str, str]:
+    if request.param == "sqlite":
+        return sqlite_url(tmp_path / "migrated.db"), sqlite_url(tmp_path / "orm.db")
+    factory = request.getfixturevalue("pg_database_factory")
+    return factory(), factory()
+
+
+# SQLite cannot reflect expression indexes; PostgreSQL compares them.
+@pytest.mark.filterwarnings(
+    "ignore:Skipped unsupported reflection of expression-based index"
+)
+def test_orm_metadata_matches_alembic_head_indexes(database_pair: tuple[str, str]):
+    """Tests build their schema with ``create_all``; production runs alembic.
+
+    A unique index that exists only in a migration (``ux_commands_agent_nonce``
+    did) is a guarantee no create_all-based test ever exercises, and an index
+    that exists only on the model never reaches production.
+    """
+    import app.models.models  # noqa: F401  (registers every table)
+    from app.core.database import Base
+
+    migrated_url, orm_url = database_pair
+    command.upgrade(migration_config(migrated_url), "head")
+
+    async def create_all() -> None:
+        engine = create_async_engine(orm_url)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(create_all())
+    migrated, orm = _index_shape(migrated_url), _index_shape(orm_url)
+
+    assert sorted(migrated) == sorted(orm)
+    drift = {
+        table: {
+            "alembic_only": sorted(migrated[table] - orm[table]),
+            "orm_only": sorted(orm[table] - migrated[table]),
+        }
+        for table in migrated
+        if migrated[table] != orm[table]
+    }
+    assert drift == {}

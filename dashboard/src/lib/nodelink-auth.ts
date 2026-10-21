@@ -2,6 +2,7 @@
 
 import "server-only";
 
+import type { LoginAttempt } from "@/lib/auth-route-core";
 import type { DashboardOperator, LoginCredentials } from "@/lib/dashboard-auth-core";
 import { nodelinkApiRequest } from "@/lib/nodelink-api";
 import { getRuntimeConfig } from "@/lib/runtime-config";
@@ -77,4 +78,16 @@ export async function revokeOperatorTokens(sessionToken: string): Promise<void> 
     method: "POST",
     sessionToken,
   });
+}
+
+/** {@link authenticateOperator} with its throws folded into a result, for the
+ * login route core. Transport failures still throw. */
+export async function attemptOperatorLogin(credentials: LoginCredentials): Promise<LoginAttempt> {
+  try {
+    return { kind: "authenticated", ...(await authenticateOperator(credentials)) };
+  } catch (error) {
+    if (error instanceof NodelinkSecondFactorRequired) return { kind: "second-factor", body: error.body };
+    if (error instanceof NodelinkAuthenticationError) return { kind: "rejected", status: error.status };
+    throw error;
+  }
 }

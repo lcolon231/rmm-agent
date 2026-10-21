@@ -47,6 +47,11 @@ The normative JSON Schema is
 [`contracts/evidence-bundle-v1.schema.json`](../contracts/evidence-bundle-v1.schema.json)
 and the golden vector is
 [`contracts/test-vectors/evidence-bundle-v1.json`](../contracts/test-vectors/evidence-bundle-v1.json).
+Negative cases (a tampered record, an injected record, a wrong or stale
+`bundle_id`, missing or unknown sections, a claimed audit range the hash prefix
+does not reach) are in
+[`contracts/test-vectors/evidence-v1-invalid.json`](../contracts/test-vectors/evidence-v1-invalid.json)
+as mutations of the golden vector, each with the refusal it must produce.
 The format identifier is `nodelink-evidence-bundle`, version `1`.
 
 The manifest contains:

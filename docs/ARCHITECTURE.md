@@ -779,11 +779,32 @@ only the sections whose stored copy is missing, changed, or older than the
 inventory bytes at all, and heartbeat size stays independent of how much
 hardware an endpoint has.
 
-Both sides canonicalize identically — Go's `encoding/json` sorts map keys and
-emits no incidental whitespace, matching Python's
-`json.dumps(sort_keys=True, separators=(",", ":"))` — and pinned digest vectors
-are asserted in both test suites, because a canonicalization drift would make
-every section look permanently changed or permanently unchanged.
+The canonical form is defined by the agent: exactly the bytes Go's
+`json.Marshal` emits. That means sorted keys, no extra whitespace, raw UTF-8
+for non-ASCII text, `<` `>` `&` U+2028 U+2029 escaped as `<`-style
+sequences, and Go float formatting (`100`, not `100.0`; `0.00005`, not `5e-05`;
+exponents only outside [1e-6, 1e21)). The server reproduces those bytes in
+`canonical_inventory_bytes` rather than using plain `json.dumps`, and both
+suites assert the shared vectors in
+`contracts/test-vectors/inventory-hash-v1.json`, because a canonicalization
+drift would make every section look permanently changed or permanently
+unchanged. The agent is the side that defines the form because it is the side
+that is expensive to change: a server fix reaches the whole fleet at once.
+The same bytes are what the 256 KiB section bound measures, so the server and
+the agent's own trimming agree on what fits. Values Go cannot emit (NaN,
+infinity, lone surrogates) are refused and never stored. One known gap: Go
+encodes a float negative zero as `-0`, which the server parses as the integer
+`0`, so such a section would never dedupe. Collectors do not produce it, and the
+shared vectors leave it out.
+
+Before #287 the server used `json.dumps` defaults. That ASCII-escaped non-ASCII
+text (`Microsoft® Office`), left `<>&` raw, and printed floats differently, so
+any such section hashed differently on each side and was re-sent on every
+heartbeat. No schema change came with the fix. Once a server with it is
+deployed, each affected section is re-sent once, stored as one new snapshot with
+identical content, and then dedupes normally. Rollback is a plain redeploy: the
+old server goes back to re-sending those sections, which costs bandwidth, not
+correctness.
 
 Submissions are atomic and bounded: every section is validated before any is
 stored, and an oversized or malformed section fails the whole request with 422
@@ -896,8 +917,11 @@ insignificant whitespace, and does not HTML-escape. Payload values are limited
 to objects, arrays, strings, booleans, null, and signed 64-bit integers; floats
 are rejected to avoid cross-runtime formatting ambiguity. Payload nesting is
 limited to 16 levels, the API payload to 60 KiB, and the full canonical envelope
-to 64 KiB. Both runtimes consume the positive and negative vectors in
-`contracts/command-v3.schema.json`. The signed time window is canonical UTC,
+to 64 KiB. Both runtimes consume the valid, tampered, and invalid vectors in
+`contracts/test-vectors/command-v3.json` (the shape is
+`contracts/command-v3.schema.json`, itself validated against Draft 2020-12 in
+`server/tests/test_contract_schemas.py`). Both also refuse every signed
+`command-v1` vector as a downgrade. The signed time window is canonical UTC,
 expires within 24 hours, and rejects timestamps more than two minutes in the
 future.
 
