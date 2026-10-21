@@ -40,6 +40,8 @@ If the open response is lost, repeating open as the same operator returns the
 existing live session; another operator remains blocked by the one-session
 admission gate. The agent retries temporary network/5xx/429 failures with the
 same sequence, and the browser preserves its output cursor while reconnecting.
+Only network interruptions reconnect: a 4xx refusal or a malformed output batch
+stops the browser stream and shows the server's reason instead of retrying.
 
 Payload bytes exist only in a bounded in-memory relay and browser terminal. They
 are never persisted, audited, or logged. Database rows keep lifecycle,
@@ -80,4 +82,7 @@ Server tests cover authorization, owner/agent hijack, replay and idempotency,
 backpressure, cursor expiry, reconnect, concurrent admission, timeouts, output
 limits, persistence metadata, and audit redaction. Go tests exercise the framed
 client and a real Windows contained PowerShell process with streaming output.
-The dashboard production build type-checks the terminal and proxy routes.
+The dashboard production build type-checks the terminal and proxy routes, and
+`npm run test:ui` renders the shell panel to check that untrusted endpoints
+cannot open a shell, endpoint output renders as text, and a refused output poll
+stops the stream.
