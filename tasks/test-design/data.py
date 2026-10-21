@@ -116,11 +116,11 @@ R("SRV-12", "server", "integration", "agent_updates._dispatch_update_command (ro
   "expected to fail: _dispatch_update_command creates Command rows without calling approvals_core.resolve_policy, so a policy covering self-update is bypassed.",
   expected_fail=True, notes=["depends on revision 0041 (approval_workflows)", REDACTION])
 R("SRV-13", "server", "integration", "POST /api/v1/agents/{id}/shell-sessions (app/api/shell_sessions.py:240)",
-  "ApprovalPolicy names only CommandKind.shell (POSIX) → interactive session refused 409 shell_session_requires_approval",
+  "ApprovalPolicy names only CommandKind.shell → interactive (PowerShell) session is still allowed, matching APPROVAL-WORKFLOWS.md",
   "operations: approval gate on interactive shell", "operations", "thin", "silent", "low",
   f"{E2E} shape; copy the powershell variant and change policy kinds", "tests/test_approval_workflows.py::test_interactive_shell_is_refused_under_a_script_policy",
-  "expected to fail: the gate resolves policy for CommandKind.powershell only. Confirm intended semantics in APPROVAL-WORKFLOWS.md before treating as a bug.",
-  expected_fail=True, notes=["depends on revision 0041"])
+  "Documented behavior, not a defect: APPROVAL-WORKFLOWS.md keys the interactive-shell gate on `powershell`, and the session itself authorizes as CommandKind.powershell (shell_sessions.py:224). Test pins that a `shell`-only policy does not block the session, so a change to that rule is deliberate.",
+  notes=["depends on revision 0041"])
 
 # ───────────────────────── server: agent-facing HTTP bounds ─────────────────────────
 R("SRV-14", "server", "integration", "POST /api/v1/agents/me/monitoring/results",
@@ -765,7 +765,7 @@ SEAMS = [
          dependency="Real app on SQLite for logic; Postgres for the concurrency guarantee.",
          happy="request → two distinct approvals → exactly one dispatch (covered)",
          failures=[
-             "Governed kind refused: dispatch (covered), scheduled task (covered), interactive shell for `powershell` (covered) / `shell` (SRV-13, expected to fail), self-update rollout (SRV-12, expected to fail)",
+             "Governed kind refused: dispatch (covered), scheduled task (covered), interactive shell for `powershell` (covered; `shell`-only policy intentionally does not apply, SRV-13), self-update rollout (SRV-12, expected to fail; issue #292)",
              "Bound exceeded: outstanding request cap 429 (SRV-28)",
              "Stale/replayed: mutated payload and double-spend (covered on SQLite); same race on PG (SRV-40)",
          ], go_only="", rows=["SRV-12", "SRV-13", "SRV-28", "SRV-40", "DSH-26"]),
