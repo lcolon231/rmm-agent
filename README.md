@@ -92,7 +92,9 @@ These are the parts of the codebase that best show how it was built.
 - **Two-person authorization done at the database.** An approval binds the
   hash of the exact command, approver eligibility is re-checked at dispatch,
   and the one-verdict-per-identity rule is a database constraint rather than
-  application logic.
+  application logic. A justified emergency override exists for policies that
+  opt in: single-use, minutes-long, notified at activation, and reviewed
+  afterwards by someone else.
 - **Operational safety has its own tests.** Forward-only Alembic migrations
   are enforced at startup, and CI rehearses an incompatible bad release, an
   exact-revision encrypted backup restore and audit re-verification.
@@ -135,6 +137,7 @@ If you have ten minutes, these files show the core ideas:
 | How the server builds the command envelope | [`server/app/core/command_envelope.py`](server/app/core/command_envelope.py) |
 | Hash-chained audit log and Merkle anchors | [`server/app/core/audit.py`](server/app/core/audit.py), [`server/app/core/anchor.py`](server/app/core/anchor.py) |
 | Two-person approval for sensitive commands | [`server/app/core/approvals.py`](server/app/core/approvals.py) |
+| Justified emergency override of an approval policy | [`server/app/core/emergency_overrides.py`](server/app/core/emergency_overrides.py) |
 | Agent self-update with automatic rollback | [`agent/internal/selfupdate/`](agent/internal/selfupdate/) |
 | Security analysis | [`docs/threat-model.md`](docs/threat-model.md) |
 | Design source of truth | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |

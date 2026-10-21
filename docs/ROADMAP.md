@@ -206,7 +206,9 @@ Workstreams:
   are implemented: scoped opt-in policies, a payload-bound approval spent
   exactly once, live re-checked approver eligibility, and no bypass through
   scheduled tasks or interactive shells. A justified emergency override (#65)
-  remains open.
+  is implemented: per-policy opt-in, tenant-admin only, payload-bound,
+  single-use, minutes-long, notified at activation, and reviewed afterwards by
+  someone else.
 - Explicit tenant IDs, tenant-scoped authorization, tenant-specific roles and
   retention, and isolation tests.
 - MFA, WebAuthn, OIDC or SAML, break-glass accounts, and administrative session

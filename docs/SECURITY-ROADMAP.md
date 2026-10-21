@@ -348,9 +348,20 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   control. The trust boundary this does *not* move: an approval is only as
   strong as the separation between the accounts involved, and two identities
   held by one person defeat it exactly as they would in any dual-control
-  system. See [`APPROVAL-WORKFLOWS.md`](APPROVAL-WORKFLOWS.md). A justified
-  emergency override that keeps the policy in force while recording the
-  exception remains open (issue #65).
+  system. See [`APPROVAL-WORKFLOWS.md`](APPROVAL-WORKFLOWS.md).
+- **Implemented (issue #65).** A justified emergency override keeps the policy
+  in force while recording the exception. A policy must opt in
+  (`emergency_override_allowed`, default off); only a tenant or platform
+  administrator who could run the command anyway may activate one, behind
+  step-up; the override binds the same `(agent_id, kind, payload)` digest an
+  approval does, expires within an hour, is spent exactly once through a
+  conditional status transition, and may be revoked unspent. Activation emails
+  the alert recipients immediately and records the outcome; a failed
+  notification never blocks the override but is flagged for review. Every
+  override stays open until a different administrator reviews it. The trust
+  boundary this does *not* move: an override is one person's decision by
+  design -- the controls make it visible and accountable, not a second opinion.
+  See [`EMERGENCY-OVERRIDES.md`](EMERGENCY-OVERRIDES.md).
 - **Implemented (issues #79/#80).** A single-tenant, versioned,
   deterministic manifest exports safe actor/endpoint/policy/signed-action/result
   metadata, sanitized audit events, hash-only chain material, anchors/receipts,

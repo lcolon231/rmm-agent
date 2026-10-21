@@ -299,6 +299,20 @@ Windows may power off before result upload (the local outbox recovers after
 boot). Two-person approval and independent endpoint-user confirmation remain
 future defenses. See [`POWER-OPERATIONS.md`](POWER-OPERATIONS.md).
 
+Issue #65 adds a justified emergency override to the two-person approval
+boundary (issue #64). It deliberately re-admits a single-person decision, so
+the trust change is stated plainly: a tenant or platform administrator whose
+account is compromised, and who holds a second factor the attacker also
+controls, can run one governed command on an opted-in policy without a second
+approver. The defenses are visibility and bounds rather than a second opinion:
+per-policy opt-in (default off), the activator must already be authorized for
+the command, step-up, a payload-bound single-use record that expires within an
+hour, immediate email to the alert recipients with the outcome recorded, and a
+mandatory review by someone else. Residual risks: an attacker who also controls
+the alert mailbox delays discovery; an administrator can lie in the
+justification. Neither is hidden -- both leave a reviewable row and an audit
+trail. See [`EMERGENCY-OVERRIDES.md`](EMERGENCY-OVERRIDES.md).
+
 Issue #58 adds a bounded event log read boundary. `query_event_log` requires
 `admin` plus `event-log-query-v1` and is restricted to a fixed channel allowlist
 with a standard tier and an elevated tier (`Security`, Defender) that a query

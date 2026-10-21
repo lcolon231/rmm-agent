@@ -196,7 +196,7 @@ export function EmergencyOverrideView({
 
   const now = new Date();
   const ordered = sortForReview(overrides);
-  const unreviewed = ordered.filter((entry) => entry.reviewed_at === null && entry.status !== "active");
+  const unreviewed = ordered.filter((entry) => entry.reviewed_at === null);
   const live = ordered.filter((entry) => entry.status === "active" && Date.parse(entry.expires_at) > now.getTime());
 
   return (
@@ -278,7 +278,7 @@ export function EmergencyOverrideView({
                     {override.reviewed_by_email ? ` · reviewed by ${override.reviewed_by_email}` : ""}
                     {override.revoked_by_email ? ` · revoked by ${override.revoked_by_email}` : ""}
                   </small>
-                  {override.status !== "active" && !override.reviewed_at && isActivator ? (
+                  {!override.reviewed_at && isActivator ? (
                     <small className="approval-blocked">
                       You activated this override, so someone else must review it.
                     </small>

@@ -202,6 +202,16 @@ neither can produce a reviewable, bound payload at fire time. With no policy
 rows the capability is inert and dispatch behaves exactly as before. See
 [`APPROVAL-WORKFLOWS.md`](APPROVAL-WORKFLOWS.md).
 
+A policy may additionally opt in to a **justified emergency override** (issue
+#65). A tenant or platform administrator who could run the command anyway
+activates an override for one exact command behind step-up; it binds the same
+digest an approval does, expires within an hour, is spent once through the
+same dispatch gate (`approval_gate.allowed` with
+`reason=emergency_override_satisfied`), and may be revoked unspent. Activation
+emails the alert recipients and records the outcome; the override stays open
+until a different administrator reviews it. Scheduled tasks and shells remain
+refused. See [`EMERGENCY-OVERRIDES.md`](EMERGENCY-OVERRIDES.md).
+
 Controlled remediation preserves polling and the signed command/result
 contract. Both server and agent validate fixed managed file roots and the
 `Software\\NodeLink\\Managed` HKLM/HKCU subtree. The endpoint rejects device,
@@ -557,6 +567,15 @@ review. `ApprovalDecision` is one identity's verdict, unique per
 people" true under concurrency rather than by convention. `Command` carries
 `approval_request_id`, so a run points at the approval it spent; `NULL` means
 no policy required one, never that approval was waived.
+
+`EmergencyOverride` (issue #65) is the self-issued counterpart of
+`ApprovalRequest`: the same tenancy snapshot, payload, binding digest, and
+copied policy terms, plus the activator, a justification, the notification
+outcome (`notified_at` or `notification_error`), and the break-glass-style
+review columns (`reviewed_at`, `reviewed_by_email`, `review_note`).
+`ApprovalPolicy.emergency_override_allowed` is the per-policy opt-in, and
+`Command.emergency_override_id` links a run to the override it spent with the
+same `NULL` semantics as `approval_request_id`.
 
 ### 4.2 API surface
 
