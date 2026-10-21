@@ -26,6 +26,7 @@ import {
   handleRotateBreakGlass,
   handleSetBreakGlassDisabled,
   handleListSessions,
+  handleListBreakGlass,
 } from "../src/lib/admin-sessions-route-core.ts";
 
 const dashboardOrigin = "https://dashboard.example.test";
@@ -424,4 +425,163 @@ test("an unavailable session backend is reported as 503, not as a refusal", asyn
     list: async () => ({ status: 200 }),
   });
   assert.equal(result.response.status, 503);
+});
+
+
+// --------------------------------------------------------------------------- //
+// Coverage extension: shared session, origin, validation, and status mapping
+// --------------------------------------------------------------------------- //
+type ASReply = { status: number; code?: string | null; body?: unknown };
+type ASSession =
+  | { kind: "anonymous" } | { kind: "unavailable" }
+  | { kind: "authenticated"; operator: { role: string }; sessionToken: string };
+const asSentinel = "SENTINEL-must-not-leak";
+
+type ASCase = {
+  name: string; body?: unknown; invalid?: unknown[]; successStatus: number; readOnly?: boolean;
+  run: (req: Request, getSession: () => Promise<ASSession>, api: (...a: unknown[]) => Promise<ASReply>) => Promise<{
+    response: Response; cookies: unknown[];
+  }>;
+};
+const asCases: ASCase[] = [
+  {
+    name: "list sessions", readOnly: true, successStatus: 200,
+    run: (req, getSession, api) => handleListSessions(req, { getSession, list: api as never }),
+  },
+  {
+    name: "list break-glass", readOnly: true, successStatus: 200,
+    run: (req, getSession, api) => handleListBreakGlass(req, { getSession, list: api as never }),
+  },
+  {
+    name: "revoke session", body: { reason: "Lost laptop" }, invalid: [{}, { reason: "no" }, { reason: 5 }, null],
+    successStatus: 200,
+    run: (req, getSession, api) => handleRevokeSession(req, "session-1", { getSession, revoke: api as never }),
+  },
+  {
+    name: "revoke other sessions", body: { reason: "Lost laptop" }, invalid: [{}, { reason: "x".repeat(501) }],
+    successStatus: 200,
+    run: (req, getSession, api) => handleRevokeOtherSessions(req, { getSession, revokeOthers: api as never }),
+  },
+  {
+    name: "create break-glass", body: { label: "Vault key", reason: "Provision" },
+    invalid: [{}, { label: "ab", reason: "Provision" }, { label: "Vault key" }], successStatus: 201,
+    run: (req, getSession, api) => handleCreateBreakGlass(req, { getSession, create: api as never }),
+  },
+  {
+    name: "rotate break-glass", body: { reason: "Scheduled rotation" }, invalid: [{}, { reason: "" }],
+    successStatus: 200,
+    run: (req, getSession, api) => handleRotateBreakGlass(req, "account-1", { getSession, rotate: api as never }),
+  },
+  {
+    name: "set break-glass disabled", body: { disabled: true, reason: "Retiring" },
+    invalid: [{ reason: "Retiring" }, { disabled: "true", reason: "Retiring" }, { disabled: true }],
+    successStatus: 200,
+    run: (req, getSession, api) => handleSetBreakGlassDisabled(req, "account-1", { getSession, setDisabled: api as never }),
+  },
+  {
+    name: "review activation", body: { note: "Reviewed and fine" }, invalid: [{}, { note: "x" }],
+    successStatus: 200,
+    run: (req, getSession, api) => handleReviewActivation(req, "activation-1", { getSession, review: api as never }),
+  },
+];
+
+for (const c of asCases) {
+  const make = (origin?: string) => request("/x", c.body, origin);
+
+  test(`admin sessions ${c.name}: no usable session never reaches the API`, async () => {
+    const sessions: Array<[number, () => Promise<ASSession>]> = [
+      [401, async () => ({ kind: "anonymous" })],
+      [503, async () => ({ kind: "unavailable" })],
+      [503, async () => { throw new Error("boom"); }],
+    ];
+    for (const [status, getSession] of sessions) {
+      let calls = 0;
+      const res = await c.run(make(), getSession, async () => { calls += 1; return { status: c.successStatus }; });
+      assert.equal(res.response.status, status);
+      assert.deepEqual(res.cookies, []);
+      assert.equal(calls, 0);
+    }
+  });
+
+  if (!c.readOnly) {
+    test(`admin sessions ${c.name}: cross-origin is rejected before a credential is spent`, async () => {
+      let calls = 0;
+      const res = await c.run(make("https://evil.test"), authenticated, async () => { calls += 1; return { status: c.successStatus }; });
+      assert.equal(res.response.status, 403);
+      assert.equal(calls, 0);
+    });
+
+    test(`admin sessions ${c.name}: invalid bodies never reach the API`, async () => {
+      let calls = 0;
+      const api = async () => { calls += 1; return { status: c.successStatus }; };
+      for (const body of c.invalid ?? []) {
+        assert.equal((await c.run(request("/x", body), authenticated, api)).response.status, 400, JSON.stringify(body));
+      }
+      const raw = new Request(`${dashboardOrigin}/x`, { method: "POST", headers: { Origin: dashboardOrigin }, body: "{bad" });
+      assert.equal((await c.run(raw, authenticated, api)).response.status, 400);
+      assert.equal(calls, 0);
+    });
+  }
+
+  test(`admin sessions ${c.name}: forwards the session token and maps upstream statuses`, async () => {
+    let received: unknown;
+    const ok = await c.run(make(), authenticated, async (...args) => {
+      received = args[0];
+      return { status: c.successStatus, body: { ok: true } };
+    });
+    assert.equal(ok.response.status, c.successStatus);
+    assert.equal(received, sessionToken);
+    assert.equal(ok.response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(ok.cookies, []);
+
+    const expected: Array<[number, number]> = [
+      [400, 400], [401, 401], [403, 403], [404, 404], [409, 409], [429, 429],
+      [422, 503], [500, 503], [200 === c.successStatus ? 201 : 200, 503],
+    ];
+    for (const [status, mapped] of expected) {
+      const res = await c.run(make(), authenticated, async () => ({ status, code: null, body: { detail: asSentinel } }));
+      assert.equal(res.response.status, mapped, String(status));
+      assert.doesNotMatch(JSON.stringify(await res.response.json()), /SENTINEL/);
+    }
+  });
+}
+
+test("admin sessions: break-glass activation validates inputs and maps upstream failures", async () => {
+  let calls = 0;
+  const deps = { activate: async () => { calls += 1; return { status: 200, body: { access_token: emergencyToken } }; } };
+  const good = { credential: "emergency-credential", reason: "Primary IdP is down" };
+  for (const body of [{}, { ...good, credential: "short" }, { ...good, reason: "x" }, { reason: good.reason }]) {
+    assert.equal((await handleActivateBreakGlass(request("/a", body), deps)).response.status, 400);
+  }
+  assert.equal(calls, 0);
+  for (const [status, mapped] of [[400, 400], [401, 401], [403, 403], [404, 404], [409, 409], [429, 429], [500, 503]] as const) {
+    const res = await handleActivateBreakGlass(request("/a", good), {
+      activate: async () => ({ status, body: { detail: asSentinel } }),
+    });
+    assert.equal(res.response.status, mapped);
+    assert.deepEqual(res.cookies, []);
+    assert.doesNotMatch(JSON.stringify(await res.response.json()), /SENTINEL/);
+  }
+});
+
+test("admin sessions: successful activation response never echoes the emergency token", async () => {
+  const res = await handleActivateBreakGlass(
+    request("/a", { credential: "emergency-credential", reason: "Primary IdP is down" }),
+    { activate: async () => ({ status: 200, body: { access_token: emergencyToken, refresh_token: asSentinel } }) },
+  );
+  assert.equal(res.response.status, 200);
+  assert.doesNotMatch(JSON.stringify(await res.response.json()), /SENTINEL|emergency-token/);
+  assert.equal((res.cookies as Array<{ value: string }>)[0].value, emergencyToken);
+});
+
+test("admin sessions: upstream bodies are relayed verbatim on success", async () => {
+  // NOTE: unlike the webhook/script/operator routes, these handlers do not
+  // allowlist upstream bodies; whatever the API returns is forwarded to the
+  // browser. That is intentional for the one-time break-glass credential but
+  // means a future upstream field would reach the client unfiltered.
+  const res = await handleListSessions(request("/s"), {
+    getSession: authenticated,
+    list: async () => ({ status: 200, body: { sessions: [], extra: "relayed" } }),
+  });
+  assert.deepEqual(await res.response.json(), { sessions: [], extra: "relayed" });
 });
