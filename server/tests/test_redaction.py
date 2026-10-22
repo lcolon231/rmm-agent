@@ -515,6 +515,13 @@ PRODUCER_DETAILS = {
         "artifact_sha256": "d" * 64,
         "rollout_bucket": 7,
     },
+    "agent_update.approval_refused": {
+        "release_id": ID1,
+        "version": "0.2.0",
+        "agent_id": ID2,
+        "policy_id": ID3,
+        "required_approvals": 2,
+    },
     "agent_update.rollout_paused": {"release_id": ID1, "rollout_percent": 10},
     "agent_update.rollout_resumed": {"release_id": ID1, "rollout_percent": 10},
     "agent_update.rollout_halted": {

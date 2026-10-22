@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_agent, require_role
 from app.core import agent_updates as updates
+from app.core import approvals as approvals_core
 from app.core import audit
 from app.core.clientip import client_ip
 from app.core.command_envelope import (
@@ -462,6 +463,30 @@ async def advance_rollout(
             # Self-update metadata must ride a key-identified signature, so an
             # agent that cannot negotiate v3 is not targeted.
             skipped["envelope_unsupported"] = skipped.get("envelope_unsupported", 0) + 1
+            continue
+        # Two-person authorization (issue #292). A release has no per-endpoint
+        # approval to spend, so an endpoint whose agent_self_update is under an
+        # approval policy is refused here, the same way the scheduler refuses an
+        # unattended run, rather than updated around a control an administrator
+        # turned on. No attempt row is written: a later advance re-evaluates it.
+        approval_policy = await approvals_core.resolve_policy(
+            db, agent, CommandKind.agent_self_update
+        )
+        if approval_policy is not None:
+            await audit.record(
+                db,
+                action="agent_update.approval_refused",
+                actor="system",
+                agent_id=agent.id,
+                detail={
+                    "release_id": release.id,
+                    "version": release.version,
+                    "agent_id": agent.id,
+                    "policy_id": approval_policy.id,
+                    "required_approvals": approval_policy.required_approvals,
+                },
+            )
+            skipped["approval_required"] = skipped.get("approval_required", 0) + 1
             continue
         if dispatched >= body.max_dispatch:
             truncated = True
