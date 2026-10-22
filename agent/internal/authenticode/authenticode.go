@@ -29,7 +29,7 @@ type Runner func(ctx context.Context, env []string, name string, args ...string)
 // Exec is the Runner that starts a real process.
 func Exec(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = append(cmd.Environ(), env...)
+	cmd.Env = append(childEnv(cmd.Environ()), env...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -38,6 +38,21 @@ func Exec(ctx context.Context, env []string, name string, args ...string) ([]byt
 		return out, fmt.Errorf("%w: %s", err, detail)
 	}
 	return out, nil
+}
+
+// childEnv drops an inherited PSModulePath. When the agent is started from
+// PowerShell 7, that variable points at PowerShell 7's modules, and the Windows
+// PowerShell child then cannot load Microsoft.PowerShell.Security, so every
+// signature check would fail. Without it, powershell.exe rebuilds its default.
+func childEnv(environ []string) []string {
+	kept := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		if len(kv) >= len("PSModulePath=") && strings.EqualFold(kv[:len("PSModulePath=")], "PSModulePath=") {
+			continue
+		}
+		kept = append(kept, kv)
+	}
+	return kept
 }
 
 // Command returns the PowerShell invocation that verifies the file named by the

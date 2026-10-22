@@ -106,6 +106,10 @@ func TestHelperProcess(t *testing.T) {
 		fmt.Fprint(os.Stdout, os.Getenv("NL_TEST_PATH"))
 		fmt.Fprint(os.Stderr, "noise on stderr")
 		os.Exit(0)
+	case "echo-psmodulepath":
+		value, set := os.LookupEnv("PSModulePath")
+		fmt.Fprintf(os.Stdout, "%v|%s", set, value)
+		os.Exit(0)
 	case "fail":
 		fmt.Fprint(os.Stdout, "partial")
 		fmt.Fprint(os.Stderr, "access denied")
@@ -126,6 +130,27 @@ func TestExecReturnsStdoutOnlyAndPassesEnv(t *testing.T) {
 	}
 	if string(out) != `C:\x.exe` {
 		t.Fatalf("stdout = %q; stderr must not be mixed into what is parsed", out)
+	}
+}
+
+// TestExecDropsInheritedPSModulePath reproduces an agent started from
+// PowerShell 7: the child Windows PowerShell must not inherit its module path.
+func TestExecDropsInheritedPSModulePath(t *testing.T) {
+	t.Setenv("PSModulePath", `C:\Program Files\PowerShell\7\Modules`)
+	out, err := runHelper("echo-psmodulepath")
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if string(out) != "false|" {
+		t.Fatalf("child saw PSModulePath %q; it must be dropped", out)
+	}
+}
+
+func TestChildEnvKeepsEverythingElse(t *testing.T) {
+	got := childEnv([]string{"PATH=x", "psmodulepath=y", "PSModulePathExtra=z", "PSModulePath="})
+	want := []string{"PATH=x", "PSModulePathExtra=z"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("childEnv = %#v, want %#v", got, want)
 	}
 }
 
