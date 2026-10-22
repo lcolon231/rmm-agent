@@ -238,6 +238,8 @@ Workstreams:
 - PSA integrations and Terraform or Ansible deployment automation.
 - Moderated community script repository and signed extension system.
 - Multi-region relays with explicit tenancy, routing, key, and audit semantics.
+  Control plane and agent routing are implemented (#87, `docs/RELAYS.md`); the
+  deployable relay service and storage residency remain.
 
 Scale work must preserve signed-action, tenant-isolation, and audit guarantees;
 availability improvements may not silently weaken them.

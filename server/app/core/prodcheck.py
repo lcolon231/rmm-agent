@@ -13,6 +13,8 @@ and CI must keep working with throwaway secrets.
 """
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -138,6 +140,31 @@ def production_config_problems(settings: Settings) -> list[str]:
                     f"(got {', '.join(insecure)}); an http origin defeats the "
                     "origin binding that makes WebAuthn phishing-resistant"
                 )
+
+    # Multi-region relays (issue #87). Every relay-capable heartbeat carries a
+    # routing manifest signed by the keyring, so an unloadable keyring must be
+    # a refused boot, not a 500 on the first relayed check-in.
+    if settings.relay_routing_enabled and settings.command_signing_keyring_path:
+        signable: list[str] = []
+        try:
+            doc = json.loads(
+                Path(settings.command_signing_keyring_path).read_text(encoding="utf-8")
+            )
+            for key_id, item in (doc.get("keys") or {}).items():
+                path = item.get("private_key_path") if isinstance(item, dict) else None
+                if (
+                    item.get("status", "overlap") in ("active", "overlap")
+                    and isinstance(path, str)
+                    and Path(path).is_file()
+                ):
+                    signable.append(key_id)
+        except (OSError, ValueError, AttributeError):
+            pass  # the missing/malformed keyring is reported above or at load
+        if not signable:
+            problems.append(
+                "RELAY_ROUTING_ENABLED requires at least one active/overlap signing "
+                "key with private material to sign agent routing manifests"
+            )
 
     problems.extend(configuration_problems(settings))
     if settings.email_alert_dashboard_base_url:

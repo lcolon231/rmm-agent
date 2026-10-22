@@ -55,6 +55,11 @@ const (
 	// handler would show an enabled dashboard button that silently does nothing,
 	// so the server and dashboard gate the technician launch on THIS capability.
 	SupportChatLaunchCapabilityV1 = "support-chat-launch-v1"
+	// RelayRoutingCapability (issue #87) means the agent verifies server-signed
+	// routing manifests, fails over across regional relays, and refuses
+	// unsigned key bundles that arrive through a relay. The server offers a
+	// manifest, and enforces strict residency, only for agents advertising it.
+	RelayRoutingCapability = "relay-routing"
 )
 
 // SupportedCommandEnvelopeVersions returns a fresh slice so callers cannot
@@ -84,6 +89,7 @@ func SupportedCapabilitiesWith(chocolateyEnabled bool) []string {
 		PackageManagementCapabilityV1,
 		SoftwareDeploymentCapabilityV1,
 		ServiceProcessCapabilityV1,
+		RelayRoutingCapability,
 	}
 	// Self-update commits through a Windows service restart, so only Windows
 	// builds advertise it. Elsewhere the server keeps failing closed.

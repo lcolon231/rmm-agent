@@ -36,6 +36,7 @@ from app.models.models import (
     CheckResult,
     Command,
     Heartbeat,
+    RelayForwardReceipt,
     SupportConversation,
     SupportConversationStatus,
     SupportMessage,
@@ -55,6 +56,7 @@ class PruneResult:
     assistant_conversations_deleted: int = 0
     support_chat_messages_deleted: int = 0
     support_chat_conversations_deleted: int = 0
+    relay_receipts_deleted: int = 0
 
 
 async def prune_expired(
@@ -114,6 +116,16 @@ async def prune_expired(
         chat_messages_deleted, chat_conversations_deleted = await _prune_support_chat(
             db, now - timedelta(days=s.support_chat_retention_days)
         )
+    # Relay forward receipts are the replay guard (issue #87). The setting's
+    # floor of one day keeps every receipt well past the accepted clock-skew
+    # plus store-and-forward window, so pruning never reopens a replay.
+    relay_cutoff = now - timedelta(days=max(1, s.relay_receipt_retention_days))
+    res = await db.execute(
+        delete(RelayForwardReceipt).where(RelayForwardReceipt.received_at < relay_cutoff),
+        execution_options={"synchronize_session": False},
+    )
+    relay_receipts_deleted = res.rowcount or 0
+
     return PruneResult(
         heartbeats_deleted=heartbeats_deleted,
         command_outputs_cleared=command_outputs_cleared,
@@ -122,6 +134,7 @@ async def prune_expired(
         assistant_conversations_deleted=assistant_deleted,
         support_chat_messages_deleted=chat_messages_deleted,
         support_chat_conversations_deleted=chat_conversations_deleted,
+        relay_receipts_deleted=relay_receipts_deleted,
     )
 
 

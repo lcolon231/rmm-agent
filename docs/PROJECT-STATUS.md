@@ -474,7 +474,13 @@ and a rebuilt Windows agent; the tagged `v0.1.11` release ships `0044`.
   audit verification tool, and a customer audit portal remain planned.
 - **Milestone 4 — Scale and Ecosystem:** shared infrastructure, distributed
   execution, high availability, public APIs, integrations, signed extensions,
-  and later Linux/macOS support.
+  and later Linux/macOS support. Multi-region relays (#87) are implemented on
+  the control plane and the agent (relay registry and key lifecycle, signed
+  forwarding with skew, store-and-forward age, and replay bounds, tenant
+  ingress residency, a keyring-signed routing manifest, and agent failover with
+  origin polling as the fallback; `docs/RELAYS.md`). The deployable relay
+  service itself is **not** built (it depends on #84/#85), and residency is
+  ingress-only: the database is not regional.
 
 ## Explicitly not implemented yet
 

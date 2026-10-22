@@ -43,7 +43,7 @@ def sqlite_url(path: Path) -> str:
 def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
     path = tmp_path / "assistant-migration.db"
     config = migration_config(sqlite_url(path))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0047"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0048"]
     command.upgrade(config, "0041")
     command.upgrade(config, "0042")
     with sqlite3.connect(path) as connection:
@@ -983,7 +983,7 @@ def test_evidence_vault_migration_is_additive_with_a_single_active_hold_per_scop
     path = tmp_path / "evidence-vault-migration.db"
     config = migration_config(sqlite_url(path))
     command.upgrade(config, "0046")
-    command.upgrade(config, "head")
+    command.upgrade(config, "0047")
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0047"
         tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -1000,6 +1000,55 @@ def test_evidence_vault_migration_is_additive_with_a_single_active_hold_per_scop
             connection.execute(insert, ("h2", "active"))
     with pytest.raises(RuntimeError, match="forward-only"):
         command.downgrade(config, "0046")
+    command.upgrade(config, "head")
+    asyncio.run(_assert_current(sqlite_url(path)))
+
+
+def test_multi_region_relay_migration_is_additive_and_forward_only(tmp_path: Path):
+    """0048 (issue #87): new relay tables plus a nullable agent column."""
+    path = tmp_path / "relay-migration.db"
+    config = migration_config(sqlite_url(path))
+    command.upgrade(config, "0047")
+    with sqlite3.connect(path) as connection:
+        connection.execute("INSERT INTO clients (id, name, created_at) VALUES ('c1', 'Acme', '2026-10-21')")
+        connection.execute(
+            "INSERT INTO sites (id, client_id, name, created_at) VALUES ('s1', 'c1', 'HQ', '2026-10-21')"
+        )
+        connection.execute(
+            "INSERT INTO agents (id, site_id, token_hash, hostname, os, os_version, "
+            "agent_version, status, enrolled_at) "
+            "VALUES ('a1', 's1', 'h', 'pc', 'windows', '11', '0.1.0', 'online', '2026-10-21')"
+        )
+        connection.commit()
+    command.upgrade(config, "head")
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0048"
+        tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {
+            "relay_regions",
+            "relays",
+            "relay_keys",
+            "tenant_region_policies",
+            "relay_forward_receipts",
+        } <= tables
+        # Existing agents keep working: the route column starts empty.
+        assert connection.execute("SELECT relay_route FROM agents WHERE id = 'a1'").fetchone()[0] is None
+        receipt_indexes = {
+            r[1] for r in connection.execute("PRAGMA index_list(relay_forward_receipts)")
+        }
+        assert {
+            "ix_relay_forward_receipts_received",
+            "ix_relay_forward_receipts_agent",
+        } <= receipt_indexes
+        unique = [
+            r for r in connection.execute("PRAGMA index_list(relay_forward_receipts)") if r[2] == 1
+        ]
+        assert any(
+            [c[2] for c in connection.execute(f"PRAGMA index_info({r[1]})")] == ["relay_id", "nonce"]
+            for r in unique
+        )
+    with pytest.raises(RuntimeError, match="forward-only"):
+        command.downgrade(config, "0047")
     asyncio.run(_assert_current(sqlite_url(path)))
 
 

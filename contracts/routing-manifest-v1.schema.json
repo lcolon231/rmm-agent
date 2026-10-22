@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nodelink.invalid/contracts/routing-manifest-v1.schema.json",
+  "title": "NodeLink agent routing manifest v1 (issue #87)",
+  "description": "The document inside a heartbeat's routing_manifest.manifest_b64. Agents verify Ed25519 signatures over the ASCII prefix 'nodelink-agent-routing-v1:' followed by the exact manifest bytes, so no re-canonicalization is required.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_version",
+    "agent_id",
+    "issued_at",
+    "expires_at",
+    "residency_mode",
+    "home_region",
+    "routes",
+    "command_public_keys"
+  ],
+  "properties": {
+    "manifest_version": {"const": "routing-manifest-v1"},
+    "agent_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "issued_at": {"type": "integer", "minimum": 0},
+    "expires_at": {"type": "integer", "minimum": 0},
+    "residency_mode": {"enum": ["none", "preferred", "strict"]},
+    "home_region": {"type": "string", "pattern": "^[a-z0-9-]{0,32}$"},
+    "routes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {"kind": {"const": "origin"}}
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "relay_id", "region", "base_url", "tls_spki_pins"],
+            "properties": {
+              "kind": {"const": "relay"},
+              "relay_id": {"type": "string", "pattern": "^[0-9a-f-]{36}$"},
+              "region": {"type": "string", "pattern": "^[a-z0-9-]{2,32}$"},
+              "base_url": {"type": "string", "pattern": "^https://[^/?#@]+$"},
+              "tls_spki_pins": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {"type": "string", "pattern": "^sha256/[A-Za-z0-9+/]{43}=$"}
+              }
+            }
+          }
+        ]
+      }
+    },
+    "command_public_keys": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[A-Za-z0-9._-]{1,64}$"},
+      "additionalProperties": {"type": "string", "minLength": 1}
+    }
+  }
+}

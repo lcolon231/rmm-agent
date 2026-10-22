@@ -141,6 +141,7 @@ If you have ten minutes, these files show the core ideas:
 | Hash-chained audit log and Merkle anchors | [`server/app/core/audit.py`](server/app/core/audit.py), [`server/app/core/anchor.py`](server/app/core/anchor.py) |
 | Two-person approval for sensitive commands | [`server/app/core/approvals.py`](server/app/core/approvals.py) |
 | Justified emergency override of an approval policy | [`server/app/core/emergency_overrides.py`](server/app/core/emergency_overrides.py) |
+| Regional relay routing: signed forwards, residency, signed routing manifest | [`server/app/core/relays.py`](server/app/core/relays.py), [`docs/RELAYS.md`](docs/RELAYS.md) |
 | Agent self-update with automatic rollback | [`agent/internal/selfupdate/`](agent/internal/selfupdate/) |
 | Security analysis | [`docs/threat-model.md`](docs/threat-model.md) |
 | Design source of truth | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
