@@ -302,3 +302,21 @@ async def test_email_delivery_retry_refusals(
 
     assert response.status_code == 409
     assert response.json()["detail"] == detail
+
+
+async def test_duplicate_name_missed_by_precheck_is_409_not_500(client):
+    # Regression: casefold() ("équipe") and SQLite lower() ("Équipe") disagree,
+    # so the pre-check misses the duplicate and the unique name index rejects
+    # the policy insert, which used to escape the IntegrityError guard as a 500.
+    customer = (
+        await client.post("/clients", json={"name": f"Policy {uuid4().hex}"})
+    ).json()
+    site = (
+        await client.post("/sites", json={"client_id": customer["id"], "name": "HQ"})
+    ).json()
+    body = {**_policy("Équipe"), "scope": "site", "scope_id": site["id"]}
+    first = await client.post("/monitoring/policies", json=body)
+    assert first.status_code == 201, first.text
+    second = await client.post("/monitoring/policies", json=body)
+    assert second.status_code == 409, second.text
+    assert second.json()["detail"]["code"] == "monitoring_policy_name_exists"

@@ -193,3 +193,18 @@ async def test_sync_with_meshcentral_unreachable_fails_closed(env, monkeypatch):
     r = await env.post("/remote-desktop/mappings/sync")
     assert r.status_code == 503, r.text
     assert r.json()["detail"] == {"code": "remote_desktop_unavailable"}
+
+
+async def test_duplicate_name_missed_by_precheck_is_409_not_500(env):
+    # Regression: casefold() ("équipe") and SQLite lower() ("Équipe") disagree,
+    # so the pre-check misses the duplicate and the unique name index rejects
+    # the policy insert. That insert used to sit outside the IntegrityError
+    # guard and surfaced as a 500.
+    org = (await env.post("/clients", json={"name": f"Policy {uuid4().hex}"})).json()
+    site = (await env.post("/sites", json={"client_id": org["id"], "name": "HQ"})).json()
+    body = {"name": "Équipe", "scope": "site", "scope_id": site["id"], **_REVISION}
+    first = await env.post("/patch-approval/policies", json=body)
+    assert first.status_code == 201, first.text
+    second = await env.post("/patch-approval/policies", json=body)
+    assert second.status_code == 409, second.text
+    assert second.json()["detail"]["code"] == "patch_approval_policy_name_exists"
