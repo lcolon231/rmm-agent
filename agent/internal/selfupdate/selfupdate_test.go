@@ -383,21 +383,91 @@ func TestHTTPDownloadRejectsOversizedBodyAndPlaintextRedirect(t *testing.T) {
 	}
 }
 
-func TestUpdateRefusesUnsignedArtifactWhenSignerIsPinned(t *testing.T) {
+// TestUpdateRefusesArtifactFailingThePinnedSigner covers every way the pinned
+// Authenticode check can say no. The refusal comes before the attempt is
+// journalled, so it must leave no journal, no staged artifact, the running
+// build in place, and no restart request — only a failed outcome report.
+func TestUpdateRefusesArtifactFailingThePinnedSigner(t *testing.T) {
+	const pinned = "AABBCCDDEEFF00112233445566778899AABBCCDD"
+	tests := []struct {
+		name  string
+		valid bool
+		thumb string
+		err   error
+	}{
+		{"unsigned", false, "", nil},
+		{"wrong publisher", true, "00112233445566778899AABBCCDDEEFF00112233", nil},
+		{"pinned signer but signature not valid", false, pinned, nil},
+		{"verifier error", false, "", fmt.Errorf("powershell.exe: not found")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t, "0.1.0")
+			h.serveArtifact(newBinary)
+			verified := 0
+			verifyAuthenticode = func(context.Context, string) (bool, string, error) {
+				verified++
+				return tt.valid, tt.thumb, tt.err
+			}
+			raw := Execute(context.Background(), "cmd-1", executor.KindAgentSelfUpdate,
+				updatePayloadJSON(map[string]any{"signer_thumbprint": pinned}), h.opts)
+			res := decodeResult(t, raw)
+			if raw.ExitCode == 0 || res.Status != StatusSignatureMismatch || res.Reason != "authenticode_mismatch" {
+				t.Fatalf("exit=%d status=%q reason=%q; want a failed %q report", raw.ExitCode, res.Status, res.Reason, StatusSignatureMismatch)
+			}
+			if verified != 1 {
+				t.Fatalf("verifier ran %d times, want 1", verified)
+			}
+			if h.exeContent() != oldBinary {
+				t.Fatal("an artifact failing the pinned signer check must not be installed")
+			}
+			if h.restarts != 0 {
+				t.Fatal("a refused artifact must not trigger a restart")
+			}
+			if journal := h.journal(); journal != nil {
+				t.Fatalf("a refusal before staging must not journal an attempt: %+v", journal)
+			}
+			if leftovers := stagedFiles(t, h.opts.Root); len(leftovers) != 0 {
+				t.Fatalf("the refused artifact must be removed: %v", leftovers)
+			}
+		})
+	}
+}
+
+func TestUpdateInstallsArtifactFromThePinnedSigner(t *testing.T) {
 	h := newHarness(t, "0.1.0")
 	h.serveArtifact(newBinary)
 	verifyAuthenticode = func(context.Context, string) (bool, string, error) {
-		return false, "", nil
+		return true, "aabbccddeeff00112233445566778899aabbccdd", nil
 	}
 	res := runUpdate(t, h, updatePayloadJSON(map[string]any{
 		"signer_thumbprint": "AABBCCDDEEFF00112233445566778899AABBCCDD",
 	}))
-	if res.Status != StatusSignatureMismatch {
-		t.Fatalf("status = %q, want %q", res.Status, StatusSignatureMismatch)
+	if res.Status != StatusRestartPending || h.exeContent() != newBinary {
+		t.Fatalf("status = %q (%s); a valid signature from the pinned signer must install", res.Status, res.Message)
 	}
-	if h.exeContent() != oldBinary {
-		t.Fatal("an artifact failing the pinned signer check must not be installed")
+}
+
+// stagedFiles lists the downloaded artifacts left under root.
+func stagedFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var found []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if !info.IsDir() && strings.HasPrefix(info.Name(), "staged-") {
+			found = append(found, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	return found
 }
 
 // --------------------------------------------------------------------------
