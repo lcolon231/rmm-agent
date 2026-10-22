@@ -30,6 +30,8 @@ from app.core.security import hash_password  # noqa: E402
 from app.main import app
 from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
+    Agent,
+    AgentUpdateAttempt,
     AuditEvent,
     Command,
     CommandKind,
@@ -471,6 +473,64 @@ async def test_quarantined_endpoint_is_not_targeted(client):
     assert response.status_code == 200, response.text
     assert response.json()["dispatched"] == 0
     assert response.json()["skipped"]["agent_not_trusted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_endpoint_under_an_approval_policy_is_not_targeted(client):
+    """A rollout cannot walk around a policy that governs agent_self_update (#292).
+
+    A release has no per-endpoint approval to spend, so a governed endpoint is
+    skipped with a coded reason, the same way a quarantined one is, and stays
+    untargeted (no attempt row) so a later advance re-evaluates it.
+    """
+    headers = await auth(client)
+    governed_id, _ = await enroll(client, headers)
+    open_id, _ = await enroll(client, headers)
+    async with AsyncSessionLocal() as db:
+        governed_site = (
+            await db.execute(select(Agent.site_id).where(Agent.id == governed_id))
+        ).scalar_one()
+    policy = await client.post(
+        "/approval-policies",
+        json={
+            "name": "Dual control for agent binaries",
+            "scope": "site",
+            "scope_id": governed_site,
+            "command_kinds": ["agent_self_update"],
+            "required_approvals": 2,
+            "request_ttl_seconds": 3600,
+        },
+        headers=headers,
+    )
+    assert policy.status_code == 201, policy.text
+    release = await publish(client, headers)
+
+    for _ in range(2):
+        response = await client.post(
+            f"/agent-updates/releases/{release['id']}/rollout",
+            json={"rollout_percent": 100},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["skipped"]["approval_required"] == 1
+
+    async with AsyncSessionLocal() as db:
+        targeted = (await db.execute(select(Command.agent_id))).scalars().all()
+        attempted = (
+            await db.execute(select(AgentUpdateAttempt.agent_id))
+        ).scalars().all()
+        refusals = (
+            await db.execute(
+                select(AuditEvent).where(
+                    AuditEvent.action == "agent_update.approval_refused"
+                )
+            )
+        ).scalars().all()
+    assert targeted == [open_id]
+    assert attempted == [open_id]
+    assert len(refusals) == 2
+    assert all(event.agent_id == governed_id for event in refusals)
+    assert refusals[0].detail["policy_id"] == policy.json()["id"]
 
 
 # --------------------------------------------------------------------------- #

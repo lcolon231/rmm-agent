@@ -7,6 +7,7 @@ import {
   type ScheduledTaskListData,
 } from "@/lib/scheduled-tasks-core";
 import { nodelinkApiRequest } from "@/lib/nodelink-api";
+import { scheduledTaskActionPath } from "@/lib/schedules-route-core";
 
 export async function getScheduledTasks(
   sessionToken: string,
@@ -26,4 +27,21 @@ export async function getScheduledTasks(
     throw new Error("The management service returned invalid scheduled tasks data.");
   }
   return data;
+}
+
+export function createScheduledTask(sessionToken: string, input: Record<string, unknown>): Promise<unknown> {
+  return nodelinkApiRequest<unknown>("/api/v1/scheduled-tasks", {
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+    sessionToken,
+  });
+}
+
+export function toggleScheduledTask(sessionToken: string, scheduleId: string): Promise<unknown> {
+  return nodelinkApiRequest<unknown>(scheduledTaskActionPath(scheduleId, "toggle"), { method: "POST", sessionToken });
+}
+
+export function runScheduledTaskNow(sessionToken: string, scheduleId: string): Promise<unknown> {
+  return nodelinkApiRequest<unknown>(scheduledTaskActionPath(scheduleId, "run-now"), { method: "POST", sessionToken });
 }

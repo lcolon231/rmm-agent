@@ -53,6 +53,11 @@ The normative manifest schema is
 [`contracts/evidence-package-v1.schema.json`](../contracts/evidence-package-v1.schema.json),
 with a golden logical vector at
 [`contracts/test-vectors/evidence-package-v1.json`](../contracts/test-vectors/evidence-package-v1.json).
+That vector is a bare manifest. `verify_package_manifest` checks it with the
+same code the archive verifier runs, and the `package` cases in
+[`contracts/test-vectors/evidence-v1-invalid.json`](../contracts/test-vectors/evidence-v1-invalid.json)
+cover a tampered file digest, a wrong `package_id`, a missing file, an
+unexpected field, a wrong media type, and a foreign signing context.
 The archive has exactly seven regular files in this order:
 
 | Path | Purpose |
@@ -143,7 +148,8 @@ nonzero with a bounded failure reason. It never extracts files to disk.
 - An unavailable private key affects ZIP only when its public-key registry entry
   remains readable. Loss of the public keyring also blocks JSON, CSV, and PDF
   because their verification-key evidence would be incomplete.
-- Issue #81 adds immutable package storage, retention, and legal hold. Issue #82
+- Issue #81 adds immutable package storage, retention, and legal hold
+  ([`EVIDENCE-VAULT.md`](EVIDENCE-VAULT.md)). Issue #82
   packages the verifier as a supported cross-platform product. Neither is
   implied by this computed-download implementation.
 

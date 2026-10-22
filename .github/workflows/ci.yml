@@ -98,54 +98,47 @@ jobs:
         shell: pwsh
         run: agent/test/service_lifecycle.ps1 -Exe (Resolve-Path agent/bin/rmm-agent-windows-amd64.exe)
 
-      - name: Validate token-only installer contract
+      - name: Validate installer contract tests
         run: python -m unittest discover -s installer/test -p "test_*.py"
+
+      # A second, newer stamped build so the installer lifecycle below can
+      # upgrade one release over another.
+      - name: Build the next Windows agent (upgrade target)
+        working-directory: agent
+        run: |
+          $env:GOOS = 'windows'; $env:GOARCH = 'amd64'
+          go build -ldflags "-X main.version=0.0.1-ci" -o bin/rmm-agent-windows-amd64-next.exe ./cmd/agent
 
       # Pinned to the 6.x line to match installer/NodeLinkAgent.iss and the
       # release workflow (bump both together when moving to IS7).
       - name: Install Inno Setup
         run: choco install innosetup --version=6.7.1 -y
 
-      - name: Compile the installer
+      # Both installers point at an unreachable .invalid host: the service the
+      # lifecycle test starts must never contact production (issue #288). The
+      # release workflow compiles without this override.
+      - name: Compile the installers
         working-directory: installer
-        env:
-          NODELINK_VERSION: 0.0.0-ci
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAgentExe=..\agent\bin\rmm-agent-windows-amd64.exe NodeLinkAgent.iss
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $server = '/DProductionServerURL=https://nodelink-ci.invalid'
+          $env:NODELINK_VERSION = '0.0.0-ci'
+          & $iscc $server /DAgentExe=..\agent\bin\rmm-agent-windows-amd64.exe NodeLinkAgent.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC exited $LASTEXITCODE" }
+          $env:NODELINK_VERSION = '0.0.1-ci'
+          & $iscc $server /DAgentExe=..\agent\bin\rmm-agent-windows-amd64-next.exe NodeLinkAgent.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC exited $LASTEXITCODE" }
 
-      - name: Silent install + uninstall smoke test
+      # Sidecar-only token, /TOKEN over sidecar, tokenless upgrade that keeps
+      # identity.json/config.json byte-identical, then uninstall.
+      - name: Installer lifecycle (sidecar, /TOKEN, upgrade, uninstall)
         shell: pwsh
-        run: |
-          $setup = Resolve-Path installer/Output/NodeLinkAgentSetup-0.0.0-ci.exe
-          $dir = Join-Path $env:RUNNER_TEMP 'nodelink-agent'
-          Write-Host "== silent install =="
-          $p = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList `
-            '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART', `
-            '/TOKEN=ci-token',"/DIR=$dir"
-          if ($p.ExitCode -ne 0) { throw "installer exited $($p.ExitCode)" }
-          $svc = Get-Service -Name NodeLinkAgent -ErrorAction SilentlyContinue
-          if ($null -eq $svc) { throw 'service not registered by installer' }
-          Write-Host "  ok: service registered (state $($svc.Status))"
-          $configPath = Join-Path $dir 'config.json'
-          if (-not (Test-Path $configPath)) { throw 'config.json not written' }
-          $config = Get-Content -Raw $configPath | ConvertFrom-Json
-          if ($config.server_url -ne 'https://nodelink-backend-733e.onrender.com') {
-            throw "unexpected server_url: $($config.server_url)"
-          }
-          if ($config.enrollment_token -ne 'ci-token') { throw 'enrollment token was not written' }
-          Write-Host "  ok: config.json uses the production server and /TOKEN"
-
-          Write-Host "== silent uninstall =="
-          $unins = Join-Path $dir 'unins000.exe'
-          if (-not (Test-Path $unins)) { throw "uninstaller missing at $unins" }
-          $u = Start-Process -FilePath $unins -Wait -PassThru -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
-          if ($u.ExitCode -ne 0) { throw "uninstaller exited $($u.ExitCode)" }
-          Start-Sleep -Seconds 2
-          if ($null -ne (Get-Service -Name NodeLinkAgent -ErrorAction SilentlyContinue)) {
-            throw 'service still present after uninstall'
-          }
-          Write-Host "  ok: service removed by uninstaller"
-          Write-Host "WINDOWS INSTALLER SMOKE OK"
+        run: >-
+          installer/test/installer_lifecycle.ps1
+          -SetupV1 (Resolve-Path installer/Output/NodeLinkAgentSetup-0.0.0-ci.exe)
+          -SetupV2 (Resolve-Path installer/Output/NodeLinkAgentSetup-0.0.1-ci.exe)
+          -V2Version 0.0.1-ci
+          -ServerURL https://nodelink-ci.invalid
 
   server:
     name: server (Python)
@@ -177,7 +170,7 @@ jobs:
           cache: pip
           cache-dependency-path: server/requirements.txt
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-asyncio pytest-cov httpx aiosqlite "moto[s3]"
+        run: pip install -r requirements.txt pytest pytest-asyncio pytest-cov httpx aiosqlite "moto[s3]" "jsonschema==4.25.1"
       - name: Generate command signing key (tests need it)
         run: python scripts/gen_command_keys.py
       - name: Run tests (with branch coverage, issue #284)

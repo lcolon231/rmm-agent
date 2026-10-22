@@ -262,6 +262,13 @@ The code in this repository currently provides:
   carrying fixed manifests, anchors, receipts, and public verification keys,
   with independent clean-room verifiers. See `docs/EVIDENCE-BUNDLES.md` and
   `docs/EVIDENCE-PACKAGES.md`.
+- Immutable evidence retention and legal hold (issue #81, schema `0047`):
+  signed packages retained on S3 Object Lock (storage-enforced) or a
+  filesystem directory (application-enforced), with a retention floor,
+  record- and tenant-scoped legal holds, admin-only disposal refused under
+  hold or before expiry, and integrity re-verification. Server-side and
+  API-only. It is verified with an S3 emulator, not yet against a live bucket.
+  See `docs/EVIDENCE-VAULT.md`.
 - Fail-closed production startup validation (`ENVIRONMENT=production` rejects
   debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
   URLs) with explicit opt-in proxy trust for client IPs.
@@ -512,7 +519,10 @@ The repository does **not** currently contain:
   certificate-based signing is
   missing). External audit-anchor publication ships (`docs/AUDIT-ANCHORING.md`)
   but the operator must configure and operate the destination.
-- Tenant-specific retention, OIDC/SAML federation, or legal hold.
+- OIDC/SAML federation, per-tenant retention schedules for operational data,
+  and a dashboard UI for the evidence vault. Evidence retention and legal hold
+  are implemented server side (`docs/EVIDENCE-VAULT.md`), but a live-bucket
+  verification has not been recorded.
   Tenant-scoped authorization with per-tenant roles
   (`docs/TENANT-AUTHORIZATION.md`) and signed compliance evidence exports
   (`docs/EVIDENCE-PACKAGES.md`) are implemented server side; the membership

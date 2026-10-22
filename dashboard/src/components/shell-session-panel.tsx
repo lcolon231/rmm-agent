@@ -13,6 +13,8 @@ import {
 } from "@/lib/shell-session-core";
 
 type TerminalLine = { id: string; stream: "input" | "stdout" | "stderr" | "control"; text: string };
+/** A refusal or malformed batch from the server: the stream stops instead of reconnecting. */
+class LiveOutputRefused extends Error {}
 const MAX_VISIBLE_CHARS = 256 * 1024;
 
 function encodeBase64(value: string): string {
@@ -62,10 +64,10 @@ export function ShellSessionPanel({ endpointId, trusted, capable, canExecuteScri
               await new Promise((resolve) => window.setTimeout(resolve, 1000));
               continue;
             }
-            throw new Error(typeof raw === "object" && raw !== null && typeof (raw as { error?: unknown }).error === "string" ? String((raw as { error: string }).error) : "Live output stopped.");
+            throw new LiveOutputRefused(typeof raw === "object" && raw !== null && typeof (raw as { error?: unknown }).error === "string" ? String((raw as { error: string }).error) : "Live output stopped.");
           }
           const batch = shellFrameBatchFromUnknown(raw);
-          if (!batch) throw new Error("The server returned invalid live output.");
+          if (!batch) throw new LiveOutputRefused("The server returned invalid live output.");
           setError(null);
           setSession(batch.session);
           if (batch.frames.length) {
@@ -79,10 +81,13 @@ export function ShellSessionPanel({ endpointId, trusted, capable, canExecuteScri
           }
           if (["closed", "denied", "timed_out", "failed"].includes(batch.session.status)) stopped = true;
         } catch (pollError) {
-          if (!controller.signal.aborted) {
+          if (pollError instanceof LiveOutputRefused) {
+            // Validation and 4xx errors fail closed with the server's reason.
+            stopped = true;
+            if (!controller.signal.aborted) setError(pollError.message);
+          } else if (!controller.signal.aborted) {
             // Browser/network interruptions keep the cursor and reconnect to
-            // the same long poll. Validation and 4xx errors take the explicit
-            // fail-closed path above.
+            // the same long poll.
             await new Promise((resolve) => window.setTimeout(resolve, 1000));
             if (!controller.signal.aborted) setError("Connection interrupted. Reconnecting…");
           }

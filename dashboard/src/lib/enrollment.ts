@@ -3,7 +3,7 @@
 import "server-only";
 
 import type { EnrollmentTokenStatus } from "@/lib/enrollment-core";
-import { nodelinkApiRequest } from "@/lib/nodelink-api";
+import { nodelinkApiRequest, nodelinkApiRequestRaw } from "@/lib/nodelink-api";
 
 export type EnrollmentAgent = {
   id: string;
@@ -131,4 +131,38 @@ export async function getAuditEvents(
     `/api/v1/audit/events?${params}`,
     { method: "GET", sessionToken },
   );
+}
+
+export function createEnrollmentToken(sessionToken: string, input: Record<string, unknown>) {
+  return nodelinkApiRequest<unknown>("/api/v1/enrollment-tokens", {
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+    sessionToken,
+  });
+}
+
+export function revokeEnrollmentToken(sessionToken: string, tokenId: string, reason: string) {
+  return nodelinkApiRequest<unknown>(`/api/v1/enrollment-tokens/${encodeURIComponent(tokenId)}/revoke`, {
+    body: JSON.stringify({ reason }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+    sessionToken,
+  });
+}
+
+export function revokeAgent(sessionToken: string, agentId: string, reason: string) {
+  return nodelinkApiRequest<unknown>(`/api/v1/agents/${encodeURIComponent(agentId)}/revoke`, {
+    body: JSON.stringify({ reason }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+    sessionToken,
+  });
+}
+
+export function requestInstallerPackage(sessionToken: string, siteId: string) {
+  return nodelinkApiRequestRaw(`/api/v1/sites/${encodeURIComponent(siteId)}/installer-package`, {
+    method: "POST",
+    sessionToken,
+  });
 }

@@ -63,6 +63,21 @@ authentication and role-based authorization:
   symlinks, compression bombs, duplicate/unexpected paths, signature or receipt
   tamper, and a public key that differs from the separately trusted deployment
   key. A public key inside its own archive is never accepted as a trust anchor.
+- **Immutable evidence retention and legal hold (issue #81).** An attacker who
+  owns the NodeLink host or database could delete or substitute retained
+  evidence, or edit the ledger to claim retention has elapsed. On the `s3`
+  backend the bucket's Object Lock is the control that resists this: COMPLIANCE
+  retention and legal hold are enforced by storage, every operation names the
+  recorded object version, and a lock that was not applied is refused at store
+  time. If the ledger says retention elapsed but storage disagrees, storage
+  wins and the record is flagged `lock_drift`. The `filesystem` backend only
+  *detects* tamper or absence; it resists deletion only on a WORM mount. Holds
+  are authoritative in the database and fail safe: an outage can delay the
+  storage hold but never loses the hold, and a release during an outage leaves
+  the storage hold on. Hold and disposal reasons enter the audit chain only as
+  digests. Storage credentials never leave the AWS client. Residual risk: a
+  GOVERNANCE-mode bucket can be bypassed by a principal with
+  `s3:BypassGovernanceRetention`, and replica loss is not detected by NodeLink.
 - **Bootstrap.** The first admin is created out-of-band via
   `scripts/create_admin.py` (the create-operator endpoint is admin-only, so it
   can't mint the first admin itself).

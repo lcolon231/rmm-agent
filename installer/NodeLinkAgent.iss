@@ -56,7 +56,12 @@
   #endif
 #endif
 
-#define ProductionServerURL "https://nodelink-backend-733e.onrender.com"
+; CI compiles with /DProductionServerURL=https://nodelink-ci.invalid so the
+; lifecycle test never points a running service at production (issue #288).
+; Release builds must not override it; test_installer_contract.py enforces that.
+#ifndef ProductionServerURL
+  #define ProductionServerURL "https://nodelink-backend-733e.onrender.com"
+#endif
 
 ; Personalized-installer sidecar (issue #9). A dashboard-generated download
 ; bundles this file next to Setup.exe carrying a short-lived, single-use

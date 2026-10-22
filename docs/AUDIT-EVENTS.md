@@ -85,6 +85,14 @@ and SHA-256/Merkle roots—remains readable.
 | `patch_compliance.viewed` | `api/management.py` patch compliance summary or list view (issue #54) | `client_id`, `site_id`, `state`, `view`, `result_count` |
 | `patch_compliance.exported` | `api/management.py` patch compliance CSV/JSON export (issue #54) | `client_id`, `site_id`, `state`, `format`, `row_count` |
 | `evidence_bundle.exported` | `api/evidence.py` tenant evidence JSON/CSV/PDF/signed-ZIP download (issues #79/#80) | `bundle_id`, `package_id`, `signing_key_id`, `tenant_id`, `format`, `from_seq`, `through_seq`, `record_count`, `content_sha256` |
+| `evidence_vault.stored` | `api/evidence_vault.py` signed package retained in the evidence vault (issue #81) | `record_id`, `tenant_id`, `package_id`, `bundle_id`, `backend`, `sha256`, `size_bytes`, `retention_mode`, `retain_until`, `legal_hold` |
+| `evidence_vault.store_failed` | `api/evidence_vault.py` vault write refused or storage unavailable; nothing recorded as retained | `tenant_id`, `package_id`, `backend`, `code` |
+| `evidence_vault.retrieved` | `api/evidence_vault.py` digest-checked download of retained bytes | `record_id`, `tenant_id`, `package_id`, `sha256` |
+| `evidence_vault.verified` | `api/evidence_vault.py` operator re-verification, or `core/tasks.py` sweep on a transition into a failing state | `record_id`, `tenant_id`, `trigger`, `integrity_state`, `reason` |
+| `evidence_vault.deletion_denied` | `api/evidence_vault.py` disposal refused by retention, legal hold, or storage lock | `record_id`, `tenant_id`, `code`, `retain_until` |
+| `evidence_vault.deleted` | `api/evidence_vault.py` administrator disposal after retention with no active hold | `record_id`, `tenant_id`, `package_id`, `sha256`, `reason_sha256`, `reason_bytes` |
+| `evidence_legal_hold.placed` | `api/evidence_vault.py` record- or tenant-scoped legal hold | `hold_id`, `tenant_id`, `record_id`, `scope`, `reason_sha256`, `reason_bytes`, `covered_records`, `storage_pending` |
+| `evidence_legal_hold.released` | `api/evidence_vault.py` legal hold release | `hold_id`, `tenant_id`, `record_id`, `scope`, `reason_sha256`, `reason_bytes`, `covered_records`, `storage_pending` |
 | `package_install.gated` | `api/management.py` package install/upgrade gate (issue #55) | `provider`, `operation`, `requested`, `source_present`, `source_digest`, `signer_present` |
 | `package_scan.dispatched` | `api/management.py` package discovery dispatch (issue #55) | `provider` |
 | `software_deployment.dispatched` | `api/management.py` MSI/EXE deployment dispatch (issue #56) | `installer_type`, `sha256`, `url_sha256`, `argument_count`, `timeout_seconds`, `signer_pinned`, `success_code_override`, `reboot_policy` |
@@ -93,6 +101,7 @@ and SHA-256/Merkle roots—remains readable.
 | `agent_update.release_published` | `api/agent_updates.py` signed agent release publication (issue #63) | `release_id`, `version`, `channel`, `platform`, `artifact_sha256`, `artifact_size_bytes`, `artifact_url_sha256`, `min_supported_version`, `signer_pinned`, `manifest_sha256`, `signing_key_id`, `failure_threshold_percent`, `min_attempts_before_halt` |
 | `agent_update.rollout_advanced` | `api/agent_updates.py` staged rollout widened (issue #63) | `release_id`, `version`, `channel`, `rollout_percent`, `dispatched`, `truncated` |
 | `agent_update.dispatched` | `api/agent_updates.py` signed self-update command queued for one endpoint (issue #63) | `release_id`, `command_id`, `version`, `channel`, `from_version`, `artifact_sha256`, `rollout_bucket` |
+| `agent_update.approval_refused` | `api/agent_updates.py` rollout skipped an endpoint whose `agent_self_update` is under an approval policy (issue #292) | `release_id`, `version`, `agent_id`, `policy_id`, `required_approvals` |
 | `agent_update.rollout_paused` | `api/agent_updates.py` rollout paused (issue #63) | `release_id`, `rollout_percent` |
 | `agent_update.rollout_resumed` | `api/agent_updates.py` rollout resumed (issue #63) | `release_id`, `rollout_percent` |
 | `agent_update.rollout_halted` | `api/agent_updates.py` rollout halted by operator or canary rule (issue #63) | `release_id`, `version`, `channel`, `reason`, `rollout_percent` |

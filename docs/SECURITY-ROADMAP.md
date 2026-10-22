@@ -373,8 +373,15 @@ implemented. Generic signed webhook delivery remains later Milestone 1 work.
   traversal, tamper, or over-limit archives. See
   [`EVIDENCE-BUNDLES.md`](EVIDENCE-BUNDLES.md) and
   [`EVIDENCE-PACKAGES.md`](EVIDENCE-PACKAGES.md).
-- Add immutable evidence storage, tenant-specific retention, deletion controls,
-  and legal hold with conflict tests.
+- **Implemented (issue #81).** Signed evidence packages, which carry the anchor
+  receipts, are retained in a content-addressed vault: S3 Object Lock
+  (storage-enforced COMPLIANCE/GOVERNANCE retention and legal hold) or an
+  application-enforced filesystem directory. Every package gets a configured
+  retention floor. Record- and tenant-scoped legal holds have conflict
+  detection. Disposal is admin-only and refused under hold or before
+  expiry. Integrity re-verification distinguishes tamper, absence, outage, and
+  lock weakening. Server-side and API-only; not yet verified against a live
+  bucket. See [`EVIDENCE-VAULT.md`](EVIDENCE-VAULT.md).
 - Ship a standalone verification CLI and a customer-facing read-only portal.
 
 These are HIPAA-supporting controls and compliance evidence features. They do

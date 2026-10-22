@@ -367,6 +367,27 @@ class Settings(BaseSettings):
     anchor_s3_object_lock_mode: str = "COMPLIANCE"  # GOVERNANCE | COMPLIANCE
     anchor_s3_retain_days: int = 3650
 
+    # --- Immutable evidence vault (issue #81) ---
+    # Where signed evidence packages (which embed the anchor receipts) are
+    # retained. "none" disables the vault: store requests fail with an explicit
+    # unsupported state. "filesystem" is application-enforced only (real WORM
+    # needs a WORM mount). "s3" writes to an Object Lock bucket, so retention
+    # and legal hold are enforced by the storage itself, not just NodeLink.
+    evidence_vault_backend: str = "none"  # none | filesystem | s3
+    evidence_vault_dir: str = "/var/lib/nodelink/evidence-vault"
+    evidence_vault_s3_bucket: str | None = None
+    evidence_vault_s3_prefix: str = "nodelink/evidence"
+    evidence_vault_s3_region: str | None = None
+    evidence_vault_s3_endpoint_url: str | None = None
+    evidence_vault_s3_object_lock_mode: str = "COMPLIANCE"  # GOVERNANCE | COMPLIANCE
+    # Minimum retention applied to every stored package. A store request may
+    # ask for longer (up to evidence_vault_max_retention_days), never shorter.
+    evidence_vault_retention_days: int = 2555
+    evidence_vault_max_retention_days: int = 36500
+    # Background re-verification of stored objects and legal-hold reconciliation.
+    evidence_vault_verify_interval_seconds: int = 86400
+    evidence_vault_verify_batch_size: int = 100
+
     # --- Storage growth / retention (issue #114) ---
     # Telemetry (heartbeats) is high-volume, non-compliance data. Rows older
     # than this are pruned. 0 disables pruning (unbounded — not recommended).

@@ -120,6 +120,14 @@ In CI, the release workflow (`.github/workflows/release.yml`) builds the
 installer on a `windows-latest` runner and attaches it to the GitHub Release
 alongside the raw binaries.
 
+The `windows-lifecycle` CI job compiles two stamped installers with
+`/DProductionServerURL=https://nodelink-ci.invalid`, so the service it starts
+never contacts production, and runs
+[`test/installer_lifecycle.ps1`](test/installer_lifecycle.ps1): a token from the
+sidecar only, `/TOKEN` overriding the sidecar, a tokenless upgrade that must
+leave `identity.json` and `config.json` byte-identical, and uninstall. Release
+builds never pass that override; `test/test_installer_contract.py` enforces it.
+
 ## Relation to the CLI install path
 
 The production installer is a wrapper for endpoints; the CLI path in

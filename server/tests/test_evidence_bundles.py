@@ -646,6 +646,56 @@ def test_golden_v1_contract_vector_and_schema_are_stable():
     assert [item["path"] for item in package_vector["files"]] == list(
         evidence_packages.CONTENT_PATHS
     )
+    package_id, _signing = evidence_packages.verify_package_manifest(package_vector)
+    assert package_id == package_vector["package_id"]
+
+
+def _mutated_vector(base: dict, case: dict, id_field: str, id_parent: list) -> dict:
+    document = copy.deepcopy(base)
+    for mutation in case["mutations"]:
+        *parents, leaf = mutation["path"]
+        target = document
+        for key in parents:
+            target = target[key]
+        if mutation.get("delete"):
+            del target[leaf]
+        else:
+            target[leaf] = mutation["value"]
+    if case.get("rederive_id"):
+        holder = document
+        for key in id_parent:
+            holder = holder[key]
+        unsigned = {key: value for key, value in holder.items() if key != id_field}
+        holder[id_field] = hashlib.sha256(
+            evidence_bundles.canonical_json(unsigned)
+        ).hexdigest()
+    return document
+
+
+def test_evidence_negative_vectors_fail_closed():
+    vectors_dir = _CONTRACT_ROOT / "test-vectors"
+    invalid = json.loads(
+        (vectors_dir / "evidence-v1-invalid.json").read_text(encoding="utf-8")
+    )
+    bundle = json.loads(
+        (vectors_dir / "evidence-bundle-v1.json").read_text(encoding="utf-8")
+    )
+    package = json.loads(
+        (vectors_dir / "evidence-package-v1.json").read_text(encoding="utf-8")
+    )
+    assert invalid["bundle"] and invalid["package"]
+
+    for case in invalid["bundle"]:
+        document = _mutated_vector(bundle, case, "bundle_id", ["manifest"])
+        with pytest.raises(evidence_bundles.EvidenceVerificationError) as caught:
+            evidence_bundles.verify_bundle_document(document)
+        assert case["error"] in str(caught.value), case["name"]
+
+    for case in invalid["package"]:
+        manifest = _mutated_vector(package, case, "package_id", [])
+        with pytest.raises(evidence_packages.PackageVerificationError) as caught:
+            evidence_packages.verify_package_manifest(manifest)
+        assert case["error"] in str(caught.value), case["name"]
 
 
 @pytest.mark.asyncio

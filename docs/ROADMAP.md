@@ -202,6 +202,9 @@ Workstreams:
 - Versioned deterministic JSON/CSV evidence bundles (#79), tagged PDF summaries,
   and domain-separated Ed25519-signed ZIP packages with clean-room verification
   (#80) are implemented.
+- Immutable evidence storage with retention enforcement and scoped legal hold
+  (#81) is implemented server side (S3 Object Lock or filesystem); dashboard
+  UI and live-bucket verification remain.
 - Approval workflows and two-person authorization for sensitive actions (#64)
   are implemented: scoped opt-in policies, a payload-bound approval spent
   exactly once, live re-checked approver eligibility, and no bypass through

@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Annotated, Literal
 
@@ -594,14 +596,87 @@ SECTION_MODELS: dict[InventorySection, type[BaseModel]] = {
 }
 
 
+# Go's encoding/json escapes these inside strings even though the output is
+# UTF-8: <, > and & for HTML safety, U+2028/U+2029 for JavaScript. Every other
+# non-ASCII character is emitted raw. json.dumps(ensure_ascii=False) already
+# matches Go for quotes, backslashes and control characters (\b \f \n \r \t,
+# otherwise lowercase \u00XX), so only these five need translating afterwards.
+_GO_STRING_ESCAPES = str.maketrans(
+    {
+        "<": "\\u003c",
+        ">": "\\u003e",
+        "&": "\\u0026",
+        " ": "\\u2028",
+        " ": "\\u2029",
+    }
+)
+
+
+def _go_float(value: float) -> str:
+    """Format a float exactly as Go's encoding/json formats a float64.
+
+    Both runtimes print the shortest digits that round-trip, so repr(value)
+    already has the right significant digits; only the layout differs.
+    Go uses plain decimal notation when 1e-6 <= |value| < 1e21 (and for zero),
+    with no trailing ".0" on whole numbers; outside that range it uses
+    exponent notation like "1e-7" / "1e+21" (no zero-padding of a negative
+    exponent). Non-finite values cannot be encoded by Go and must raise
+    ValueError so the section fails validation instead of hashing differently.
+    """
+    if not math.isfinite(value):
+        raise ValueError("inventory values must be finite numbers")
+    if value == 0:
+        return "-0" if math.copysign(1.0, value) < 0 else "0"
+    if 1e-6 <= abs(value) < 1e21:
+        text = format(Decimal(repr(value)), "f")
+        return text.rstrip("0").rstrip(".") if "." in text else text
+    # Outside Go's plain range repr is always in exponent form with at least
+    # two exponent digits; Go drops the padding only from "e-0X".
+    mantissa, exponent = repr(value).split("e")
+    if exponent[0] == "-" and len(exponent) == 3 and exponent[1] == "0":
+        exponent = "-" + exponent[2]
+    return f"{mantissa}e{exponent}"
+
+
+def _go_json(value: object) -> str:
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return _go_float(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False).translate(_GO_STRING_ESCAPES)
+    if isinstance(value, list):
+        return "[" + ",".join(_go_json(item) for item in value) + "]"
+    if isinstance(value, dict):
+        # Go sorts keys by UTF-8 bytes; that is the same order as sorting
+        # Python strings by code point.
+        return "{" + ",".join(
+            f"{_go_json(key)}:{_go_json(value[key])}" for key in sorted(value)
+        ) + "}"
+    raise ValueError(f"unsupported inventory value: {type(value).__name__}")
+
+
 def canonical_inventory_bytes(payload: dict) -> bytes:
     """The exact byte sequence that is size-checked, hashed, and stored.
 
-    Sorted keys and tight separators, matching the canonicalization the command
-    envelope already uses, so an agent and the server can independently compute
-    the same content hash and agree on whether anything changed.
+    This is byte-for-byte what the agent's Go json.Marshal produces for the
+    same payload, so both sides compute the same content hash and agree on
+    whether anything changed (ARCHITECTURE.md §6.1). It is deliberately not
+    plain json.dumps: that ASCII-escapes non-ASCII text, leaves <>& raw, and
+    prints floats like 5e-05 or 100.0, any of which made an unchanged section
+    hash differently and resend on every heartbeat. The pinned vectors in
+    contracts/test-vectors/inventory-hash-v1.json are asserted by both suites.
+
+    A lone surrogate (which Go can never emit) fails the UTF-8 encode with a
+    ValueError, so it is rejected like any other malformed section.
     """
-    return json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return _go_json(payload).encode("utf-8")
 
 
 def inventory_content_hash(payload: dict) -> str:
