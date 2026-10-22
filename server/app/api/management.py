@@ -2575,7 +2575,16 @@ async def create_monitoring_policy(
         enabled=body.enabled,
     )
     db.add(policy)
-    await db.flush()
+    # The unique name index fires on this insert, not on the revision below.
+    # The pre-check above can miss a duplicate (a concurrent create, or a name
+    # where Python casefold() and SQL lower() disagree), so guard it here.
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "monitoring_policy_name_exists"},
+        ) from exc
     revision = MonitoringPolicyRevision(
         policy_id=policy.id,
         version=1,
@@ -2584,13 +2593,7 @@ async def create_monitoring_policy(
         created_by=operator.email,
     )
     db.add(revision)
-    try:
-        await db.flush()
-    except IntegrityError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "monitoring_policy_name_exists"},
-        ) from exc
+    await db.flush()
     await audit.record(
         db,
         action="monitoring_policy.created",
@@ -2975,7 +2978,16 @@ async def create_patch_policy(
         enabled=body.enabled,
     )
     db.add(policy)
-    await db.flush()
+    # The unique name index fires on this insert, not on the revision below.
+    # The pre-check above can miss a duplicate (a concurrent create, or a name
+    # where Python casefold() and SQL lower() disagree), so guard it here.
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "patch_approval_policy_name_exists"},
+        ) from exc
     revision = PatchApprovalPolicyRevision(
         policy_id=policy.id,
         version=1,
@@ -2990,13 +3002,7 @@ async def create_patch_policy(
         created_by=operator.email,
     )
     db.add(revision)
-    try:
-        await db.flush()
-    except IntegrityError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "patch_approval_policy_name_exists"},
-        ) from exc
+    await db.flush()
     await audit.record(
         db,
         action="patch_approval_policy.created",

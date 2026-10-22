@@ -170,11 +170,24 @@ jobs:
           cache: pip
           cache-dependency-path: server/requirements.txt
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-asyncio httpx aiosqlite "moto[s3]" "jsonschema==4.25.1"
+        run: pip install -r requirements.txt pytest pytest-asyncio pytest-cov httpx aiosqlite "moto[s3]" "jsonschema==4.25.1"
       - name: Generate command signing key (tests need it)
         run: python scripts/gen_command_keys.py
-      - name: Run tests
-        run: pytest -q
+      - name: Run tests (with branch coverage, issue #284)
+        run: pytest -q --cov=app --cov-branch --cov-report=term --cov-report=json:coverage.json
+      - name: Report untriggered HTTPException branches
+        run: |
+          set -o pipefail
+          # Ceiling, not a ratchet: race-only IntegrityError handlers can't be
+          # triggered by sequential tests, so leave headroom for them.
+          python scripts/report_refusal_coverage.py coverage.json --list --max-uncovered 20 | tee refusal-coverage.txt
+          {
+            echo '### Server coverage'
+            echo '```'
+            python -m coverage report --format=total | sed 's/^/total line+branch coverage: /;s/$/%/'
+            head -n 20 refusal-coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   dashboard:
     name: dashboard (Next.js)

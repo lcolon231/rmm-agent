@@ -1,0 +1,8 @@
+# Server coverage settings (issue #284).
+# SQLAlchemy's async engine runs ORM work inside greenlets; without the greenlet
+# concurrency mode coverage.py stops tracing after the first `await db...` and
+# reports most route bodies as unexecuted.
+[run]
+source = app
+branch = True
+concurrency = greenlet, thread

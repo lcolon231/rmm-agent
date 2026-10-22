@@ -607,3 +607,49 @@ async def test_agent_can_reattach_active_session_after_transport_disconnect(clie
     assert first.json()["session"]["id"] == session_id
     assert second.json()["session"]["id"] == session_id
     assert second.json()["session"]["status"] == "active"
+
+
+# --------------------------------------------------------------------------- #
+# Agent-side completion (issue #284: route had no HTTP test)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "expected", "action"),
+    [
+        ("closed", "closed", "shell_session.closed"),
+        ("failed", "failed", "shell_session.failed"),
+    ],
+)
+async def test_agent_complete_records_terminal_state_once(
+    client, status, expected, action
+):
+    op = await _auth(client, "sh-op@nodelink.test", "op-pass")
+    agent_id, agent_auth = await _enroll_identity(client, op)
+    session_id = (await _open(client, op, agent_id)).json()["id"]
+    await client.post("/agents/me/shell-sessions/attach", headers=agent_auth)
+
+    unknown = await client.post(
+        "/agents/me/shell-sessions/does-not-exist/complete",
+        json={"status": status},
+        headers=agent_auth,
+    )
+    assert unknown.status_code == 404
+
+    done = await client.post(
+        f"/agents/me/shell-sessions/{session_id}/complete",
+        json={"status": status},
+        headers=agent_auth,
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == expected
+    assert done.json()["close_reason"] == "agent_completed"
+
+    # A repeated completion is idempotent: terminal state, no second audit row.
+    again = await client.post(
+        f"/agents/me/shell-sessions/{session_id}/complete",
+        json={"status": "closed", "reason": "late"},
+        headers=agent_auth,
+    )
+    assert again.status_code == 200
+    assert again.json()["status"] == expected
+    assert (await _audit_actions()).count(action) == 1
