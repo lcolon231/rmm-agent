@@ -43,7 +43,7 @@ def sqlite_url(path: Path) -> str:
 def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
     path = tmp_path / "assistant-migration.db"
     config = migration_config(sqlite_url(path))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0046"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0047"]
     command.upgrade(config, "0041")
     command.upgrade(config, "0042")
     with sqlite3.connect(path) as connection:
@@ -956,7 +956,7 @@ def test_emergency_override_migration_is_additive_and_forward_only(tmp_path: Pat
             "VALUES ('p1', 'strict', 'global', NULL, '[\"powershell\"]', 2, 3600, 1, '2026-10-21')"
         )
         connection.commit()
-    command.upgrade(config, "head")
+    command.upgrade(config, "0046")
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0046"
         tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -972,6 +972,34 @@ def test_emergency_override_migration_is_additive_and_forward_only(tmp_path: Pat
         assert {"ix_emergency_overrides_client_status", "ix_emergency_overrides_unreviewed"} <= indexes
     with pytest.raises(RuntimeError, match="forward-only"):
         command.downgrade(config, "0045")
+    command.upgrade(config, "head")
+    asyncio.run(_assert_current(sqlite_url(path)))
+
+
+def test_evidence_vault_migration_is_additive_with_a_single_active_hold_per_scope(
+    tmp_path: Path,
+):
+    """0047 (issue #81): two new tables, idempotency + one-active-hold indexes."""
+    path = tmp_path / "evidence-vault-migration.db"
+    config = migration_config(sqlite_url(path))
+    command.upgrade(config, "0046")
+    command.upgrade(config, "head")
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0047"
+        tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"evidence_vault_records", "evidence_legal_holds"} <= tables
+        insert = (
+            "INSERT INTO evidence_legal_holds (id, client_id, record_id, scope_key, status, "
+            "reason, placed_by_email, placed_at) VALUES (?, 'c1', NULL, '*', ?, 'r', 'a@x', '2026-10-21')"
+        )
+        connection.execute(insert, ("h1", "active"))
+        # A released hold on the same scope never blocks a new active one ...
+        connection.execute(insert, ("h0", "released"))
+        # ... but a second active hold on the same scope is refused by the index.
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(insert, ("h2", "active"))
+    with pytest.raises(RuntimeError, match="forward-only"):
+        command.downgrade(config, "0046")
     asyncio.run(_assert_current(sqlite_url(path)))
 
 

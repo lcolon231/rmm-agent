@@ -305,6 +305,66 @@ async def anchor_publisher(stop: asyncio.Event) -> None:
             pass
 
 
+async def _vault_sweep_once() -> None:
+    """Reconcile storage legal holds and re-verify retained evidence. Only a
+    transition into a failing state is audited, so a steady sweep never grows
+    the chain (the same churn rule as anchor publication)."""
+    from app.core import audit, evidence_vault
+
+    vault = evidence_vault.build_vault(settings)
+    if vault is None:
+        return
+    async with AsyncSessionLocal() as db:
+        result = await evidence_vault.sweep(db, vault, settings)
+        for record, outcome in result.newly_failing or []:
+            await audit.record(
+                db,
+                action="evidence_vault.verified",
+                actor="system",
+                organization_id=record.client_id,
+                detail={
+                    "record_id": record.id,
+                    "tenant_id": record.client_id,
+                    "trigger": "sweep",
+                    "integrity_state": outcome.integrity_state,
+                    "reason": outcome.reason,
+                },
+            )
+        await db.commit()
+    for record, outcome in result.newly_failing or []:
+        print(
+            f"[evidence_vault] WARNING record {record.id} is {outcome.integrity_state} "
+            f"({outcome.reason})"
+        )
+    if result.holds_pending:
+        print(
+            f"[evidence_vault] WARNING {result.holds_pending} storage legal hold(s) "
+            "could not be reconciled; deletion stays blocked by the hold rows"
+        )
+
+
+async def evidence_vault_sweeper(stop: asyncio.Event) -> None:
+    """Periodic integrity/hold sweep for the evidence vault (issue #81)."""
+    from app.core.evidence_vault import BackendMisconfigured, build_vault
+
+    try:
+        if build_vault(settings) is None:
+            return
+    except BackendMisconfigured as exc:
+        print(f"[evidence_vault] WARNING vault misconfigured: {exc}")
+        return
+    interval = settings.evidence_vault_verify_interval_seconds
+    while not stop.is_set():
+        try:
+            await _vault_sweep_once()
+        except Exception as exc:  # keep the loop alive on transient errors
+            print(f"[evidence_vault] error: {type(exc).__name__}")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+
+
 async def scheduled_task_dispatcher(stop: asyncio.Event) -> None:
     """Inspect due scheduled tasks and dispatch corresponding commands (issue #49)."""
     from app.core import scheduler

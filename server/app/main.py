@@ -22,6 +22,7 @@ from app.api import (
     auth,
     emergency_overrides,
     evidence,
+    evidence_vault,
     management,
     meshcentral,
     mfa,
@@ -39,6 +40,7 @@ from app.core.structured_logging import log_event
 from app.core.tasks import (
     anchor_publisher,
     email_alert_sender,
+    evidence_vault_sweeper,
     offline_sweeper,
     retention_sweeper,
     scheduled_task_dispatcher,
@@ -76,6 +78,7 @@ async def lifespan(app: FastAPI):
     webhook_delivery_sender = asyncio.create_task(webhook_sender(stop))
     task_scheduler = asyncio.create_task(scheduled_task_dispatcher(stop))
     shell_expirer = asyncio.create_task(shell_session_sweeper(stop))
+    vault_verifier = asyncio.create_task(evidence_vault_sweeper(stop))
     try:
         yield
     finally:
@@ -88,6 +91,7 @@ async def lifespan(app: FastAPI):
             webhook_delivery_sender,
             task_scheduler,
             shell_expirer,
+            vault_verifier,
         )
 
 
@@ -106,6 +110,7 @@ app.include_router(mfa.router, prefix="/api/v1")
 app.include_router(admin_sessions.router, prefix="/api/v1")
 app.include_router(agents.router, prefix="/api/v1")
 app.include_router(evidence.router, prefix="/api/v1")
+app.include_router(evidence_vault.router, prefix="/api/v1")
 app.include_router(management.router, prefix="/api/v1")
 app.include_router(approvals.router, prefix="/api/v1")
 app.include_router(emergency_overrides.router, prefix="/api/v1")

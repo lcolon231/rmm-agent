@@ -23,6 +23,7 @@ settings. The pruners physically do not target those tables.
 | Support chat transcripts | DB (`support_messages`, `support_conversations`) | Endpoint-user conversations | Messages **and** the conversation row deleted `support_chat_retention_days` (default 30) after the conversation **closes**; open conversations are never pruned. Lifecycle audit events are kept ([`SUPPORT-CHAT.md`](SUPPORT-CHAT.md)) | `retention.prune_expired` |
 | Audit events | DB (`audit_events`) | Audited actions | **Never pruned** (compliance chain) | Observability only |
 | Merkle anchors + receipts | DB (`audit_anchors`, `anchor_publications`) | Anchor cadence | **Never pruned**; unpublished backlog is alerted | Observability + lag alert |
+| Retained evidence packages | Evidence vault (`filesystem` or S3 Object Lock) + DB ledger (`evidence_vault_records`, `evidence_legal_holds`) | Store requests | **Never pruned automatically.** Each package carries a retention date (floor `evidence_vault_retention_days`); disposal is an explicit admin action refused under legal hold or before expiry ([`EVIDENCE-VAULT.md`](EVIDENCE-VAULT.md)) | Explicit disposal only |
 | Encrypted backups | Off-host (operator-managed) | Backup schedule | Pruned **only** after verified off-host retention + key custody (manual) | Operator policy |
 | Host disk | Server filesystem | All of the above | Free-space threshold alert | Observability |
 
