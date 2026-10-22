@@ -60,3 +60,9 @@ Thumbs.db
 /.agents/skills/
 /.claude/skills/
 /skills-lock.json
+
+# Server coverage outputs (issue #284)
+server/.coverage
+server/.coverage.*
+server/coverage.json
+server/refusal-coverage.txt
