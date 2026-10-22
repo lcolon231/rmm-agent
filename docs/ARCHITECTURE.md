@@ -69,6 +69,26 @@ Agent/API client -- HTTPS --> Caddy :443 -- HTTP loopback --> uvicorn :8000
 This topology is documented in [DEPLOYMENT-TLS.md](DEPLOYMENT-TLS.md) and
 `deploy/Caddyfile`; production-policy enforcement is still planned.
 
+### 2.1 Regional relays (issue #87)
+
+```text
+Agent --HTTPS--> regional relay --HTTPS + X-NodeLink-Relay-* signature--> server
+  \--------------------- origin (always the last fallback) -------------/
+```
+
+With `RELAY_ROUTING_ENABLED`, polling endpoints may be reached through a
+regional relay. `RelayIngressMiddleware` verifies the relay signature, skew,
+store-and-forward age, body bound, and a unique (relay, nonce) receipt before
+any handler runs. `get_current_agent` then enforces the tenant's ingress
+residency policy. The heartbeat returns a keyring-signed routing manifest that
+lists relays best first. The agent fails over across them, with per-relay TLS
+pins and cooldowns, and falls back to origin polling. Enrollment, reattach,
+shell, chat, and self-update stay origin-only. The schema is in revision
+`0048`: `relay_regions`, `relays`, `relay_keys`, `tenant_region_policies`,
+`relay_forward_receipts`, and `agents.relay_route`. The contract, states, and
+rollback are in [RELAYS.md](RELAYS.md). The relay service process is not part
+of this repository yet.
+
 ## 3. Architectural planes
 
 ### 3.1 Trust plane

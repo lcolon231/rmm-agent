@@ -492,6 +492,25 @@ class Settings(BaseSettings):
     support_chat_retention_days: int = Field(default=30, ge=0)
     support_chat_notice_version: str = "1"
 
+    # --- Multi-region relays (issue #87) ---
+    # Off by default: while disabled, any request carrying relay forwarding
+    # headers is refused (fail closed) and heartbeats carry no routing manifest,
+    # so agents keep polling the origin exactly as before.
+    relay_routing_enabled: bool = False
+    # Accepted difference between the relay's signed timestamp and server time.
+    relay_clock_skew_seconds: int = Field(default=120, ge=5, le=600)
+    # Store-and-forward bound: a relay may hold an agent request at most this
+    # long (signed queued_at -> server receipt) before the server refuses it.
+    relay_max_forward_age_seconds: int = Field(default=300, ge=10, le=3600)
+    relay_max_forward_body_bytes: int = Field(
+        default=1_048_576, ge=4_096, le=8_388_608
+    )
+    relay_route_manifest_ttl_seconds: int = Field(default=3600, ge=300, le=86_400)
+    relay_max_routes: int = Field(default=8, ge=1, le=16)
+    # Forward receipts are the replay guard; they must outlive the accepted
+    # skew + forward age window, which the minimum of one day guarantees.
+    relay_receipt_retention_days: int = Field(default=7, ge=1, le=365)
+
     # How often the retention sweep runs.
     retention_sweep_interval_seconds: int = 86_400  # daily
     # Filesystem path whose free space is reported/alerted in /storage/status

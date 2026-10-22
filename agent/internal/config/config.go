@@ -71,6 +71,27 @@ type Identity struct {
 	// receipt and expiry without needing the server to report the lifetime.
 	// Empty for identities predating credential renewal (issue #125).
 	CredentialObtainedAt string `json:"credential_obtained_at,omitempty"`
+	// RoutingManifest is the last verified relay routing manifest (issue #87).
+	// Absent for identities predating relay routing, or when the server never
+	// offered one; the agent then polls the origin only.
+	RoutingManifest *StoredRoutingManifest `json:"routing_manifest,omitempty"`
+}
+
+// StoredRoutingManifest is the persisted, already-verified subset of a routing
+// manifest. IssuedAt is the rollback floor for the next manifest.
+type StoredRoutingManifest struct {
+	IssuedAt      int64         `json:"issued_at"`
+	ExpiresAt     int64         `json:"expires_at"`
+	ResidencyMode string        `json:"residency_mode"`
+	Routes        []StoredRoute `json:"routes"`
+}
+
+// StoredRoute is one relay route; the origin is implicit.
+type StoredRoute struct {
+	RelayID     string   `json:"relay_id"`
+	Region      string   `json:"region,omitempty"`
+	BaseURL     string   `json:"base_url"`
+	TLSSPKIPins []string `json:"tls_spki_pins,omitempty"`
 }
 
 // SaveInstallConfig writes a token-free install configuration atomically.

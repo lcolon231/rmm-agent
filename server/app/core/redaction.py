@@ -1014,6 +1014,25 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     ),
     # A cross-tenant mutation/dispatch attempt that failed closed. ``resource``
     # is a coded string (e.g. "command"); ids are opaque.
+    # Multi-region relays (issue #87).
+    "relay_region.created": _schema("region_id", "code", "name"),
+    "relay_region.status_changed": _schema("region_id", "previous", "current"),
+    "relay.registered": _schema(
+        "relay_id", "region_id", "name", "base_url", "pin_count"
+    ),
+    "relay.status_changed": _schema("relay_id", "previous", "current"),
+    "relay.key_registered": _schema(
+        "relay_id", "key_id", "public_key_sha256", "not_after"
+    ),
+    "relay.key_retired": _schema("relay_id", "key_id"),
+    "relay.key_revoked": _schema("relay_id", "key_id", "reason", digest_fields=("reason",)),
+    "relay.forward_refused": _schema(
+        "relay_id", "key_id", "reason", "path", "suppressed_count"
+    ),
+    "tenant.region_policy_set": _schema(
+        "client_id", "region_id", "mode", "previous_region_id", "previous_mode"
+    ),
+    "agent.route_changed": _schema("previous", "current", "region"),
     "tenant.access_denied": _schema(
         "operator_id",
         "resource",

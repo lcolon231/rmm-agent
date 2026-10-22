@@ -25,6 +25,7 @@ import (
 	"github.com/lcolon231/rmm/agent/internal/protocol"
 	"github.com/lcolon231/rmm/agent/internal/redact"
 	"github.com/lcolon231/rmm/agent/internal/telemetry"
+	"github.com/lcolon231/rmm/agent/internal/verify"
 )
 
 // StatusError is an HTTP-level rejection from the server. Keeping the status
@@ -63,6 +64,11 @@ type Client struct {
 	// is omitted, which an older server ignores.
 	updateChannel string
 	http          *http.Client
+	// Relay routes from the last verified routing manifest (issue #87), best
+	// first; the origin above is the implicit final route. See routes.go.
+	routes         []*routeState
+	routesExpireAt time.Time
+	lastRoute      string
 }
 
 // New creates a client. agentToken may be empty for the enrollment call.
@@ -409,6 +415,10 @@ type HeartbeatAck struct {
 	// ChatLaunchRequested is an opaque credential-bearing browser URL. Older
 	// servers omit it and older agents ignore the additive response field.
 	ChatLaunchRequested string `json:"chat_launch_requested"`
+	// RoutingManifest is the server-signed relay route set and key bundle
+	// (issue #87). Older servers, and servers with relay routing disabled,
+	// omit it. The agent acts on it only after verify.VerifyRoutingManifest.
+	RoutingManifest *verify.SignedRoutingManifest `json:"routing_manifest"`
 }
 
 // PendingResultNotice tells the server that execution has finished locally but
@@ -556,16 +566,53 @@ func (c *Client) ReportSelfUpdate(ctx context.Context, outcome SelfUpdateOutcome
 }
 
 // do performs a JSON request. If auth is true, the agent bearer token is sent.
+// A relayable call walks the manifest's relay routes in order and falls back
+// to the origin; any other call goes straight to the origin.
 func (c *Client) do(ctx context.Context, method, path string, in, out any, auth bool) error {
-	var reader io.Reader
+	var data []byte
 	if in != nil {
-		data, err := json.Marshal(in)
+		encoded, err := json.Marshal(in)
 		if err != nil {
 			return err
 		}
+		data = encoded
+	}
+	if auth && isRelayable(method, path) {
+		now := time.Now()
+		for _, route := range c.activeRoutes(now) {
+			err := c.doAt(ctx, route.http, route.baseURL, method, path, data, in != nil, out, auth)
+			if !shouldFailover(err) {
+				c.markRoute(route, true, now)
+				if err == nil {
+					c.setLastRoute(route.id)
+				}
+				return err
+			}
+			c.markRoute(route, false, now)
+		}
+		err := c.doAt(ctx, c.http, c.baseURL, method, path, data, in != nil, out, auth)
+		if err == nil {
+			c.setLastRoute(OriginRouteID)
+		}
+		return err
+	}
+	return c.doAt(ctx, c.http, c.baseURL, method, path, data, in != nil, out, auth)
+}
+
+func (c *Client) doAt(
+	ctx context.Context,
+	httpClient *http.Client,
+	baseURL, method, path string,
+	data []byte,
+	hasBody bool,
+	out any,
+	auth bool,
+) error {
+	var reader io.Reader
+	if hasBody {
 		reader = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, reader)
 	if err != nil {
 		return err
 	}
@@ -580,7 +627,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, auth 
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	resp, err := c.http.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

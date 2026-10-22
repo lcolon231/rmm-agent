@@ -34,6 +34,8 @@ def test_every_contract_has_a_schema_file():
         "command-v3",
         "evidence-bundle-v1",
         "evidence-package-v1",
+        "relay-forward-v1",
+        "routing-manifest-v1",
     }
 
 

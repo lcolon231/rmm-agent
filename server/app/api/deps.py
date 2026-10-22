@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 async def get_current_agent(
+    request: Request,
     authorization: str | None = Header(default=None, description="Bearer <agent_token>"),
     db: AsyncSession = Depends(get_db),
 ) -> Agent:
@@ -90,7 +91,36 @@ async def get_current_agent(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token"
         )
     agent.credential_matched = matched
+    await _apply_relay_route(request, agent, db)
     return agent
+
+
+async def _apply_relay_route(request: Request, agent: Agent, db: AsyncSession) -> None:
+    """Bind a relayed request's receipt to the agent and enforce residency.
+
+    Every authenticated agent endpoint passes through here, so the tenant's
+    ingress policy (issue #87) cannot be skipped by any one handler. The relay
+    itself was already authenticated by ``RelayIngressMiddleware``.
+    """
+    from app.core import relays
+    from app.core.tenant_scope import agent_client_id
+    from app.models.models import RelayForwardReceipt
+
+    ctx = getattr(request.state, "relay", None)
+    if ctx is not None:
+        receipt = await db.get(RelayForwardReceipt, ctx.receipt_id)
+        if receipt is not None:
+            receipt.agent_id = agent.id
+    if not settings.relay_routing_enabled:
+        return
+    await relays.enforce_route_policy(
+        db,
+        agent,
+        await agent_client_id(agent, db),
+        ctx,
+        path=request.url.path,
+        method=request.method,
+    )
 
 
 async def get_agent_for_credential_reattach(

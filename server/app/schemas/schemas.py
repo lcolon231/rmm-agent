@@ -482,6 +482,11 @@ class HeartbeatAck(BaseModel):
     # and a steady-state heartbeat carries no chat data.
     chat_launch_requested: str | None = None
     monitoring_checks: list["AgentCheckAssignment"] = Field(default_factory=list)
+    # Server-signed routing manifest (issue #87): ordered relay routes plus the
+    # command key bundle, as exact base64 bytes and one signature per signing
+    # key. Only sent to agents advertising "relay-routing" while relay routing
+    # is enabled; older agents ignore the field and keep polling the origin.
+    routing_manifest: dict[str, object] | None = None
 
 
 # --------------------------------------------------------------------------- #

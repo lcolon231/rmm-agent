@@ -368,6 +368,13 @@ func (a *Agent) loadSession(ctx context.Context) (*session, error) {
 	// Report the release channel this endpoint follows (issue #63) so the server
 	// only ever targets it with a release published on that channel.
 	api.SetUpdateChannel(cfg.Update.Channel)
+	// Resume relay routing from the last verified manifest (issue #87). A
+	// lapsed or unusable manifest is dropped, leaving origin-only polling.
+	if stored := identity.RoutingManifest; stored != nil {
+		if err := api.SetRoutes(storedRoutes(stored), time.Unix(stored.ExpiresAt, 0)); err != nil {
+			a.log.Printf("ignoring stored relay routes: %v", err)
+		}
+	}
 	monitoringStore, err := monitoring.LoadStore(monitoring.StatePath(a.configPath))
 	if err != nil {
 		return nil, fatal(err)
@@ -499,6 +506,9 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	if err != nil {
 		return err
 	}
+	// Which path carried this beat decides how much of the unsigned response
+	// the agent may act on (issue #87): see applyRoutingAndKeys.
+	relayed := s.api.LastRoute() != client.OriginRouteID
 	// Quarantine: the server keeps answering our beats but has suspended trust.
 	// Execute nothing — even if commands were somehow present in the ack — and
 	// keep checking in so a restore takes effect on the next beat.
@@ -513,7 +523,12 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 		a.log.Printf("server restored this agent from quarantine; resuming normal operation")
 		s.quarantined = false
 	}
-	a.handleChatLaunch(ack.ChatLaunchRequested)
+	// A chat launch opens a browser on the interactive desktop. Only the
+	// origin may ask for that: a relay could otherwise point the user at a
+	// page of its choosing.
+	if !relayed {
+		a.handleChatLaunch(ack.ChatLaunchRequested)
+	}
 	// Upload only what the server asked for. A failure here is logged and
 	// retried on the next beat rather than failing the check-in: inventory is
 	// evidence, not control flow, and losing a beat over it would also delay
@@ -544,20 +559,8 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 		a.log.Printf("failed to flush pending command results: %v", err)
 		firstReportErr = err
 	}
-	if len(ack.CommandPublicKeys) > 0 {
-		updated := map[string]ed25519.PublicKey{}
-		for keyID, pemKey := range ack.CommandPublicKeys {
-			parsed, parseErr := verify.PublicKeyFromPEM(pemKey)
-			if parseErr != nil {
-				return fmt.Errorf("invalid signing-key bundle entry %s: %w", keyID, parseErr)
-			}
-			updated[keyID] = parsed
-		}
-		s.pubKeys = updated
-		s.identity.CommandPublicKeys = ack.CommandPublicKeys
-		if err := s.identity.Save(s.identityPath); err != nil {
-			a.log.Printf("failed to persist signing-key bundle: %v", err)
-		}
+	if err := a.applyRoutingAndKeys(s, ack, relayed, time.Now()); err != nil {
+		return err
 	}
 	if len(ack.PendingCommands) == 0 {
 		return firstReportErr
@@ -1178,4 +1181,112 @@ func NewFileLogger() (*log.Logger, io.Closer, error) {
 		return nil, nil, err
 	}
 	return log.New(w, "", log.LstdFlags|log.LUTC), w, nil
+}
+
+// applyRoutingAndKeys updates the trusted command keys and relay routes from a
+// heartbeat ack (issue #87).
+//
+// A server-signed routing manifest is authoritative wherever it arrives from:
+// it must verify with a key the agent already trusts, name this agent, be
+// unexpired, and not be older than the manifest already held. A manifest that
+// fails any check is ignored and nothing changes.
+//
+// Without a valid manifest, the unsigned command_public_keys bundle is honored
+// only when the beat went directly to the enrolled origin, which preserves the
+// pre-relay behavior. A beat carried by a relay never changes trusted keys
+// without a signature: a relay terminates TLS and could otherwise rewrite the
+// bundle and then sign commands of its own.
+func (a *Agent) applyRoutingAndKeys(s *session, ack *client.HeartbeatAck, relayed bool, now time.Time) error {
+	if ack.RoutingManifest != nil {
+		var floor int64
+		if s.identity.RoutingManifest != nil {
+			floor = s.identity.RoutingManifest.IssuedAt
+		}
+		manifest, err := verify.VerifyRoutingManifest(
+			*ack.RoutingManifest, s.pubKeys, s.pub, s.agentID, floor, now,
+		)
+		if err != nil {
+			a.log.Printf("%v", err)
+		} else {
+			return a.adoptManifest(s, manifest)
+		}
+	}
+	if relayed || len(ack.CommandPublicKeys) == 0 {
+		return nil
+	}
+	updated, err := parseKeyBundle(ack.CommandPublicKeys)
+	if err != nil {
+		return err
+	}
+	s.pubKeys = updated
+	s.identity.CommandPublicKeys = ack.CommandPublicKeys
+	if err := s.identity.Save(s.identityPath); err != nil {
+		a.log.Printf("failed to persist signing-key bundle: %v", err)
+	}
+	return nil
+}
+
+func (a *Agent) adoptManifest(s *session, manifest *verify.RoutingManifest) error {
+	keys, err := parseKeyBundle(manifest.CommandPublicKeys)
+	if err != nil {
+		return err
+	}
+	stored := &config.StoredRoutingManifest{
+		IssuedAt:      manifest.IssuedAt,
+		ExpiresAt:     manifest.ExpiresAt,
+		ResidencyMode: manifest.ResidencyMode,
+	}
+	for _, route := range manifest.Routes {
+		if route.Kind != "relay" {
+			continue
+		}
+		stored.Routes = append(stored.Routes, config.StoredRoute{
+			RelayID:     route.RelayID,
+			Region:      route.Region,
+			BaseURL:     route.BaseURL,
+			TLSSPKIPins: route.TLSSPKIPins,
+		})
+	}
+	if err := s.api.SetRoutes(storedRoutes(stored), time.Unix(stored.ExpiresAt, 0)); err != nil {
+		// A route the client cannot build (e.g. a malformed pin) must not
+		// leave a half-applied manifest: keep the previous state entirely.
+		a.log.Printf("ignoring routing manifest: %v", err)
+		return nil
+	}
+	previous := s.identity.RoutingManifest
+	s.pubKeys = keys
+	s.identity.CommandPublicKeys = manifest.CommandPublicKeys
+	s.identity.RoutingManifest = stored
+	if previous == nil || len(previous.Routes) != len(stored.Routes) ||
+		previous.ResidencyMode != stored.ResidencyMode {
+		a.log.Printf("adopted %s", manifest)
+	}
+	if err := s.identity.Save(s.identityPath); err != nil {
+		a.log.Printf("failed to persist routing manifest: %v", err)
+	}
+	return nil
+}
+
+func parseKeyBundle(bundle map[string]string) (map[string]ed25519.PublicKey, error) {
+	updated := make(map[string]ed25519.PublicKey, len(bundle))
+	for keyID, pemKey := range bundle {
+		parsed, err := verify.PublicKeyFromPEM(pemKey)
+		if err != nil {
+			return nil, fmt.Errorf("invalid signing-key bundle entry %s: %w", keyID, err)
+		}
+		updated[keyID] = parsed
+	}
+	return updated, nil
+}
+
+func storedRoutes(stored *config.StoredRoutingManifest) []client.Route {
+	routes := make([]client.Route, 0, len(stored.Routes))
+	for _, route := range stored.Routes {
+		routes = append(routes, client.Route{
+			ID:          route.RelayID,
+			BaseURL:     route.BaseURL,
+			TLSSPKIPins: route.TLSSPKIPins,
+		})
+	}
+	return routes
 }

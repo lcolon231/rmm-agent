@@ -26,6 +26,7 @@ from app.api import (
     management,
     meshcentral,
     mfa,
+    relays,
     scheduled_tasks,
     script_library,
     shell_sessions,
@@ -35,6 +36,7 @@ from app.core import metrics
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.core.prodcheck import ensure_safe_production_config
+from app.core.relay_ingress import RelayIngressMiddleware
 from app.core.schema_revision import ensure_schema_current
 from app.core.structured_logging import log_event
 from app.core.tasks import (
@@ -121,6 +123,10 @@ app.include_router(shell_sessions.agent_router, prefix="/api/v1")
 app.include_router(meshcentral.router, prefix="/api/v1")
 app.include_router(agent_updates.router, prefix="/api/v1")
 app.include_router(agent_updates.agent_router, prefix="/api/v1")
+app.include_router(relays.router, prefix="/api/v1")
+app.include_router(relays.tenant_router, prefix="/api/v1")
+# Relay-forwarded requests (issue #87) are authenticated before any route runs.
+app.add_middleware(RelayIngressMiddleware)
 
 
 

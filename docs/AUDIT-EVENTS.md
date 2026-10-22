@@ -35,6 +35,7 @@ and SHA-256/Merkle roots—remains readable.
 | `agent.credential_renewal_rejected` | `api/agents.py` credential renewal | `reason` |
 | `agent.command_envelope_capabilities_changed` | `api/agents.py` heartbeat | `previous`, `current` |
 | `agent.version_changed` | `api/agents.py` heartbeat | `previous`, `current` |
+| `agent.route_changed` | `api/agents.py` heartbeat; server-observed ingress path changed (#87) | `previous`, `current`, `region` |
 | `agent.offline` | `core/tasks.py` offline sweep | `last_seen_at` |
 | `agent.quarantined` | `api/management.py` trust transition | `previous_trust_state`, `trust_state`, `reason_sha256`, `reason_bytes` |
 | `agent.restored` | `api/management.py` trust transition | `previous_trust_state`, `trust_state`, `reason_sha256`, `reason_bytes` |
@@ -160,6 +161,15 @@ and SHA-256/Merkle roots—remains readable.
 | `operator.tenant_membership_granted` | `api/auth.py` client-membership grant (#66) | `operator_id`, `client_id`, `previous_role`, `new_role`, `reason_sha256`, `reason_bytes` |
 | `operator.tenant_membership_revoked` | `api/auth.py` client-membership revoke (#66) | `operator_id`, `client_id`, `previous_role`, `reason_sha256`, `reason_bytes` |
 | `operator.platform_admin_changed` | `api/auth.py` platform-admin toggle (#66) | `operator_id`, `previous`, `new`, `reason_sha256`, `reason_bytes` |
+| `relay_region.created` | `api/relays.py` platform admin created a relay region (#87) | `region_id`, `code`, `name` |
+| `relay_region.status_changed` | `api/relays.py` region active/draining/disabled (#87) | `region_id`, `previous`, `current` |
+| `relay.registered` | `api/relays.py` relay registered as `pending` (#87) | `relay_id`, `region_id`, `name`, `base_url`, `pin_count` |
+| `relay.status_changed` | `api/relays.py` relay activated, drained, or revoked (#87) | `relay_id`, `previous`, `current` |
+| `relay.key_registered` | `api/relays.py` relay public key registered, step-up required (#87) | `relay_id`, `key_id`, `public_key_sha256`, `not_after` |
+| `relay.key_retired` | `api/relays.py` relay key retired (#87) | `relay_id`, `key_id` |
+| `relay.key_revoked` | `api/relays.py` relay key revoked, step-up required (#87) | `relay_id`, `key_id`, `reason_sha256`, `reason_bytes` |
+| `relay.forward_refused` | `core/relays.py` a registered relay's forward was refused; at most one row per relay and reason per minute (#87) | `relay_id`, `key_id`, `reason`, `path`, `suppressed_count` |
+| `tenant.region_policy_set` | `api/relays.py` tenant ingress-residency policy set or cleared (#87) | `client_id`, `region_id`, `mode`, `previous_region_id`, `previous_mode` |
 | `tenant.access_denied` | `api/management.py` cross-tenant dispatch attempt (#66) | `operator_id`, `resource`, `agent_id`, `client_id` |
 | `mfa.second_factor_required` | `api/auth.py` login that stopped at the password step | `operator_id`, `enrollment_required`, `methods` |
 | `mfa.credential_registered` | `api/mfa.py` WebAuthn enrolment | `operator_id`, `credential_id`, `name_sha256`, `name_bytes`, `algorithm`, `aaguid`, `attestation_format`, `backup_eligible` |

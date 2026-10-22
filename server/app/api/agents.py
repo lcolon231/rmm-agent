@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_agent_for_credential_reattach, get_current_agent
 from app.core import support_chat as support_chat_core
 from app.models.models import SupportConversation, SupportConversationStatus, SupportParty
-from app.core import audit, inventory, metrics, monitoring
+from app.core import audit, inventory, metrics, monitoring, relays
 from app.core.clientip import client_ip
 from app.core.command_envelope import (
     SUPPORTED_COMMAND_ENVELOPE_VERSIONS,
@@ -35,6 +35,7 @@ from app.core.security import (
 )
 from app.core.keyring import active_signing_key
 from app.core.ratelimit import enrollment_limiter
+from app.core.tenant_scope import agent_client_id
 from app.core.timeutil import ensure_utc
 from app.models.models import (
     Agent,
@@ -376,6 +377,7 @@ def inventory_field_errors(exc: ValueError, limit: int = 10) -> list[dict]:
 @router.post("/heartbeat", response_model=HeartbeatAck)
 async def heartbeat(
     body: HeartbeatIn,
+    request: Request,
     agent: Agent = Depends(get_current_agent),
     db: AsyncSession = Depends(get_db),
 ):
@@ -583,10 +585,37 @@ async def heartbeat(
                 "technician_launch",
                 actor=f"agent:{agent.id}",
             )
+    # Relay path continuity (issue #87). The ingress path is what the server
+    # observed, never what the agent claims; only a change is audited, so a
+    # steady-state fleet adds nothing to the chain and a failover is visible.
+    routing_manifest = None
+    if settings.relay_routing_enabled:
+        relay_ctx = getattr(request.state, "relay", None)
+        current_route = relay_ctx.relay_id if relay_ctx is not None else "origin"
+        previous_route = agent.relay_route or ""
+        if previous_route != current_route:
+            agent.relay_route = current_route
+            await audit.record(
+                db,
+                action="agent.route_changed",
+                actor=f"agent:{agent.id}",
+                agent_id=agent.id,
+                detail={
+                    "previous": previous_route,
+                    "current": current_route,
+                    "region": relay_ctx.region_code if relay_ctx is not None else "",
+                },
+            )
+        # Commands above are signed end to end by the keyring; this signed
+        # manifest is the only routing/key material a relayed agent acts on.
+        routing_manifest = await relays.signed_routing_manifest(
+            db, agent, await agent_client_id(agent, db)
+        )
     return HeartbeatAck(
         ok=True,
         pending_commands=[CommandOut.model_validate(c) for c in pending],
         command_public_keys=public_key_bundle_pem(),
+        routing_manifest=routing_manifest,
         trust_state=agent.trust_state,
         chat_launch_requested=chat_launch_requested,
         inventory_requested=inventory_requested,

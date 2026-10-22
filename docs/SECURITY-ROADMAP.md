@@ -396,6 +396,15 @@ idempotency, signed-action checks, audit ordering, and evidence completeness.
 Failure injection and region/worker partition tests are required before scale
 claims are made.
 
+Relay trust (#87, `docs/RELAYS.md`) is in place on the control plane and the
+agent: relays sign every forward with a registered Ed25519 key (skew,
+store-and-forward age, body, and unique-nonce replay bounds, all fail-closed);
+routes and command keys reach agents only in a manifest signed by every
+keyring key, verified against already-trusted keys with rollback protection;
+and an unsigned key bundle arriving through a relay is ignored. Open: the
+relay service itself, end-to-end signing of the remaining heartbeat fields
+(monitoring assignments), and storage residency.
+
 ## Security acceptance evidence
 
 Every security issue should identify:

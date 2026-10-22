@@ -556,6 +556,43 @@ this launch authorization can obtain interactive desktop control of a mapped
 endpoint, and MeshCentral's own compromise or misconfiguration is outside
 NodeLink's audit guarantees.
 
+### (7) Regional relay → Server, and relay → Agent (issue #87)
+
+A relay is a regional HTTPS ingress that forwards agent requests. It is
+authenticated but **not trusted for content** (`docs/RELAYS.md`). Threats and
+mitigations:
+
+- **Forged or replayed forwards.** Every forward is signed by a registered
+  relay Ed25519 key over method, path, body hash, timestamp, queued-at, and
+  nonce. Unknown, retired, revoked, and expired keys, a bad signature, clock
+  skew, a request held past `RELAY_MAX_FORWARD_AGE_SECONDS`, an oversize body,
+  and a reused (relay, nonce) are refused before any handler runs. The replay
+  receipt is committed first and is unique in the database, so concurrent
+  replays accept exactly once.
+- **Relay rewriting agent trust.** A relay terminates TLS and could alter
+  heartbeat responses. Command keys and routes therefore travel only in a
+  routing manifest signed by every keyring key and verified by the agent
+  against keys it already trusts (agent-bound, expiring, rollback-protected).
+  Unsigned key bundles on relayed beats are ignored, and chat-launch URLs on
+  relayed beats are dropped. Commands stay end-to-end signed.
+- **Residency bypass.** A strict tenant's traffic through another region's
+  relay is refused (`relay_region_mismatch`). A relay-capable agent going
+  direct is refused (`residency_route_required`). The path an agent used is
+  recorded from what the server verified (`agent.route_changed`).
+- **Audit flooding.** Unauthenticated relay noise is metric-only. Refusals by a
+  registered relay are audited at most once per relay and reason per minute,
+  with a suppressed count.
+
+Residual risk:
+
+- A relay sees agent bearer credentials in transit, like any TLS terminator,
+  so relay registration and key changes require platform admin plus step-up.
+- A compromised relay can alter unsigned heartbeat fields (monitoring
+  assignments, inventory requests) for agents that route through it. It can
+  delay traffic up to the forward-age bound.
+- Residency is ingress-only.
+- The deployable relay service is not built yet.
+
 ## Audit log: tamper-evidence
 
 Every meaningful action appends an `AuditEvent` to a **hash chain**: each event

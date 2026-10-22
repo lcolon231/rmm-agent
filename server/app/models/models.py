@@ -765,6 +765,10 @@ class Agent(Base):
     # the endpoint predates self-update or has not reported one, so it is only
     # ever targeted by a stable-channel release.
     update_channel: Mapped[str | None] = mapped_column(String(16))
+    # Ingress path of the most recent accepted check-in (issue #87): a relay id,
+    # or "origin" for a direct request. NULL until the first beat after the
+    # relay-routing revision. Server-observed, never agent-reported.
+    relay_route: Mapped[str | None] = mapped_column(String(36))
 
     status: Mapped[AgentStatus] = mapped_column(
         Enum(AgentStatus), default=AgentStatus.pending
@@ -3217,3 +3221,119 @@ class EvidenceLegalHold(Base):
     released_by_email: Mapped[str | None] = mapped_column(String(320))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     release_reason: Mapped[str | None] = mapped_column(Text)
+
+
+# --- Multi-region relays (issue #87) -----------------------------------------
+# Statuses are short strings validated by the application (see app.core.relays)
+# rather than database ENUM types, so a later state can be added without a
+# PostgreSQL type migration.
+
+
+class RelayRegion(Base):
+    """A named ingress region that relays and tenant residency policies use."""
+
+    __tablename__ = "relay_regions"
+    __table_args__ = (UniqueConstraint("code", name="ux_relay_regions_code"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class Relay(Base):
+    """A regional HTTPS ingress allowed to forward agent requests."""
+
+    __tablename__ = "relays"
+    __table_args__ = (
+        UniqueConstraint("base_url", name="ux_relays_base_url"),
+        Index("ix_relays_region_status", "region_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    region_id: Mapped[str] = mapped_column(
+        ForeignKey("relay_regions.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    # Optional leaf SPKI pins agents apply to this relay only ("sha256/<b64>").
+    tls_spki_pins: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_forward_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RelayKey(Base):
+    """Public half of a relay's Ed25519 forwarding key. Private keys never
+    reach the control plane."""
+
+    __tablename__ = "relay_keys"
+    __table_args__ = (
+        UniqueConstraint("key_id", name="ux_relay_keys_key_id"),
+        Index("ix_relay_keys_relay_status", "relay_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    relay_id: Mapped[str] = mapped_column(
+        ForeignKey("relays.id", ondelete="CASCADE"), nullable=False
+    )
+    key_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    public_key_pem: Mapped[str] = mapped_column(Text, nullable=False)
+    public_key_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TenantRegionPolicy(Base):
+    """Where a tenant's agent traffic may enter (ingress residency)."""
+
+    __tablename__ = "tenant_region_policies"
+    __table_args__ = (Index("ix_tenant_region_policies_region", "region_id"),)
+
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True
+    )
+    region_id: Mapped[str] = mapped_column(
+        ForeignKey("relay_regions.id", ondelete="RESTRICT"), nullable=False
+    )
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    set_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class RelayForwardReceipt(Base):
+    """One accepted relayed request: the replay guard and path evidence."""
+
+    __tablename__ = "relay_forward_receipts"
+    __table_args__ = (
+        UniqueConstraint("relay_id", "nonce", name="ux_relay_forward_receipts_nonce"),
+        Index("ix_relay_forward_receipts_received", "received_at"),
+        Index("ix_relay_forward_receipts_agent", "agent_id", "received_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    relay_id: Mapped[str] = mapped_column(
+        ForeignKey("relays.id", ondelete="CASCADE"), nullable=False
+    )
+    key_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    nonce: Mapped[str] = mapped_column(String(64), nullable=False)
+    agent_id: Mapped[str | None] = mapped_column(String(36))
+    method: Mapped[str] = mapped_column(String(8), nullable=False)
+    path: Mapped[str] = mapped_column(String(256), nullable=False)
+    queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )

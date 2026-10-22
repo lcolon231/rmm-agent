@@ -208,6 +208,8 @@ async def _retention_once() -> None:
             f"[retention] pruned {result.support_chat_messages_deleted} support chat "
             f"message(s) from {result.support_chat_conversations_deleted} closed conversation(s)"
         )
+    if result.relay_receipts_deleted:
+        print(f"[retention] pruned {result.relay_receipts_deleted} relay forward receipt(s)")
     if status["alert"]:
         print(f"[retention] WARNING storage threshold breached: {status}")
 

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nodelink.invalid/contracts/relay-forward-v1.schema.json",
+  "title": "NodeLink relay forwarding headers v1 (issue #87)",
+  "description": "Headers a relay adds to every agent request it forwards (names lower-cased). The signature is Ed25519 over the newline-joined fields: 'nodelink-relay-forward-v1', relay id, key id, upper-case method, path (with '?query' if any), lower-case hex SHA-256 of the body, timestamp, queued_at, nonce.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "x-nodelink-relay-id",
+    "x-nodelink-relay-key-id",
+    "x-nodelink-relay-timestamp",
+    "x-nodelink-relay-queued-at",
+    "x-nodelink-relay-nonce",
+    "x-nodelink-relay-signature"
+  ],
+  "properties": {
+    "x-nodelink-relay-id": {"type": "string", "pattern": "^[0-9a-f-]{36}$"},
+    "x-nodelink-relay-key-id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"},
+    "x-nodelink-relay-timestamp": {"type": "string", "pattern": "^[0-9]{1,12}$"},
+    "x-nodelink-relay-queued-at": {"type": "string", "pattern": "^[0-9]{1,12}$"},
+    "x-nodelink-relay-nonce": {"type": "string", "pattern": "^[A-Za-z0-9_-]{22,64}$"},
+    "x-nodelink-relay-signature": {"type": "string", "pattern": "^[A-Za-z0-9+/]{86}==$"}
+  }
+}

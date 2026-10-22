@@ -1,0 +1,24 @@
+{
+  "contract": "relay-forward-v1",
+  "notes": "Test-only relay key derived from a fixed seed. canonical is the exact signed text for inputs; headers are what the relay sends.",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA1TZbfMssAo1U8KLyBDsmkWAdJWYYwDke5mnXH3Xk4tU=\n-----END PUBLIC KEY-----\n",
+  "inputs": {
+    "relay_id": "7d2e9a40-1f6b-4b8e-8c3a-2e5f9b1d4c22",
+    "key_id": "euw1-k1",
+    "method": "POST",
+    "path": "/api/v1/heartbeat",
+    "timestamp": 1800000000,
+    "queued_at": 1799999970,
+    "nonce": "Wm9kZUxpbmtSZWxheU5vbmNlMDE",
+    "body_utf8": "{\"cpu_percent\":3.0}"
+  },
+  "canonical": "nodelink-relay-forward-v1\n7d2e9a40-1f6b-4b8e-8c3a-2e5f9b1d4c22\neuw1-k1\nPOST\n/api/v1/heartbeat\n3df8c0e154922d8a6d59cd0178fd85d8ed29725c39e814e597aaa5d932d269c7\n1800000000\n1799999970\nWm9kZUxpbmtSZWxheU5vbmNlMDE",
+  "headers": {
+    "x-nodelink-relay-id": "7d2e9a40-1f6b-4b8e-8c3a-2e5f9b1d4c22",
+    "x-nodelink-relay-key-id": "euw1-k1",
+    "x-nodelink-relay-timestamp": "1800000000",
+    "x-nodelink-relay-queued-at": "1799999970",
+    "x-nodelink-relay-nonce": "Wm9kZUxpbmtSZWxheU5vbmNlMDE",
+    "x-nodelink-relay-signature": "n5PXdz3wZBiMbNqBg7fp9reQ0M/Y5Z5QhX1w7fzQefRcdyHgb3mUHnsr17BVThLEz772YksBU/IHNuBRoLSECw=="
+  }
+}

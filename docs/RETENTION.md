@@ -21,6 +21,7 @@ settings. The pruners physically do not target those tables.
 | Command results (output) | DB (`commands.stdout/stderr`) | Command volume × output size | Per-stream capture cap (256 KiB/384 KiB); **text** cleared after `command_output_retention_days` (default 90), row + metadata kept | Agent cap + retention |
 | Command rows (metadata) | DB (`commands`) | Command volume | Retained (accountability); observable backlog | Observability |
 | Support chat transcripts | DB (`support_messages`, `support_conversations`) | Endpoint-user conversations | Messages **and** the conversation row deleted `support_chat_retention_days` (default 30) after the conversation **closes**; open conversations are never pruned. Lifecycle audit events are kept ([`SUPPORT-CHAT.md`](SUPPORT-CHAT.md)) | `retention.prune_expired` |
+| Relay forward receipts (replay guard) | DB (`relay_forward_receipts`) | Relayed requests | Deleted after `relay_receipt_retention_days` (default 7, minimum 1, which always exceeds the accepted skew + forward-age window) | `retention.prune_expired` |
 | Audit events | DB (`audit_events`) | Audited actions | **Never pruned** (compliance chain) | Observability only |
 | Merkle anchors + receipts | DB (`audit_anchors`, `anchor_publications`) | Anchor cadence | **Never pruned**; unpublished backlog is alerted | Observability + lag alert |
 | Retained evidence packages | Evidence vault (`filesystem` or S3 Object Lock) + DB ledger (`evidence_vault_records`, `evidence_legal_holds`) | Store requests | **Never pruned automatically.** Each package carries a retention date (floor `evidence_vault_retention_days`); disposal is an explicit admin action refused under legal hold or before expiry ([`EVIDENCE-VAULT.md`](EVIDENCE-VAULT.md)) | Explicit disposal only |
@@ -61,6 +62,7 @@ All settings live in `server/app/core/config.py` (environment variables):
 | `telemetry_retention_days` | 30 | Delete heartbeats older than this. `0` disables (unbounded — not recommended). |
 | `command_output_retention_days` | 90 | Clear command output text older than this. `0` disables. |
 | `support_chat_retention_days` | 30 | Delete support chat transcripts this long after the conversation closes. `0` disables. A minimum-necessary choice, not a regulatory requirement. |
+| `relay_receipt_retention_days` | 7 | Delete relay forward receipts older than this (1–365). See [`RELAYS.md`](RELAYS.md). |
 | `retention_sweep_interval_seconds` | 86400 | How often the retention sweep runs. |
 | `retention_disk_path` | `/` | Filesystem whose free space is reported/alerted. |
 | `heartbeat_backlog_alert` | 5,000,000 | Alert when total heartbeat rows exceed this. |
