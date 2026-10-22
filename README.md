@@ -53,7 +53,10 @@ is tamper-evident and independently verifiable.
   break-glass emergency access and full session management.
 - **Audit and compliance evidence.** A hash-chained audit log with Merkle
   anchors that can be published to immutable storage, plus signed,
-  deterministic evidence packages that an auditor can verify offline.
+  deterministic evidence packages that an auditor can verify offline. Those
+  packages can be retained on S3 Object Lock with enforced retention and legal
+  hold. This is server-side and API-only, and it is not yet verified against a
+  live bucket.
 - **Agent lifecycle.** Signed, staged agent self-update with automatic
   rollback, loss-safe credential renewal, quarantine and revocation.
 - **End-user support.** A system-tray launcher that opens a consent-gated

@@ -1011,6 +1011,19 @@ rejects unsafe paths, noncanonical archive metadata, signature/key mismatch,
 tamper, and size excess. See [`EVIDENCE-BUNDLES.md`](EVIDENCE-BUNDLES.md) and
 [`EVIDENCE-PACKAGES.md`](EVIDENCE-PACKAGES.md).
 
+Issue #81 adds `app/core/evidence_vault.py` and `app/api/evidence_vault.py`.
+They retain signed packages, which embed the anchor receipts, in a
+content-addressed store: `filesystem` (application-enforced) or `s3` with
+Object Lock (storage-enforced, every operation addressing the exact object
+version). Schema `0047` adds the `evidence_vault_records` ledger, unique per
+`(backend, package_id)` for idempotent retries, and `evidence_legal_holds`,
+whose partial unique index allows one active hold per `(tenant, scope)`.
+Disposal is an explicit admin action, refused while a hold covers the package
+or retention has not elapsed. The hold row is authoritative and the storage
+hold is reconciled by `evidence_vault_sweeper`, which also re-verifies stored
+objects and audits only transitions into `tampered`, `missing`, or
+`lock_drift`. See [`EVIDENCE-VAULT.md`](EVIDENCE-VAULT.md).
+
 ## 8. Tenant isolation roadmap
 
 `Client` is the authorization tenant. Issue #66 implements a default-deny

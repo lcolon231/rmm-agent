@@ -148,7 +148,8 @@ nonzero with a bounded failure reason. It never extracts files to disk.
 - An unavailable private key affects ZIP only when its public-key registry entry
   remains readable. Loss of the public keyring also blocks JSON, CSV, and PDF
   because their verification-key evidence would be incomplete.
-- Issue #81 adds immutable package storage, retention, and legal hold. Issue #82
+- Issue #81 adds immutable package storage, retention, and legal hold
+  ([`EVIDENCE-VAULT.md`](EVIDENCE-VAULT.md)). Issue #82
   packages the verifier as a supported cross-platform product. Neither is
   implied by this computed-download implementation.
 

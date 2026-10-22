@@ -33,6 +33,7 @@ from sqlalchemy import (
     UniqueConstraint,
     JSON,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -3125,3 +3126,94 @@ class EmergencyOverride(Base):
         # Drives the "what still needs review" queue.
         Index("ix_emergency_overrides_unreviewed", "reviewed_at", "created_at"),
     )
+
+
+class EvidenceVaultRecord(Base):
+    """One signed evidence package retained in immutable storage (issue #81).
+
+    The row is the application's ledger of what was written where; the object
+    in the backend is the evidence. ``sha256`` and ``storage_receipt`` let any
+    re-read detect a substituted object, and ``retain_until`` / the legal-hold
+    tables decide whether deletion may even be attempted. Rows are never
+    deleted: a disposed package keeps its row with ``state = deleted`` so the
+    ledger still accounts for it.
+
+    ``client_id`` deliberately has no foreign key: evidence must outlive the
+    tenant row it describes.
+    """
+    __tablename__ = "evidence_vault_records"
+    __table_args__ = (
+        UniqueConstraint("backend", "package_id", name="ux_evidence_vault_backend_package"),
+        Index("ix_evidence_vault_client_state", "client_id", "state"),
+        Index("ix_evidence_vault_verify_queue", "state", "last_verified_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    client_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="evidence_package")
+    package_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    bundle_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    from_seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    through_seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    record_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    signing_key_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    backend: Mapped[str] = mapped_column(String(32), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(1024), nullable=False)
+    uri: Mapped[str] = mapped_column(String(1024), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_receipt: Mapped[dict] = mapped_column(JSON, nullable=False)
+    receipt_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # COMPLIANCE / GOVERNANCE when the storage enforces it; "application" when
+    # only NodeLink does (filesystem backend).
+    retention_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    retain_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Whether a storage-level legal hold is currently applied to the object.
+    # The authoritative hold is EvidenceLegalHold; this tracks reconciliation.
+    backend_legal_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="stored")
+    # unverified | intact | tampered | missing | unavailable | lock_drift
+    integrity_state: Mapped[str] = mapped_column(String(16), nullable=False, default="unverified")
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_verify_error: Mapped[str | None] = mapped_column(String(500))
+    stored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    stored_by_operator_id: Mapped[str | None] = mapped_column(String(36))
+    stored_by_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by_email: Mapped[str | None] = mapped_column(String(320))
+
+
+class EvidenceLegalHold(Base):
+    """A scoped legal hold that suspends deletion (issue #81).
+
+    ``record_id`` NULL means every package of the tenant, including ones stored
+    while the hold is active. ``scope_key`` is ``record_id`` or ``"*"`` so a
+    partial unique index can refuse a second active hold on the same scope
+    (NULLs would otherwise compare distinct). Holds are released, never
+    deleted, so who held what and why stays on record.
+    """
+    __tablename__ = "evidence_legal_holds"
+    __table_args__ = (
+        Index(
+            "ux_evidence_legal_hold_active_scope",
+            "client_id",
+            "scope_key",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
+        Index("ix_evidence_legal_holds_client_status", "client_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    client_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    record_id: Mapped[str | None] = mapped_column(String(36))
+    scope_key: Mapped[str] = mapped_column(String(36), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    placed_by_operator_id: Mapped[str | None] = mapped_column(String(36))
+    placed_by_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    placed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    released_by_email: Mapped[str | None] = mapped_column(String(320))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    release_reason: Mapped[str | None] = mapped_column(Text)

@@ -480,6 +480,30 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "record_count",
         "content_sha256",
     ),
+    # Evidence vault (issue #81). Identifiers, digests, and states only; the
+    # free-text disposal/hold reasons are digested, never stored verbatim.
+    "evidence_vault.stored": _schema(
+        "record_id", "tenant_id", "package_id", "bundle_id", "backend", "sha256",
+        "size_bytes", "retention_mode", "retain_until", "legal_hold",
+    ),
+    "evidence_vault.store_failed": _schema("tenant_id", "package_id", "backend", "code"),
+    "evidence_vault.retrieved": _schema("record_id", "tenant_id", "package_id", "sha256"),
+    "evidence_vault.verified": _schema(
+        "record_id", "tenant_id", "trigger", "integrity_state", "reason",
+    ),
+    "evidence_vault.deletion_denied": _schema("record_id", "tenant_id", "code", "retain_until"),
+    "evidence_vault.deleted": _schema(
+        "record_id", "tenant_id", "package_id", "sha256", "reason",
+        digest_fields=("reason",),
+    ),
+    "evidence_legal_hold.placed": _schema(
+        "hold_id", "tenant_id", "record_id", "scope", "reason", "covered_records",
+        "storage_pending", digest_fields=("reason",),
+    ),
+    "evidence_legal_hold.released": _schema(
+        "hold_id", "tenant_id", "record_id", "scope", "reason", "covered_records",
+        "storage_pending", digest_fields=("reason",),
+    ),
     "monitoring_alert.acknowledged": _schema(
         "alert_id", "generation", "request_id", "from_state", "to_state",
         "comment", "comment_redacted", digest_fields=("comment",),
