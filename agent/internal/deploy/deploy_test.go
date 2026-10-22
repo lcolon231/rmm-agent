@@ -118,16 +118,84 @@ func TestDeployTamperedDigestFailsClosed(t *testing.T) {
 	}
 }
 
-func TestDeploySignerMismatch(t *testing.T) {
+const pinnedThumbprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+// TestDeployAuthenticodeRefusesBeforeAnyInstallerStarts covers every way the
+// pinned signer check can say no. Each must stop the deployment before the
+// installer runs, and report the refusal as a failed outcome.
+func TestDeployAuthenticodeRefusesBeforeAnyInstallerStarts(t *testing.T) {
+	tests := []struct {
+		name       string
+		valid      bool
+		thumb      string
+		err        error
+		wantStatus string
+	}{
+		{"unsigned", false, "", nil, "signature_mismatch"},
+		{"wrong publisher", true, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", nil, "signature_mismatch"},
+		{"pinned signer but signature not valid", false, pinnedThumbprint, nil, "signature_mismatch"},
+		{"verifier error", false, "", fmt.Errorf("powershell.exe: not found"), "signature_unavailable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var verified, ran, readCode int
+			withSeams(t, seams{
+				download: fakeDownload(goodSHA),
+				auth: func(context.Context, string) (bool, string, error) {
+					verified++
+					return tt.valid, tt.thumb, tt.err
+				},
+				run: func(context.Context, string, string, []string, time.Duration) (int, error) {
+					ran++
+					return 0, nil
+				},
+				product: func(context.Context, string) string { readCode++; return "" },
+			})
+			res := Execute(context.Background(), executor.KindDeploySoftware,
+				msiPayload(map[string]any{"signer_thumbprint": pinnedThumbprint}))
+			if verified != 1 || ran != 0 || readCode != 0 {
+				t.Fatalf("verified=%d ran=%d readCode=%d; the installer must never start", verified, ran, readCode)
+			}
+			if res.ExitCode == 0 || res.Stderr == "" {
+				t.Fatalf("a refusal must be reported as a failure: %+v", res)
+			}
+			if got := decode(t, res).Status; got != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestDeployAuthenticodeThumbprintMatchIgnoresCase(t *testing.T) {
+	ran := false
 	withSeams(t, seams{
 		download: fakeDownload(goodSHA),
-		auth:     func(context.Context, string) (bool, string, error) { return true, "BADTHUMBPRINT", nil },
-		run:      func(context.Context, string, string, []string, time.Duration) (int, error) { return 0, nil },
+		auth: func(context.Context, string) (bool, string, error) {
+			return true, strings.ToLower(pinnedThumbprint), nil
+		},
+		run:     func(context.Context, string, string, []string, time.Duration) (int, error) { ran = true; return 0, nil },
+		product: func(context.Context, string) string { return "" },
 	})
-	payload := msiPayload(map[string]any{"signer_thumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"})
-	res := Execute(context.Background(), executor.KindDeploySoftware, payload)
-	if decode(t, res).Status != "signature_mismatch" {
-		t.Fatalf("want signature_mismatch, got %s", res.Stdout)
+	res := Execute(context.Background(), executor.KindDeploySoftware,
+		msiPayload(map[string]any{"signer_thumbprint": pinnedThumbprint}))
+	if !ran || decode(t, res).Status != "succeeded" {
+		t.Fatalf("a valid signature from the pinned signer must install: %s", res.Stdout)
+	}
+}
+
+func TestDeploySkipsAuthenticodeWhenNoSignerIsPinned(t *testing.T) {
+	withSeams(t, seams{
+		download: fakeDownload(goodSHA),
+		auth: func(context.Context, string) (bool, string, error) {
+			t.Fatal("no signer pinned: the verifier must not run")
+			return false, "", nil
+		},
+		run:     func(context.Context, string, string, []string, time.Duration) (int, error) { return 0, nil },
+		product: func(context.Context, string) string { return "" },
+	})
+	res := Execute(context.Background(), executor.KindDeploySoftware, msiPayload(nil))
+	if decode(t, res).Status != "succeeded" {
+		t.Fatalf("got %s", res.Stdout)
 	}
 }
 

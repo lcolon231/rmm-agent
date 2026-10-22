@@ -9,61 +9,42 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/authenticode"
 )
 
-// serviceName duplicates the installed Windows service name rather than
-// importing the service package, which depends on this one.
-const serviceName = "NodeLinkAgent"
+// Process seams, swapped by tests so no PowerShell or sc.exe ever starts.
+var (
+	runPowerShell authenticode.Runner = authenticode.Exec
+	lookPath                          = exec.LookPath
+	startDetached                     = func(name string, args ...string) error {
+		cmd := exec.Command(name, args...)
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		// Detach: the helper must outlive this process.
+		return cmd.Process.Release()
+	}
+)
 
 // platformVerifyAuthenticode returns whether the staged artifact carries a Valid
 // Authenticode signature and the signer certificate's SHA-1 thumbprint.
 func platformVerifyAuthenticode(ctx context.Context, path string) (bool, string, error) {
-	bounded, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	script := "$s = Get-AuthenticodeSignature -LiteralPath $env:NL_UPDATE_PATH; " +
-		"if ($s.SignerCertificate) { Write-Output ($s.Status.ToString() + '|' + $s.SignerCertificate.Thumbprint) } " +
-		"else { Write-Output ($s.Status.ToString() + '|') }"
-	cmd := exec.CommandContext(bounded, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.Env = append(cmd.Environ(), "NL_UPDATE_PATH="+path)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return false, "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
-	}
-	fields := strings.SplitN(strings.TrimSpace(string(out)), "|", 2)
-	status := ""
-	thumbprint := ""
-	if len(fields) > 0 {
-		status = strings.TrimSpace(fields[0])
-	}
-	if len(fields) > 1 {
-		thumbprint = strings.TrimSpace(fields[1])
-	}
-	return strings.EqualFold(status, "Valid"), thumbprint, nil
+	return authenticode.Verify(ctx, runPowerShell, "NL_UPDATE_PATH", path)
 }
 
-// platformRestartService asks the service control manager to restart the agent.
-// The restart cannot be performed inline: this process *is* the service, so
-// stopping it would kill the caller before it could start anything. A detached
-// helper does the stop/start after a short delay, which lets the command result
-// reach the server first. The service also has SCM failure actions configured,
-// so even a helper that never runs leaves the service restarting on its own.
-func platformRestartService(ctx context.Context) error {
-	if _, err := exec.LookPath("cmd.exe"); err != nil {
-		return fmt.Errorf("cmd.exe is unavailable: %w", err)
+// platformRestartService asks the service control manager to restart the agent
+// through the detached helper described at restartCommand.
+func platformRestartService(_ context.Context) error {
+	name, args := restartCommand()
+	if _, err := lookPath(name); err != nil {
+		return fmt.Errorf("%s is unavailable: %w", name, err)
 	}
-	// Bounded, fixed argument vector: no operator input reaches this command.
-	script := fmt.Sprintf(
-		"ping -n 6 127.0.0.1 >NUL & sc stop %s >NUL & ping -n 4 127.0.0.1 >NUL & sc start %s >NUL",
-		serviceName, serviceName,
-	)
-	cmd := exec.Command("cmd.exe", "/c", script)
-	if err := cmd.Start(); err != nil {
+	if err := startDetached(name, args...); err != nil {
 		return fmt.Errorf("request service restart: %w", err)
 	}
-	// Detach: the helper must outlive this process.
-	return cmd.Process.Release()
+	return nil
 }
 
 // replaceRunningBinary installs src at dest. Windows refuses to overwrite the

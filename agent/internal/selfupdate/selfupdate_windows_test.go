@@ -4,8 +4,12 @@
 package selfupdate
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -145,10 +149,88 @@ func TestReplaceRunningBinaryRestoresOnFailure(t *testing.T) {
 	}
 }
 
-// TestRestartRequestUsesFixedServiceName asserts the restart helper never
-// interpolates caller-controlled text into the command it runs.
-func TestRestartRequestUsesFixedServiceName(t *testing.T) {
-	if serviceName != "NodeLinkAgent" {
-		t.Fatalf("serviceName = %q; the restart helper must target the installed service", serviceName)
+type startCall struct {
+	name string
+	args []string
+}
+
+// fakeRestart swaps the service-restart seams so no helper process starts.
+func fakeRestart(t *testing.T, lookErr, startErr error) *[]startCall {
+	t.Helper()
+	origLook, origStart := lookPath, startDetached
+	var calls []startCall
+	lookPath = func(file string) (string, error) {
+		if lookErr != nil {
+			return "", lookErr
+		}
+		return `C:\Windows\System32\` + file, nil
+	}
+	startDetached = func(name string, args ...string) error {
+		calls = append(calls, startCall{name, append([]string(nil), args...)})
+		return startErr
+	}
+	t.Cleanup(func() { lookPath, startDetached = origLook, origStart })
+	return &calls
+}
+
+func TestPlatformRestartService(t *testing.T) {
+	name, args := restartCommand()
+	tests := []struct {
+		name      string
+		lookErr   error
+		startErr  error
+		wantErr   string
+		wantStart []startCall
+	}{
+		{"starts the fixed helper", nil, nil, "", []startCall{{name, args}}},
+		{"cmd.exe missing starts nothing", errors.New("not found"), nil, "cmd.exe is unavailable", nil},
+		{"start failure is reported", nil, errors.New("access denied"), "request service restart: access denied", []startCall{{name, args}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := fakeRestart(t, tt.lookErr, tt.startErr)
+			err := platformRestartService(context.Background())
+			if (err == nil) != (tt.wantErr == "") || (err != nil && !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("err = %v, want %q", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(*calls, tt.wantStart) {
+				t.Fatalf("started %#v, want %#v", *calls, tt.wantStart)
+			}
+		})
+	}
+}
+
+func TestPlatformVerifyAuthenticode(t *testing.T) {
+	tests := []struct {
+		name      string
+		out       string
+		err       error
+		wantValid bool
+		wantThumb string
+		wantErr   bool
+	}{
+		{"valid", "Valid|AABBCCDDEEFF00112233445566778899AABBCCDD\r\n", nil, true, "AABBCCDDEEFF00112233445566778899AABBCCDD", false},
+		{"not signed", "NotSigned|\r\n", nil, false, "", false},
+		{"powershell failed", "", errors.New("exit status 1"), false, "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := runPowerShell
+			var env []string
+			var ran string
+			runPowerShell = func(_ context.Context, e []string, name string, _ ...string) ([]byte, error) {
+				env, ran = e, name
+				return []byte(tt.out), tt.err
+			}
+			t.Cleanup(func() { runPowerShell = orig })
+
+			valid, thumb, err := platformVerifyAuthenticode(context.Background(), `C:\NodeLink\update\staged-1`)
+			if valid != tt.wantValid || thumb != tt.wantThumb || (err != nil) != tt.wantErr {
+				t.Fatalf("got %v, %q, %v", valid, thumb, err)
+			}
+			if ran != "powershell.exe" || !reflect.DeepEqual(env, []string{`NL_UPDATE_PATH=C:\NodeLink\update\staged-1`}) {
+				t.Fatalf("ran %q with env %#v", ran, env)
+			}
+		})
 	}
 }
