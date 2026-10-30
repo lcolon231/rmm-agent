@@ -164,11 +164,15 @@ func ProtectLocalData(format string, version int, plaintext []byte) ([]byte, err
 	})
 }
 
-// UnprotectLocalData decodes a protected local-state envelope. A file without
-// an envelope is returned as legacy plaintext so callers can migrate an older
-// non-sensitive format atomically. An envelope for a different format or
-// platform protection scheme fails closed.
+// UnprotectLocalData decodes a protected local-state envelope. A well-formed
+// JSON file without an envelope is returned as legacy plaintext so callers can
+// migrate an older non-sensitive format atomically. Malformed JSON (for example
+// a truncated envelope) and an envelope for a different format or platform
+// protection scheme fail closed.
 func UnprotectLocalData(data []byte, format string, version int) (plaintext []byte, legacy bool, err error) {
+	if !json.Valid(data) {
+		return nil, false, fmt.Errorf("local state is not valid JSON (truncated or corrupt)")
+	}
 	var env ProtectedLocalData
 	if json.Unmarshal(data, &env) != nil || env.Format == "" {
 		return data, true, nil

@@ -858,7 +858,9 @@ is stored with protection `none` and mode `0600`. A legacy plaintext
 `identity.json` is migrated to the envelope form on first load via an atomic
 replace; if protection or migration fails, the agent refuses to run rather than
 falling back to plaintext, and a scheme mismatch (e.g. a blob enrolled under a
-different account) fails closed with a delete-and-re-enroll instruction.
+different account) fails closed with a delete-and-re-enroll instruction. A
+machine-scope DPAPI blob (decryptable by any local account) is refused, as is
+a truncated or tampered envelope.
 `seen_commands.json` is a versioned local command journal and result outbox.
 Because bounded output can contain sensitive endpoint data, Windows protects
 the complete file with DPAPI under the service identity and the same

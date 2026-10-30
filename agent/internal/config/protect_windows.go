@@ -43,6 +43,9 @@ func (dpapiProtector) Unprotect(blob []byte) ([]byte, error) {
 	if len(blob) == 0 {
 		return nil, fmt.Errorf("empty DPAPI blob")
 	}
+	if err := checkDPAPIUserScope(blob); err != nil {
+		return nil, err
+	}
 	in := windows.DataBlob{Size: uint32(len(blob)), Data: &blob[0]}
 	var out windows.DataBlob
 	if err := windows.CryptUnprotectData(
