@@ -109,6 +109,7 @@ and SHA-256/Merkle roots—remains readable.
 | `agent_update.halt_reason_recorded` | `api/agent_updates.py` operator halt justification (issue #63) | `release_id`, `reason_sha256`, `reason_bytes` |
 | `agent_update.rollback_dispatched` | `api/management.py` operator-requested rollback to the retained previous build (issue #63) | `reason_sha256`, `reason_bytes`, `expected_current_version`, `current_version` |
 | `agent_update.outcome_reported` | `api/agent_updates.py` endpoint post-restart resolution (issue #63) | `release_id`, `command_id`, `status`, `reason`, `from_version`, `to_version`, `observed_version`, `health_attempts`, `recorded` |
+| `agent_update.outcome_rejected` | `api/agent_updates.py` endpoint outcome report refused: endpoint not `active`, or a retry conflicting with the resolved attempt (issue #291) | `release_id`, `command_id`, `status`, `rejection`, `trust_state` |
 | `monitoring_alert.acknowledged` | `api/management.py` technician acknowledgement | `alert_id`, `generation`, `request_id`, `from_state`, `to_state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.assigned` | `api/management.py` technician assignment | `alert_id`, `generation`, `request_id`, `assigned_to_operator_id`, `assigned_to_email_sha256`, `assigned_to_email_bytes`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.commented` | `api/management.py` technician comment | `alert_id`, `generation`, `request_id`, `state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |

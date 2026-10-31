@@ -28,6 +28,7 @@ from app.core import agent_updates as updates
 from app.core import approvals as approvals_core
 from app.core import audit
 from app.core.clientip import client_ip
+from app.core.redaction import sanitize_audit_detail
 from app.core.command_envelope import (
     COMMAND_ENVELOPE_V3,
     COMMAND_SCHEMA_VERSION,
@@ -44,6 +45,7 @@ from app.models.models import (
     AgentUpdateChannel,
     AgentUpdateRelease,
     AgentUpdateReleaseState,
+    AuditEvent,
     Command,
     CommandKind,
     CommandStatus,
@@ -735,6 +737,84 @@ async def resume_release(
 # --------------------------------------------------------------------------- #
 # Agent-facing outcome report
 # --------------------------------------------------------------------------- #
+_REPORT_STATUS = {
+    "succeeded": AgentUpdateAttemptStatus.succeeded,
+    "rolled_back": AgentUpdateAttemptStatus.rolled_back,
+    "failed": AgentUpdateAttemptStatus.failed,
+}
+
+# How many of an endpoint's most recent evidence-only reports are compared
+# against an incoming one to recognize a retry. The agent resends only its one
+# retained outcome, so the latest event is the one a retry would duplicate.
+_UNTARGETED_REPLAY_WINDOW = 1
+
+
+def _outcome_detail(body: SelfUpdateReportIn, *, recorded: bool) -> dict:
+    return {
+        "release_id": body.release_id or "",
+        "command_id": body.command_id or "",
+        "status": body.status,
+        "reason": body.reason or "",
+        "from_version": body.from_version or "",
+        "to_version": body.to_version or "",
+        "observed_version": body.observed_version or "",
+        "health_attempts": body.attempts,
+        "recorded": recorded,
+    }
+
+
+def _report_matches_attempt(
+    body: SelfUpdateReportIn, attempt: AgentUpdateAttempt
+) -> bool:
+    """True when ``body`` is an exact retry of the report that resolved ``attempt``."""
+    return (
+        attempt.status == _REPORT_STATUS[body.status]
+        and attempt.observed_version == body.observed_version
+        and attempt.reason == body.reason
+        and attempt.health_attempts == body.attempts
+        and (body.from_version is None or body.from_version == attempt.from_version)
+        and (body.to_version is None or body.to_version == attempt.to_version)
+    )
+
+
+async def _is_untargeted_replay(
+    db: AsyncSession, agent: Agent, detail: dict
+) -> bool:
+    """True when the endpoint's latest evidence-only report is this exact one."""
+    previous = (
+        await db.execute(
+            select(AuditEvent.detail)
+            .where(
+                AuditEvent.agent_id == agent.id,
+                AuditEvent.action == "agent_update.outcome_reported",
+            )
+            .order_by(AuditEvent.seq.desc())
+            .limit(_UNTARGETED_REPLAY_WINDOW)
+        )
+    ).scalars().all()
+    # Compare what the chain actually stores, not the raw report.
+    stored = sanitize_audit_detail("agent_update.outcome_reported", detail)
+    return any(event == stored for event in previous)
+
+
+async def _record_report_rejection(
+    db: AsyncSession, agent: Agent, body: SelfUpdateReportIn, rejection: str
+) -> None:
+    await audit.record(
+        db,
+        action="agent_update.outcome_rejected",
+        actor="agent",
+        agent_id=agent.id,
+        detail={
+            "release_id": body.release_id or "",
+            "command_id": body.command_id or "",
+            "status": body.status,
+            "rejection": rejection,
+            "trust_state": agent.trust_state.value,
+        },
+    )
+
+
 @agent_router.post(
     "/agents/me/self-update/report",
     response_model=SelfUpdateReportAck,
@@ -750,30 +830,69 @@ async def report_self_update(
     (for example an operator-triggered rollback). That is recorded as audit
     evidence but never creates an attempt row, so the halt rule keeps counting
     only the endpoints the rollout actually chose.
+
+    Two fail-closed rules guard the report (issue #291):
+
+    * Only an ``active`` endpoint may report. A quarantined or revoked endpoint
+      has suspended trust, so it can neither move its stored build, resolve an
+      attempt, nor feed the canary halt rule. The refusal is audited.
+    * The report is idempotent per (agent, release). The agent retains its
+      outcome on disk and resends it until the server acknowledges it, so an
+      exact retry of an already-resolved attempt is acknowledged without a
+      second transition or audit event. A retry that disagrees with the
+      resolved outcome is refused and audited instead of overwriting it.
     """
+    if agent.trust_state != AgentTrustState.active:
+        await _record_report_rejection(db, agent, body, "agent_not_active")
+        # Commit explicitly: the refusal evidence is the only mutation, and the
+        # raise below would otherwise roll it back with the request.
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "agent_not_active"},
+        )
+
     now = _now()
+    attempt: AgentUpdateAttempt | None = None
+    if body.release_id:
+        # Lock the row so two concurrent copies of the same report serialize:
+        # the second sees the first's resolution and takes the replay path.
+        attempt = await db.scalar(
+            select(AgentUpdateAttempt)
+            .where(
+                AgentUpdateAttempt.release_id == body.release_id,
+                AgentUpdateAttempt.agent_id == agent.id,
+            )
+            .with_for_update()
+        )
+
+    if attempt is not None and attempt.reported_at is not None:
+        release = await db.get(AgentUpdateRelease, attempt.release_id)
+        release_state = release.state.value if release is not None else None
+        if _report_matches_attempt(body, attempt):
+            return SelfUpdateReportAck(
+                ok=True, recorded=True, release_state=release_state
+            )
+        await _record_report_rejection(db, agent, body, "conflicting_report")
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "agent_update_report_conflict"},
+        )
+
+    detail = _outcome_detail(body, recorded=attempt is not None)
+    if attempt is None and await _is_untargeted_replay(db, agent, detail):
+        # Evidence-only report already on the chain: acknowledge, append nothing.
+        return SelfUpdateReportAck(ok=True, recorded=False, release_state=None)
+
     if body.observed_version:
         # The report is also the earliest reliable statement of what is now
         # running, so it refreshes the stored build alongside the heartbeat.
         agent.agent_version = body.observed_version
 
-    attempt: AgentUpdateAttempt | None = None
-    if body.release_id:
-        attempt = await db.scalar(
-            select(AgentUpdateAttempt).where(
-                AgentUpdateAttempt.release_id == body.release_id,
-                AgentUpdateAttempt.agent_id == agent.id,
-            )
-        )
-
-    status_map = {
-        "succeeded": AgentUpdateAttemptStatus.succeeded,
-        "rolled_back": AgentUpdateAttemptStatus.rolled_back,
-        "failed": AgentUpdateAttemptStatus.failed,
-    }
     release_state: str | None = None
     if attempt is not None:
-        attempt.status = status_map[body.status]
+        attempt.status = _REPORT_STATUS[body.status]
         attempt.from_version = body.from_version or attempt.from_version
         attempt.to_version = body.to_version or attempt.to_version
         attempt.observed_version = body.observed_version
@@ -786,17 +905,7 @@ async def report_self_update(
         action="agent_update.outcome_reported",
         actor="agent",
         agent_id=agent.id,
-        detail={
-            "release_id": body.release_id or "",
-            "command_id": body.command_id or "",
-            "status": body.status,
-            "reason": body.reason or "",
-            "from_version": body.from_version or "",
-            "to_version": body.to_version or "",
-            "observed_version": body.observed_version or "",
-            "health_attempts": body.attempts,
-            "recorded": attempt is not None,
-        },
+        detail=detail,
     )
 
     if attempt is not None:
