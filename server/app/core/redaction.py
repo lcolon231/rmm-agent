@@ -463,6 +463,11 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "release_id", "command_id", "status", "reason", "from_version",
         "to_version", "observed_version", "health_attempts", "recorded",
     ),
+    # A report refused because the endpoint is not active or because it
+    # contradicts an already-resolved attempt (issue #291). Coded values only.
+    "agent_update.outcome_rejected": _schema(
+        "release_id", "command_id", "status", "rejection", "trust_state",
+    ),
     "patch_compliance.viewed": _schema(
         "client_id", "site_id", "state", "view", "result_count",
     ),

@@ -548,6 +548,13 @@ PRODUCER_DETAILS = {
         "health_attempts": 1,
         "recorded": True,
     },
+    "agent_update.outcome_rejected": {
+        "release_id": ID1,
+        "command_id": ID3,
+        "status": "succeeded",
+        "rejection": "agent_not_active",
+        "trust_state": "quarantined",
+    },
     "service_control.dispatched": {
         "action": "stop",
         "service": "Spooler",
