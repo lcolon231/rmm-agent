@@ -7,7 +7,7 @@
 # needs a real registry, so without this test the script's own logic ships
 # unexercised and a defect in it surfaces only on an endpoint.
 #
-# This extracts the exact script text from probe_windows.go, parses it with the
+# This extracts the exact script text from probe_ps.go, parses it with the
 # PowerShell parser, then runs it against stubbed registry state. Test-Path and
 # Get-ItemProperty are shadowed by functions in the same scope, so the script
 # under test is byte-identical to the shipped one -- only the registry beneath
@@ -18,7 +18,7 @@
 # Exits non-zero on the first failed assertion.
 
 param(
-    [string]$Source = (Join-Path $PSScriptRoot '..' 'internal' 'monitoring' 'probe_windows.go')
+    [string]$Source = (Join-Path $PSScriptRoot '..' 'internal' 'monitoring' 'probe_ps.go')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,8 +28,8 @@ if (-not (Test-Path $Source)) { throw "probe source not found: $Source" }
 # Concatenate the raw-string chunks of the script literal, skipping the Go line
 # comments between them and stopping at the closing backtick of the last chunk.
 $go = Get-Content -Raw $Source
-$body = $go.Substring($go.IndexOf('func (platformProbe) RebootPending'))
-$body = $body.Substring(0, $body.IndexOf('out, err := powerShell'))
+$body = $go.Substring($go.IndexOf('func rebootPending('))
+$body = $body.Substring(0, $body.IndexOf('out, err := run(ctx, script)'))
 $chunks = [regex]::Matches($body, '`([^`]*)`') | ForEach-Object { $_.Groups[1].Value }
 if ($chunks.Count -lt 2) { throw "could not extract the probe script from $Source" }
 $script = -join $chunks
