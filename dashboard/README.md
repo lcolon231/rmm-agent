@@ -71,7 +71,7 @@ npm run validate:env
 npm audit --omit=dev
 npm run lint
 npm run typecheck
-npm test
+npm run test:coverage   # npm test plus honest coverage and its CI floor
 npm run build
 npm run smoke:production
 ```
