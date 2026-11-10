@@ -7,27 +7,14 @@ package patching
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
-	"unicode/utf16"
 )
 
 const installTimeout = 20 * time.Minute
-
-func encodeUTF16LE(s string) string {
-	runes := []rune(s)
-	encoded := utf16.Encode(runes)
-	buf := make([]byte, len(encoded)*2)
-	for i, u := range encoded {
-		buf[i*2] = byte(u)
-		buf[i*2+1] = byte(u >> 8)
-	}
-	return base64.StdEncoding.EncodeToString(buf)
-}
 
 const psInstallScript = `
 $ErrorActionPreference = 'Stop'

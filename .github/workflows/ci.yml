@@ -52,6 +52,13 @@ jobs:
       - name: reboot probe script behavior
         shell: pwsh
         run: pwsh -File test/reboot_probe_script.ps1
+      # The Windows Update scan and install scripts are embedded the same way
+      # and go test only covers their Go-side parsers. This runs both against
+      # stub WUA COM objects and checks the JSON matches what BuildSection and
+      # assembleInstallResult accept (issue #279).
+      - name: WUA scan and install script behavior
+        shell: pwsh
+        run: pwsh -File test/wua_scripts.ps1
 
   agent-windows:
     name: agent (Go, Windows)
