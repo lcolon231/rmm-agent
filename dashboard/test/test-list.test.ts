@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Guards against orphaned test files (issue #283): every test file under
 // test/ must be picked up by a test-file glob in the `test` or `test:ui`
 // npm script, so a new or moved file can never silently skip CI the way
