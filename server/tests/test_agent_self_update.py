@@ -771,6 +771,186 @@ async def test_report_for_an_untargeted_release_is_evidence_only(client):
     assert detail["state"] == "published"
 
 
+async def _audit_count(action: str) -> int:
+    async with AsyncSessionLocal() as db:
+        return len(
+            (
+                await db.execute(
+                    select(AuditEvent.id).where(AuditEvent.action == action)
+                )
+            ).scalars().all()
+        )
+
+
+@pytest.mark.asyncio
+async def test_quarantined_endpoint_cannot_report_an_outcome(client):
+    """Quarantine is fail-closed on the report path too (issue #291)."""
+    headers = await auth(client)
+    tokens = []
+    agent_ids = []
+    for _ in range(3):
+        agent_id, token = await enroll(client, headers)
+        agent_ids.append(agent_id)
+        tokens.append(token)
+    release = await publish(client, headers)
+    await client.post(
+        f"/agent-updates/releases/{release['id']}/rollout",
+        json={"rollout_percent": 100},
+        headers=headers,
+    )
+    # One genuine failure: one more resolved failure would cross the threshold.
+    first = await report(
+        client, tokens[0], release_id=release["id"], status="rolled_back",
+        observed_version="0.1.0", reason="health_check_failed",
+    )
+    assert first.json()["release_state"] == "rolling"
+
+    quarantine = await client.post(
+        f"/agents/{agent_ids[1]}/quarantine",
+        json={"reason": "under investigation for a suspected compromise"},
+        headers=headers,
+    )
+    assert quarantine.status_code in (200, 204), quarantine.text
+    before = (await client.get(f"/agents/{agent_ids[1]}", headers=headers)).json()
+    reported_before = await _audit_count("agent_update.outcome_reported")
+
+    refused = await report(
+        client, tokens[1], release_id=release["id"], status="rolled_back",
+        observed_version="9.9.9", reason="health_check_failed",
+    )
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["detail"] == {"code": "agent_not_active"}
+
+    after = (await client.get(f"/agents/{agent_ids[1]}", headers=headers)).json()
+    assert after["agent_version"] == before["agent_version"]
+    attempts = (
+        await client.get(
+            f"/agent-updates/releases/{release['id']}/attempts", headers=headers
+        )
+    ).json()["attempts"]
+    mine = [a for a in attempts if a["agent_id"] == agent_ids[1]]
+    assert all(a["status"] == "dispatched" for a in mine)
+    assert all(a["reported_at"] is None for a in mine)
+    detail = (
+        await client.get(f"/agent-updates/releases/{release['id']}", headers=headers)
+    ).json()
+    assert detail["state"] == "rolling"
+    assert detail["stats"]["resolved"] == 1
+
+    assert await _audit_count("agent_update.outcome_reported") == reported_before
+    async with AsyncSessionLocal() as db:
+        rejection = (
+            await db.execute(
+                select(AuditEvent).where(
+                    AuditEvent.action == "agent_update.outcome_rejected"
+                )
+            )
+        ).scalar_one()
+    assert rejection.agent_id == agent_ids[1]
+    assert rejection.detail["rejection"] == "agent_not_active"
+    assert rejection.detail["trust_state"] == "quarantined"
+
+
+@pytest.mark.asyncio
+async def test_identical_report_replay_is_a_no_op(client):
+    headers = await auth(client)
+    tokens = [(await enroll(client, headers))[1] for _ in range(3)]
+    release = await publish(client, headers)
+    await client.post(
+        f"/agent-updates/releases/{release['id']}/rollout",
+        json={"rollout_percent": 100},
+        headers=headers,
+    )
+    outcome = dict(
+        release_id=release["id"], status="rolled_back", from_version="0.1.0",
+        to_version="0.2.0", observed_version="0.1.0",
+        reason="health_check_failed", attempts=2,
+    )
+    first = await report(client, tokens[0], **outcome)
+    assert first.status_code == 200, first.text
+    attempts = (
+        await client.get(
+            f"/agent-updates/releases/{release['id']}/attempts", headers=headers
+        )
+    ).json()["attempts"]
+    reported_at = {a["agent_id"]: a["reported_at"] for a in attempts}
+
+    # The replay is acknowledged (so the agent clears its journal) but neither
+    # re-applies the transition nor appends evidence, and one endpoint resending
+    # its failure cannot count twice toward the halt rule.
+    for _ in range(2):
+        again = await report(client, tokens[0], **outcome)
+        assert again.status_code == 200, again.text
+        assert again.json() == {
+            "ok": True, "recorded": True, "release_state": "rolling",
+        }
+
+    assert await _audit_count("agent_update.outcome_reported") == 1
+    attempts = (
+        await client.get(
+            f"/agent-updates/releases/{release['id']}/attempts", headers=headers
+        )
+    ).json()["attempts"]
+    assert {a["agent_id"]: a["reported_at"] for a in attempts} == reported_at
+    detail = (
+        await client.get(f"/agent-updates/releases/{release['id']}", headers=headers)
+    ).json()
+    assert detail["state"] == "rolling"
+    assert detail["stats"]["rolled_back"] == 1
+
+
+@pytest.mark.asyncio
+async def test_conflicting_report_replay_is_refused(client):
+    headers = await auth(client)
+    agent_id, token = await enroll(client, headers)
+    release = await publish(client, headers)
+    await client.post(
+        f"/agent-updates/releases/{release['id']}/rollout",
+        json={"rollout_percent": 100},
+        headers=headers,
+    )
+    first = await report(
+        client, token, release_id=release["id"], status="rolled_back",
+        observed_version="0.1.0", reason="health_check_failed",
+    )
+    assert first.status_code == 200, first.text
+
+    conflict = await report(
+        client, token, release_id=release["id"], status="succeeded",
+        observed_version="0.2.0", reason="health_check_passed",
+    )
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["detail"] == {"code": "agent_update_report_conflict"}
+
+    attempts = (
+        await client.get(
+            f"/agent-updates/releases/{release['id']}/attempts", headers=headers
+        )
+    ).json()["attempts"]
+    assert attempts[0]["status"] == "rolled_back"
+    assert attempts[0]["observed_version"] == "0.1.0"
+    endpoint = (await client.get(f"/agents/{agent_id}", headers=headers)).json()
+    assert endpoint["agent_version"] == "0.1.0"
+    assert await _audit_count("agent_update.outcome_reported") == 1
+    assert await _audit_count("agent_update.outcome_rejected") == 1
+
+
+@pytest.mark.asyncio
+async def test_untargeted_report_replay_appends_one_event(client):
+    headers = await auth(client)
+    _, token = await enroll(client, headers)
+    release = await publish(client, headers)
+    outcome = dict(
+        release_id=release["id"], status="rolled_back",
+        reason="operator_requested_rollback",
+    )
+    for _ in range(2):
+        response = await report(client, token, **outcome)
+        assert response.status_code == 200, response.text
+        assert response.json()["recorded"] is False
+    assert await _audit_count("agent_update.outcome_reported") == 1
+
+
 @pytest.mark.asyncio
 async def test_report_requires_agent_authentication_and_a_known_status(client):
     headers = await auth(client)
