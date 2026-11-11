@@ -69,7 +69,7 @@ export default async function Home({ searchParams }: HomePageProps) {
   const [all, offline, online, alerts, compliance, approvals, audit] = await Promise.allSettled([
     getEndpointList(token, scope),
     getEndpointList(token, { ...scope, status: "offline" }),
-    getEndpointList(token, { ...scope, status: "online" }),
+    getEndpointList(token, { ...scope, status: "online", pageSize: 1 }),
     getMonitoringAlerts(token),
     getComplianceSummary(token, scope),
     getApprovalRequests(token),
@@ -94,7 +94,7 @@ export default async function Home({ searchParams }: HomePageProps) {
     scopeName: selectedSite ? `${selectedClient?.name} · ${selectedSite.name}` : (selectedClient?.name ?? null),
     now: now.toISOString(),
     devices: allList && offlineList && onlineList ? { total: allList.total, online: onlineList.total, offline: offlineList.total } : null,
-    attention: allList && offlineList ? attentionDevices([offlineList.items, allList.items, onlineList?.items ?? []], alertIndex, now) : null,
+    attention: allList && offlineList ? attentionDevices([offlineList.items, allList.items], alertIndex, now) : null,
     alerts: alertList ? openAlertsBySeverity(alertList) : null,
     compliance: complianceSummary ? compliancePercent(complianceSummary) : "error",
     approvals: approvalList

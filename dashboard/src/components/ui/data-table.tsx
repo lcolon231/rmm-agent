@@ -124,15 +124,17 @@ export function DataTable<T>({
 type TableFooterProps = {
   shown: number;
   total: number;
+  /** How the rows are ordered; say "on this page" when the order is not global. */
+  sortNote?: string;
   /** Pagination controls (36px icon buttons), usually URL-driven links. */
   pagination?: ReactNode;
 };
 
-export function TableFooter({ shown, total, pagination }: TableFooterProps) {
+export function TableFooter({ shown, total, sortNote = "most urgent first", pagination }: TableFooterProps) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-(--line) px-5 py-3 text-xs text-(--muted)">
       <p className="m-0">
-        Showing {shown} of {total} · most urgent first
+        Showing {shown} of {total} · {sortNote}
       </p>
       {pagination ? <nav aria-label="Pages" className="flex items-center gap-1">{pagination}</nav> : null}
     </div>

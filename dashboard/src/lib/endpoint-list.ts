@@ -33,6 +33,8 @@ export type EndpointQuery = {
   clientId?: string;
   direction?: "asc" | "desc";
   page?: number;
+  /** 1–100; the server's default page is 25. Use 1 when only `total` is needed. */
+  pageSize?: number;
   search?: string;
   siteId?: string;
   sort?: "last_seen" | "hostname" | "status";
@@ -40,7 +42,7 @@ export type EndpointQuery = {
 };
 
 export async function getEndpointList(sessionToken: string, options: EndpointQuery = {}): Promise<EndpointListData> {
-  const query = new URLSearchParams({ page: String(options.page ?? 1), page_size: "25", sort: options.sort ?? "last_seen", direction: options.direction ?? "desc" });
+  const query = new URLSearchParams({ page: String(options.page ?? 1), page_size: String(Math.min(100, Math.max(1, Math.trunc(options.pageSize ?? 25)))), sort: options.sort ?? "last_seen", direction: options.direction ?? "desc" });
   if (options.clientId) query.set("client_id", options.clientId);
   if (options.siteId) query.set("site_id", options.siteId);
   if (options.status) query.set("status", options.status);
