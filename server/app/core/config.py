@@ -470,6 +470,12 @@ class Settings(BaseSettings):
     script_library_max_content_bytes: int = Field(
         default=57_344, ge=1_024, le=57_344
     )
+
+    # --- Moderated community script repository (issue #74) ---
+    community_max_publishers: int = Field(default=200, ge=1, le=10_000)
+    community_max_keys_per_publisher: int = Field(default=5, ge=1, le=20)
+    community_max_packages: int = Field(default=2_000, ge=1, le=20_000)
+    community_max_versions_per_package: int = Field(default=100, ge=1, le=1_000)
     # Separate 32-byte AES-GCM key for expiring per-run parameter values. It
     # must remain stable while prepared value sets may still be consumed.
     script_parameter_encryption_key: str | None = None

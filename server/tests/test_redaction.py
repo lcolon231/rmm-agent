@@ -799,6 +799,73 @@ PRODUCER_DETAILS = {
         "record_version": 3,
         "reason": SENTINEL,
     },
+    "community.publisher_created": {"publisher_id": ID1, "slug": "acme"},
+    "community.publisher_key_added": {
+        "publisher_id": ID1, "key_id": "acme-2026", "fingerprint": "a" * 64,
+    },
+    "community.publisher_key_revoked": {
+        "publisher_id": ID1, "key_id": "acme-2026", "fingerprint": "a" * 64,
+        "request_id": "request-12345688", "reason": SENTINEL,
+    },
+    "community.publisher_revoked": {
+        "publisher_id": ID1, "slug": "acme", "request_id": "request-12345689",
+        "reason": SENTINEL,
+    },
+    "community.catalog_viewed": {
+        "page": 1, "page_size": 50, "result_count": 1, "total": 1,
+    },
+    "community.version_viewed": {
+        "package_id": ID1, "package_version_id": ID2, "version": "1.0.0",
+        "content_sha256": "b" * 64,
+    },
+    "community.submission_refused": {
+        "code": "signature_invalid", "publisher": SENTINEL, "name": SENTINEL,
+        "version": SENTINEL, "key_id": "acme-2026", "content_sha256": "b" * 64,
+    },
+    "community.submitted": {
+        "package_id": ID1, "package_version_id": ID2,
+        "qualified_name": "acme/temp-cleanup", "version": "1.0.0",
+        "manifest_sha256": "c" * 64, "content_sha256": "b" * 64,
+        "content_bytes": 120, "key_id": "acme-2026",
+        "capabilities": ["platform.windows", "script.run.powershell"],
+    },
+    "community.moderated": {
+        "package_id": ID1, "package_version_id": ID2,
+        "qualified_name": "acme/temp-cleanup", "version": "1.0.0",
+        "state": "approved", "capability_escalation": ["network.egress"],
+        "reason": SENTINEL,
+    },
+    "community.version_revoked": {
+        "package_id": ID1, "package_version_id": ID2,
+        "qualified_name": "acme/temp-cleanup", "version": "1.0.0",
+        "request_id": "request-12345690", "reason": SENTINEL,
+    },
+    "community.installed": {
+        "install_id": ID1, "package_version_id": ID2,
+        "qualified_name": "acme/temp-cleanup", "version": "1.0.0",
+        "script_id": ID3, "script_version_id": ID3,
+        "capabilities": ["platform.windows", "script.run.powershell"],
+        "request_id": "request-12345691",
+    },
+    "community.updated": {
+        "install_id": ID1, "package_version_id": ID2,
+        "qualified_name": "acme/temp-cleanup", "version": "1.1.0",
+        "previous_version": "1.0.0", "script_id": ID3, "script_version_id": ID3,
+        "capabilities": ["platform.windows", "script.run.powershell"],
+        "request_id": "request-12345692",
+    },
+    "community.rolled_back": {
+        "install_id": ID1, "package_version_id": ID2,
+        "qualified_name": "acme/temp-cleanup", "version": "1.0.0",
+        "previous_version": "1.1.0", "script_id": ID3, "script_version_id": ID3,
+        "capabilities": ["platform.windows", "script.run.powershell"],
+        "request_id": "request-12345693",
+    },
+    "community.dispatch_refused": {
+        "source": "dispatch", "code": "community_package_blocked",
+        "kind": "powershell", "script_version_id": ID1,
+        "package_version_id": ID2, "agent_id": ID3,
+    },
     "maintenance_window.created": {
         "maintenance_window_id": ID3,
         "scope": "client",

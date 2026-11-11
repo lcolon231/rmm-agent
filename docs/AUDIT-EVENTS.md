@@ -128,6 +128,20 @@ and SHA-256/Merkle roots—remains readable.
 | `script_library.parameter_values_prepared` | `api/script_library.py` encrypted per-run parameter values | `script_id`, `version`, `parameter_value_set_id`, `request_id`, `provided_keys`, `defaulted_keys`, `secret_keys`, `values_fingerprint`, `expires_at` |
 | `script_library.reviewed` | `api/script_library.py` final review | `script_id`, `version`, `state`, `reason_sha256`, `reason_bytes` |
 | `script_library.deprecated` | `api/script_library.py` terminal idempotent deprecation | `script_id`, `request_id`, `previous_record_version`, `record_version`, `reason_sha256`, `reason_bytes` |
+| `community.publisher_created` | `api/community_packages.py` publisher namespace registration | `publisher_id`, `slug` |
+| `community.publisher_key_added` | `api/community_packages.py` Ed25519 public key registration | `publisher_id`, `key_id`, `fingerprint` |
+| `community.publisher_key_revoked` | `api/community_packages.py` terminal key revocation | `publisher_id`, `key_id`, `fingerprint`, `request_id`, `reason_sha256`, `reason_bytes` |
+| `community.publisher_revoked` | `api/community_packages.py` terminal idempotent publisher revocation | `publisher_id`, `slug`, `request_id`, `reason_sha256`, `reason_bytes` |
+| `community.catalog_viewed` | `api/community_packages.py` bounded catalog read | `page`, `page_size`, `result_count`, `total` |
+| `community.version_viewed` | `api/community_packages.py` exact signed source read | `package_id`, `package_version_id`, `version`, `content_sha256` |
+| `community.submission_refused` | `api/community_packages.py` tampered/forged/unauthorized submission (committed despite refusal) | `code`, `publisher_sha256`, `publisher_bytes`, `name_sha256`, `name_bytes`, `version_sha256`, `version_bytes`, `key_id`, `content_sha256` |
+| `community.submitted` | `api/community_packages.py` verified immutable version submission | `package_id`, `package_version_id`, `qualified_name`, `version`, `manifest_sha256`, `content_sha256`, `content_bytes`, `key_id`, `capabilities` |
+| `community.moderated` | `api/community_packages.py` final moderation (separation of duties) | `package_id`, `package_version_id`, `qualified_name`, `version`, `state`, `capability_escalation`, `reason_sha256`, `reason_bytes` |
+| `community.version_revoked` | `api/community_packages.py` terminal version revocation | `package_id`, `package_version_id`, `qualified_name`, `version`, `request_id`, `reason_sha256`, `reason_bytes` |
+| `community.installed` | `api/community_packages.py` install into the script library | `install_id`, `package_version_id`, `qualified_name`, `version`, `script_id`, `script_version_id`, `capabilities`, `request_id` |
+| `community.updated` | `api/community_packages.py` forward update (appends a library version) | `install_id`, `package_version_id`, `qualified_name`, `version`, `previous_version`, `script_id`, `script_version_id`, `capabilities`, `request_id` |
+| `community.rolled_back` | `api/community_packages.py` rollback (appends a library version with older content) | `install_id`, `package_version_id`, `qualified_name`, `version`, `previous_version`, `script_id`, `script_version_id`, `capabilities`, `request_id` |
+| `community.dispatch_refused` | `api/management.py` dispatch and `core/scheduler.py` scheduled run trust refusal | `source`, `code`, `kind`, `script_version_id`, `package_version_id`, `agent_id` |
 | `maintenance_window.created` | `api/management.py` maintenance-window creation | `maintenance_window_id`, `scope`, `scope_id`, `starts_at`, `ends_at`, `name_sha256`, `name_bytes` |
 | `maintenance_window.deleted` | `api/management.py` maintenance-window deletion | `maintenance_window_id`, `scope`, `scope_id`, `name_sha256`, `name_bytes` |
 | `command.authorization_allowed` | `api/management.py` dispatch policy, including power-operation role decisions | `operator_id`, `operator_role`, `kind`, `site_id`, `policy`, `reason`, `permission_scope`, `permission_scope_id` |

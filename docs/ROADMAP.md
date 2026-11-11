@@ -238,7 +238,10 @@ Workstreams:
 - Linux and macOS agents after platform contracts and support policy exist.
 - Versioned public API and webhook event catalog.
 - PSA integrations and Terraform or Ansible deployment automation.
-- Moderated community script repository and signed extension system.
+- Moderated community script repository and signed extension system. The
+  in-deployment signed, moderated catalog is implemented (#74,
+  `docs/COMMUNITY-PACKAGES.md`); a remote/federated feed and agent-side
+  script confinement remain.
 - Multi-region relays with explicit tenancy, routing, key, and audit semantics.
   Control plane and agent routing are implemented (#87, `docs/RELAYS.md`); the
   deployable relay service and storage residency remain.

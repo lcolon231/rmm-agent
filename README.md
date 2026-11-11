@@ -47,7 +47,9 @@ is tamper-evident and independently verifiable.
   policies and compliance reporting, Winget and Chocolatey package management,
   and MSI/EXE deployment with mandatory integrity checks.
 - **Automation.** An immutable, versioned script library with typed
-  parameters, and cron-style scheduled tasks.
+  parameters, cron-style scheduled tasks, and a moderated community
+  repository of publisher-signed script packages whose trust is re-checked on
+  every run (`docs/COMMUNITY-PACKAGES.md`).
 - **Operator security.** Roles, tenant-scoped authorization, WebAuthn
   multi-factor authentication, two-person approval for sensitive commands,
   break-glass emergency access and full session management.

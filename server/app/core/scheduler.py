@@ -32,7 +32,9 @@ from app.models.models import (
     ScheduleMisfirePolicy,
     ScheduleTargetType,
     ScheduledTask,
+    ScriptVersion,
 )
+from app.core import community_packages as community_trust
 
 
 
@@ -250,6 +252,41 @@ async def dispatch_scheduled_tasks_once(
                 task_approval_refused = True
                 skipped_count += 1
                 continue
+            # Community package trust (issue #74): a scheduled run gets the same
+            # revocation/capability check as an interactive dispatch.
+            if task.script_version_id:
+                script_version = await db.get(ScriptVersion, task.script_version_id)
+                refusal_code = None
+                if script_version is not None:
+                    try:
+                        await community_trust.check_dispatch(
+                            db,
+                            script_version,
+                            kind=task.kind,
+                            agent_os=agent.os,
+                            payload=task.payload,
+                        )
+                    except community_trust.CommunityRefusal as refusal:
+                        refusal_code = refusal.code
+                if refusal_code is not None:
+                    await audit.record(
+                        db,
+                        action="community.dispatch_refused",
+                        actor="system",
+                        agent_id=agent.id,
+                        detail={
+                            "source": "scheduler",
+                            "code": refusal_code,
+                            "kind": task.kind.value
+                            if hasattr(task.kind, "value")
+                            else str(task.kind),
+                            "script_version_id": script_version.id,
+                            "package_version_id": script_version.community_package_version_id,
+                            "agent_id": agent.id,
+                        },
+                    )
+                    skipped_count += 1
+                    continue
             # Check concurrency policy
             if task.concurrency_policy == ScheduleConcurrencyPolicy.skip:
                 active_cmd_res = await db.execute(

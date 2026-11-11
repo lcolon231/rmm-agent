@@ -578,6 +578,58 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
         "script_id", "request_id", "previous_record_version", "record_version",
         "reason", digest_fields=("reason",),
     ),
+    # Moderated community script repository (issue #74). Script content,
+    # signatures, and moderator prose are never stored; digests are.
+    "community.publisher_created": _schema("publisher_id", "slug"),
+    "community.publisher_key_added": _schema("publisher_id", "key_id", "fingerprint"),
+    "community.publisher_key_revoked": _schema(
+        "publisher_id", "key_id", "fingerprint", "request_id", "reason",
+        digest_fields=("reason",),
+    ),
+    "community.publisher_revoked": _schema(
+        "publisher_id", "slug", "request_id", "reason", digest_fields=("reason",),
+    ),
+    "community.catalog_viewed": _schema("page", "page_size", "result_count", "total"),
+    "community.version_viewed": _schema(
+        "package_id", "package_version_id", "version", "content_sha256"
+    ),
+    # Refused submissions carry unauthenticated identity claims, so the
+    # claimed publisher/name/version are digested rather than stored.
+    "community.submission_refused": _schema(
+        "code", "publisher", "name", "version", "key_id", "content_sha256",
+        digest_fields=("publisher", "name", "version"),
+    ),
+    "community.submitted": _schema(
+        "package_id", "package_version_id", "qualified_name", "version",
+        "manifest_sha256", "content_sha256", "content_bytes", "key_id",
+        "capabilities",
+    ),
+    "community.moderated": _schema(
+        "package_id", "package_version_id", "qualified_name", "version", "state",
+        "capability_escalation", "reason", digest_fields=("reason",),
+    ),
+    "community.version_revoked": _schema(
+        "package_id", "package_version_id", "qualified_name", "version",
+        "request_id", "reason", digest_fields=("reason",),
+    ),
+    "community.installed": _schema(
+        "install_id", "package_version_id", "qualified_name", "version",
+        "script_id", "script_version_id", "capabilities", "request_id",
+    ),
+    "community.updated": _schema(
+        "install_id", "package_version_id", "qualified_name", "version",
+        "previous_version", "script_id", "script_version_id", "capabilities",
+        "request_id",
+    ),
+    "community.rolled_back": _schema(
+        "install_id", "package_version_id", "qualified_name", "version",
+        "previous_version", "script_id", "script_version_id", "capabilities",
+        "request_id",
+    ),
+    "community.dispatch_refused": _schema(
+        "source", "code", "kind", "script_version_id", "package_version_id",
+        "agent_id",
+    ),
     "maintenance_window.created": _schema(
         "maintenance_window_id",
         "scope",
