@@ -146,7 +146,7 @@ function DeviceDrawer({ row, onClose, now }: { row: EndpointRow | null; onClose:
           <ButtonLink href={href} variant="primary">
             Open device
           </ButtonLink>
-          <ButtonLink href={`${href}?tab=commands`} icon={TerminalSquare}>
+          <ButtonLink href={`${href}/commands`} icon={TerminalSquare}>
             Restart or run a command
           </ButtonLink>
         </>

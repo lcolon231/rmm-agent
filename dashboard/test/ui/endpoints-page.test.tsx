@@ -112,7 +112,7 @@ test("a row opens the preview drawer, which links to the device and its command 
   const drawer = screen.getByRole("dialog", { name: "C-CRITICAL" });
   assert.match(within(drawer).getByRole("status").textContent ?? "", /Critical1 critical alert open\./);
   assert.equal(within(drawer).getByRole("link", { name: "Open device" }).getAttribute("href"), "/endpoints/crit");
-  assert.equal(within(drawer).getByRole("link", { name: /Restart or run a command/ }).getAttribute("href"), "/endpoints/crit?tab=commands");
+  assert.equal(within(drawer).getByRole("link", { name: /Restart or run a command/ }).getAttribute("href"), "/endpoints/crit/commands");
 });
 
 test("status chips are links that keep the search and show server totals", async () => {
