@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
-from app.core import audit, evidence_bundles, evidence_packages, evidence_vault
+from app.core import audit, evidence_bundles, evidence_packages, evidence_vault, retention_policy
 from app.core.clientip import client_ip
 from app.core.database import get_db
 from app.core.tenant_scope import assert_client_action, assert_client_visible, client_id_filter
@@ -157,9 +157,15 @@ async def store_evidence(
         minimum=ClientRole.client_operator, detail={"code": "tenant_not_found"},
     )
     assert tenant is not None
+    requested_days = body.retention_days
+    if requested_days is None:
+        # A tenant's evidence default (issue #88) applies only to new records
+        # and still passes the vault's own floor/ceiling below.
+        policy = await retention_policy.effective_policy(db, tenant.id)
+        requested_days = policy.value("evidence_default_days")
     try:
         vault = evidence_vault.require_vault()
-        retention_days = evidence_vault.resolve_retention_days(body.retention_days)
+        retention_days = evidence_vault.resolve_retention_days(requested_days)
     except evidence_vault.VaultError as exc:
         _raise(exc)
     try:

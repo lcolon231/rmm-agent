@@ -28,12 +28,14 @@ from app.api import (
     meshcentral,
     mfa,
     relays,
+    retention_policy,
     scheduled_tasks,
     script_library,
     shell_sessions,
     support_chat,
 )
 from app.core import metrics
+from app.core.retention_policy import validate_settings as validate_retention_settings
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.core.prodcheck import ensure_safe_production_config
@@ -62,6 +64,9 @@ async def lifespan(app: FastAPI):
     # debug mode, placeholder secrets, missing signing keys, or a non-HTTPS
     # public URL must not serve a single request.
     ensure_safe_production_config(settings)
+    # Contradictory retention floors/ceilings (issue #88) must stop startup
+    # rather than let the sweeper guess which bound was meant.
+    validate_retention_settings(settings)
 
     # Dev convenience: create tables on startup. In production use Alembic
     # migrations instead (see alembic/).
@@ -127,6 +132,7 @@ app.include_router(agent_updates.router, prefix="/api/v1")
 app.include_router(agent_updates.agent_router, prefix="/api/v1")
 app.include_router(relays.router, prefix="/api/v1")
 app.include_router(relays.tenant_router, prefix="/api/v1")
+app.include_router(retention_policy.router, prefix="/api/v1")
 # Relay-forwarded requests (issue #87) are authenticated before any route runs.
 app.add_middleware(RelayIngressMiddleware)
 

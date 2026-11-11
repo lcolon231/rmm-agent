@@ -58,7 +58,10 @@ is tamper-evident and independently verifiable.
   deterministic evidence packages that an auditor can verify offline. Those
   packages can be retained on S3 Object Lock with enforced retention and legal
   hold. This is server-side and API-only, and it is not yet verified against a
-  live bucket.
+  live bucket. Each tenant can also set its own retention for operational data
+  (telemetry, commands and task history, inventory, alerts, notifications)
+  within platform minimums. Purges pause under legal hold and leave deletion
+  proof in the audit chain. This is API-only (`docs/RETENTION.md`).
 - **Agent lifecycle.** Signed, staged agent self-update with automatic
   rollback, loss-safe credential renewal, quarantine and revocation.
 - **End-user support.** A system-tray launcher that opens a consent-gated

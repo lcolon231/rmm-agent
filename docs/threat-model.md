@@ -78,6 +78,29 @@ authentication and role-based authorization:
   digests. Storage credentials never leave the AWS client. Residual risk: a
   GOVERNANCE-mode bucket can be bypassed by a principal with
   `s3:BypassGovernanceRetention`, and replica loss is not detected by NodeLink.
+- **Tenant-specific retention (issue #88).** Shortening retention destroys
+  data, so the threat is a compromised or careless tenant administrator, or a
+  cross-tenant caller, erasing history. The mitigations:
+  - A change needs global `admin`, `client_admin` on that tenant, and a fresh
+    step-up.
+  - Another tenant's policy answers 404.
+  - No override can go below a platform floor, and a floor that is raised later
+    still wins at enforcement.
+  - Audit events, anchors, and receipts are not configurable and are never
+    pruned.
+  - A tenant-wide legal hold suspends every purge for the tenant.
+  - Live work is never selected: running commands, open or acknowledged alerts,
+    and in-flight deliveries.
+  - Every purge appends deletion proof: counts and a digest of the sorted
+    affected keys, with no content.
+  - A failed purge rolls back only that tenant and is audited.
+
+  Residual risk:
+  - A platform operator who controls the environment can lower floors or
+    delete rows directly.
+  - Deleted rows are recoverable only from backups.
+  - Command rows deleted after the 30-day floor no longer show in server-side
+    replay review. Agents refuse replays on their own nonce and expiry checks.
 - **Bootstrap.** The first admin is created out-of-band via
   `scripts/create_admin.py` (the create-operator endpoint is admin-only, so it
   can't mint the first admin itself).

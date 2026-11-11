@@ -1518,6 +1518,8 @@ class Alert(Base):
         ),
         Index("ix_alerts_state_last_observed", "state", "last_observed_at"),
         Index("ix_alerts_agent_state", "agent_id", "state"),
+        # Tenant retention (#88) selects resolved alerts by resolution age.
+        Index("ix_alerts_state_resolved", "state", "resolved_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -3313,6 +3315,36 @@ class TenantRegionPolicy(Base):
         ForeignKey("relay_regions.id", ondelete="RESTRICT"), nullable=False
     )
     mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    set_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class TenantRetentionPolicy(Base):
+    """A tenant's retention overrides (issue #88).
+
+    Each NULL column inherits the platform default. Values are validated
+    against platform floors/ceilings on write and clamped again at enforcement,
+    so raising a floor later can never be undercut by a stale override.
+    ``version`` is the optimistic-concurrency token for updates.
+    """
+
+    __tablename__ = "tenant_retention_policies"
+
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True
+    )
+    telemetry_days: Mapped[int | None] = mapped_column(Integer)
+    command_output_days: Mapped[int | None] = mapped_column(Integer)
+    command_record_days: Mapped[int | None] = mapped_column(Integer)
+    inventory_history_per_section: Mapped[int | None] = mapped_column(Integer)
+    alert_days: Mapped[int | None] = mapped_column(Integer)
+    notification_days: Mapped[int | None] = mapped_column(Integer)
+    evidence_default_days: Mapped[int | None] = mapped_column(Integer)
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
     set_by: Mapped[str] = mapped_column(String(320), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False

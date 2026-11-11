@@ -177,7 +177,9 @@ operator, so they are not per-operator scoped. Their responsibility under this
 design is only to **stamp the resolved `client_id` on the audit events and alerts
 they emit**, so that per-tenant evidence exports and retention (#79, #88) can
 filter by tenant. The tenant boundary is enforced on operator-initiated reads and
-writes.
+writes. The retention sweep (#88) resolves every tenant's own policy. It scopes
+each purge to that tenant's agents through `site.client_id`, and stamps its
+deletion-proof events with the tenant's `organization_id`.
 
 ## Dashboard
 

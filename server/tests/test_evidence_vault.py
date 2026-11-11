@@ -51,6 +51,7 @@ from app.models.models import (  # noqa: E402
     Operator,
     OperatorClientMembership,
     OperatorRole,
+    TenantRetentionPolicy,
 )
 
 _SENTINEL = "nlk-vault-sensitive-hold-reason-7f1c"
@@ -251,6 +252,34 @@ async def test_store_is_authorized_idempotent_and_clean_room_verifiable(vault):
     stored_event = (await _events("evidence_vault.stored"))[0]
     assert stored_event.organization_id == ids["a"]
     assert stored_event.detail["package_id"] == record["package_id"]
+
+
+@pytest.mark.asyncio
+async def test_tenant_retention_policy_sets_the_default_for_new_records(vault, monkeypatch):
+    """Issue #88: a tenant's evidence default applies only when the request
+    omits retention_days, and is still bound by the vault floor."""
+    client, ids, tokens, _vault_dir = vault
+    async with AsyncSessionLocal() as db:
+        db.add(TenantRetentionPolicy(client_id=ids["a"], evidence_default_days=200,
+                                     version=1, set_by="test"))
+        await db.commit()
+
+    def days_left(resp) -> timedelta:
+        assert resp.status_code == 201, resp.text
+        return datetime.fromisoformat(resp.json()["record"]["retain_until"]) - datetime.now(
+            timezone.utc
+        )
+
+    assert timedelta(days=199) < days_left(await _store(client, tokens, ids["a"])) <= timedelta(days=200)
+    # The other tenant still inherits the platform floor.
+    assert days_left(await _store(client, tokens, ids["b"], who="other")) <= timedelta(days=30)
+    # An explicit request wins over the tenant default.
+    explicit = await _store(client, tokens, ids["a"], retention_days=400, through_seq=1)
+    assert days_left(explicit) > timedelta(days=399)
+    # A floor raised above the saved default is enforced, never undercut.
+    monkeypatch.setattr(settings, "evidence_vault_retention_days", 365)
+    raised = await _store(client, tokens, ids["a"], through_seq=2)
+    assert timedelta(days=364) < days_left(raised) <= timedelta(days=365)
 
 
 @pytest.mark.asyncio

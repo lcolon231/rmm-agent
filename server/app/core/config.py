@@ -517,6 +517,39 @@ class Settings(BaseSettings):
     # skew + forward age window, which the minimum of one day guarantees.
     relay_receipt_retention_days: int = Field(default=7, ge=1, le=365)
 
+    # --- Tenant-specific retention (issue #88) ---
+    # Platform defaults for the classes #88 brings under retention. 0 keeps the
+    # data forever, which is what every deployment did before #88, so these are
+    # inert until an operator opts in. Command records are terminal command rows
+    # (scheduled task runs are command rows, so this is also task history);
+    # alerts are *resolved* alerts with their events and observations;
+    # notifications are terminal email/webhook deliveries and their attempts.
+    command_record_retention_days: int = Field(default=0, ge=0)
+    alert_retention_days: int = Field(default=0, ge=0)
+    notification_retention_days: int = Field(default=0, ge=0)
+    # Platform floors: no tenant override (and no positive platform default)
+    # may be shorter. The command-record floor stays well past any command's
+    # signed validity window so a deleted row never matters for replay review.
+    retention_min_telemetry_days: int = Field(default=1, ge=1)
+    retention_min_command_output_days: int = Field(default=1, ge=1)
+    retention_min_command_record_days: int = Field(default=30, ge=1)
+    retention_min_inventory_history_per_section: int = Field(default=1, ge=1)
+    retention_min_alert_days: int = Field(default=30, ge=1)
+    retention_min_notification_days: int = Field(default=7, ge=1)
+    # Platform ceilings on tenant overrides (storage bound). 0 means no ceiling;
+    # a tenant may then also choose 0 ("keep forever").
+    retention_max_telemetry_days: int = Field(default=3650, ge=0)
+    retention_max_command_output_days: int = Field(default=3650, ge=0)
+    retention_max_command_record_days: int = Field(default=3650, ge=0)
+    retention_max_inventory_history_per_section: int = Field(default=1000, ge=0)
+    retention_max_alert_days: int = Field(default=3650, ge=0)
+    retention_max_notification_days: int = Field(default=3650, ge=0)
+    # Each tenant/category deletes in id-ordered batches of this size, and at
+    # most retention_max_rows_per_sweep rows per sweep; the rest waits for the
+    # next sweep, so one tenant's backlog cannot hold a transaction open.
+    retention_batch_size: int = Field(default=5000, ge=1, le=50_000)
+    retention_max_rows_per_sweep: int = Field(default=1_000_000, ge=1)
+
     # How often the retention sweep runs.
     retention_sweep_interval_seconds: int = 86_400  # daily
     # Filesystem path whose free space is reported/alerted in /storage/status

@@ -89,6 +89,10 @@ shell, chat, and self-update stay origin-only. The schema is in revision
 rollback are in [RELAYS.md](RELAYS.md). The relay service process is not part
 of this repository yet.
 
+Tenant-specific retention (issue #88) is schema revision `0049`:
+`tenant_retention_policies` and `ix_alerts_state_resolved`. This is the current
+migration head.
+
 ## 3. Architectural planes
 
 ### 3.1 Trust plane
@@ -601,6 +605,24 @@ that is `scrub_text`-redacted on write (Alembic `0044`; `0045` adds the
 deleted `support_chat_retention_days` after close. Lifecycle is recorded only
 in the audit chain (§9).
 
+`TenantRetentionPolicy` (issue #88, Alembic `0049`) holds one optional row per
+client. Each nullable column overrides one retention category, and `NULL`
+inherits the platform default:
+- telemetry
+- command output
+- terminal command records, which include scheduled-task runs
+- inventory history per section
+- resolved alerts
+- terminal notification deliveries
+- the evidence default for new vault records
+
+`version` is the optimistic-concurrency token. It only increases, even across a
+clear. `app/core/retention_policy.py` resolves each category as override, then
+platform default, then a clamp to the platform floor and ceiling at enforcement.
+`app/core/retention.py` prunes each tenant inside its own savepoint and skips any
+tenant under a tenant-wide legal hold. See
+[`RETENTION.md`](RETENTION.md#tenant-specific-retention-issue-88).
+
 `ApprovalPolicy` mirrors `MonitoringPolicy`/`PatchApprovalPolicy` scoping
 (`global`, `client`, `site`, `agent`) and resolves most-specific-wins among the
 policies that *name* the dispatched kind, so a narrow policy can add a
@@ -1070,14 +1092,30 @@ hold is reconciled by `evidence_vault_sweeper`, which also re-verifies stored
 objects and audits only transitions into `tampered`, `missing`, or
 `lock_drift`. See [`EVIDENCE-VAULT.md`](EVIDENCE-VAULT.md).
 
+Retention (issue #88) only *appends* to the chain. The sweep records:
+- `retention.purged` for each non-empty purge of a table for a tenant. It
+  carries the cutoff, the policy version and source, the row count, and
+  `ids_sha256` over the sorted affected keys.
+- `retention.purge_suspended` for a tenant under legal hold.
+- `retention.purge_failed` for a tenant whose purge was rolled back. Only the
+  exception class is recorded.
+- `retention.sweep_completed` at the end of the sweep.
+
+Each event is stamped with the tenant's `organization_id`. Policy changes are
+recorded as `tenant.retention_policy_set` and `tenant.retention_policy_cleared`.
+No retention path deletes or edits an audit event, anchor, or receipt.
+
 ## 8. Tenant isolation roadmap
 
 `Client` is the authorization tenant. Issue #66 implements a default-deny
 operator-client membership boundary, per-client roles, platform-admin bypass,
 404 anti-oracle behavior, tenant-scoped queries, and audit anchoring, with an
 access-preserving migration and isolation tests. Evidence export (#79) is
-single-tenant and reuses the same visibility boundary. Per-tenant retention and
-administrative break-glass rules remain Milestone 3 work.
+single-tenant and reuses the same visibility boundary. Per-tenant retention
+(#88) is implemented server side. It has platform floors and ceilings, a
+legal-hold suspension, and audit-chained deletion proof. Changing it requires
+`client_admin` and step-up ([`RETENTION.md`](RETENTION.md)). Administrative
+break-glass rules remain Milestone 3 work.
 
 ## 9. Remote access boundary
 

@@ -213,7 +213,9 @@ Workstreams:
   single-use, minutes-long, notified at activation, and reviewed afterwards by
   someone else.
 - Explicit tenant IDs, tenant-scoped authorization, tenant-specific roles and
-  retention, and isolation tests.
+  retention, and isolation tests. Tenant-specific retention (#88) is
+  implemented server side and API-only, with the dashboard UI tracked in #311; see
+  `docs/RETENTION.md`.
 - MFA, WebAuthn, OIDC or SAML, break-glass accounts, and administrative session
   management.
 - Immutable evidence storage, retention policy enforcement, and legal hold.
