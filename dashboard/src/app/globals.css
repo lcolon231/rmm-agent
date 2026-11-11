@@ -92,44 +92,51 @@
 @media (max-width: 900px) { .script-detail-grid { grid-template-columns: 1fr; }.script-register-row { grid-template-columns: 8px minmax(210px,1fr) 90px 48px 120px 80px; }.script-register-row time { display: none; }.script-digest-rail { grid-template-columns: 1fr; }.script-digest-rail > i { display: none; }.script-parameter-list article { grid-template-columns: 42px 1fr 1fr; }.script-parameter-list article .wide { grid-column: 2 / -1; }.script-binding-list article { grid-template-columns: 120px 1fr 70px; }.script-binding-list article > :nth-child(n+4) { grid-column: 2; } }
 @media (max-width: 620px) { .script-page-head, .script-detail-head { flex-direction: column; }.script-stats, .script-form-grid, .script-value-grid { grid-template-columns: 1fr; }.script-form-grid .wide { grid-column: auto; }.script-form-grid fieldset { flex-wrap: wrap; }.script-version-ledger article { grid-template-columns: 38px 1fr; }.script-version-ledger article code, .script-version-ledger article .script-state { grid-column: 2; }.script-source-panel > footer { flex-direction: column; gap: 4px; }.script-parameter-list article { grid-template-columns: 34px 1fr; }.script-parameter-list article .wide { grid-column: 2; }.script-parameter-sequence { grid-row: 1 / span 12; }.script-binding-list article { grid-template-columns: 1fr 80px; }.script-binding-list article > div { grid-column: 1 / -1; }.script-binding-list article > :nth-child(n+4) { grid-column: auto; } }
 
-* {
-  box-sizing: border-box;
-}
+/* Element resets live in the base layer so Tailwind utilities (layered)
+   can override them; unlayered rules would always win. */
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
 
-html,
-body {
-  min-height: 100%;
-}
+  html,
+  body {
+    min-height: 100%;
+  }
 
-body {
-  margin: 0;
-  overflow-x: hidden;
-  background: var(--fog);
-  color: var(--ink);
-  font-family: var(--font-interface);
-  font-size: 14px;
-}
+  body {
+    margin: 0;
+    overflow-x: hidden;
+    background: var(--fog);
+    color: var(--ink);
+    font-family: var(--font-interface);
+    font-size: 14px;
+  }
 
-button,
-input,
-select {
-  font: inherit;
-}
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 
-button,
-select {
-  cursor: pointer;
-}
+  button,
+  select {
+    cursor: pointer;
+  }
 
-button {
-  color: inherit;
-}
+  button {
+    color: inherit;
+  }
 
-button:focus-visible,
-input:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
 }
 
 .sr-only {
@@ -2434,8 +2441,6 @@ select:focus-visible {
 /* Enrollment control surface
    The narrow left rail echoes a chain-of-custody register: every management
    view stays anchored to temporary credentials, endpoint identity, and audit. */
-textarea { font: inherit; }
-textarea:focus-visible,
 .enrollment-app a:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
