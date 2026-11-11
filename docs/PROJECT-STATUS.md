@@ -211,6 +211,13 @@ The code in this repository currently provides:
   evidence, bounded language/platform/tag metadata, append-only final reviews,
   terminal idempotent deprecation, role-gated API/dashboard workflows, and no
   implicit execution permission (`docs/SCRIPT-LIBRARY.md`).
+- A moderated, in-deployment community script repository: publisher-namespace
+  Ed25519 keys, signed canonical manifests bound to exact content, declared
+  capabilities with escalation acknowledgement, separation-of-duties
+  moderation, revocation that blocks the next dispatch and scheduled run, and
+  safe install/update/rollback into the script library. Additive at revision
+  `0049`; no agent change. No remote feed or agent-side sandbox
+  (`docs/COMMUNITY-PACKAGES.md`).
 - Immutable typed script parameters (`string`, `number`, `boolean`, `choice`,
   `secret`) with strict defaults/bounds, encrypted expiring per-run value sets,
   keyed idempotency, safe PowerShell/POSIX variable binding, and secret-redacted
@@ -480,7 +487,10 @@ and a rebuilt Windows agent; the tagged `v0.1.11` release ships `0044`.
   ingress residency, a keyring-signed routing manifest, and agent failover with
   origin polling as the fallback; `docs/RELAYS.md`). The deployable relay
   service itself is **not** built (it depends on #84/#85), and residency is
-  ingress-only: the database is not regional.
+  ingress-only: the database is not regional. The signed, moderated community
+  script repository (#74) is implemented in-deployment
+  (`docs/COMMUNITY-PACKAGES.md`); a remote feed and agent-side script
+  confinement are not.
 
 ## Explicitly not implemented yet
 

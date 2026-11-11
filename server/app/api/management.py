@@ -67,6 +67,7 @@ from app.core.database import get_db
 from app.core.security import generate_token, hash_token, sign_command
 from app.core.keyring import active_signing_key, load_keyring
 from app.core.redaction import AUDIT_DETAIL_SCHEMAS, scrub_text
+from app.core import community_packages as community_trust
 from app.core import meshcentral as meshcentral_provider
 from app.core import meshcentral_mapping
 from app.schemas.meshcentral import (
@@ -1848,10 +1849,55 @@ async def list_signing_keys(db: AsyncSession = Depends(get_db)):
     }
 
 
+async def _enforce_community_trust(
+    db: AsyncSession,
+    script_version: ScriptVersion,
+    *,
+    kind: CommandKind,
+    agent: Agent,
+    payload: dict,
+    operator: Operator | None,
+) -> None:
+    """Refuse (and audit) a run whose community package is no longer trusted.
+
+    Revocation of a publisher, key, or version takes effect on the next run,
+    not just the next install (issue #74).
+    """
+    try:
+        await community_trust.check_dispatch(
+            db, script_version, kind=kind, agent_os=agent.os, payload=payload
+        )
+    except community_trust.CommunityRefusal as refusal:
+        await audit.record(
+            db,
+            action="community.dispatch_refused",
+            actor=operator.email if operator else "system",
+            actor_user_id=operator.id if operator else None,
+            agent_id=agent.id,
+            detail={
+                "source": "dispatch",
+                "code": refusal.code,
+                "kind": kind.value,
+                "script_version_id": script_version.id,
+                "package_version_id": script_version.community_package_version_id,
+                "agent_id": agent.id,
+            },
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409, detail={"code": refusal.code}
+        ) from refusal
+
+
 async def _resolve_script_provenance(
     db: AsyncSession,
     script_version_id: str | None,
     value_set_id: str | None,
+    *,
+    kind: CommandKind | None = None,
+    agent: Agent | None = None,
+    payload: dict | None = None,
+    operator: Operator | None = None,
 ) -> None:
     """Fail closed unless the optional script provenance is coherent (issue #50).
 
@@ -1866,9 +1912,15 @@ async def _resolve_script_provenance(
             detail={"code": "script_parameter_value_set_requires_version"},
         )
     if script_version_id is not None:
-        if await db.get(ScriptVersion, script_version_id) is None:
+        script_version = await db.get(ScriptVersion, script_version_id)
+        if script_version is None:
             raise HTTPException(
                 status_code=400, detail={"code": "script_version_not_found"}
+            )
+        if agent is not None:
+            await _enforce_community_trust(
+                db, script_version, kind=kind, agent=agent, payload=payload,
+                operator=operator,
             )
     if value_set_id is not None:
         value_set = await db.get(ScriptParameterValueSet, value_set_id)
@@ -2090,7 +2142,13 @@ async def dispatch_command(
         )
 
     await _resolve_script_provenance(
-        db, body.script_version_id, body.script_parameter_value_set_id
+        db,
+        body.script_version_id,
+        body.script_parameter_value_set_id,
+        kind=body.kind,
+        agent=agent,
+        payload=body.payload,
+        operator=operator,
     )
 
     now = _now()

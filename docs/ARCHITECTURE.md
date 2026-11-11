@@ -493,6 +493,32 @@ dispatch (#49) must negotiate a parameter-aware contract and transport secrets
 without writing plaintext into the existing `commands.payload`. See
 [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md) for limits, compatibility, and recovery.
 
+### Moderated community script packages
+
+Revision `0049` adds an in-deployment community repository (issue #74).
+`community_publishers` own namespace slugs; `community_publisher_keys` hold only
+Ed25519 public keys, each bound to one namespace forever. Publishers sign a
+canonical, domain-separated JSON manifest offline
+(`server/scripts/sign_community_package.py`) that binds the exact script bytes,
+interpreter, platforms, and an allowlisted capability set. Submissions
+(operator) are verified for shape, digest, namespace ownership, key/publisher
+state, and signature, and become immutable, monotonically versioned
+`community_package_versions`. A second admin, never the submitter, records one
+final `community_package_moderations` row and must acknowledge any capability
+escalation. An admin install re-verifies everything, requires acceptance of
+the exact capability set, refuses to shadow any existing local library name,
+and appends an approved library version whose
+`script_versions.community_package_version_id` records provenance. Update and
+rollback append further library versions.
+
+Trust is re-checked at run time: interactive dispatch, scheduled runs, and
+schedule creation refuse (and audit `community.dispatch_refused`) a
+community-provenance version that is revoked or blocked by a revoked
+key/publisher, whose kind or agent platform falls outside its declared
+capabilities, or whose `payload.script` differs from the signed bytes. The
+signed command envelope and agent are unchanged; there is no remote feed and no
+agent-side sandbox. Full contract: [`COMMUNITY-PACKAGES.md`](COMMUNITY-PACKAGES.md).
+
 ## 4. Server
 
 The server uses FastAPI, Pydantic 2, async SQLAlchemy, and Alembic. PostgreSQL is

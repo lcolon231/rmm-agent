@@ -192,6 +192,25 @@ tampering before external audit anchoring and a malicious approved script;
 review is accountable evidence, not sandboxing or semantic safety analysis.
 See [`SCRIPT-LIBRARY.md`](SCRIPT-LIBRARY.md).
 
+**Community package trust boundary (#74).** Third-party publishers are a new
+principal: they hold Ed25519 signing keys an admin registered for one namespace.
+Threats and controls: a *tampered package* fails the content digest or
+signature check (refusal audited with digests only); a *forged or
+cross-namespace signature* fails because a manifest may claim only the
+namespace that owns its key, and key fingerprints are globally unique; a
+*compromised key or publisher* is revoked, which blocks every version it signed
+at the next dispatch or scheduled run, not just at install; *capability
+escalation* in an update requires explicit moderator acknowledgement and exact
+installer acceptance; *dependency/name confusion* is prevented by mandatory
+`publisher/name` identity and by refusing any install that would shadow an
+existing local library name; *moderator self-approval* is refused (the
+submitter can never moderate). Runs citing community provenance must carry the
+exact signed bytes and match the declared interpreter and platform. Residual
+risks: a malicious publisher whose package is approved by a careless moderator
+(capabilities are declarations, not a sandbox), two colluding admins, and
+database-owner tampering before audit anchoring. See
+[`COMMUNITY-PACKAGES.md`](COMMUNITY-PACKAGES.md).
+
 ### (2) Server ↔ Network (transport)
 
 Agents connect **outbound only**. There is no inbound agent port to open at a

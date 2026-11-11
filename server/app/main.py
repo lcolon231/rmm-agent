@@ -20,6 +20,7 @@ from app.api import (
     approvals,
     assistant,
     auth,
+    community_packages,
     emergency_overrides,
     evidence,
     evidence_vault,
@@ -117,6 +118,7 @@ app.include_router(management.router, prefix="/api/v1")
 app.include_router(approvals.router, prefix="/api/v1")
 app.include_router(emergency_overrides.router, prefix="/api/v1")
 app.include_router(script_library.router, prefix="/api/v1")
+app.include_router(community_packages.router, prefix="/api/v1")
 app.include_router(scheduled_tasks.router, prefix="/api/v1")
 app.include_router(shell_sessions.router, prefix="/api/v1")
 app.include_router(shell_sessions.agent_router, prefix="/api/v1")

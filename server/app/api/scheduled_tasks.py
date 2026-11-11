@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
 from app.core import audit
+from app.core import community_packages as community_trust
 from app.core.clientip import client_ip
 from app.core.database import get_db
 from app.core.scheduler import compute_next_run, dispatch_scheduled_tasks_once
@@ -22,6 +23,7 @@ from app.models.models import (
     OperatorRole,
     ScheduleTargetType,
     ScheduledTask,
+    ScriptVersion,
     Site,
 )
 from app.schemas.scheduled_tasks import (
@@ -134,6 +136,21 @@ async def create_scheduled_task(
             minimum=ClientRole.client_operator,
             detail=f"Target site {body.target_id} not found",
         )
+
+    if body.script_version_id is not None:
+        script_version = await db.get(ScriptVersion, body.script_version_id)
+        if script_version is None:
+            raise HTTPException(
+                status_code=400, detail={"code": "script_version_not_found"}
+            )
+        try:
+            await community_trust.check_run_definition(
+                db, script_version, kind=body.kind, payload=body.payload
+            )
+        except community_trust.CommunityRefusal as refusal:
+            raise HTTPException(
+                status_code=409, detail={"code": refusal.code}
+            ) from refusal
 
     now = _now()
     try:

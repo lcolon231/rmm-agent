@@ -43,7 +43,7 @@ def sqlite_url(path: Path) -> str:
 def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
     path = tmp_path / "assistant-migration.db"
     config = migration_config(sqlite_url(path))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0048"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0049"]
     command.upgrade(config, "0041")
     command.upgrade(config, "0042")
     with sqlite3.connect(path) as connection:
@@ -1020,7 +1020,7 @@ def test_multi_region_relay_migration_is_additive_and_forward_only(tmp_path: Pat
             "VALUES ('a1', 's1', 'h', 'pc', 'windows', '11', '0.1.0', 'online', '2026-10-21')"
         )
         connection.commit()
-    command.upgrade(config, "head")
+    command.upgrade(config, "0048")
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0048"
         tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -1049,6 +1049,60 @@ def test_multi_region_relay_migration_is_additive_and_forward_only(tmp_path: Pat
         )
     with pytest.raises(RuntimeError, match="forward-only"):
         command.downgrade(config, "0047")
+    command.upgrade(config, "head")
+    asyncio.run(_assert_current(sqlite_url(path)))
+
+
+def test_community_package_migration_is_additive_and_forward_only(tmp_path: Path):
+    """0049 (issue #74): community registry tables plus nullable provenance."""
+    path = tmp_path / "community-migration.db"
+    config = migration_config(sqlite_url(path))
+    command.upgrade(config, "0048")
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO script_library_items (id, name, normalized_name, latest_version, "
+            "record_version, created_by, created_at, updated_at) VALUES "
+            "('s1', 'Local', 'local', 1, 1, 'a@x', '2026-11-10', '2026-11-10')"
+        )
+        connection.execute(
+            "INSERT INTO script_versions (id, script_id, version, language, content, "
+            "content_sha256, content_bytes, tags, supported_platforms, created_by, created_at) "
+            "VALUES ('v1', 's1', 1, 'shell', 'echo', ?, 4, '[]', '[\"linux\"]', 'a@x', '2026-11-10')",
+            ("0" * 64,),
+        )
+        connection.commit()
+    command.upgrade(config, "head")
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0049"
+        tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {
+            "community_publishers",
+            "community_publisher_keys",
+            "community_packages",
+            "community_package_versions",
+            "community_package_moderations",
+            "community_installs",
+        } <= tables
+        # Existing library versions keep working: provenance starts empty.
+        assert connection.execute(
+            "SELECT community_package_version_id FROM script_versions WHERE id = 'v1'"
+        ).fetchone()[0] is None
+        connection.execute(
+            "INSERT INTO community_publishers (id, slug, display_name, status, created_by, created_at) "
+            "VALUES ('p1', 'acme', 'Acme', 'active', 'a@x', '2026-11-10')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO community_publishers (id, slug, display_name, status, created_by, created_at) "
+                "VALUES ('p2', 'acme', 'Dup', 'active', 'a@x', '2026-11-10')"
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO community_publishers (id, slug, display_name, status, created_by, created_at) "
+                "VALUES ('p3', 'other', 'Bad', 'trusted', 'a@x', '2026-11-10')"
+            )
+    with pytest.raises(RuntimeError, match="forward-only"):
+        command.downgrade(config, "0048")
     asyncio.run(_assert_current(sqlite_url(path)))
 
 

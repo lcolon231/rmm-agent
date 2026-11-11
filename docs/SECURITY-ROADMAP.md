@@ -396,6 +396,16 @@ idempotency, signed-action checks, audit ordering, and evidence completeness.
 Failure injection and region/worker partition tests are required before scale
 claims are made.
 
+Signed community script packages (#74, `docs/COMMUNITY-PACKAGES.md`) are in
+place as an in-deployment catalog: publisher-namespace Ed25519 keys, canonical
+signed manifests bound to exact content, immutable monotonic versions,
+separation-of-duties moderation with capability-escalation acknowledgement,
+terminal key/publisher/version revocation that blocks the next dispatch and
+scheduled run, exact capability acceptance on install/update/rollback, and
+name-shadowing refusal. Remaining: a federated/remote feed (with its own feed
+signing and egress controls), agent-side confinement of script behaviour, and
+tenant-scoped catalogs.
+
 Relay trust (#87, `docs/RELAYS.md`) is in place on the control plane and the
 agent: relays sign every forward with a registered Ed25519 key (skew,
 store-and-forward age, body, and unique-nonce replay bounds, all fail-closed);

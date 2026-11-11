@@ -1777,6 +1777,11 @@ class ScriptVersion(Base):
     description: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     supported_platforms: Mapped[list] = mapped_column(JSON, nullable=False)
+    # Set only when the version was installed from a moderated community
+    # package (issue #74). Dispatch re-checks that package's trust state.
+    community_package_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("community_package_versions.id", ondelete="RESTRICT")
+    )
     created_by: Mapped[str] = mapped_column(String(320), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
@@ -3335,5 +3340,188 @@ class RelayForwardReceipt(Base):
     path: Mapped[str] = mapped_column(String(256), nullable=False)
     queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class CommunityPublisher(Base):
+    """A namespace owner whose registered keys sign community packages (#74)."""
+
+    __tablename__ = "community_publishers"
+    __table_args__ = (
+        UniqueConstraint("slug", name="ux_community_publisher_slug"),
+        CheckConstraint(
+            "status IN ('active', 'revoked')", name="ck_community_publisher_status"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    created_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[str | None] = mapped_column(String(320))
+    revocation_request_id: Mapped[str | None] = mapped_column(String(64))
+    revocation_reason_sha256: Mapped[str | None] = mapped_column(String(64))
+    revocation_reason_bytes: Mapped[int | None] = mapped_column(Integer)
+
+
+class CommunityPublisherKey(Base):
+    """Public half of a publisher's Ed25519 package-signing key."""
+
+    __tablename__ = "community_publisher_keys"
+    __table_args__ = (
+        UniqueConstraint("publisher_id", "key_id", name="ux_community_key_id"),
+        UniqueConstraint("fingerprint", name="ux_community_key_fingerprint"),
+        CheckConstraint(
+            "status IN ('active', 'revoked')", name="ck_community_key_status"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    publisher_id: Mapped[str] = mapped_column(
+        ForeignKey("community_publishers.id", ondelete="RESTRICT"), nullable=False
+    )
+    key_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    public_key_pem: Mapped[str] = mapped_column(Text, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    created_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[str | None] = mapped_column(String(320))
+    revocation_reason_sha256: Mapped[str | None] = mapped_column(String(64))
+    revocation_reason_bytes: Mapped[int | None] = mapped_column(Integer)
+
+
+class CommunityPackage(Base):
+    """Stable ``publisher/name`` identity; content lives in immutable versions."""
+
+    __tablename__ = "community_packages"
+    __table_args__ = (
+        UniqueConstraint("publisher_id", "name", name="ux_community_package_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    publisher_id: Mapped[str] = mapped_column(
+        ForeignKey("community_publishers.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class CommunityPackageVersion(Base):
+    """Append-only signed manifest + content for one package version."""
+
+    __tablename__ = "community_package_versions"
+    __table_args__ = (
+        UniqueConstraint("package_id", "version", name="ux_community_version"),
+        CheckConstraint(
+            "length(content_sha256) = 64", name="ck_community_version_digest"
+        ),
+        CheckConstraint(
+            "content_bytes BETWEEN 1 AND 57344", name="ck_community_version_bytes"
+        ),
+        Index(
+            "ix_community_version_order", "package_id", "major", "minor", "patch"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    package_id: Mapped[str] = mapped_column(
+        ForeignKey("community_packages.id", ondelete="RESTRICT"), nullable=False
+    )
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    major: Mapped[int] = mapped_column(Integer, nullable=False)
+    minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    patch: Mapped[int] = mapped_column(Integer, nullable=False)
+    manifest: Mapped[dict] = mapped_column(JSON, nullable=False)
+    manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    signature: Mapped[str] = mapped_column(String(128), nullable=False)
+    signing_key_id: Mapped[str] = mapped_column(
+        ForeignKey("community_publisher_keys.id", ondelete="RESTRICT"), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    capabilities: Mapped[list] = mapped_column(JSON, nullable=False)
+    submitted_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[str | None] = mapped_column(String(320))
+    revocation_reason_sha256: Mapped[str | None] = mapped_column(String(64))
+    revocation_reason_bytes: Mapped[int | None] = mapped_column(Integer)
+
+
+class CommunityPackageModeration(Base):
+    """Final, append-only moderation decision for one package version."""
+
+    __tablename__ = "community_package_moderations"
+    __table_args__ = (
+        UniqueConstraint("package_version_id", name="ux_community_moderation_final"),
+        CheckConstraint(
+            "state IN ('approved', 'rejected')", name="ck_community_moderation_state"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    package_version_id: Mapped[str] = mapped_column(
+        ForeignKey("community_package_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    moderated_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    reason_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    acknowledged_capability_escalation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class CommunityInstall(Base):
+    """Binding of one local library script to one community package."""
+
+    __tablename__ = "community_installs"
+    __table_args__ = (
+        UniqueConstraint("script_id", name="ux_community_install_script"),
+        UniqueConstraint("package_id", name="ux_community_install_package"),
+        UniqueConstraint("request_id", name="ux_community_install_request"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    package_id: Mapped[str] = mapped_column(
+        ForeignKey("community_packages.id", ondelete="RESTRICT"), nullable=False
+    )
+    script_id: Mapped[str] = mapped_column(
+        ForeignKey("script_library_items.id", ondelete="RESTRICT"), nullable=False
+    )
+    package_version_id: Mapped[str] = mapped_column(
+        ForeignKey("community_package_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Idempotency key of the most recent install/update/rollback transition.
+    last_request_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    installed_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
