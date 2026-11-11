@@ -1,23 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { DashboardShell } from "@/components/dashboard-shell";
-import { getAuditAnchors, getAuditEventPage, verifyAuditChain } from "@/lib/audit";
-import type { AuditAnchorRecord, AuditChainVerification, AuditEventRecord } from "@/lib/audit-core";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+
+import { OverviewView, type OverviewData } from "@/components/overview-view";
+import { AppShell } from "@/components/shell/app-shell";
+import { getApprovalRequests } from "@/lib/approvals";
+import { getAuditEventPage } from "@/lib/audit";
 import { getClientNavigation, type NavigationData } from "@/lib/client-navigation";
-import { getSigningKeys } from "@/lib/dashboard-overview";
-import type { SigningKeyInfo } from "@/lib/dashboard-overview-core";
+import { attentionDevices, indexOpenAlerts } from "@/lib/device-status-core";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import { getEndpointList, type EndpointListData } from "@/lib/endpoint-list";
 import { getMonitoringAlerts } from "@/lib/monitoring";
-import type { MonitoringAlert } from "@/lib/monitoring-core";
-import Link from "next/link";
-import { redirect } from "next/navigation";
+import { compliancePercent, openAlertsBySeverity, recentActivity, waitingForApproval } from "@/lib/overview-core";
+import { getComplianceSummary } from "@/lib/patch-compliance";
 
 export const dynamic = "force-dynamic";
 
 type HomePageProps = {
-  searchParams: Promise<{ client?: string | string[]; dir?: string | string[]; page?: string | string[]; search?: string | string[]; site?: string | string[]; sort?: string | string[]; status?: string | string[] }>;
+  searchParams: Promise<{ client?: string | string[]; site?: string | string[] }>;
 };
+
+function settled<T>(result: PromiseSettledResult<T>): T | null {
+  return result.status === "fulfilled" ? result.value : null;
+}
 
 export default async function Home({ searchParams }: HomePageProps) {
   const session = await getDashboardSession();
@@ -39,94 +45,80 @@ export default async function Home({ searchParams }: HomePageProps) {
   }
 
   const query = await searchParams;
-  const selectedClientId = typeof query.client === "string" ? query.client : undefined;
-  const selectedSiteId = typeof query.site === "string" ? query.site : undefined;
-  const endpointStatus = query.status === "online" || query.status === "offline" || query.status === "pending" ? query.status : undefined;
-  const endpointSort = query.sort === "hostname" || query.sort === "status" || query.sort === "last_seen" ? query.sort : "last_seen";
-  const endpointDirection = query.dir === "asc" ? "asc" : "desc";
-  const endpointPage = typeof query.page === "string" && /^\d+$/.test(query.page) ? Math.max(1, Number(query.page)) : 1;
-  const endpointSearch = typeof query.search === "string" ? query.search.slice(0, 100) : undefined;
+  const token = session.sessionToken;
 
   let navigation: NavigationData | null = null;
-  let endpointList: EndpointListData | null = null;
-  let alerts: MonitoringAlert[] = [];
-  let auditEvents: AuditEventRecord[] = [];
-  let chainVerification: AuditChainVerification | null = null;
-  let anchors: AuditAnchorRecord[] = [];
-  let signingKeys: SigningKeyInfo | null = null;
-
   let navigationError = false;
-  let endpointError = false;
-  let alertsError = false;
-  let auditError = false;
-  let trustError = false;
-
   try {
-    navigation = await getClientNavigation(session.sessionToken);
+    navigation = await getClientNavigation(token);
   } catch {
     navigationError = true;
   }
 
-  try {
-    endpointList = await getEndpointList(session.sessionToken, { clientId: selectedClientId, direction: endpointDirection, page: endpointPage, search: endpointSearch, siteId: selectedSiteId, sort: endpointSort, status: endpointStatus });
-  } catch {
-    endpointError = true;
-  }
+  const requestedClientId = typeof query.client === "string" ? query.client : undefined;
+  const requestedSiteId = typeof query.site === "string" ? query.site : undefined;
+  const selectedClient = navigation?.items.find((client) => client.id === requestedClientId);
+  const selectedSite = selectedClient?.sites.find((site) => site.id === requestedSiteId);
+  const validSelection = (!requestedClientId && !requestedSiteId) || Boolean(selectedClient && (!requestedSiteId || selectedSite));
+  // An unknown scope is still sent as asked, never widened to every client:
+  // the server's tenant boundary decides, and the sidebar says it is unavailable.
+  const clientId = requestedClientId;
+  const siteId = requestedSiteId;
+  const scope = { clientId, siteId };
 
-  try {
-    alerts = await getMonitoringAlerts(session.sessionToken);
-  } catch {
-    alertsError = true;
-  }
+  const [all, offline, online, alerts, compliance, approvals, audit] = await Promise.allSettled([
+    getEndpointList(token, scope),
+    getEndpointList(token, { ...scope, status: "offline" }),
+    getEndpointList(token, { ...scope, status: "online" }),
+    getMonitoringAlerts(token),
+    getComplianceSummary(token, scope),
+    getApprovalRequests(token),
+    getAuditEventPage(token, { page: 1 }),
+  ]);
 
-  try {
-    const auditPage = await getAuditEventPage(session.sessionToken, { page: 1 });
-    auditEvents = auditPage.items;
-  } catch {
-    auditError = true;
-  }
+  const allList = settled<EndpointListData>(all);
+  const offlineList = settled<EndpointListData>(offline);
+  const onlineList = settled<EndpointListData>(online);
+  const alertList = settled(alerts);
+  const alertIndex = indexOpenAlerts(alertList ?? []);
+  const now = new Date();
 
-  try {
-    const [chain, anchorList, keys] = await Promise.all([
-      verifyAuditChain(session.sessionToken).catch(() => null),
-      getAuditAnchors(session.sessionToken).catch(() => []),
-      getSigningKeys(session.sessionToken).catch(() => null),
-    ]);
-    chainVerification = chain;
-    anchors = anchorList;
-    signingKeys = keys;
-  } catch {
-    trustError = true;
-  }
+  const hostnames = new Map<string, string>();
+  for (const list of [allList, offlineList, onlineList]) for (const item of list?.items ?? []) hostnames.set(item.id, item.hostname);
 
-  const selectedSite = navigation?.items
-    .flatMap((client) => client.sites)
-    .find((site) => site.id === selectedSiteId);
-  const selectedClient = navigation?.items.find((client) => client.id === selectedClientId);
-  const validSelection = !selectedClientId && !selectedSiteId
-    ? true
-    : Boolean(selectedClient && selectedSite && selectedSite.client_id === selectedClient.id);
+  const complianceSummary = settled(compliance);
+  const approvalList = settled(approvals);
+  const auditPage = settled(audit);
+
+  const data: OverviewData = {
+    scopeName: selectedSite ? `${selectedClient?.name} · ${selectedSite.name}` : (selectedClient?.name ?? null),
+    now: now.toISOString(),
+    devices: allList && offlineList && onlineList ? { total: allList.total, online: onlineList.total, offline: offlineList.total } : null,
+    attention: allList && offlineList ? attentionDevices([offlineList.items, allList.items, onlineList?.items ?? []], alertIndex, now) : null,
+    alerts: alertList ? openAlertsBySeverity(alertList) : null,
+    compliance: complianceSummary ? compliancePercent(complianceSummary) : "error",
+    approvals: approvalList
+      ? waitingForApproval(
+          approvalList.filter((request) => (!clientId || request.client_id === clientId) && (!siteId || request.site_id === siteId)),
+          session.operator.id,
+          now,
+        )
+      : null,
+    activity: auditPage ? recentActivity(auditPage.items, hostnames) : null,
+  };
 
   return (
-    <DashboardShell
+    <AppShell
+      activePath="/"
       navigation={navigation}
       navigationError={navigationError}
-      endpointError={endpointError}
-      endpointList={endpointList}
-      endpointSort={endpointSort}
-      endpointStatus={endpointStatus}
-      alerts={alerts}
-      alertsError={alertsError}
-      auditEvents={auditEvents}
-      auditError={auditError}
-      chainVerification={chainVerification}
-      anchors={anchors}
-      signingKeys={signingKeys}
-      trustError={trustError}
       operator={session.operator}
-      selectedClientId={selectedClientId}
-      selectedSiteId={selectedSiteId}
+      selectedClientId={clientId}
+      selectedSiteId={siteId}
       selectionError={!validSelection}
-    />
+      alertCount={data.alerts?.total}
+    >
+      <OverviewView data={data} />
+    </AppShell>
   );
 }
