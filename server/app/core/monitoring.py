@@ -1076,25 +1076,28 @@ async def evaluate_patch_age_checks(
     return written
 
 
-async def prune_check_results(db: AsyncSession, keep: int) -> int:
+async def prune_check_results(db: AsyncSession, keep: int, exclude_agents=None) -> int:
     """Keep the newest ``keep`` results per ``(agent_id, check_key)``.
 
     Mirrors inventory-history pruning: the newest row is the agent's current
     state for that check and is never a deletion candidate whatever ``keep`` is.
+    ``exclude_agents`` is an optional subquery of agent ids that must not be
+    pruned at all (tenants under legal hold, issue #88).
     """
     if keep <= 0:
         return 0
-    groups = (
-        await db.execute(
-            select(
-                CheckResult.agent_id,
-                CheckResult.check_key,
-                func.count().label("total"),
-            )
-            .group_by(CheckResult.agent_id, CheckResult.check_key)
-            .having(func.count() > keep)
+    groups_query = (
+        select(
+            CheckResult.agent_id,
+            CheckResult.check_key,
+            func.count().label("total"),
         )
-    ).all()
+        .group_by(CheckResult.agent_id, CheckResult.check_key)
+        .having(func.count() > keep)
+    )
+    if exclude_agents is not None:
+        groups_query = groups_query.where(CheckResult.agent_id.not_in(exclude_agents))
+    groups = (await db.execute(groups_query)).all()
 
     deleted = 0
     for agent_id, check_key, _total in groups:

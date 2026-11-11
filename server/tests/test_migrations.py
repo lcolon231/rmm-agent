@@ -43,7 +43,7 @@ def sqlite_url(path: Path) -> str:
 def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
     path = tmp_path / "assistant-migration.db"
     config = migration_config(sqlite_url(path))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0048"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0049"]
     command.upgrade(config, "0041")
     command.upgrade(config, "0042")
     with sqlite3.connect(path) as connection:
@@ -1022,7 +1022,6 @@ def test_multi_region_relay_migration_is_additive_and_forward_only(tmp_path: Pat
         connection.commit()
     command.upgrade(config, "head")
     with sqlite3.connect(path) as connection:
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0048"
         tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "relay_regions",
@@ -1049,6 +1048,38 @@ def test_multi_region_relay_migration_is_additive_and_forward_only(tmp_path: Pat
         )
     with pytest.raises(RuntimeError, match="forward-only"):
         command.downgrade(config, "0047")
+    asyncio.run(_assert_current(sqlite_url(path)))
+
+
+def test_tenant_retention_migration_is_additive_and_forward_only(tmp_path: Path):
+    """0049 (issue #88): optional per-tenant overrides; no row means inherit."""
+    path = tmp_path / "retention-migration.db"
+    config = migration_config(sqlite_url(path))
+    command.upgrade(config, "0048")
+    with sqlite3.connect(path) as connection:
+        connection.execute("INSERT INTO clients (id, name, created_at) VALUES ('c1', 'Acme', '2026-11-10')")
+        connection.commit()
+    command.upgrade(config, "0049")
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0049"
+        columns = {r[1]: r for r in connection.execute("PRAGMA table_info(tenant_retention_policies)")}
+        assert set(columns) == {
+            "client_id", "telemetry_days", "command_output_days", "command_record_days",
+            "inventory_history_per_section", "alert_days", "notification_days",
+            "evidence_default_days", "version", "set_by", "updated_at",
+        }
+        # Every override is nullable (NULL = inherit); the version is not.
+        for name in ("telemetry_days", "alert_days", "evidence_default_days"):
+            assert columns[name][3] == 0
+        assert columns["version"][3] == 1
+        foreign_keys = list(connection.execute("PRAGMA foreign_key_list(tenant_retention_policies)"))
+        assert [(r[2], r[6]) for r in foreign_keys] == [("clients", "CASCADE")]
+        # No backfill: existing tenants inherit the platform defaults.
+        assert connection.execute("SELECT count(*) FROM tenant_retention_policies").fetchone()[0] == 0
+        alert_indexes = {r[1] for r in connection.execute("PRAGMA index_list(alerts)")}
+        assert "ix_alerts_state_resolved" in alert_indexes
+    with pytest.raises(RuntimeError, match="forward-only"):
+        command.downgrade(config, "0048")
     asyncio.run(_assert_current(sqlite_url(path)))
 
 

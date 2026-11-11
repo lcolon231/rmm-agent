@@ -210,6 +210,19 @@ async def _retention_once() -> None:
         )
     if result.relay_receipts_deleted:
         print(f"[retention] pruned {result.relay_receipts_deleted} relay forward receipt(s)")
+    if result.command_records_deleted or result.alerts_deleted or result.notifications_deleted:
+        print(
+            f"[retention] deleted {result.command_records_deleted} command record(s), "
+            f"{result.alerts_deleted} resolved alert(s), "
+            f"{result.notifications_deleted} notification delivery(ies)"
+        )
+    if result.tenants_suspended or result.tenants_failed:
+        # Per-tenant detail is in the audit chain (retention.purge_suspended /
+        # retention.purge_failed); only counts are logged here.
+        print(
+            f"[retention] WARNING {result.tenants_suspended} tenant(s) suspended by "
+            f"legal hold, {result.tenants_failed} tenant(s) failed and will retry"
+        )
     if status["alert"]:
         print(f"[retention] WARNING storage threshold breached: {status}")
 
