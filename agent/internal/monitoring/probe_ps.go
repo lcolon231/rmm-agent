@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package monitoring
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// psRunner runs one PowerShell script and returns its trimmed stdout. The
+// Windows build binds it to powershell.exe; tests feed captured output.
+//
+// The probe logic below lives in an untagged file so every CI job covers it,
+// not only the Windows one. Only the exec call stays behind the build tag.
+type psRunner func(ctx context.Context, script string) (string, error)
+
+func psQuote(value string) string { return strings.ReplaceAll(value, "'", "''") }
+
+func diskPercentScript(mount string) string {
+	// Keep the policy-supplied mount point inside a single-quoted PowerShell
+	// literal. Filtering an already-created object avoids interpolating it into
+	// a WQL expression, which has a second quoting language of its own.
+	return fmt.Sprintf(`$mount='%s'; $d=Get-CimInstance Win32_LogicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.DeviceID -eq $mount } | Select-Object -First 1; if ($null -eq $d -or $d.Size -le 0) { 'missing' } else { [math]::Round((($d.Size-$d.FreeSpace)/$d.Size)*100,2) }`, psQuote(mount))
+}
+
+func diskPercent(ctx context.Context, run psRunner, mount string) (float64, bool, string) {
+	out, err := run(ctx, diskPercentScript(mount))
+	if err != nil {
+		return 0, false, "disk_probe_failed"
+	}
+	if out == "missing" {
+		return 0, false, "disk_not_found"
+	}
+	// [math]::Round output follows the endpoint's culture, so a German locale
+	// prints a decimal comma.
+	value, err := strconv.ParseFloat(strings.ReplaceAll(out, ",", "."), 64)
+	if err != nil {
+		return 0, false, "disk_probe_invalid"
+	}
+	return value, true, "sample_collected"
+}
+
+func serviceStateScript(name string) string {
+	return fmt.Sprintf(`$s=Get-Service -Name '%s' -ErrorAction SilentlyContinue; if ($null -eq $s) { 'absent' } else { $s.Status.ToString().ToLowerInvariant() }`, psQuote(name))
+}
+
+func serviceState(ctx context.Context, run psRunner, name string) (string, bool, string) {
+	out, err := run(ctx, serviceStateScript(name))
+	if err != nil {
+		return "", false, "service_probe_failed"
+	}
+	if out == "" {
+		return "", false, "service_probe_invalid"
+	}
+	return strings.ToLower(out), true, "sample_collected"
+}
+
+// rebootPending runs the reboot-source probe. agent/test/reboot_probe_script.ps1
+// extracts the script literal below (from "func rebootPending" up to the
+// run call) and executes it against stubbed registry state, so keep the
+// script as backtick chunks inside this function.
+func rebootPending(ctx context.Context, run psRunner) (RebootStatus, bool, string) {
+	// Report each source separately rather than ORing them: only the
+	// WindowsUpdate key means an installed update is waiting on a restart.
+	//
+	// PendingFileRenameOperations is counted in place and its paths are never
+	// emitted -- they routinely contain user names, and result detail is meant
+	// to stay safe to forward to alert email and third-party webhooks. The
+	// count is best-effort: it emits -1 on any failure so that a count error
+	// cannot flip a working check to unknown.
+	script := `$cbs = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'; ` +
+		`$wu = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'; ` +
+		`$item = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue; ` +
+		`$pfr = $null -ne $item; $count = -1; ` +
+		// The count stays -1 until the whole walk succeeds. A property getter
+		// that fails yields $null rather than raising, so an unreadable value
+		// must be tested for directly -- catch alone would let a failed query
+		// report zero, which reads as "no renames queued" rather than
+		// "unknown".
+		`if ($pfr) { $entries = $null; try { $entries = $item.PendingFileRenameOperations } catch { $entries = $null }; ` +
+		`if ($null -ne $entries) { $list = @($entries); $n = 0; ` +
+		`for ($i = 0; $i -lt $list.Count; $i += 2) { if (-not [string]::IsNullOrEmpty($list[$i])) { $n++ } }; $count = $n } }; ` +
+		`@($cbs.ToString().ToLowerInvariant(), $wu.ToString().ToLowerInvariant(), $pfr.ToString().ToLowerInvariant(), $count.ToString()) -join ([string][char]10)`
+	out, err := run(ctx, script)
+	if err != nil {
+		return RebootStatus{}, false, "reboot_probe_failed"
+	}
+	status, ok := parseRebootProbeOutput(out)
+	if !ok {
+		return RebootStatus{}, false, "reboot_probe_invalid"
+	}
+	return status, true, "sample_collected"
+}
