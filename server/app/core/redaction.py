@@ -1037,6 +1037,27 @@ AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     "tenant.region_policy_set": _schema(
         "client_id", "region_id", "mode", "previous_region_id", "previous_mode"
     ),
+    "tenant.retention_policy_set": _schema(
+        "client_id", "version", "previous_version", "categories", "values",
+        "previous_values",
+    ),
+    "tenant.retention_policy_cleared": _schema(
+        "client_id", "version", "previous_version", "categories", "previous_values"
+    ),
+    "retention.purged": _schema(
+        "client_id", "category", "table", "operation", "cutoff", "keep_per_section",
+        "policy_version", "policy_source", "rows", "dependent_rows", "ids_sha256",
+        "truncated",
+    ),
+    "retention.purge_suspended": _schema("client_id", "reason", "policy_version"),
+    "retention.purge_failed": _schema("client_id", "error_class", "policy_version"),
+    "retention.sweep_completed": _schema(
+        "swept_at", "tenants", "tenants_suspended", "tenants_failed",
+        "heartbeats_deleted", "command_outputs_cleared", "command_records_deleted",
+        "inventory_snapshots_deleted", "alerts_deleted", "notifications_deleted",
+        "check_results_deleted", "support_chat_conversations_deleted",
+        "relay_receipts_deleted",
+    ),
     "agent.route_changed": _schema("previous", "current", "region"),
     "tenant.access_denied": _schema(
         "operator_id",
