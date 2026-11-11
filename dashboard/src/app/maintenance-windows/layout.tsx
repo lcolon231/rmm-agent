@@ -38,8 +38,6 @@ export default async function MaintenanceWindowsLayout({
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Operations"
-      sectionTitle="Maintenance windows"
     >
       {children}
     </DashboardSectionShell>

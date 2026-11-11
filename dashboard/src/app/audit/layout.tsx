@@ -34,8 +34,6 @@ export default async function AuditLayout({ children }: { children: React.ReactN
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Evidence"
-      sectionTitle="Audit timeline and verification"
     >
       {children}
     </DashboardSectionShell>

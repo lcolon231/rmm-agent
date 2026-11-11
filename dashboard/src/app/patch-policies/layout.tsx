@@ -34,8 +34,6 @@ export default async function PatchPoliciesLayout({ children }: { children: Reac
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Fleet assurance"
-      sectionTitle="Patch policies"
     >
       {children}
     </DashboardSectionShell>

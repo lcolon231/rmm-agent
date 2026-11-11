@@ -38,8 +38,6 @@ export default async function SecurityLayout({
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Your account"
-      sectionTitle="Multi-factor authentication"
     >
       {children}
     </DashboardSectionShell>

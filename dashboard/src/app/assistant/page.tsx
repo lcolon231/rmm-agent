@@ -23,7 +23,7 @@ export default async function AssistantPage({ searchParams }: {
   const clientId = clients?.items.some(client => client.id === params.client_id) ? params.client_id : undefined;
   const endpointId = typeof params.endpoint_id === "string" && /^[a-f0-9-]{36}$/i.test(params.endpoint_id) ? params.endpoint_id : undefined;
   return <DashboardSectionShell activePath="/assistant" navigation={clients} navigationError={!clients}
-    operator={session.operator} sectionLabel="Read-only investigation" sectionTitle="AI assistant">
+    operator={session.operator}>
     <AssistantChat clients={clients?.items.map(({ id, name }) => ({ id, name })) ?? []}
       initialClientId={clientId} endpointId={clientId ? endpointId : undefined} state={state} />
   </DashboardSectionShell>;

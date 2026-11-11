@@ -34,8 +34,6 @@ export default async function SchedulesLayout({ children }: { children: React.Re
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Operations"
-      sectionTitle="Recurring task scheduling"
     >
       {children}
     </DashboardSectionShell>

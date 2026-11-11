@@ -34,8 +34,6 @@ export default async function TasksLayout({ children }: { children: React.ReactN
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Operations"
-      sectionTitle="Task history"
     >
       {children}
     </DashboardSectionShell>

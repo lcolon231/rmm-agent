@@ -39,8 +39,6 @@ export default async function OperatorsLayout({
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Administration"
-      sectionTitle="Operator access control"
     >
       {session.operator.role === "admin" ? children : (
         <section className="operator-access-denied" role="alert">

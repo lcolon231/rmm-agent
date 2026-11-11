@@ -12,5 +12,5 @@ export default async function CommunityLayout({ children }: { children: React.Re
   let navigation: NavigationData | null = null; let navigationError = false;
   try { navigation = await getClientNavigation(session.sessionToken); } catch { navigationError = true; }
   return <DashboardSectionShell activePath="/community" navigation={navigation} navigationError={navigationError}
-    operator={session.operator} sectionLabel="Automation" sectionTitle="Community script repository">{children}</DashboardSectionShell>;
+    operator={session.operator}>{children}</DashboardSectionShell>;
 }

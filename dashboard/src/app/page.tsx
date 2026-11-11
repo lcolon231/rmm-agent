@@ -113,7 +113,6 @@ export default async function Home({ searchParams }: HomePageProps) {
       navigationError={navigationError}
       endpointError={endpointError}
       endpointList={endpointList}
-      endpointSearch={endpointSearch ?? ""}
       endpointSort={endpointSort}
       endpointStatus={endpointStatus}
       alerts={alerts}

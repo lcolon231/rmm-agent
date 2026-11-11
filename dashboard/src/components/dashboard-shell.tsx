@@ -3,13 +3,8 @@
 "use client";
 
 import {
-  Activity,
   AlertTriangle,
-  Bell,
-  Bot,
   BriefcaseBusiness,
-  Building2,
-  CalendarClock,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -21,30 +16,20 @@ import {
   Command,
   Download,
   FileClock,
-  HeartPulse,
   KeyRound,
   Laptop,
-  ListChecks,
-  Menu,
-  MessagesSquare,
   Monitor,
   RefreshCw,
   Search,
   Server,
-  Settings,
-  Siren,
   Shield,
   ShieldCheck,
-  Store,
   TerminalSquare,
-  UserCheck,
-  Users,
   X,
 } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { AuditAnchorRecord, AuditChainVerification, AuditEventRecord } from "@/lib/audit-core";
 import type { NavigationData } from "@/lib/client-navigation";
@@ -61,31 +46,9 @@ import type { DashboardOperator } from "@/lib/dashboard-auth-core";
 import { formatAgentVersion } from "@/lib/endpoint-detail-core";
 import type { EndpointListData } from "@/lib/endpoint-list";
 import type { MonitoringAlert } from "@/lib/monitoring-core";
-import { operatorRoleLabel } from "@/lib/operator-management-core";
 import type { Endpoint, EndpointStatus } from "@/data/dashboard";
 
-const navItems = [
-  { label: "Overview", icon: Activity, href: "/" },
-  { label: "Endpoints", icon: Monitor, count: null, href: "/endpoints" },
-  { label: "AI assistant", icon: Bot, count: null, href: "/assistant" },
-  { label: "Alerts", icon: AlertTriangle, count: null, href: "/alerts" },
-  { label: "Support chat", icon: MessagesSquare, count: null, href: "/support" },
-  { label: "Automation", icon: Bot, count: null, href: "/scripts" },
-  { label: "Community scripts", icon: Store, count: null, href: "/community" },
-  { label: "Tasks", icon: ListChecks, count: null, href: "/tasks" },
-  { label: "Schedules", icon: Clock3, count: null, href: "/schedules" },
-  { label: "Monitoring", icon: HeartPulse, count: null, href: "/monitoring" },
-  { label: "Maintenance", icon: CalendarClock, count: null, href: "/maintenance-windows" },
-  { label: "Patch compliance", icon: Shield, count: null, href: "/patch-compliance" },
-  { label: "Patch policies", icon: Shield, count: null, href: "/patch-policies" },
-  { label: "Approvals", icon: UserCheck, count: null, href: "/approvals" },
-  { label: "Emergency overrides", icon: Siren, count: null, href: "/emergency-overrides" },
-  { label: "Audit", icon: ShieldCheck, count: null, href: "/audit" },
-  { label: "Administration", icon: Settings, count: null, href: "/enrollment" },
-  { label: "Operators", icon: Users, count: null, href: "/operators", adminOnly: true },
-  { label: "Security keys", icon: KeyRound, count: null, href: "/security" },
-  { label: "Break-glass", icon: Siren, count: null, href: "/security/break-glass", adminOnly: true },
-];
+import { AppShell } from "./shell/app-shell";
 
 const statusLabels: Record<EndpointStatus, string> = {
   online: "Online",
@@ -128,165 +91,6 @@ function WorkIcon({ work }: { work: Endpoint["work"] }) {
   if (work === "queued") return <BriefcaseBusiness size={17} />;
   if (work === "policy") return <Shield size={17} />;
   return <FileClock size={17} />;
-}
-
-type SidebarProps = {
-  activePath: string;
-  navigation: NavigationData | null;
-  navigationError: boolean;
-  onClose: () => void;
-  open: boolean;
-  operator: DashboardOperator;
-  selectedClientId?: string;
-  selectedSiteId?: string;
-  selectionError: boolean;
-};
-
-function Sidebar({
-  activePath,
-  navigation,
-  navigationError,
-  onClose,
-  open,
-  operator,
-  selectedClientId,
-  selectedSiteId,
-  selectionError,
-}: SidebarProps) {
-  // Poll the cheap unread-count route so the Support chat badge stays current
-  // without a full navigation refresh.
-  const [supportUnread, setSupportUnread] = useState(0);
-  useEffect(() => {
-    let stopped = false;
-    async function poll() {
-      try {
-        const response = await fetch("/api/support/unread-count", { cache: "no-store" });
-        if (response.ok) {
-          const data = await response.json();
-          if (!stopped && Number.isInteger(data?.unread)) setSupportUnread(data.unread);
-        }
-      } catch { /* transient; next tick retries */ }
-    }
-    void poll();
-    const timer = setInterval(poll, 10000);
-    return () => { stopped = true; clearInterval(timer); };
-  }, []);
-  return (
-    <>
-      <button
-        className={`sidebar-scrim ${open ? "is-open" : ""}`}
-        onClick={onClose}
-        aria-label="Close navigation"
-      />
-      <aside className={`sidebar ${open ? "is-open" : ""}`}>
-        <div className="brand-row">
-          <Link className="dashboard-brand" href="/" onClick={onClose}>
-            <Image
-              className="dashboard-brand-logo"
-              src="/brand/nodelink-logo.jpg"
-              alt="NodeLink Technologies"
-              width={48}
-              height={48}
-              priority
-            />
-            <span className="dashboard-brand-name" aria-hidden="true">
-              <strong>NodeLink</strong>
-              <small>Technologies</small>
-            </span>
-          </Link>
-          <button className="sidebar-close" onClick={onClose} aria-label="Close navigation">
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="sidebar-section client-section">
-          <div className="sidebar-label">
-            <span>Clients</span>
-            {operator.role === "readonly" ? (
-              <small>View only</small>
-            ) : (
-              <Link
-                aria-label="Add client"
-                className="add-client-link"
-                href="/enrollment/setup"
-                onClick={onClose}
-                title="Add client"
-              >
-                +
-              </Link>
-            )}
-          </div>
-          {navigationError ? (
-            <div className="navigation-state" role="alert">
-              <span>Client navigation is unavailable.</span>
-              <button onClick={() => window.location.reload()}>Retry</button>
-            </div>
-          ) : navigation?.items.length === 0 ? (
-            <p className="navigation-state">No clients are available to this operator.</p>
-          ) : (
-            navigation?.items.map((client) => (
-              <div className="client-tree" key={client.id}>
-                <Link
-                  className={`client-name ${selectedClientId === client.id && !selectedSiteId ? "active" : ""}`}
-                  href={`/?client=${encodeURIComponent(client.id)}`}
-                  onClick={onClose}
-                >
-                  <span className="client-avatar">{client.name.slice(0, 2).toUpperCase()}</span>
-                  <span>{client.name}</span>
-                  <ChevronDown size={15} />
-                </Link>
-                <div className="site-list">
-                  {client.sites.map((site) => (
-                    <Link
-                      aria-current={selectedSiteId === site.id ? "page" : undefined}
-                      className={selectedSiteId === site.id ? "active" : ""}
-                      href={`/?client=${encodeURIComponent(client.id)}&site=${encodeURIComponent(site.id)}`}
-                      key={site.id}
-                      onClick={onClose}
-                    >
-                      <span>{site.name}</span>
-                      <span className="site-count">{site.endpoint_count}</span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-          {navigation?.truncated ? <p className="navigation-state">Only the first 200 clients are shown.</p> : null}
-          {selectionError ? <p className="navigation-state" role="alert">The requested client or site is unavailable.</p> : null}
-        </div>
-
-        <nav className="sidebar-section main-nav" aria-label="Primary navigation">
-          <div className="sidebar-label">Navigation</div>
-          {navItems
-            .filter((item) => !item.adminOnly || operator.role === "admin")
-            .map(({ label, icon: Icon, count, href }) => {
-              const isActive = activePath === href || (href !== "/" && activePath.startsWith(`${href}/`));
-              const badge = href === "/support" ? supportUnread : count;
-              return (
-                <Link
-                  aria-current={isActive ? "page" : undefined}
-                  className={isActive ? "active" : ""}
-                  href={href}
-                  key={label}
-                  onClick={onClose}
-                >
-                  <Icon size={19} />
-                  <span>{label}</span>
-                  {badge ? <span className="nav-count">{badge}</span> : null}
-                  {label === "Administration" ? <ChevronRight className="nav-chevron" size={15} /> : null}
-                </Link>
-              );
-            })}
-        </nav>
-
-        <button className="collapse-button">
-          <ChevronLeft size={18} />
-          <span>Collapse</span>
-        </button>
-      </aside>
-    </>
-  );
 }
 
 function TrustRail({
@@ -487,80 +291,17 @@ export function DashboardSectionShell({
   navigation,
   navigationError,
   operator,
-  sectionLabel,
-  sectionTitle,
 }: {
   activePath: string;
   children: React.ReactNode;
   navigation: NavigationData | null;
   navigationError: boolean;
   operator: DashboardOperator;
-  sectionLabel: string;
-  sectionTitle: string;
 }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [signOutError, setSignOutError] = useState("");
-
-  async function signOut() {
-    setSignOutError("");
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      window.location.assign("/login");
-    } catch {
-      setSignOutError("Sign-out could not be confirmed. Try again.");
-    }
-  }
-
-  const operatorInitials = operator.email
-    .split("@")[0]
-    .split(/[._-]/)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
   return (
-    <div className="app-shell">
-      <Sidebar
-        activePath={activePath}
-        navigation={navigation}
-        navigationError={navigationError}
-        onClose={() => setSidebarOpen(false)}
-        open={sidebarOpen}
-        operator={operator}
-        selectionError={false}
-      />
-      <header className="topbar section-topbar">
-        <button className="mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">
-          <Menu size={21} />
-        </button>
-        <div className="section-context">
-          <span>{sectionLabel}</span>
-          <strong>{sectionTitle}</strong>
-        </div>
-        <div className="topbar-spacer" />
-        <div className="profile-block">
-          <div>
-            <strong>{operator.email}</strong>
-            <span>{operatorRoleLabel(operator.role)}</span>
-          </div>
-          <span className="avatar">{operatorInitials}</span>
-          <button className="sign-out" onClick={signOut}>
-            Sign out
-          </button>
-        </div>
-      </header>
-      <main className="workspace section-workspace">
-        <div className="content-column">
-          {signOutError ? (
-            <p className="sign-out-error" role="alert">
-              {signOutError}
-            </p>
-          ) : null}
-          {children}
-        </div>
-      </main>
-    </div>
+    <AppShell activePath={activePath} navigation={navigation} navigationError={navigationError} operator={operator}>
+      {children}
+    </AppShell>
   );
 }
 
@@ -575,7 +316,6 @@ type DashboardShellProps = {
   trustError: boolean;
   endpointError: boolean;
   endpointList: EndpointListData | null;
-  endpointSearch: string;
   endpointSort: "last_seen" | "hostname" | "status";
   endpointStatus?: "online" | "offline" | "pending";
   navigation: NavigationData | null;
@@ -597,7 +337,6 @@ export function DashboardShell({
   trustError,
   endpointError,
   endpointList,
-  endpointSearch,
   endpointSort,
   endpointStatus,
   navigation,
@@ -608,15 +347,11 @@ export function DashboardShell({
   selectionError,
 }: DashboardShellProps) {
   const router = useRouter();
-  const [query, setQuery] = useState(endpointSearch);
   const [issueFilter, setIssueFilter] = useState<Endpoint["issue"] | "all">("all");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedEndpoint, setSelectedEndpoint] = useState<Endpoint | null>(null);
   const [refreshTime, setRefreshTime] = useState(() =>
     new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date()),
   );
-  const [signOutError, setSignOutError] = useState("");
-
   const fleetSummary = useMemo(
     () => calculateFleetSummary(endpointList?.items ?? [], endpointList?.total),
     [endpointList],
@@ -708,18 +443,7 @@ export function DashboardShell({
     router.refresh();
   };
 
-  const signOut = async () => {
-    setSignOutError("");
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      window.location.assign("/login");
-    } catch {
-      setSignOutError("Sign-out could not be confirmed. Try again.");
-    }
-  };
-
   const updateEndpointQuery = (changes: Record<string, string | undefined>) => {
-    if ("search" in changes) setQuery(changes.search ?? "");
     const params = new URLSearchParams(window.location.search);
     for (const [key, value] of Object.entries(changes)) {
       if (value) params.set(key, value);
@@ -730,99 +454,26 @@ export function DashboardShell({
     router.push(nextQuery ? `/?${nextQuery}` : "/");
   };
 
-  const operatorInitials = operator.email
-    .split("@")[0]
-    .split(/[._-]/)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
   const activeAlertCount = alerts.filter((a) => a.state !== "resolved").length;
 
   return (
-    <div className="app-shell">
-      <Sidebar
-        activePath="/"
-        navigation={navigation}
-        navigationError={navigationError}
-        onClose={() => setSidebarOpen(false)}
-        open={sidebarOpen}
-        operator={operator}
-        selectedClientId={selectedClientId}
-        selectedSiteId={selectedSiteId}
-        selectionError={selectionError}
-      />
-
-      <header className="topbar">
-        <button className="mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">
-          <Menu size={21} />
-        </button>
-        <label className="scope-select">
-          <Building2 size={17} />
-          <select
-            value={selectedClientId ?? ""}
-            onChange={(event) =>
-              updateEndpointQuery({ client: event.target.value || undefined, site: undefined })
-            }
-            aria-label="Client scope"
-          >
-            <option value="">All clients</option>
-            {navigation?.items.map((client) => (
-              <option key={client.id} value={client.id}>
-                {client.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={15} />
-        </label>
-        <label className="global-search">
-          <Search size={18} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search endpoints, users, or sites…"
-            aria-label="Search endpoints, users, or sites"
-            onKeyDown={(event) => {
-              if (event.key === "Enter") updateEndpointQuery({ search: query });
-            }}
-          />
-          <kbd>⌘ K</kbd>
-        </label>
-        <div className="topbar-spacer" />
-        <div className={`audit-verified ${trustStatusData.chainIntact ? "" : "error-status"}`}>
-          {trustStatusData.chainIntact ? <ShieldCheck size={19} /> : <CircleAlert size={19} />}
-          <span>{trustStatusData.chainIntact ? "Live data · Verified" : "Audit chain alert"}</span>
-          <i />
-        </div>
-        <button className="notification-button" aria-label="Notifications">
-          <Bell size={19} />
-          <span>{activeAlertCount}</span>
-        </button>
-        <div className="profile-block">
-          <div>
-            <strong>{operator.email}</strong>
-            <span>{operatorRoleLabel(operator.role)}</span>
-          </div>
-          <span className="avatar">{operatorInitials}</span>
-          <button className="sign-out" onClick={signOut}>
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      <main className="workspace">
+    <AppShell
+      activePath="/"
+      navigation={navigation}
+      navigationError={navigationError}
+      operator={operator}
+      selectedClientId={selectedClientId}
+      selectedSiteId={selectedSiteId}
+      selectionError={selectionError}
+      alertCount={alertsError ? undefined : activeAlertCount}
+    >
+      <div className="workspace">
         <div className="content-column">
           <section className="page-heading">
             <div>
               <span className="eyebrow">Fleet operations</span>
               <h1>Operations overview</h1>
               <p>Risk and operational posture across your managed endpoints.</p>
-              {signOutError ? (
-                <p className="sign-out-error" role="alert">
-                  {signOutError}
-                </p>
-              ) : null}
             </div>
             <div className="freshness">
               <span>
@@ -1115,9 +766,9 @@ export function DashboardShell({
           signedActions={signedActionsList}
           trustStatus={trustStatusData}
         />
-      </main>
+      </div>
 
       <EndpointDrawer endpoint={selectedEndpoint} onClose={() => setSelectedEndpoint(null)} />
-    </div>
+    </AppShell>
   );
 }

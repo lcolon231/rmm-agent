@@ -38,8 +38,6 @@ export default async function ApprovalsLayout({
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Authorization"
-      sectionTitle="Approvals"
     >
       {children}
     </DashboardSectionShell>

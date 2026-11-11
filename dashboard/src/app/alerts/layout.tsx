@@ -34,8 +34,6 @@ export default async function AlertsLayout({ children }: { children: React.React
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Operations"
-      sectionTitle="Alerts"
     >
       {children}
     </DashboardSectionShell>
