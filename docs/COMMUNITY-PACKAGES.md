@@ -178,7 +178,7 @@ and store only digests of the unauthenticated publisher/name/version claims.
 
 ## Schema, compatibility, rollout
 
-Revision `0049` is additive: six new tables and a nullable
+Revision `0050` is additive: six new tables and a nullable
 `script_versions.community_package_version_id`. Older binaries never read them;
 existing library versions have `NULL` provenance and are unaffected by every
 check above. No agent upgrade is needed and mixed agent versions are fine,
@@ -198,7 +198,7 @@ is additive.
   deprecate the library item.
 - **Publisher compromise:** revoke the publisher; all of its packages block.
 - **Schema rollback:** migrations are forward-only. Back out the capability by
-  revoking publishers/versions; crossing below `0049` requires the
+  revoking publishers/versions; crossing below `0050` requires the
   exact-revision restore in [`ROLLBACK.md`](ROLLBACK.md).
 
 ## Verification
@@ -210,6 +210,6 @@ acceptance, dispatch kind/platform/content refusals, dependency/name confusion,
 moderation separation of duties and finality, immutability and monotonic
 versions, update/rollback, idempotency, scheduler enforcement, the role matrix,
 and digest-only audit evidence. `server/tests/test_migrations.py` covers
-`0049`. Dashboard parsers, BFF handlers, and the view are covered by
+`0050`. Dashboard parsers, BFF handlers, and the view are covered by
 `dashboard/test/community-packages.test.ts` and
 `dashboard/test/ui/community-repository-view.test.tsx`.

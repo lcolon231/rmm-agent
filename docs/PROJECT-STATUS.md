@@ -216,7 +216,7 @@ The code in this repository currently provides:
   capabilities with escalation acknowledgement, separation-of-duties
   moderation, revocation that blocks the next dispatch and scheduled run, and
   safe install/update/rollback into the script library. Additive at revision
-  `0049`; no agent change. No remote feed or agent-side sandbox
+  `0050`; no agent change. No remote feed or agent-side sandbox
   (`docs/COMMUNITY-PACKAGES.md`).
 - Immutable typed script parameters (`string`, `number`, `boolean`, `choice`,
   `secret`) with strict defaults/bounds, encrypted expiring per-run value sets,

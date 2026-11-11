@@ -499,7 +499,7 @@ without writing plaintext into the existing `commands.payload`. See
 
 ### Moderated community script packages
 
-Revision `0049` adds an in-deployment community repository (issue #74).
+Revision `0050` adds an in-deployment community repository (issue #74).
 `community_publishers` own namespace slugs; `community_publisher_keys` hold only
 Ed25519 public keys, each bound to one namespace forever. Publishers sign a
 canonical, domain-separated JSON manifest offline

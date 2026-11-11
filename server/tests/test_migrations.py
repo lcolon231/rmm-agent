@@ -43,7 +43,7 @@ def sqlite_url(path: Path) -> str:
 def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
     path = tmp_path / "assistant-migration.db"
     config = migration_config(sqlite_url(path))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0049"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0050"]
     command.upgrade(config, "0041")
     command.upgrade(config, "0042")
     with sqlite3.connect(path) as connection:
@@ -1053,10 +1053,10 @@ def test_multi_region_relay_migration_is_additive_and_forward_only(tmp_path: Pat
 
 
 def test_community_package_migration_is_additive_and_forward_only(tmp_path: Path):
-    """0049 (issue #74): community registry tables plus nullable provenance."""
+    """0050 (issue #74): community registry tables plus nullable provenance."""
     path = tmp_path / "community-migration.db"
     config = migration_config(sqlite_url(path))
-    command.upgrade(config, "0048")
+    command.upgrade(config, "0049")
     with sqlite3.connect(path) as connection:
         connection.execute(
             "INSERT INTO script_library_items (id, name, normalized_name, latest_version, "
@@ -1072,7 +1072,7 @@ def test_community_package_migration_is_additive_and_forward_only(tmp_path: Path
         connection.commit()
     command.upgrade(config, "head")
     with sqlite3.connect(path) as connection:
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0049"
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0050"
         tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "community_publishers",
@@ -1101,7 +1101,7 @@ def test_community_package_migration_is_additive_and_forward_only(tmp_path: Path
                 "VALUES ('p3', 'other', 'Bad', 'trusted', 'a@x', '2026-11-10')"
             )
     with pytest.raises(RuntimeError, match="forward-only"):
-        command.downgrade(config, "0048")
+        command.downgrade(config, "0049")
     asyncio.run(_assert_current(sqlite_url(path)))
 
 
@@ -1134,6 +1134,7 @@ def test_tenant_retention_migration_is_additive_and_forward_only(tmp_path: Path)
         assert "ix_alerts_state_resolved" in alert_indexes
     with pytest.raises(RuntimeError, match="forward-only"):
         command.downgrade(config, "0048")
+    command.upgrade(config, "head")
     asyncio.run(_assert_current(sqlite_url(path)))
 
 
