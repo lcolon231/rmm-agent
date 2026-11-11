@@ -4,9 +4,15 @@ package patching
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"testing"
+	"time"
 )
+
+// windowsUpdateTestTimeout bounds the one test that searches the live Windows
+// Update Agent. It must stay well under the default 10m `go test` timeout.
+const windowsUpdateTestTimeout = 2 * time.Minute
 
 func TestInstallUnsupportedPlatform(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -25,7 +31,16 @@ func TestInstallWindowsTargetNotFound(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("skipping Windows test on non-windows host")
 	}
-	res, err := Install(context.Background(), InstallTargets{KBIDs: []string{"KB9999999"}})
+	// This drives the real Windows Update Agent, whose online search can stall
+	// for many minutes on a CI runner. Bound it well inside the package test
+	// timeout and treat an unresponsive update service as environmental, so a
+	// slow host cannot hang the whole Go job; any other outcome is still asserted.
+	ctx, cancel := context.WithTimeout(context.Background(), windowsUpdateTestTimeout)
+	defer cancel()
+	res, err := Install(ctx, InstallTargets{KBIDs: []string{"KB9999999"}})
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Skipf("Windows Update did not answer within %s on this host; skipping live search", windowsUpdateTestTimeout)
+	}
 	if err != nil {
 		t.Fatalf("install failed unexpectedly: %v", err)
 	}
