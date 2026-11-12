@@ -19,14 +19,13 @@ import {
   type StreamName,
 } from "@/lib/command-console-core";
 import { formatAgentVersion, formatEndpointDateTime } from "@/lib/endpoint-detail-core";
-import { custodySteps, type CustodyState } from "@/lib/endpoint-pages-core";
+import { commandKindLabel, custodySteps, type CustodyState } from "@/lib/endpoint-pages-core";
 import { commandBadge } from "@/lib/endpoint-summary-core";
 import {
   installUpdatesResultFromUnknown,
   type InstallUpdatesResultView,
 } from "@/lib/windows-updates-core";
 
-import { commandKindLabel } from "./endpoint/command-history-table";
 import { endpointBase, endpointCrumbs, inlineLink, monoText, Notice, Panel } from "./endpoint/section-header";
 import { PageHeader, PageStack } from "./shell/page-header";
 import { cx } from "./ui/cx";

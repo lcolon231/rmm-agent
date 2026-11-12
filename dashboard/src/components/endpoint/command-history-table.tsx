@@ -5,8 +5,9 @@
 import { TerminalSquare } from "lucide-react";
 import Link from "next/link";
 
-import { commandDetailRequiresAdmin, commandKindDefinitions, commandPageCount, type CommandHistoryData, type CommandHistoryItem } from "@/lib/command-console-core";
+import { commandDetailRequiresAdmin, commandPageCount, type CommandHistoryData, type CommandHistoryItem } from "@/lib/command-console-core";
 import { formatEndpointDateTime } from "@/lib/endpoint-detail-core";
+import { commandKindLabel } from "@/lib/endpoint-pages-core";
 import { commandBadge } from "@/lib/endpoint-summary-core";
 
 import { DataTable, PrimaryCell, TableFooter, type Column } from "../ui/data-table";
@@ -14,9 +15,7 @@ import { EmptyState } from "../ui/states";
 import { StatusBadge } from "../ui/status-badge";
 import { endpointBase, HistoryPager, inlineLink, monoText } from "./section-header";
 
-export function commandKindLabel(kind: string) {
-  return commandKindDefinitions.find((definition) => definition.kind === kind)?.label ?? kind;
-}
+
 
 /** Newest-first command history for one device; each row links to its record. */
 export function CommandHistoryTable({ endpointId, history, isAdmin }: { endpointId: string; history: CommandHistoryData; isAdmin: boolean }) {

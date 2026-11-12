@@ -2,7 +2,7 @@
 
 /** Presentation helpers for the endpoint Inventory and Commands subpages. */
 
-import type { CommandDetailData } from "./command-console-core.ts";
+import { commandKindDefinitions, type CommandDetailData } from "./command-console-core.ts";
 import type { InventorySectionStatus } from "./inventory-core.ts";
 
 type Tone = "ok" | "warn" | "crit" | "off" | "info";
@@ -109,3 +109,8 @@ export function custodySteps(command: CommandDetailData): CustodyStep[] {
   return steps;
 }
 
+
+/** Shared by server-rendered command records and the client history table. */
+export function commandKindLabel(kind: string) {
+  return commandKindDefinitions.find((definition) => definition.kind === kind)?.label ?? kind;
+}
