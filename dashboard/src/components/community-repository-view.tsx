@@ -117,7 +117,7 @@ function VersionRow({ pkg, version, role, installed }: {
   const admin = role === "admin";
   return <article className="bg-(--paper)">
     <header><code>v{version.version}</code><StatusBadge tone={version.state === "approved" ? "ok" : version.state === "submitted" ? "warn" : "crit"}>
-      {version.state === "approved" ? "Approved" : version.state === "submitted" ? "Needs review" : version.state === "rejected" ? "Rejected" : version.state === "revoked" ? "Revoked" : "Blocked"}</StatusBadge><small>Submitted by {version.submitted_by} · {formatScriptTimestamp(version.submitted_at)}</small></header>
+      {version.state === "approved" ? "Approved" : version.state === "submitted" ? "Needs review" : version.state === "rejected" ? "Rejected" : version.state === "revoked" ? "Revoked" : "Blocked"}</StatusBadge>{version.state === "blocked" ? <span>Blocked (publisher or key revoked)</span> : null}<small>Submitted by {version.submitted_by} · {formatScriptTimestamp(version.submitted_at)}</small></header>
     <dl>
       <div><dt>Signer key</dt><dd><code>{version.signing_key_id}</code> <code title={version.signing_key_fingerprint}>{short(version.signing_key_fingerprint)}</code></dd></div>
       <div><dt>Manifest SHA-256</dt><dd><code title={version.manifest_sha256}>{short(version.manifest_sha256)}</code></dd></div>
@@ -137,7 +137,7 @@ function InstallRow({ install, pkg, role }: { install: CommunityInstall; pkg: Co
   const candidates = (pkg?.versions ?? []).filter((item) => item.state === "approved" && item.version !== install.installed_version);
   const chosen = candidates.find((item) => item.version === target);
   const direction = chosen && compareSemver(chosen.version, install.installed_version) > 0 ? "update" : "rollback";
-  return <article className="bg-(--paper)">
+  return <article aria-label={`Installed ${install.qualified_name}`} className="bg-(--paper)">
     <header><strong>{install.qualified_name}</strong><code>v{install.installed_version}</code>
       <small>Library version {install.library_version} · installed by {install.installed_by}</small></header>
     {role === "admin" && candidates.length ? <div className="grid gap-3">
@@ -235,6 +235,7 @@ export function CommunityRepositoryView({ publishers, packages, installs, initia
     </>}
   </div></PageStack>;
 }
+
 
 
 

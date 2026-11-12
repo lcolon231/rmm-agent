@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { CommunityRepositoryView } from "@/components/community-repository-view";
 import type { CommunityInstall, CommunityPackage, CommunityPackageVersion, CommunityPublisher } from "@/lib/community-packages-core";
@@ -90,6 +90,7 @@ function lastCall(fetchMock: ReturnType<typeof refusing>) {
 test("a submission must be JSON and is forwarded unchanged", async (t) => {
   const fetchMock = refusing(t, "Signature does not verify.");
   view("operator", []);
+  fireEvent.click(screen.getByRole("button", { name: "Submit a package" }));
   const submit = button("Submit for moderation") as HTMLButtonElement;
   assert.equal(submit.disabled, true);
   const area = screen.getByLabelText(/Submission JSON/);
@@ -126,15 +127,21 @@ test("revocation and rejection require a reason and carry a request id", async (
   const fetchMock = refusing(t);
   view("admin", [pkg({})]);
   const revokePublisher = button("^Revoke publisher$") as HTMLButtonElement;
-  assert.equal(revokePublisher.disabled, true);
-  fireEvent.change(screen.getByLabelText("Revoke publisher reason"), { target: { value: "Key leaked" } });
   fireEvent.click(revokePublisher);
+  const dialog = within(screen.getByRole("alertdialog"));
+  assert.equal((dialog.getByRole("button", { name: "Revoke publisher" }) as HTMLButtonElement).disabled, true);
+  fireEvent.change(dialog.getByRole("textbox"), { target: { value: "Key leaked" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Revoke publisher" }));
   await screen.findAllByText("Refused by server.");
   const revoke = lastCall(fetchMock);
   assert.equal(revoke.url, "/api/community/publishers/pub1/revoke");
   assert.match(revoke.body.request_id, /^revoke-/);
+  fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
   fireEvent.change(screen.getByLabelText("Moderation reason"), { target: { value: "Unsafe" } });
   fireEvent.click(button("Reject")!);
+  const rejection = within(screen.getByRole("alertdialog"));
+  fireEvent.change(rejection.getByRole("textbox"), { target: { value: "Unsafe" } });
+  fireEvent.click(rejection.getByRole("button", { name: "Reject version" }));
   await waitFor(() => assert.equal(fetchMock.mock.callCount(), 2));
   assert.deepEqual(lastCall(fetchMock), { url: "/api/community/packages/p1/versions/1.0.0/moderation",
     body: { state: "rejected", reason: "Unsafe" } });
@@ -153,16 +160,17 @@ test("installs move forward by update and backward by rollback with exact accept
   fireEvent.change(select, { target: { value: "2.0.0" } });
   const update = button("Update to v2.0.0") as HTMLButtonElement;
   assert.equal(update.disabled, true);
-  const boxes = screen.getAllByRole("checkbox").filter((box) => box.closest(".community-install"));
+  const boxes = within(screen.getByRole("article", { name: "Installed acme/net-check" })).getAllByRole("checkbox");
   for (const box of boxes) fireEvent.click(box);
   fireEvent.click(update);
   await screen.findAllByText("Refused by server.");
   assert.equal(lastCall(fetchMock).url, "/api/community/installs/i1/update");
   fireEvent.change(select, { target: { value: "1.0.0" } });
-  for (const box of screen.getAllByRole("checkbox").filter((item) => item.closest(".community-install"))) fireEvent.click(box);
+  for (const box of within(screen.getByRole("article", { name: "Installed acme/net-check" })).getAllByRole("checkbox")) fireEvent.click(box);
   fireEvent.click(button("Roll back to v1.0.0")!);
   await waitFor(() => assert.equal(fetchMock.mock.callCount(), 2));
   const rollback = lastCall(fetchMock);
   assert.equal(rollback.url, "/api/community/installs/i1/rollback");
   assert.equal(rollback.body.version, "1.0.0");
 });
+
