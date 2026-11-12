@@ -372,7 +372,7 @@ export function AlertDetailView({ alert, emailDeliveries, webhookDeliveries, ass
         <div className="grid items-start gap-6 min-[1100px]:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
           <div className="grid min-w-0 gap-6">
             {tab === "timeline" ? (
-              <Card title="Timeline" sub="Every change to this alert and every notification sent, oldest first.">
+              <Card title="Timeline" sub="Loaded alert events and delivery attempts, oldest first.">
                 <Timeline entries={timelineEntries(alert, emailDeliveries, webhookDeliveries)} />
               </Card>
             ) : tab === "notifications" ? (
@@ -391,3 +391,4 @@ export function AlertDetailView({ alert, emailDeliveries, webhookDeliveries, ass
     </AlertActionsProvider>
   );
 }
+
