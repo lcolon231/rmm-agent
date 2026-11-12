@@ -113,6 +113,15 @@ accept an action. It currently contains:
   resource is indistinguishable from a missing one (404). Membership grant/revoke
   and the platform-admin flag are platform-admin-only, audited, and bump the
   target's token generation. See [`TENANT-AUTHORIZATION.md`](TENANT-AUTHORIZATION.md).
+- Tenant-scoped API tokens (issue #72): an operator may mint an opaque
+  `nlk_` bearer (SHA-256 stored, shown once, step-up required) for integrations.
+  It resolves to a transient, narrowed copy of its owner: confined to one
+  client, global and client roles capped at the token's ceilings, never a
+  platform admin, refused by step-up and MFA gates, and accepted only on the
+  public routes registered in `app/core/public_api.py`. Revoke, expiry, owner
+  disable, and a `token_generation` bump each end it. Actions taken through a
+  token are attributed to it in the audit `actor`. See
+  [`PUBLIC-API.md`](PUBLIC-API.md).
 - Enrollment-token and agent-token issuance; only token hashes are stored on
   the server.
 - A single deployment-wide Ed25519 command-signing keypair.
@@ -647,7 +656,14 @@ same `NULL` semantics as `approval_request_id`.
 
 ### 4.2 API surface
 
-All application routes except `/healthz` are under `/api/v1`.
+All application routes except `/healthz`, `/readyz`, and `/metrics` are under
+`/api/v1`. A curated subset is the versioned **public v1 contract** (issue #72):
+those routes are listed in `app/core/public_api.py`, exported to the committed
+[`api/openapi-v1.json`](api/openapi-v1.json), carry `NodeLink-API-Version` (plus
+`Deprecation`/`Sunset` when deprecated), and are the only routes an API token
+may call. Pagination, `Idempotency-Key`, rate limits, errors, and the
+deprecation policy are in [`PUBLIC-API.md`](PUBLIC-API.md). Production does not
+serve `/docs`, `/redoc`, or `/openapi.json` unless `EXPOSE_OPENAPI=true`.
 
 | Method | Path | Current purpose | Authorization |
 |---|---|---|---|
@@ -711,6 +727,15 @@ All application routes except `/healthz` are under `/api/v1`.
 | POST | `/approval-requests/{id}/approve` | Record one eligible identity's approval | Operator, never the requester |
 | POST | `/approval-requests/{id}/reject` | Refuse a request (terminal) | Operator, never the requester |
 | POST | `/approval-requests/{id}/cancel` | Withdraw a request | Requester or client admin |
+| GET | `/api-version` | Public API version, revision, webhook versions, deprecations | Any operator or API token |
+| POST | `/api-tokens` | Mint a tenant-scoped API token (shown once) | Any operator, step-up; never an API token |
+| GET | `/api-tokens` | List own tokens (platform admin: any operator's) | Interactive session only |
+| DELETE | `/api-tokens/{id}` | Revoke a token (idempotent) | Owner or platform admin; interactive session only |
+| GET | `/monitoring/webhook-endpoints` | List signed webhook destinations | Readonly |
+| POST/PATCH/DELETE | `/monitoring/webhook-endpoints[/{id}]` | Create, revise, or delete a destination | Admin |
+| POST | `/monitoring/webhook-endpoints/{id}/rotate-secret` | Rotate the signing secret | Admin |
+| GET | `/monitoring/alerts/{id}/webhook-deliveries` | Delivery history for one alert | Readonly, tenant-scoped via the alert's agent |
+| POST | `/monitoring/webhook-deliveries/{id}/retry` | Reopen a failed delivery | Client operator on the alert's tenant |
 
 Enrollment-token list/detail/revoke APIs, an enrollment dashboard summary, a
 filtered enrollment audit-event list, and the general audit timeline,
@@ -720,9 +745,9 @@ script-permission administration, and session revocation are implemented in the
 dashboard. Deleting identities and password lifecycle operations remain absent.
 Monitoring policy models, read APIs, the initial six checks, result ingestion,
 deduplicated automatic alert state, technician alert lifecycle actions, and
-durable email notification delivery are implemented; generic webhooks, general
-task scheduling, patching, and
-evidence export remain absent. Telemetry history is
+durable email and signed generic-webhook notification delivery are
+implemented, with a versioned webhook event catalog
+([`WEBHOOK-EVENTS.md`](WEBHOOK-EVENTS.md), issue #72). Telemetry history is
 available only as a bounded read-only endpoint-detail query, not as a general
 analytics API.
 
@@ -1247,8 +1272,10 @@ moved merely to match an aspirational tree.
 - Audit anchors are published to external immutable storage when a backend is
   configured (`docs/AUDIT-ANCHORING.md`); with none configured they remain
   inside the database trust boundary and the publisher warns.
-- Roles are global; clients/sites bind token and agent assignments but are not
-  authorization tenants.
+- Clients are authorization tenants (issue #66) on top of global roles; webhook
+  destinations remain deployment-level administrator configuration.
+- Public API token budgets are process-local like the login limiter, so behind
+  multiple workers the effective per-token ceiling multiplies (issue #72).
 - Login and enrollment limiters plus enrollment counters are process-local and
   weaken or multiply with multiple workers.
 - `CommandStatus.running` remains reserved for a future live start signal;

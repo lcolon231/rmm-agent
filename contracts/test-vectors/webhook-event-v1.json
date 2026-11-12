@@ -1,0 +1,145 @@
+{
+  "api_version": "2026-08-05",
+  "contract": "webhook-event-v1",
+  "notes": "Test-only secret. Signature is HMAC-SHA256 over 'v1.' + X-NodeLink-Timestamp + '.' + the exact raw body bytes, hex-encoded and prefixed 'v1='.",
+  "secret": "whsec_test_vector_secret",
+  "timestamp": 1785945600,
+  "vectors": [
+    {
+      "body": "{\"api_version\":\"2026-08-05\",\"data\":{\"alert\":{\"check_key\":\"disk_free_percent\",\"endpoint_id\":\"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d\",\"from_state\":null,\"generation\":1,\"id\":\"6f1c2b8e-3a4d-4e5f-8a9b-0c1d2e3f4a5b\",\"last_value\":4.5,\"policy_id\":\"1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e\",\"policy_revision_id\":\"2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f\",\"result_status\":\"critical\",\"to_state\":\"open\"}},\"delivery_id\":\"00000000-0000-4000-8000-000000000001\",\"event_id\":\"00000000-0000-4000-9000-000000000001\",\"event_type\":\"monitoring.alert.opened\",\"occurred_at\":\"2026-08-05T16:00:00Z\"}",
+      "description": "A monitoring check crossed its threshold and a new alert opened.",
+      "event_type": "monitoring.alert.opened",
+      "headers": {
+        "Idempotency-Key": "nodelink-webhook/00000000-0000-4000-8000-000000000001",
+        "X-NodeLink-Delivery-Id": "00000000-0000-4000-8000-000000000001",
+        "X-NodeLink-Event-Id": "00000000-0000-4000-9000-000000000001",
+        "X-NodeLink-Key-Id": "4b0e1c55-2f8e-4d0a-9a61-7c3b5d2e8f10",
+        "X-NodeLink-Signature": "v1=bc6312e3174081de17db707bc3957b4e55e1eb4b5ed4c89cb08546da5e24f890",
+        "X-NodeLink-Timestamp": "1785945600",
+        "X-NodeLink-Webhook-Version": "2026-08-05"
+      },
+      "schema_version": 1,
+      "since": "2026-08-05",
+      "subscription_value": "opened"
+    },
+    {
+      "body": "{\"api_version\":\"2026-08-05\",\"data\":{\"alert\":{\"check_key\":\"disk_free_percent\",\"endpoint_id\":\"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d\",\"from_state\":\"resolved\",\"generation\":1,\"id\":\"6f1c2b8e-3a4d-4e5f-8a9b-0c1d2e3f4a5b\",\"last_value\":4.5,\"policy_id\":\"1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e\",\"policy_revision_id\":\"2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f\",\"result_status\":\"warning\",\"to_state\":\"open\"}},\"delivery_id\":\"00000000-0000-4000-8000-000000000002\",\"event_id\":\"00000000-0000-4000-9000-000000000002\",\"event_type\":\"monitoring.alert.reopened\",\"occurred_at\":\"2026-08-05T16:00:00Z\"}",
+      "description": "A previously resolved alert for the same check fired again.",
+      "event_type": "monitoring.alert.reopened",
+      "headers": {
+        "Idempotency-Key": "nodelink-webhook/00000000-0000-4000-8000-000000000002",
+        "X-NodeLink-Delivery-Id": "00000000-0000-4000-8000-000000000002",
+        "X-NodeLink-Event-Id": "00000000-0000-4000-9000-000000000002",
+        "X-NodeLink-Key-Id": "4b0e1c55-2f8e-4d0a-9a61-7c3b5d2e8f10",
+        "X-NodeLink-Signature": "v1=8a74ef9cf64e769784b4f42e3e77126528b74524892d21dca414a08006dbca2b",
+        "X-NodeLink-Timestamp": "1785945600",
+        "X-NodeLink-Webhook-Version": "2026-08-05"
+      },
+      "schema_version": 1,
+      "since": "2026-08-05",
+      "subscription_value": "reopened"
+    },
+    {
+      "body": "{\"api_version\":\"2026-08-05\",\"data\":{\"alert\":{\"check_key\":\"disk_free_percent\",\"endpoint_id\":\"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d\",\"from_state\":\"open\",\"generation\":1,\"id\":\"6f1c2b8e-3a4d-4e5f-8a9b-0c1d2e3f4a5b\",\"last_value\":4.5,\"policy_id\":\"1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e\",\"policy_revision_id\":\"2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f\",\"result_status\":\"critical\",\"to_state\":\"acknowledged\"}},\"delivery_id\":\"00000000-0000-4000-8000-000000000003\",\"event_id\":\"00000000-0000-4000-9000-000000000003\",\"event_type\":\"monitoring.alert.acknowledged\",\"occurred_at\":\"2026-08-05T16:00:00Z\"}",
+      "description": "A technician acknowledged an open alert.",
+      "event_type": "monitoring.alert.acknowledged",
+      "headers": {
+        "Idempotency-Key": "nodelink-webhook/00000000-0000-4000-8000-000000000003",
+        "X-NodeLink-Delivery-Id": "00000000-0000-4000-8000-000000000003",
+        "X-NodeLink-Event-Id": "00000000-0000-4000-9000-000000000003",
+        "X-NodeLink-Key-Id": "4b0e1c55-2f8e-4d0a-9a61-7c3b5d2e8f10",
+        "X-NodeLink-Signature": "v1=acf94591433530c4ec9c13ad1c854b39c266a24225d4e3276766692ac6823507",
+        "X-NodeLink-Timestamp": "1785945600",
+        "X-NodeLink-Webhook-Version": "2026-08-05"
+      },
+      "schema_version": 1,
+      "since": "2026-08-05",
+      "subscription_value": "acknowledged"
+    },
+    {
+      "body": "{\"api_version\":\"2026-08-05\",\"data\":{\"alert\":{\"check_key\":\"disk_free_percent\",\"endpoint_id\":\"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d\",\"from_state\":\"acknowledged\",\"generation\":1,\"id\":\"6f1c2b8e-3a4d-4e5f-8a9b-0c1d2e3f4a5b\",\"last_value\":4.5,\"policy_id\":\"1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e\",\"policy_revision_id\":\"2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f\",\"result_status\":\"critical\",\"to_state\":\"resolved\"}},\"delivery_id\":\"00000000-0000-4000-8000-000000000004\",\"event_id\":\"00000000-0000-4000-9000-000000000004\",\"event_type\":\"monitoring.alert.manual_resolution\",\"occurred_at\":\"2026-08-05T16:00:00Z\"}",
+      "description": "A technician resolved an alert by hand.",
+      "event_type": "monitoring.alert.manual_resolution",
+      "headers": {
+        "Idempotency-Key": "nodelink-webhook/00000000-0000-4000-8000-000000000004",
+        "X-NodeLink-Delivery-Id": "00000000-0000-4000-8000-000000000004",
+        "X-NodeLink-Event-Id": "00000000-0000-4000-9000-000000000004",
+        "X-NodeLink-Key-Id": "4b0e1c55-2f8e-4d0a-9a61-7c3b5d2e8f10",
+        "X-NodeLink-Signature": "v1=1368fb96c7743acda29c28d0b5b4403215fb3db959feb6ba3f9292fdddea4516",
+        "X-NodeLink-Timestamp": "1785945600",
+        "X-NodeLink-Webhook-Version": "2026-08-05"
+      },
+      "schema_version": 1,
+      "since": "2026-08-05",
+      "subscription_value": "manual_resolution"
+    },
+    {
+      "body": "{\"api_version\":\"2026-08-05\",\"data\":{\"alert\":{\"check_key\":\"disk_free_percent\",\"endpoint_id\":\"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d\",\"from_state\":\"open\",\"generation\":1,\"id\":\"6f1c2b8e-3a4d-4e5f-8a9b-0c1d2e3f4a5b\",\"last_value\":41.0,\"policy_id\":\"1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e\",\"policy_revision_id\":\"2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f\",\"result_status\":\"ok\",\"to_state\":\"resolved\"}},\"delivery_id\":\"00000000-0000-4000-8000-000000000005\",\"event_id\":\"00000000-0000-4000-9000-000000000005\",\"event_type\":\"monitoring.alert.automatic_recovery\",\"occurred_at\":\"2026-08-05T16:00:00Z\"}",
+      "description": "The check recovered and the alert resolved itself.",
+      "event_type": "monitoring.alert.automatic_recovery",
+      "headers": {
+        "Idempotency-Key": "nodelink-webhook/00000000-0000-4000-8000-000000000005",
+        "X-NodeLink-Delivery-Id": "00000000-0000-4000-8000-000000000005",
+        "X-NodeLink-Event-Id": "00000000-0000-4000-9000-000000000005",
+        "X-NodeLink-Key-Id": "4b0e1c55-2f8e-4d0a-9a61-7c3b5d2e8f10",
+        "X-NodeLink-Signature": "v1=0c7e4271de2bc6aca7423eb4b947543505d10c82ec294bbb076e5a741036bb6d",
+        "X-NodeLink-Timestamp": "1785945600",
+        "X-NodeLink-Webhook-Version": "2026-08-05"
+      },
+      "schema_version": 1,
+      "since": "2026-08-05",
+      "subscription_value": "automatic_recovery"
+    },
+    {
+      "body": "{\"api_version\":\"2026-08-05\",\"data\":{\"alert\":{\"check_key\":\"disk_free_percent\",\"endpoint_id\":\"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d\",\"from_state\":\"open\",\"generation\":1,\"id\":\"6f1c2b8e-3a4d-4e5f-8a9b-0c1d2e3f4a5b\",\"last_value\":4.5,\"policy_id\":\"1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e\",\"policy_revision_id\":\"2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f\",\"result_status\":\"warning\",\"to_state\":\"resolved\"}},\"delivery_id\":\"00000000-0000-4000-8000-000000000006\",\"event_id\":\"00000000-0000-4000-9000-000000000006\",\"event_type\":\"monitoring.alert.policy_revised\",\"occurred_at\":\"2026-08-05T16:00:00Z\"}",
+      "description": "The monitoring policy changed and the alert was closed under the old revision.",
+      "event_type": "monitoring.alert.policy_revised",
+      "headers": {
+        "Idempotency-Key": "nodelink-webhook/00000000-0000-4000-8000-000000000006",
+        "X-NodeLink-Delivery-Id": "00000000-0000-4000-8000-000000000006",
+        "X-NodeLink-Event-Id": "00000000-0000-4000-9000-000000000006",
+        "X-NodeLink-Key-Id": "4b0e1c55-2f8e-4d0a-9a61-7c3b5d2e8f10",
+        "X-NodeLink-Signature": "v1=deb1ec532862e8c0b41a81c4ecc88498bbce42e265355aff1062da5d3e3dbe5f",
+        "X-NodeLink-Timestamp": "1785945600",
+        "X-NodeLink-Webhook-Version": "2026-08-05"
+      },
+      "schema_version": 1,
+      "since": "2026-08-05",
+      "subscription_value": "policy_revised"
+    },
+    {
+      "body": "{\"api_version\":\"2026-08-05\",\"data\":{\"alert\":{\"check_key\":\"disk_free_percent\",\"endpoint_id\":\"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d\",\"from_state\":\"open\",\"generation\":1,\"id\":\"6f1c2b8e-3a4d-4e5f-8a9b-0c1d2e3f4a5b\",\"last_value\":4.5,\"policy_id\":\"1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e\",\"policy_revision_id\":\"2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f\",\"result_status\":\"warning\",\"to_state\":\"resolved\"}},\"delivery_id\":\"00000000-0000-4000-8000-000000000007\",\"event_id\":\"00000000-0000-4000-9000-000000000007\",\"event_type\":\"monitoring.alert.policy_deleted\",\"occurred_at\":\"2026-08-05T16:00:00Z\"}",
+      "description": "The monitoring policy was deleted and its alert was closed.",
+      "event_type": "monitoring.alert.policy_deleted",
+      "headers": {
+        "Idempotency-Key": "nodelink-webhook/00000000-0000-4000-8000-000000000007",
+        "X-NodeLink-Delivery-Id": "00000000-0000-4000-8000-000000000007",
+        "X-NodeLink-Event-Id": "00000000-0000-4000-9000-000000000007",
+        "X-NodeLink-Key-Id": "4b0e1c55-2f8e-4d0a-9a61-7c3b5d2e8f10",
+        "X-NodeLink-Signature": "v1=fea0762ada1465def32adb83f45a5594e755e2fdcf87d71bdeeec831224c9bf5",
+        "X-NodeLink-Timestamp": "1785945600",
+        "X-NodeLink-Webhook-Version": "2026-08-05"
+      },
+      "schema_version": 1,
+      "since": "2026-08-05",
+      "subscription_value": "policy_deleted"
+    },
+    {
+      "body": "{\"api_version\":\"2026-08-05\",\"data\":{\"alert\":{\"check_key\":\"disk_free_percent\",\"endpoint_id\":\"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d\",\"from_state\":\"open\",\"generation\":1,\"id\":\"6f1c2b8e-3a4d-4e5f-8a9b-0c1d2e3f4a5b\",\"last_value\":4.5,\"policy_id\":\"1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e\",\"policy_revision_id\":\"2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f\",\"result_status\":\"warning\",\"to_state\":\"resolved\"}},\"delivery_id\":\"00000000-0000-4000-8000-000000000008\",\"event_id\":\"00000000-0000-4000-9000-000000000008\",\"event_type\":\"monitoring.alert.policy_superseded\",\"occurred_at\":\"2026-08-05T16:00:00Z\"}",
+      "description": "A higher-precedence policy took over the check and the alert was closed.",
+      "event_type": "monitoring.alert.policy_superseded",
+      "headers": {
+        "Idempotency-Key": "nodelink-webhook/00000000-0000-4000-8000-000000000008",
+        "X-NodeLink-Delivery-Id": "00000000-0000-4000-8000-000000000008",
+        "X-NodeLink-Event-Id": "00000000-0000-4000-9000-000000000008",
+        "X-NodeLink-Key-Id": "4b0e1c55-2f8e-4d0a-9a61-7c3b5d2e8f10",
+        "X-NodeLink-Signature": "v1=f2460f37997c2e7281882703655987b180cf28695bd3b9737ef3ff43ee93aa1b",
+        "X-NodeLink-Timestamp": "1785945600",
+        "X-NodeLink-Webhook-Version": "2026-08-05"
+      },
+      "schema_version": 1,
+      "since": "2026-08-05",
+      "subscription_value": "policy_superseded"
+    }
+  ]
+}

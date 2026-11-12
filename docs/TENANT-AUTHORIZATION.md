@@ -289,7 +289,12 @@ the role gate before any tenant check.
   enumeration of policies is a follow-up.
 - **Webhook/email delivery configuration** endpoints remain deployment-level
   config gated by the global role; they expose alert linkage, not per-tenant
-  endpoint data.
+  endpoint data. Per-alert delivery *history* and manual *retry* are
+  tenant-scoped through the alert's agent (issue #72): readonly visibility for
+  history, `client_operator` for retry, and 404 across tenants.
+- **API tokens** (issue #72) are confined to exactly one client and cap the
+  client role at the token's ceiling inside these same helpers; see
+  [`PUBLIC-API.md`](PUBLIC-API.md).
 - The **dashboard membership-management UI** is delivered API-first; the backend
   already filters every response so existing dashboard views show only authorized
   tenants automatically.

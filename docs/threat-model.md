@@ -44,6 +44,20 @@ authentication and role-based authorization:
   tenant command-dispatch attempt is additionally recorded as
   `tenant.access_denied`. Membership grant/revoke and the platform-admin flag are
   platform-admin-only, audited, and bump `token_generation`.
+- **Public API tokens (issue #72).** An `nlk_` API token is an unattended
+  bearer credential, so it can only ever narrow its owner. It is confined to one
+  client, even for a platform-admin owner. Its global and client roles are
+  capped at the token's ceilings. Step-up and MFA gates always refuse it. It is
+  accepted only on the public routes in `app/core/public_api.py`; any other
+  route returns an opaque 401. It is stored as SHA-256 and shown once. Minting
+  requires a step-up-fresh interactive session, and a token cannot list,
+  mint, or revoke tokens, so a leak cannot entrench itself. Expiry is mandatory
+  (at most 90 days). Revoke, owner disable, and any `token_generation` bump end
+  it on the next request. Per-token request budgets bound abuse
+  (process-local). Every audit event produced through a token names it in the
+  hashed `actor`. Alert email and webhook delivery history and retry are now
+  tenant-scoped through the alert's agent; before this they were readable and
+  retryable across tenants.
 - **Accountability.** The acting operator's email is recorded as the `actor` on
   each `command.dispatched` audit event. Allowed and denied authorization
   decisions are also audited before signing/queueing without payload values.
@@ -723,3 +737,4 @@ warning in production when unconfigured. See `docs/AUDIT-ANCHORING.md`.
 | 13 | Client/site records are not authorization tenants | High | **Closed** — `Client` is the authorization tenant; default-deny operator memberships, per-client roles, platform-admin bypass, 404 anti-oracle behavior, scoped queries, and isolation tests landed in issue #66 |
 | 14 | Operator authentication is single-factor | High | **Mostly closed (issue #67)** — phishing-resistant WebAuthn second factor with single-use purpose-bound challenges, signed `amr`/step-up session claims gating operator-management and factor reconfiguration, bcrypt-hashed single-use recovery codes that never satisfy step-up, and an admin-only step-up-gated reset for device loss. Enforcement stages `off`/`optional`/`required` with configuration-only rollback. Attestation is not verified, so authenticator provenance is unestablished; the second-factor rate limiter is process-local (`docs/MFA.md`) |
 | 15 | Operator sessions are opaque and revocable only in bulk | Medium | **Closed (issue #69)** — sessions are server-side rows bound to a signed `sid`; inventory shows device context, revocation is individual and takes effect on the next request, and absolute/idle ceilings are enforced on read. Break-glass supplies audited, reviewed, time-bounded emergency access that cannot provision more of itself. Activation rate limiting is process-local (`docs/ADMIN-SESSIONS.md`) |
+| 16 | No unattended integration credential; public API surface, pagination, idempotency, and deprecation undefined | Medium | **Closed (issue #72)** — tenant-confined, ceiling-capped, expiring, hash-stored API tokens restricted to a registered public route set; committed OpenAPI with drift and breaking-change tests; `Idempotency-Key` on command dispatch; per-token budgets; RFC 9745/8594 deprecation headers; signed webhook event catalog with JSON Schema and vectors. Rate limits are process-local and there is no dashboard token UI yet (`docs/PUBLIC-API.md`) |

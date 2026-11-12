@@ -32,6 +32,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.core import webhook_catalog
 from app.models.models import (
     AlertEventType,
     AlertState,
@@ -701,18 +702,8 @@ class AlertEmailRetry(BaseModel):
 # --------------------------------------------------------------------------- #
 # Versioned signed webhook notifications (#46)
 # --------------------------------------------------------------------------- #
-WEBHOOK_EVENT_TYPES = frozenset(
-    {
-        AlertEventType.opened,
-        AlertEventType.reopened,
-        AlertEventType.acknowledged,
-        AlertEventType.manual_resolution,
-        AlertEventType.automatic_recovery,
-        AlertEventType.policy_revised,
-        AlertEventType.policy_deleted,
-        AlertEventType.policy_superseded,
-    }
-)
+# Derived from the event catalog (issue #72), the single registry.
+WEBHOOK_EVENT_TYPES = webhook_catalog.WEBHOOK_EVENT_SOURCES
 
 
 class WebhookEndpointCreate(BaseModel):

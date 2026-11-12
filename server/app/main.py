@@ -17,6 +17,7 @@ from app.api import (
     admin_sessions,
     agent_updates,
     agents,
+    api_tokens,
     approvals,
     assistant,
     auth,
@@ -34,11 +35,11 @@ from app.api import (
     shell_sessions,
     support_chat,
 )
-from app.core import metrics
+from app.core import api_tokens as api_token_auth, metrics, public_api
 from app.core.retention_policy import validate_settings as validate_retention_settings
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, Base, engine
-from app.core.prodcheck import ensure_safe_production_config
+from app.core.prodcheck import ensure_safe_production_config, is_production
 from app.core.relay_ingress import RelayIngressMiddleware
 from app.core.schema_revision import ensure_schema_current
 from app.core.structured_logging import log_event
@@ -103,10 +104,23 @@ async def lifespan(app: FastAPI):
         )
 
 
+# The live, unauthenticated schema browser is a development aid. In
+# production it is off unless explicitly opted in (issue #72); the reviewed
+# public contract is the committed docs/api/openapi-v1.json.
+def openapi_urls(config) -> dict[str, str | None]:
+    serve = config.expose_openapi or not is_production(config)
+    return {
+        "openapi_url": "/openapi.json" if serve else None,
+        "docs_url": "/docs" if serve else None,
+        "redoc_url": "/redoc" if serve else None,
+    }
+
+
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     lifespan=lifespan,
+    **openapi_urls(settings),
 )
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -117,6 +131,7 @@ app.include_router(assistant.router, prefix="/api/v1")
 app.include_router(mfa.router, prefix="/api/v1")
 app.include_router(admin_sessions.router, prefix="/api/v1")
 app.include_router(agents.router, prefix="/api/v1")
+app.include_router(api_tokens.router, prefix="/api/v1")
 app.include_router(evidence.router, prefix="/api/v1")
 app.include_router(evidence_vault.router, prefix="/api/v1")
 app.include_router(management.router, prefix="/api/v1")
@@ -136,6 +151,25 @@ app.include_router(retention_policy.router, prefix="/api/v1")
 # Relay-forwarded requests (issue #87) are authenticated before any route runs.
 app.add_middleware(RelayIngressMiddleware)
 
+
+
+@app.middleware("http")
+async def public_api_headers(request: Request, call_next):
+    """Version and deprecation headers on public API routes (issue #72).
+
+    Also clears the per-request API-token attribution so it can never carry
+    over from a previous request handled in the same context.
+    """
+    api_token_auth.current_token_id.set(None)
+    response = await call_next(request)
+    route = public_api.lookup(
+        request.method, getattr(request.scope.get("route"), "path", None)
+    )
+    if route is not None:
+        response.headers["NodeLink-API-Version"] = public_api.API_REVISION
+        for name, value in public_api.deprecation_headers(route).items():
+            response.headers[name] = value
+    return response
 
 
 @app.middleware("http")

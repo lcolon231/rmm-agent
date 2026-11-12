@@ -24,6 +24,7 @@ from app.core.security import hash_password  # noqa: E402
 from app.main import app
 from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
+    Agent,
     Alert,
     AlertEmailAttempt,
     AlertEmailDelivery,
@@ -32,10 +33,12 @@ from app.models.models import (  # noqa: E402
     AlertState,
     AuditEvent,
     CheckResultStatus,
+    Client,
     EmailAttemptStatus,
     EmailDeliveryStatus,
     Operator,
     OperatorRole,
+    Site,
 )
 
 NOW = datetime(2026, 8, 4, 15, 30, tzinfo=timezone.utc)
@@ -320,6 +323,18 @@ async def test_delivery_api_auth_masking_and_audited_retry(clean_db):
             ),
             alert, event, delivery,
         ])
+        # Delivery history and retry are tenant-gated through the alert's
+        # agent (issue #72): seed the agent inside a real tenant.
+        tenant = Client(id="client-api", name="Email Tenant")
+        db.add(tenant)
+        await db.flush()
+        db.add(Site(id="site-api", client_id=tenant.id, name="HQ"))
+        await db.flush()
+        db.add(Agent(
+            id="agent-api", site_id="site-api", token_hash="agent-api-hash",
+            hostname="EMAIL-1", os="windows",
+        ))
+        await grant_all_memberships(db)
         await db.commit()
 
     transport = httpx.ASGITransport(app=app)

@@ -24,7 +24,7 @@ still narrow command targets *within* a client the operator already belongs to.
 from __future__ import annotations
 
 from fastapi import HTTPException, status
-from sqlalchemy import Select, select, true
+from sqlalchemy import Select, literal, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -50,6 +50,11 @@ def client_role_permits(role: ClientRole, minimum: ClientRole) -> bool:
     return _CLIENT_ROLE_RANK[role] >= _CLIENT_ROLE_RANK[minimum]
 
 
+def _token_client(operator: Operator) -> str | None:
+    """The single client an API-token principal is confined to (issue #72)."""
+    return getattr(operator, "api_token_client_id", None)
+
+
 def _membership_client_ids(operator: Operator) -> Select:
     """Sub-select of the client ids this operator holds a membership for.
 
@@ -57,10 +62,22 @@ def _membership_client_ids(operator: Operator) -> Select:
     the caller's query -- no pre-fetch, no round trip, and always consistent
     with the database. With no memberships the set is empty and the outer query
     returns nothing.
+
+    An API-token principal (issue #72) is further confined to the token's one
+    client: the membership set is intersected with it, or -- for a
+    platform-admin owner, who needs no membership -- replaced by it.
     """
-    return select(OperatorClientMembership.client_id).where(
+    token_client = _token_client(operator)
+    if token_client is not None and getattr(
+        operator, "api_token_owner_platform_admin", False
+    ):
+        return select(literal(token_client))
+    query = select(OperatorClientMembership.client_id).where(
         OperatorClientMembership.operator_id == operator.id
     )
+    if token_client is not None:
+        query = query.where(OperatorClientMembership.client_id == token_client)
+    return query
 
 
 def client_id_filter(operator: Operator, column: ColumnElement) -> ColumnElement:
@@ -98,8 +115,16 @@ async def resolve_membership(
     Returns ``None`` for a platform admin too -- callers that need admin bypass
     should check :attr:`Operator.is_platform_admin` first (the assert helpers
     below already do).
+
+    For an API-token principal (issue #72) the result is a *transient* copy
+    whose role is capped at the token's client-role ceiling, and any client
+    other than the token's is ``None``. A platform-admin owner gets a
+    synthetic membership at the ceiling for the token's client only.
     """
-    return (
+    token_client = _token_client(operator)
+    if token_client is not None and client_id != token_client:
+        return None
+    membership = (
         await db.execute(
             select(OperatorClientMembership).where(
                 OperatorClientMembership.operator_id == operator.id,
@@ -107,6 +132,22 @@ async def resolve_membership(
             )
         )
     ).scalar_one_or_none()
+    if token_client is None:
+        return membership
+    ceiling: ClientRole = operator.api_token_client_role
+    if membership is None:
+        if not getattr(operator, "api_token_owner_platform_admin", False):
+            return None
+        role = ceiling
+    else:
+        role = (
+            membership.role
+            if _CLIENT_ROLE_RANK[membership.role] <= _CLIENT_ROLE_RANK[ceiling]
+            else ceiling
+        )
+    return OperatorClientMembership(
+        operator_id=operator.id, client_id=client_id, role=role
+    )
 
 
 async def is_client_visible(

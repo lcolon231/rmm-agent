@@ -13,7 +13,6 @@ import base64
 import hashlib
 import hmac
 import ipaddress
-import json
 import re
 import secrets
 import socket
@@ -28,9 +27,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import metrics
+from app.core import metrics, webhook_catalog
 from app.core.config import Settings, settings
 from app.core.database import AsyncSessionLocal
+from app.core.webhook_catalog import WEBHOOK_API_VERSION
 from app.models.models import (
     Alert,
     AlertEvent,
@@ -42,21 +42,12 @@ from app.models.models import (
     WebhookSecretVersion,
 )
 
-WEBHOOK_API_VERSION = "2026-08-05"
 SIGNATURE_VERSION = "v1"
 MAX_PAYLOAD_BYTES = 64 * 1024
 MAX_RESPONSE_HEADER_BYTES = 16 * 1024
+# The event catalog (issue #72) is the single registry of deliverable events.
 SUPPORTED_EVENT_TYPES = frozenset(
-    {
-        "opened",
-        "reopened",
-        "acknowledged",
-        "manual_resolution",
-        "automatic_recovery",
-        "policy_revised",
-        "policy_deleted",
-        "policy_superseded",
-    }
+    source.value for source in webhook_catalog.WEBHOOK_EVENT_SOURCES
 )
 _DNS_NAME = re.compile(
     r"^(?=.{1,253}\.?$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
@@ -296,6 +287,26 @@ def signature_for(secret: str, payload: bytes, timestamp: int) -> str:
     return f"{SIGNATURE_VERSION}={digest}"
 
 
+def signed_headers(
+    *,
+    delivery_id: str,
+    event_id: str,
+    timestamp: int,
+    signature: str,
+    secret_version_id: str,
+) -> dict[str, str]:
+    """The contract headers on every delivery (published in the event catalog)."""
+    return {
+        "Idempotency-Key": f"nodelink-webhook/{delivery_id}",
+        "X-NodeLink-Webhook-Version": WEBHOOK_API_VERSION,
+        "X-NodeLink-Event-Id": event_id,
+        "X-NodeLink-Delivery-Id": delivery_id,
+        "X-NodeLink-Timestamp": str(timestamp),
+        "X-NodeLink-Signature": signature,
+        "X-NodeLink-Key-Id": secret_version_id,
+    }
+
+
 def build_payload(
     alert: Alert, event: AlertEvent, *, delivery_id: str
 ) -> str:
@@ -303,7 +314,7 @@ def build_payload(
         "api_version": WEBHOOK_API_VERSION,
         "delivery_id": delivery_id,
         "event_id": event.id,
-        "event_type": f"monitoring.alert.{event.event_type.value}",
+        "event_type": webhook_catalog.wire_event_type(event.event_type),
         "occurred_at": _iso_z(event.created_at),
         "data": {
             "alert": {
@@ -320,9 +331,7 @@ def build_payload(
             }
         },
     }
-    payload = json.dumps(
-        body, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    )
+    payload = webhook_catalog.canonical_json(body)
     if len(payload.encode("utf-8")) > MAX_PAYLOAD_BYTES:
         raise WebhookError("payload_too_large", state="invalid", retryable=False)
     return payload
@@ -445,13 +454,13 @@ class PinnedHTTPSWebhookSender:
             "Content-Type": "application/json",
             "Content-Length": str(len(payload)),
             "Connection": "close",
-            "Idempotency-Key": f"nodelink-webhook/{delivery.id}",
-            "X-NodeLink-Webhook-Version": WEBHOOK_API_VERSION,
-            "X-NodeLink-Event-Id": delivery.alert_event_id,
-            "X-NodeLink-Delivery-Id": delivery.id,
-            "X-NodeLink-Timestamp": str(delivery.signature_timestamp),
-            "X-NodeLink-Signature": signature,
-            "X-NodeLink-Key-Id": delivery.secret_version_id,
+            **signed_headers(
+                delivery_id=delivery.id,
+                event_id=delivery.alert_event_id,
+                timestamp=delivery.signature_timestamp,
+                signature=signature,
+                secret_version_id=delivery.secret_version_id,
+            ),
         }
         request = (
             f"POST {destination.request_target} HTTP/1.1\r\n"

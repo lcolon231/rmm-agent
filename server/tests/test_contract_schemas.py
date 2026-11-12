@@ -36,6 +36,7 @@ def test_every_contract_has_a_schema_file():
         "evidence-package-v1",
         "relay-forward-v1",
         "routing-manifest-v1",
+        "webhook-event-v1",
     }
 
 
@@ -75,3 +76,13 @@ def test_golden_evidence_vectors_conform_to_their_schema(contract: str):
     validator = _validator(contract)
     errors = list(validator.iter_errors(_load(VECTORS / f"{contract}.json")))
     assert not errors, [error.message for error in errors]
+
+
+def test_webhook_event_vectors_conform_to_their_schema():
+    """Every signed catalog vector body is a valid webhook-event-v1 payload."""
+    validator = _validator("webhook-event-v1")
+    vectors = _load(VECTORS / "webhook-event-v1.json")
+    assert vectors["vectors"]
+    for case in vectors["vectors"]:
+        errors = list(validator.iter_errors(json.loads(case["body"])))
+        assert not errors, (case["event_type"], [error.message for error in errors])

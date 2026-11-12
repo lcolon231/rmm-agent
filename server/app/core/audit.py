@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.api_tokens import current_token_id
 from app.core.redaction import sanitize_audit_detail
 from app.models.models import AuditEvent
 
@@ -115,6 +116,11 @@ async def record(
     representation ever hashed, keeping chain/anchor verification reproducible.
     """
     detail = sanitize_audit_detail(action, detail if detail is not None else {})
+    # Attribute work done through a public-API token (issue #72) to the token
+    # as well as its owner, inside the hashed ``actor`` -- no schema change.
+    token_id = current_token_id.get()
+    if token_id is not None and actor != "system":
+        actor = f"{actor} [api_token:{token_id}]"[:255]
     await _serialize_append(db)
     prev, prev_seq = await _chain_tail(db)
     seq = prev_seq + 1

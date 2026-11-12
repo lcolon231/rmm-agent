@@ -1,0 +1,4480 @@
+{
+  "components": {
+    "schemas": {
+      "AgentOut": {
+        "properties": {
+          "agent_version": {
+            "title": "Agent Version",
+            "type": "string"
+          },
+          "architecture": {
+            "title": "Architecture",
+            "type": "string"
+          },
+          "command_envelope_versions": {
+            "items": {
+              "maxLength": 32,
+              "minLength": 1,
+              "pattern": "^[a-z0-9-]+$",
+              "type": "string"
+            },
+            "title": "Command Envelope Versions",
+            "type": "array"
+          },
+          "credential_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Expires At"
+          },
+          "credential_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Fingerprint"
+          },
+          "credential_issued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Issued At"
+          },
+          "enrolled_at": {
+            "format": "date-time",
+            "title": "Enrolled At",
+            "type": "string"
+          },
+          "enrolled_by_token_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enrolled By Token Id"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "os": {
+            "title": "Os",
+            "type": "string"
+          },
+          "os_version": {
+            "title": "Os Version",
+            "type": "string"
+          },
+          "owner_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner User Id"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "site_id": {
+            "title": "Site Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus"
+          },
+          "trust_state": {
+            "$ref": "#/components/schemas/AgentTrustState"
+          },
+          "trust_state_changed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust State Changed At"
+          },
+          "trust_state_changed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust State Changed By"
+          },
+          "trust_state_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust State Reason"
+          }
+        },
+        "required": [
+          "id",
+          "site_id",
+          "name",
+          "hostname",
+          "os",
+          "os_version",
+          "agent_version",
+          "architecture",
+          "environment",
+          "labels",
+          "owner_user_id",
+          "enrolled_by_token_id",
+          "credential_fingerprint",
+          "credential_issued_at",
+          "credential_expires_at",
+          "command_envelope_versions",
+          "status",
+          "trust_state",
+          "trust_state_reason",
+          "trust_state_changed_at",
+          "trust_state_changed_by",
+          "last_seen_at",
+          "enrolled_at",
+          "revoked_at"
+        ],
+        "title": "AgentOut",
+        "type": "object"
+      },
+      "AgentStatus": {
+        "enum": [
+          "pending",
+          "online",
+          "offline"
+        ],
+        "title": "AgentStatus",
+        "type": "string"
+      },
+      "AgentTrustState": {
+        "description": "Whether the server still trusts an agent's credentials. Deliberately\nseparate from AgentStatus: online/offline says whether the machine is\nreachable, trust says whether we will act on its behalf at all.\n\nactive      -> normal operation\nquarantined -> authenticates, but receives no commands and may not submit\n               results; reversible by an operator\nrevoked     -> credentials fail authentication entirely; terminal — the\n               machine must re-enroll under a new identity",
+        "enum": [
+          "active",
+          "quarantined",
+          "revoked"
+        ],
+        "title": "AgentTrustState",
+        "type": "string"
+      },
+      "AlertAcknowledge": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "request_id": {
+            "pattern": "^[A-Za-z0-9_-]{16,64}$",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "expected_version"
+        ],
+        "title": "AlertAcknowledge",
+        "type": "object"
+      },
+      "AlertDetailOut": {
+        "properties": {
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          },
+          "acknowledged_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged By"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "assigned_to_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To Email"
+          },
+          "assigned_to_operator_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To Operator Id"
+          },
+          "check_key": {
+            "title": "Check Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AlertEventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "first_opened_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Opened At"
+          },
+          "generation": {
+            "minimum": 0.0,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_evaluated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Evaluated At"
+          },
+          "last_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Observed At"
+          },
+          "last_result_detail": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Result Detail"
+          },
+          "last_result_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Result Id"
+          },
+          "last_result_status": {
+            "$ref": "#/components/schemas/CheckResultStatus"
+          },
+          "last_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Value"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/AlertObservationOut"
+            },
+            "title": "Observations",
+            "type": "array"
+          },
+          "occurrence_count": {
+            "minimum": 0.0,
+            "title": "Occurrence Count",
+            "type": "integer"
+          },
+          "opened_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opened At"
+          },
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "policy_revision_id": {
+            "title": "Policy Revision Id",
+            "type": "string"
+          },
+          "reboot_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RebootCauseOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolution_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Reason"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AlertState"
+          },
+          "suppressed_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suppressed Until"
+          },
+          "suppression_window_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suppression Window Id"
+          },
+          "total_occurrence_count": {
+            "minimum": 0.0,
+            "title": "Total Occurrence Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "policy_id",
+          "policy_revision_id",
+          "check_key",
+          "state",
+          "last_result_status",
+          "occurrence_count",
+          "total_occurrence_count",
+          "generation",
+          "first_opened_at",
+          "opened_at",
+          "last_observed_at",
+          "resolved_at",
+          "last_evaluated_at",
+          "last_result_id",
+          "last_value",
+          "resolution_reason",
+          "assigned_to_operator_id",
+          "assigned_to_email",
+          "acknowledged_at",
+          "acknowledged_by",
+          "version",
+          "suppression_window_id",
+          "suppressed_until",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AlertDetailOut",
+        "type": "object"
+      },
+      "AlertEventOut": {
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "alert_id": {
+            "title": "Alert Id",
+            "type": "string"
+          },
+          "assigned_to_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To Email"
+          },
+          "assigned_to_operator_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To Operator Id"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "comment_redacted": {
+            "title": "Comment Redacted",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_type": {
+            "$ref": "#/components/schemas/AlertEventType"
+          },
+          "from_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AlertState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation": {
+            "minimum": 0.0,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "source_result_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Result Id"
+          },
+          "to_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AlertState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "alert_id",
+          "generation",
+          "event_type",
+          "from_state",
+          "to_state",
+          "actor",
+          "actor_user_id",
+          "comment",
+          "comment_redacted",
+          "assigned_to_operator_id",
+          "assigned_to_email",
+          "source_result_id",
+          "request_id",
+          "created_at"
+        ],
+        "title": "AlertEventOut",
+        "type": "object"
+      },
+      "AlertEventType": {
+        "description": "Immutable lifecycle transitions and technician actions (#44).",
+        "enum": [
+          "state_imported",
+          "opened",
+          "reopened",
+          "acknowledged",
+          "assigned",
+          "commented",
+          "manual_resolution",
+          "automatic_recovery",
+          "policy_revised",
+          "policy_deleted",
+          "policy_superseded"
+        ],
+        "title": "AlertEventType",
+        "type": "string"
+      },
+      "AlertListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AlertOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "title": "AlertListOut",
+        "type": "object"
+      },
+      "AlertObservationOut": {
+        "properties": {
+          "alert_id": {
+            "title": "Alert Id",
+            "type": "string"
+          },
+          "check_result_id": {
+            "title": "Check Result Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "evaluated_at": {
+            "format": "date-time",
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "out_of_order": {
+            "title": "Out Of Order",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CheckResultStatus"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "check_result_id",
+          "alert_id",
+          "status",
+          "value",
+          "evaluated_at",
+          "out_of_order",
+          "created_at"
+        ],
+        "title": "AlertObservationOut",
+        "type": "object"
+      },
+      "AlertOut": {
+        "properties": {
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          },
+          "acknowledged_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged By"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "assigned_to_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To Email"
+          },
+          "assigned_to_operator_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To Operator Id"
+          },
+          "check_key": {
+            "title": "Check Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "first_opened_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Opened At"
+          },
+          "generation": {
+            "minimum": 0.0,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_evaluated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Evaluated At"
+          },
+          "last_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Observed At"
+          },
+          "last_result_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Result Id"
+          },
+          "last_result_status": {
+            "$ref": "#/components/schemas/CheckResultStatus"
+          },
+          "last_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Value"
+          },
+          "occurrence_count": {
+            "minimum": 0.0,
+            "title": "Occurrence Count",
+            "type": "integer"
+          },
+          "opened_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opened At"
+          },
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "policy_revision_id": {
+            "title": "Policy Revision Id",
+            "type": "string"
+          },
+          "resolution_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Reason"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AlertState"
+          },
+          "suppressed_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suppressed Until"
+          },
+          "suppression_window_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suppression Window Id"
+          },
+          "total_occurrence_count": {
+            "minimum": 0.0,
+            "title": "Total Occurrence Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "policy_id",
+          "policy_revision_id",
+          "check_key",
+          "state",
+          "last_result_status",
+          "occurrence_count",
+          "total_occurrence_count",
+          "generation",
+          "first_opened_at",
+          "opened_at",
+          "last_observed_at",
+          "resolved_at",
+          "last_evaluated_at",
+          "last_result_id",
+          "last_value",
+          "resolution_reason",
+          "assigned_to_operator_id",
+          "assigned_to_email",
+          "acknowledged_at",
+          "acknowledged_by",
+          "version",
+          "suppression_window_id",
+          "suppressed_until",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AlertOut",
+        "type": "object"
+      },
+      "AlertResolve": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Comment",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "request_id": {
+            "pattern": "^[A-Za-z0-9_-]{16,64}$",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "expected_version",
+          "comment"
+        ],
+        "title": "AlertResolve",
+        "type": "object"
+      },
+      "AlertState": {
+        "description": "Lifecycle state for one deduplicated monitoring alert.\n\n#43 drives ``open`` and automatic ``resolved`` transitions. The\n``acknowledged`` value is reserved for #44's role-gated technician action\nso mixed server versions share one stable database contract.",
+        "enum": [
+          "open",
+          "acknowledged",
+          "resolved"
+        ],
+        "title": "AlertState",
+        "type": "string"
+      },
+      "ApiDeprecationOut": {
+        "properties": {
+          "deprecated_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deprecated On"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "sunset_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sunset On"
+          }
+        },
+        "required": [
+          "method",
+          "path",
+          "deprecated_on",
+          "sunset_on"
+        ],
+        "title": "ApiDeprecationOut",
+        "type": "object"
+      },
+      "ApiVersionOut": {
+        "properties": {
+          "api_revision": {
+            "title": "Api Revision",
+            "type": "string"
+          },
+          "api_version": {
+            "title": "Api Version",
+            "type": "string"
+          },
+          "deprecations": {
+            "items": {
+              "$ref": "#/components/schemas/ApiDeprecationOut"
+            },
+            "title": "Deprecations",
+            "type": "array"
+          },
+          "webhook_api_versions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Webhook Api Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "api_version",
+          "api_revision",
+          "webhook_api_versions",
+          "deprecations"
+        ],
+        "title": "ApiVersionOut",
+        "type": "object"
+      },
+      "CheckResultStatus": {
+        "description": "Evaluation outcome for one check on one agent.\n\n``unknown`` is distinct from ``ok``: it means the check could not be\nevaluated (the agent did not report, or the metric was unavailable), which\na technician must be able to tell apart from a passing check.",
+        "enum": [
+          "ok",
+          "warning",
+          "critical",
+          "unknown"
+        ],
+        "title": "CheckResultStatus",
+        "type": "string"
+      },
+      "CommandCreate": {
+        "properties": {
+          "approval_request_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Request Id"
+          },
+          "emergency_override_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Override Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CommandKind"
+          },
+          "payload": {
+            "title": "Payload",
+            "type": "object"
+          },
+          "script_parameter_value_set_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Script Parameter Value Set Id"
+          },
+          "script_version_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Script Version Id"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "CommandCreate",
+        "type": "object"
+      },
+      "CommandDetailOut": {
+        "description": "Full command record: signed envelope evidence plus the bounded result.",
+        "properties": {
+          "agent_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Completed At"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dispatched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatched At"
+          },
+          "envelope_version": {
+            "maxLength": 32,
+            "minLength": 1,
+            "pattern": "^[a-z0-9-]+$",
+            "title": "Envelope Version",
+            "type": "string"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CommandKind"
+          },
+          "nonce": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nonce"
+          },
+          "payload": {
+            "title": "Payload",
+            "type": "object"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "signature": {
+            "title": "Signature",
+            "type": "string"
+          },
+          "signing_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signing Key Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CommandStatus"
+          },
+          "stderr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stderr"
+          },
+          "stderr_total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stderr Total Bytes"
+          },
+          "stderr_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stderr Truncated"
+          },
+          "stdout": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdout"
+          },
+          "stdout_total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdout Total Bytes"
+          },
+          "stdout_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdout Truncated"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "kind",
+          "status",
+          "envelope_version",
+          "schema_version",
+          "signing_key_id",
+          "exit_code",
+          "stdout_truncated",
+          "stderr_truncated",
+          "created_at",
+          "issued_at",
+          "dispatched_at",
+          "agent_completed_at",
+          "completed_at",
+          "expires_at",
+          "payload",
+          "nonce",
+          "signature",
+          "stdout",
+          "stderr",
+          "stdout_total_bytes",
+          "stderr_total_bytes"
+        ],
+        "title": "CommandDetailOut",
+        "type": "object"
+      },
+      "CommandHistoryItemOut": {
+        "description": "One row of an endpoint's command history.\n\n`status` is the effective status: a stored queued/dispatched command whose\nexpires_at has passed is reported as expired even before the next agent\nheartbeat persists that transition, so operators never see an expired\ncommand still presented as pending work.",
+        "properties": {
+          "agent_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Completed At"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dispatched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatched At"
+          },
+          "envelope_version": {
+            "maxLength": 32,
+            "minLength": 1,
+            "pattern": "^[a-z0-9-]+$",
+            "title": "Envelope Version",
+            "type": "string"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CommandKind"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "signing_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signing Key Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CommandStatus"
+          },
+          "stderr_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stderr Truncated"
+          },
+          "stdout_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdout Truncated"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "kind",
+          "status",
+          "envelope_version",
+          "schema_version",
+          "signing_key_id",
+          "exit_code",
+          "stdout_truncated",
+          "stderr_truncated",
+          "created_at",
+          "issued_at",
+          "dispatched_at",
+          "agent_completed_at",
+          "completed_at",
+          "expires_at"
+        ],
+        "title": "CommandHistoryItemOut",
+        "type": "object"
+      },
+      "CommandHistoryOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CommandHistoryItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "outstanding": {
+            "minimum": 0.0,
+            "title": "Outstanding",
+            "type": "integer"
+          },
+          "outstanding_limit": {
+            "minimum": 1.0,
+            "title": "Outstanding Limit",
+            "type": "integer"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page",
+          "page_size",
+          "total",
+          "outstanding",
+          "outstanding_limit"
+        ],
+        "title": "CommandHistoryOut",
+        "type": "object"
+      },
+      "CommandKind": {
+        "enum": [
+          "powershell",
+          "shell",
+          "collect_inventory",
+          "scan_updates",
+          "install_updates",
+          "file_upload",
+          "file_download",
+          "registry_read",
+          "registry_write",
+          "registry_delete",
+          "remediation_rollback",
+          "reboot",
+          "shutdown",
+          "cancel_power_action",
+          "query_event_log",
+          "scan_packages",
+          "install_packages",
+          "deploy_software",
+          "list_services",
+          "control_service",
+          "list_processes",
+          "terminate_process",
+          "agent_self_update",
+          "agent_update_rollback"
+        ],
+        "title": "CommandKind",
+        "type": "string"
+      },
+      "CommandOut": {
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "envelope_version": {
+            "maxLength": 32,
+            "minLength": 1,
+            "pattern": "^[a-z0-9-]+$",
+            "title": "Envelope Version",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CommandKind"
+          },
+          "nonce": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nonce"
+          },
+          "payload": {
+            "title": "Payload",
+            "type": "object"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "signature": {
+            "title": "Signature",
+            "type": "string"
+          },
+          "signing_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signing Key Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CommandStatus"
+          },
+          "stderr_total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stderr Total Bytes"
+          },
+          "stderr_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stderr Truncated"
+          },
+          "stdout_total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdout Total Bytes"
+          },
+          "stdout_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdout Truncated"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "kind",
+          "payload",
+          "envelope_version",
+          "schema_version",
+          "issued_at",
+          "nonce",
+          "signing_key_id",
+          "signature",
+          "status",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "CommandOut",
+        "type": "object"
+      },
+      "CommandStatus": {
+        "enum": [
+          "queued",
+          "dispatched",
+          "running",
+          "result_pending",
+          "succeeded",
+          "failed",
+          "expired"
+        ],
+        "title": "CommandStatus",
+        "type": "string"
+      },
+      "EndpointDetailOut": {
+        "properties": {
+          "agent_version": {
+            "title": "Agent Version",
+            "type": "string"
+          },
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_name": {
+            "title": "Client Name",
+            "type": "string"
+          },
+          "command_envelope_versions": {
+            "items": {
+              "maxLength": 32,
+              "minLength": 1,
+              "pattern": "^[a-z0-9-]+$",
+              "type": "string"
+            },
+            "title": "Command Envelope Versions",
+            "type": "array"
+          },
+          "current_telemetry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointTelemetrySampleOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enrolled_at": {
+            "format": "date-time",
+            "title": "Enrolled At",
+            "type": "string"
+          },
+          "history_hours": {
+            "maximum": 168.0,
+            "minimum": 1.0,
+            "title": "History Hours",
+            "type": "integer"
+          },
+          "history_limit": {
+            "maximum": 500.0,
+            "minimum": 10.0,
+            "title": "History Limit",
+            "type": "integer"
+          },
+          "history_truncated": {
+            "default": false,
+            "title": "History Truncated",
+            "type": "boolean"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "os": {
+            "title": "Os",
+            "type": "string"
+          },
+          "os_version": {
+            "title": "Os Version",
+            "type": "string"
+          },
+          "script_execution_allowed": {
+            "title": "Script Execution Allowed",
+            "type": "boolean"
+          },
+          "site_id": {
+            "title": "Site Id",
+            "type": "string"
+          },
+          "site_name": {
+            "title": "Site Name",
+            "type": "string"
+          },
+          "stale_after_seconds": {
+            "minimum": 1.0,
+            "title": "Stale After Seconds",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus"
+          },
+          "supported_capabilities": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z0-9-]+$",
+              "type": "string"
+            },
+            "title": "Supported Capabilities",
+            "type": "array"
+          },
+          "telemetry": {
+            "items": {
+              "$ref": "#/components/schemas/EndpointTelemetrySampleOut"
+            },
+            "title": "Telemetry",
+            "type": "array"
+          },
+          "telemetry_freshness": {
+            "enum": [
+              "current",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Telemetry Freshness",
+            "type": "string"
+          },
+          "trust_state": {
+            "$ref": "#/components/schemas/AgentTrustState"
+          }
+        },
+        "required": [
+          "id",
+          "hostname",
+          "os",
+          "os_version",
+          "agent_version",
+          "command_envelope_versions",
+          "status",
+          "trust_state",
+          "last_seen_at",
+          "enrolled_at",
+          "client_id",
+          "client_name",
+          "site_id",
+          "site_name",
+          "script_execution_allowed",
+          "current_telemetry",
+          "telemetry_freshness",
+          "stale_after_seconds",
+          "history_hours",
+          "history_limit"
+        ],
+        "title": "EndpointDetailOut",
+        "type": "object"
+      },
+      "EndpointListItemOut": {
+        "properties": {
+          "agent_version": {
+            "title": "Agent Version",
+            "type": "string"
+          },
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_name": {
+            "title": "Client Name",
+            "type": "string"
+          },
+          "cpu_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Percent"
+          },
+          "disk_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Percent"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "logged_in_user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logged In User"
+          },
+          "mem_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Percent"
+          },
+          "os": {
+            "title": "Os",
+            "type": "string"
+          },
+          "os_version": {
+            "title": "Os Version",
+            "type": "string"
+          },
+          "site_id": {
+            "title": "Site Id",
+            "type": "string"
+          },
+          "site_name": {
+            "title": "Site Name",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus"
+          }
+        },
+        "required": [
+          "id",
+          "hostname",
+          "os",
+          "os_version",
+          "agent_version",
+          "status",
+          "last_seen_at",
+          "client_id",
+          "client_name",
+          "site_id",
+          "site_name",
+          "cpu_percent",
+          "mem_percent",
+          "disk_percent",
+          "logged_in_user"
+        ],
+        "title": "EndpointListItemOut",
+        "type": "object"
+      },
+      "EndpointListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EndpointListItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page",
+          "page_size",
+          "total"
+        ],
+        "title": "EndpointListOut",
+        "type": "object"
+      },
+      "EndpointTelemetrySampleOut": {
+        "properties": {
+          "cpu_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Percent"
+          },
+          "disk_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Percent"
+          },
+          "logged_in_user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logged In User"
+          },
+          "mem_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Percent"
+          },
+          "ts": {
+            "format": "date-time",
+            "title": "Ts",
+            "type": "string"
+          },
+          "uptime_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime Seconds"
+          }
+        },
+        "required": [
+          "ts",
+          "cpu_percent",
+          "mem_percent",
+          "disk_percent",
+          "uptime_seconds",
+          "logged_in_user"
+        ],
+        "title": "EndpointTelemetrySampleOut",
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "type": "object"
+              },
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Human-readable message, or a coded object. Clients branch on `code`, never on message text."
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "Error",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InstalledUpdate": {
+        "additionalProperties": false,
+        "description": "One update already installed on the endpoint (issue #51).",
+        "properties": {
+          "client_application_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Application Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "hresult": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hresult"
+          },
+          "installed_by": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed By"
+          },
+          "installed_on": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed On"
+          },
+          "kb_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kb Id"
+          },
+          "result_code": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Code"
+          },
+          "revision_number": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Number"
+          },
+          "support_url": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Support Url"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "update_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Id"
+          }
+        },
+        "title": "InstalledUpdate",
+        "type": "object"
+      },
+      "InventoryOut": {
+        "description": "The current inventory for one agent: at most one row per section.",
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "missing_sections": {
+            "items": {
+              "$ref": "#/components/schemas/InventorySection"
+            },
+            "title": "Missing Sections",
+            "type": "array"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/InventorySectionOut"
+            },
+            "title": "Sections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "title": "InventoryOut",
+        "type": "object"
+      },
+      "InventorySection": {
+        "description": "Section names. Later inventory issues add members here, not schemas.",
+        "enum": [
+          "system",
+          "cpu",
+          "memory",
+          "storage",
+          "network",
+          "installed_software",
+          "security_defender",
+          "security_bitlocker",
+          "security_secure_boot",
+          "security_tpm",
+          "local_administrators",
+          "windows_updates",
+          "installed_packages"
+        ],
+        "title": "InventorySection",
+        "type": "string"
+      },
+      "InventorySectionOut": {
+        "description": "One stored section, newest first in operator views.",
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "byte_size": {
+            "title": "Byte Size",
+            "type": "integer"
+          },
+          "collected_at": {
+            "format": "date-time",
+            "title": "Collected At",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "payload": {
+            "title": "Payload",
+            "type": "object"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "section": {
+            "$ref": "#/components/schemas/InventorySection"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InventorySectionStatus"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "section",
+          "status",
+          "schema_version",
+          "content_hash",
+          "byte_size",
+          "payload",
+          "collected_at",
+          "received_at"
+        ],
+        "title": "InventorySectionOut",
+        "type": "object"
+      },
+      "InventorySectionStatus": {
+        "description": "Why a section looks the way it does.\n\n``ok``                collected completely.\n``partial``           collected, but bounded away — some rows are missing.\n``unavailable``       the platform supports this but collection failed.\n``unsupported``       the platform cannot report it at all.\n``permission_denied`` the platform supports it and it exists, but the agent\n                      lacks the rights to read it.\n\n``permission_denied`` is separated from ``unavailable`` because the two\ncall for different responses. An unavailable section is a transient fault\nto retry; a denied one is a fixable deployment problem — the agent is not\nrunning with the privileges its collectors need — and would otherwise hide\ninside generic failures forever. BitLocker is the first collector that can\nhit it, since its cmdlets require elevation.",
+        "enum": [
+          "ok",
+          "partial",
+          "unavailable",
+          "unsupported",
+          "permission_denied"
+        ],
+        "title": "InventorySectionStatus",
+        "type": "string"
+      },
+      "MissingUpdate": {
+        "additionalProperties": false,
+        "description": "One applicable-but-not-installed update the scan found (issue #51).\n\n``title`` is the only field a row cannot be reported without; everything\nelse is ``None`` when Windows Update did not supply it, never guessed.",
+        "properties": {
+          "classification": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classification"
+          },
+          "is_downloaded": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Downloaded"
+          },
+          "kb_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kb Id"
+          },
+          "last_deployment_change": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Deployment Change"
+          },
+          "priority_grade": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority Grade"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product"
+          },
+          "reboot_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reboot Required"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severity"
+          },
+          "support_url": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Support Url"
+          },
+          "title": {
+            "maxLength": 2048,
+            "title": "Title",
+            "type": "string"
+          },
+          "update_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Id"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "MissingUpdate",
+        "type": "object"
+      },
+      "RebootCauseOut": {
+        "additionalProperties": false,
+        "description": "Why a restart is pending, plus correlated update inventory.\n\n``verdict`` is categorical and derives only from ``sources``. The update\nlists stay correlation evidence and never become a cause. Agents that\npredate reboot-source reporting send no sources and yield ``unknown``.",
+        "properties": {
+          "reboot_flagged_updates": {
+            "items": {
+              "$ref": "#/components/schemas/MissingUpdate"
+            },
+            "title": "Reboot Flagged Updates",
+            "type": "array"
+          },
+          "recent_installs": {
+            "items": {
+              "$ref": "#/components/schemas/InstalledUpdate"
+            },
+            "maxItems": 10,
+            "title": "Recent Installs",
+            "type": "array"
+          },
+          "scanned_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanned At"
+          },
+          "snapshot_received_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Received At"
+          },
+          "sources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RebootSourcesOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "system_reboot_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Reboot Required"
+          },
+          "verdict": {
+            "default": "unknown",
+            "enum": [
+              "update_caused",
+              "not_update_caused",
+              "unknown"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "title": "RebootCauseOut",
+        "type": "object"
+      },
+      "RebootSourcesOut": {
+        "additionalProperties": false,
+        "description": "Which Windows reboot-required registry sources the endpoint reported.\n\nOnly ``windows_update`` means an installed update is waiting on a restart.\n``pending_file_rename_count`` is a count and never a path: the paths behind\nit routinely contain user names, and this payload is meant to stay safe to\nforward to alert email and third-party webhooks. It is best-effort and null\nwhen unavailable.",
+        "properties": {
+          "component_based_servicing": {
+            "title": "Component Based Servicing",
+            "type": "boolean"
+          },
+          "pending_file_rename": {
+            "title": "Pending File Rename",
+            "type": "boolean"
+          },
+          "pending_file_rename_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending File Rename Count"
+          },
+          "windows_update": {
+            "title": "Windows Update",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "component_based_servicing",
+          "windows_update",
+          "pending_file_rename"
+        ],
+        "title": "RebootSourcesOut",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "description": "A tenant-scoped API token (`nlk_...`), or an operator session JWT. API tokens are accepted only on these routes.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Versioned public API v1. Contract, pagination, idempotency, rate limits, and deprecation policy: docs/PUBLIC-API.md. Webhook events: docs/WEBHOOK-EVENTS.md.",
+    "license": {
+      "name": "AGPL-3.0-only"
+    },
+    "title": "NodeLink Public API",
+    "version": "2026-11-12"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/agents/{agent_id}": {
+      "get": {
+        "operationId": "get_agent_api_v1_agents__agent_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Agent",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-stability": "stable"
+      }
+    },
+    "/api/v1/agents/{agent_id}/commands": {
+      "get": {
+        "description": "Paginated command history for one endpoint, newest first.",
+        "operationId": "list_commands_api_v1_agents__agent_id__commands_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandHistoryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List Commands",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-pagination": "page",
+        "x-nodelink-stability": "stable"
+      },
+      "post": {
+        "description": "Queue a command for an agent, signed so the agent can verify authenticity.\n\nThe acting operator is recorded in the audit event, so the tamper-evident\nlog answers not just *what* ran but *who* ordered it.",
+        "operationId": "dispatch_command_api_v1_agents__agent_id__commands_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional client retry key (issue #72). A retry with the same key and body replays the original response instead of queueing a second command.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional client retry key (issue #72). A retry with the same key and body replays the original response instead of queueing a second command.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Dispatch Command",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-idempotency": "header",
+        "x-nodelink-stability": "stable"
+      }
+    },
+    "/api/v1/agents/{agent_id}/commands/{command_id}": {
+      "get": {
+        "description": "One command's signed-envelope evidence and bounded result streams.\n\nViewing is audited: the detail response includes captured stdout/stderr,\nwhich can contain sensitive endpoint data, so the record must show who\nread it.",
+        "operationId": "get_command_api_v1_agents__agent_id__commands__command_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "title": "Command Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Command",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-stability": "stable"
+      }
+    },
+    "/api/v1/api-version": {
+      "get": {
+        "description": "The public API version, revision, webhook versions, and deprecations.",
+        "operationId": "api_version_api_v1_api_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Api Version",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-stability": "stable"
+      }
+    },
+    "/api/v1/endpoints": {
+      "get": {
+        "operationId": "list_endpoints_api_v1_endpoints_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 36,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Client Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "site_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 36,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Site Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "last_seen",
+              "pattern": "^(last_seen|hostname|status)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "pattern": "^(asc|desc)$",
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndpointListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List Endpoints",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-pagination": "page",
+        "x-nodelink-stability": "stable"
+      }
+    },
+    "/api/v1/endpoints/{endpoint_id}": {
+      "get": {
+        "operationId": "get_endpoint_detail_api_v1_endpoints__endpoint_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "title": "Endpoint Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "history_hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 168,
+              "minimum": 1,
+              "title": "History Hours",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "history_limit",
+            "required": false,
+            "schema": {
+              "default": 144,
+              "maximum": 500,
+              "minimum": 10,
+              "title": "History Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndpointDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Endpoint Detail",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-stability": "stable"
+      }
+    },
+    "/api/v1/endpoints/{endpoint_id}/inventory": {
+      "get": {
+        "description": "The endpoint's current inventory: the newest snapshot per section.\n\nSections this build knows about but the endpoint has never reported are\nlisted separately rather than omitted, so \"we have no data for this\" is\nvisible instead of looking like the section does not exist.",
+        "operationId": "get_endpoint_inventory_api_v1_endpoints__endpoint_id__inventory_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "title": "Endpoint Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Endpoint Inventory",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-stability": "stable"
+      }
+    },
+    "/api/v1/monitoring/alerts": {
+      "get": {
+        "operationId": "list_monitoring_alerts_api_v1_monitoring_alerts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 36,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "policy_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 36,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Policy Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "check_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Check Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AlertState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "result_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CheckResultStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Result Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List Monitoring Alerts",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-pagination": "limit",
+        "x-nodelink-stability": "beta"
+      }
+    },
+    "/api/v1/monitoring/alerts/{alert_id}": {
+      "get": {
+        "operationId": "get_monitoring_alert_api_v1_monitoring_alerts__alert_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "required": true,
+            "schema": {
+              "title": "Alert Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Monitoring Alert",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-stability": "stable"
+      }
+    },
+    "/api/v1/monitoring/alerts/{alert_id}/acknowledge": {
+      "post": {
+        "operationId": "acknowledge_monitoring_alert_api_v1_monitoring_alerts__alert_id__acknowledge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "required": true,
+            "schema": {
+              "title": "Alert Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertAcknowledge"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Acknowledge Monitoring Alert",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-idempotency": "request_id",
+        "x-nodelink-stability": "stable"
+      }
+    },
+    "/api/v1/monitoring/alerts/{alert_id}/resolve": {
+      "post": {
+        "operationId": "resolve_monitoring_alert_api_v1_monitoring_alerts__alert_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "required": true,
+            "schema": {
+              "title": "Alert Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertResolve"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired, revoked, or out-of-scope credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Authenticated, but the role or client-role ceiling forbids this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found, or not visible in the caller's tenant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API token request budget exhausted.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests allowed per 60 s window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds until the budget refills.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Resolve Monitoring Alert",
+        "tags": [
+          "public-v1"
+        ],
+        "x-nodelink-idempotency": "request_id",
+        "x-nodelink-stability": "stable"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "servers": [
+    {
+      "url": "/"
+    }
+  ]
+}

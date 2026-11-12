@@ -27,15 +27,19 @@ from app.core import webhook_notifications  # noqa: E402
 from app.core.database import AsyncSessionLocal, Base, engine  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.main import app  # noqa: E402
+from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
+    Agent,
     Alert,
     AlertEventType,
     AlertState,
     AlertWebhookAttempt,
     AlertWebhookDelivery,
     CheckResultStatus,
+    Client,
     Operator,
     OperatorRole,
+    Site,
     WebhookAttemptStatus,
     WebhookDeliveryStatus,
     WebhookSecretVersion,
@@ -326,6 +330,20 @@ async def test_delete_soft_deletes_and_refuses(client):
 
 async def _seed_delivery(endpoint: dict, *, status, attempt_count=1) -> str:
     async with AsyncSessionLocal() as db:
+        # The alert lives on a real agent in a real tenant: delivery history and
+        # retry are tenant-gated through the alert's agent (issue #72).
+        tenant = Client(id="client-1", name="Tenant One")
+        db.add(tenant)
+        await db.flush()
+        db.add(Site(id="site-1", client_id=tenant.id, name="HQ"))
+        await db.flush()
+        db.add(
+            Agent(
+                id="agent-1", site_id="site-1", token_hash="agent-1-hash",
+                hostname="HOST-1", os="windows",
+            )
+        )
+        await grant_all_memberships(db)
         db.add(
             Alert(
                 id="alert-1",
@@ -391,6 +409,55 @@ async def test_delivery_list_masks_destination_and_404s_unknown_alert(client):
     assert item["endpoint_name"] == "Ops"
     assert len(item["attempts"]) == 1
     assert "token=hidden" not in listed.text
+
+
+async def test_delivery_history_and_retry_are_tenant_scoped(client):
+    """Issue #72: a foreign tenant's delivery is indistinguishable from none."""
+    endpoint = await _create(client)
+    delivery_id = await _seed_delivery(endpoint, status=WebhookDeliveryStatus.failed)
+    async with AsyncSessionLocal() as db:
+        db.add(
+            Operator(
+                email="outsider@example.test",
+                password_hash=hash_password("outsider-password"),
+                role=OperatorRole.operator,
+            )
+        )
+        await db.commit()
+    login = await client.post(
+        "/auth/login",
+        json={"email": "outsider@example.test", "password": "outsider-password"},
+    )
+    outsider = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    listed = await client.get(
+        "/monitoring/alerts/alert-1/webhook-deliveries", headers=outsider
+    )
+    assert listed.status_code == 404
+    assert listed.json()["detail"] == "Monitoring alert not found"
+    retried = await client.post(
+        f"/monitoring/webhook-deliveries/{delivery_id}/retry",
+        headers=outsider,
+        json={"request_id": _rid(9)},
+    )
+    assert retried.status_code == 404
+    assert retried.json()["detail"] == "Webhook delivery not found"
+    email = await client.get(
+        "/monitoring/alerts/alert-1/email-deliveries", headers=outsider
+    )
+    assert email.status_code == 404
+
+    # A delivery whose alert is gone fails closed for everyone, even a
+    # platform admin: there is no tenant to authorize it against.
+    async with AsyncSessionLocal() as db:
+        await db.delete(await db.get(Alert, "alert-1"))
+        await db.commit()
+    orphan = await client.post(
+        f"/monitoring/webhook-deliveries/{delivery_id}/retry",
+        headers=client.admin,
+        json={"request_id": _rid(10)},
+    )
+    assert orphan.status_code == 404
 
 
 async def test_retry_is_idempotent_and_refuses_bad_states(client):

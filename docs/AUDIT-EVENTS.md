@@ -115,6 +115,8 @@ and SHA-256/Merkle roots—remains readable.
 | `monitoring_alert.commented` | `api/management.py` technician comment | `alert_id`, `generation`, `request_id`, `state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert.resolved` | `api/management.py` manual resolution | `alert_id`, `generation`, `request_id`, `from_state`, `to_state`, `comment_sha256`, `comment_bytes`, `comment_redacted` |
 | `monitoring_alert_email.retried` | `api/management.py` operator-requested failed-delivery retry | `delivery_id`, `alert_id`, `request_id`, `previous_status`, `recipient_sha256`, `recipient_bytes` |
+| `api_token.created` | `api/api_tokens.py` public API token creation (issue #72) | `token_id`, `prefix`, `operator_id`, `client_id`, `role_ceiling`, `client_role_ceiling`, `expires_at`, `name_sha256`, `name_bytes` |
+| `api_token.revoked` | `api/api_tokens.py` public API token revocation (issue #72) | `token_id`, `prefix`, `operator_id`, `client_id`, `revoked_by_operator_id` |
 | `webhook_endpoint.created` | `api/management.py` endpoint creation | `endpoint_id`, `name_sha256`, `name_bytes`, `url_sha256`, `url_bytes`, `enabled`, `event_types`, `secret_version` |
 | `webhook_endpoint.updated` | `api/management.py` endpoint revision | `endpoint_id`, `request_id`, `previous_version`, `version`, `name_sha256`, `name_bytes`, `url_sha256`, `url_bytes`, `enabled`, `event_types` |
 | `webhook_endpoint.deleted` | `api/management.py` endpoint soft deletion | `endpoint_id`, `request_id`, `previous_version`, `version`, `name_sha256`, `name_bytes`, `url_sha256`, `url_bytes` |
