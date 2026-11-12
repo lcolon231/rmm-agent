@@ -2,6 +2,9 @@
 
 "use client";
 
+import { ManagedSurface, useReasonConfirmation } from "./admin/managed-surface";
+import { PageHeader } from "./shell/page-header";
+import { StatRow, StatTile } from "./ui/stat-tile";
 import { CheckCircle2, KeyRound, RefreshCw, ShieldAlert, Siren } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useState } from "react";
@@ -38,6 +41,7 @@ export function BreakGlassView({
   const [accounts, setAccounts] = useState(initialAccounts ?? []);
   const [activations, setActivations] = useState(initialActivations ?? []);
   const [status, setStatus] = useState(initialStatus);
+  const confirmation = useReasonConfirmation();
   const [error, setError] = useState(initialError);
   const [notice, setNotice] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -108,15 +112,7 @@ export function BreakGlassView({
     }
   }
 
-  async function rotate(account: BreakGlassAccountRecord) {
-    if (!window.confirm(
-      `Rotate "${account.label}"? The credential in the existing envelope stops working immediately.`,
-    )) {
-      return;
-    }
-    const reason = window.prompt("Why are you rotating this credential?", "");
-    if (reason === null || reason.trim().length < 3) return;
-
+  async function rotate(account: BreakGlassAccountRecord, reason: string) {
     begin();
     setIssued(null);
     try {
@@ -137,13 +133,7 @@ export function BreakGlassView({
     }
   }
 
-  async function setDisabled(account: BreakGlassAccountRecord, disabled: boolean) {
-    const reason = window.prompt(
-      disabled ? "Why are you disabling this credential?" : "Why are you re-enabling it?",
-      "",
-    );
-    if (reason === null || reason.trim().length < 3) return;
-
+  async function setDisabled(account: BreakGlassAccountRecord, disabled: boolean, reason: string) {
     begin();
     try {
       const response = await fetch(`/api/auth/break-glass/${account.id}/disabled`, {
@@ -162,13 +152,7 @@ export function BreakGlassView({
     }
   }
 
-  async function review(activation: BreakGlassActivationRecord) {
-    const note = window.prompt(
-      "What did you find? This closes the activation and is recorded.",
-      "",
-    );
-    if (note === null || note.trim().length < 3) return;
-
+  async function review(activation: BreakGlassActivationRecord, note: string) {
     begin();
     try {
       const response = await fetch(
@@ -193,38 +177,29 @@ export function BreakGlassView({
   const unreviewed = activations.filter((row) => !row.reviewed_at);
 
   return (
-    <section className="mfa-settings break-glass">
-      <header>
-        <h1>Break-glass access</h1>
-        <p>
-          A sealed emergency credential that signs in with no second factor. It
-          exists so a lost security key or a federation outage cannot lock every
-          administrator out of the deployment — and because it bypasses the
-          controls everything else relies on, every use is recorded and must be
-          reviewed.
-        </p>
-      </header>
+    <ManagedSurface><section>
+<PageHeader breadcrumb={[{ label: "Administration" }, { label: "Break-glass" }]} title="Emergency access" description="Manage emergency credentials and review recorded activations." /><StatRow><StatTile icon={KeyRound} label="Credentials" value={initialAccounts ? accounts.length : "—"} /><StatTile icon={Siren} label="Awaiting review" value={initialActivations ? unreviewed.length : "—"} /><StatTile icon={ShieldAlert} label="Disabled" value={initialAccounts ? accounts.filter((account) => account.disabled_at).length : "—"} /></StatRow>
 
       {status && !status.enabled ? (
-        <p className="mfa-banner" role="status">
+        <p className="" role="status">
           Break-glass is turned off for this deployment. Existing credentials are
           retained but cannot be activated.
         </p>
       ) : null}
 
       {unreviewed.length > 0 ? (
-        <p className="mfa-banner mfa-banner-warning" role="alert">
+        <p className="" role="alert">
           <Siren aria-hidden="true" size={16} />{" "}
           {unreviewed.length} emergency {unreviewed.length === 1 ? "activation" : "activations"}
           {" "}awaiting review.
         </p>
       ) : null}
 
-      {error ? <p className="login-error" role="alert">{error}</p> : null}
-      {notice ? <p className="mfa-banner" role="status">{notice}</p> : null}
+      {error ? <p className="" role="alert">{error}</p> : null}
+      {notice ? <p className="" role="status">{notice}</p> : null}
 
       {issued ? (
-        <div className="mfa-recovery-codes" role="status">
+        <div className="" role="status">
           <p>
             <strong>Save this now.</strong> It is shown once and cannot be
             retrieved again. Print it, seal it, and record where the envelope is
@@ -237,17 +212,17 @@ export function BreakGlassView({
 
       <h2>Activations</h2>
       {activations.length === 0 ? (
-        <p>Break-glass has never been used on this deployment.</p>
+        <p>No activation records are loaded.</p>
       ) : (
-        <ul className="session-list">
+        <ul className="">
           {activations.map((activation) => (
             <li key={activation.id}>
               <div>
                 <strong>
                   {new Date(activation.activated_at).toLocaleString()}
                   {activation.reviewed_at
-                    ? <span className="session-badge">Reviewed</span>
-                    : <span className="session-badge session-badge-alarm">Open</span>}
+                    ? <span className="">Reviewed</span>
+                    : <span className="">Open</span>}
                 </strong>
                 <small>
                   {describeClient(activation.user_agent)}
@@ -262,7 +237,7 @@ export function BreakGlassView({
               {activation.reviewed_at ? (
                 <CheckCircle2 aria-label="Reviewed" size={16} />
               ) : (
-                <button disabled={isBusy} onClick={() => review(activation)} type="button">
+                <button disabled={isBusy} onClick={() => confirmation.ask("Review emergency activation?", "Your findings are submitted for this activation.", (note) => review(activation, note))} type="button">
                   Review
                 </button>
               )}
@@ -273,20 +248,19 @@ export function BreakGlassView({
 
       <h2>Credentials</h2>
       {accounts.length === 0 ? (
-        <p className="mfa-banner mfa-banner-warning">
+        <p className="">
           <ShieldAlert aria-hidden="true" size={16} /> No emergency credential is
-          provisioned. If every administrator loses their security key, nobody
-          will be able to sign in.
+          provisioned. 
         </p>
       ) : (
-        <ul className="session-list">
+        <ul className="">
           {accounts.map((account) => (
             <li key={account.id}>
               <div>
                 <strong>
                   {account.label}
                   {account.disabled_at
-                    ? <span className="session-badge session-badge-warn">Disabled</span>
+                    ? <span className="">Disabled</span>
                     : null}
                 </strong>
                 <small>
@@ -298,13 +272,13 @@ export function BreakGlassView({
                     : ""}
                 </small>
               </div>
-              <div className="mfa-credential-actions">
-                <button disabled={isBusy} onClick={() => rotate(account)} type="button">
+              <div className="">
+                <button disabled={isBusy} onClick={() => confirmation.ask("Rotate emergency credential?", "The previous credential stops working immediately. Save the replacement securely.", (reason) => rotate(account, reason))} type="button">
                   <RefreshCw size={14} /> Rotate
                 </button>
                 <button
                   disabled={isBusy}
-                  onClick={() => setDisabled(account, account.disabled_at === null)}
+                  onClick={() => confirmation.ask(account.disabled_at ? "Enable emergency account?" : "Disable emergency account?", "This changes whether the credential can start an emergency session.", (reason) => setDisabled(account, account.disabled_at === null, reason))}
                   type="button"
                 >
                   {account.disabled_at ? "Enable" : "Disable"}
@@ -341,6 +315,6 @@ export function BreakGlassView({
           <KeyRound size={16} /> Create emergency credential
         </button>
       </form>
-    </section>
+    {confirmation.dialog}</section></ManagedSurface>
   );
 }
