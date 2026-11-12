@@ -19,7 +19,7 @@ test("read-only policy review exposes no mutations, including inside the drawer"
 
 test("policy deletion requires a reason and preserves the existing delete request and refusal", async (t) => {
   const calls: RequestInit[] = [];
-  t.mock.method(globalThis, "fetch", async (_url, init) => {
+  t.mock.method(globalThis, "fetch", async (_url: RequestInfo | URL, init?: RequestInit) => {
     calls.push(init as RequestInit);
     return Response.json({ error: "Permission denied." }, { status: 403 });
   });
@@ -37,3 +37,4 @@ test("policy deletion requires a reason and preserves the existing delete reques
   assert.equal(calls[0].body, undefined);
   assert.ok(screen.getByRole("row", { name: "Show rules for Baseline" }));
 });
+

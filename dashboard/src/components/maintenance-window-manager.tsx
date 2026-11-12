@@ -394,9 +394,9 @@ export function MaintenanceWindowManager({
         <section role="status" className="flex flex-wrap items-start gap-3 rounded-lg bg-(--success-soft) px-4 py-3 text-sm text-(--slate)">
           <ShieldCheck aria-hidden="true" size={18} className="mt-0.5 shrink-0 text-(--success)" />
           <p className="m-0 grid flex-1 gap-0.5">
-            <strong className="text-(--success)">{created.name} is open</strong>
+            <strong className="text-(--success)">{created.name} was created · {STATE_BADGE[windowStateAt(created, nowMs)].reason}</strong>
             <span>
-              It closes at {formatMonitoringTimestamp(created.ends_at)}. The management service will
+              Scheduled from {formatMonitoringTimestamp(created.starts_at)} to {formatMonitoringTimestamp(created.ends_at)}. The management service will
               re-check coverage when the command is signed.
             </span>
           </p>
