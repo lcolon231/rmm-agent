@@ -4,7 +4,7 @@
 
 import { CircleCheck, History, Play, ShieldAlert, Siren, Timer, TriangleAlert } from "lucide-react";
 import type { FormEvent } from "react";
-import { useCallback, useId, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { formatAuditTimestamp } from "@/lib/audit-core";
 import {
@@ -38,7 +38,7 @@ import { FilterBar, FilterChip } from "./ui/filter-bar";
 import { StatRow, StatTile } from "./ui/stat-tile";
 import { EmptyState, ErrorState } from "./ui/states";
 import { StatusBadge } from "./ui/status-badge";
-import { useModal } from "./ui/use-modal";
+
 
 type EmergencyOverrideViewProps = {
   initialError: string;
@@ -52,7 +52,7 @@ type Filter = "all" | "unreviewed" | "reviewed";
 
 const BREADCRUMB = [{ label: "Compliance" }, { label: "Emergency overrides" }];
 const DESCRIPTION =
-  "For urgent situations when a second approver cannot be reached. Each one runs one exact command, expires within an hour, is emailed to the alert recipients, and stays open here until a different administrator reviews it.";
+  "For urgent situations when a second approver cannot be reached. Each one runs one exact command, expires within an hour, attempts to notify configured recipients, and stays open here until a different administrator reviews it.";
 const NOTE_ERROR = "Enter a printable note of 10 to 512 characters.";
 const mono = "font-(family-name:--font-data)";
 
@@ -145,6 +145,8 @@ export function EmergencyOverrideView({
               : "Override reviewed.",
         );
         return null;
+      } catch {
+        return "The result could not be confirmed. Refresh the override before retrying.";
       } finally {
         setBusyId(null);
       }
@@ -226,9 +228,11 @@ export function EmergencyOverrideView({
       setActivating(false);
       setNotice(
         body.override.notified_at
-          ? "Override activated and recipients notified. Use it before it expires; it must still be reviewed."
-          : "Override activated, but nobody was notified. Tell someone yourself; it must still be reviewed.",
+          ? "Override activated and email accepted by the notification provider. Use it before it expires; it must still be reviewed."
+          : "Override activated, but no email acceptance was recorded. Tell someone yourself; it must still be reviewed.",
       );
+    } catch {
+      setError("Activation could not be confirmed. Refresh the list before retrying.");
     } finally {
       setBusyId(null);
     }
@@ -286,7 +290,7 @@ export function EmergencyOverrideView({
 
   const state =
     ordered.length === 0 ? (
-      <EmptyState icon={Siren} title="No overrides yet" body="No emergency override has ever been activated." />
+      <EmptyState icon={Siren} title="No overrides yet" body="No emergency overrides are loaded." />
     ) : visible.length === 0 ? (
       <EmptyState title="No overrides match" body="No override is in this state." actionLabel="Clear filters" onAction={() => setFilter("all")} />
     ) : undefined;
@@ -415,8 +419,8 @@ export function EmergencyOverrideView({
           <p role="note" className="m-0 flex items-start gap-3 rounded-lg bg-(--amber-soft) px-4 py-3 text-[#89500b]">
             <ShieldAlert aria-hidden="true" size={18} className="mt-0.5 shrink-0" />
             <span>
-              This skips the second reviewer the approval policy requires. Use it only when the delay itself is the harm. The alert recipients are emailed the moment you
-              submit, the override expires in minutes, it runs exactly one command, and another administrator must review it afterwards.
+              This skips the second reviewer the approval policy requires. Use it only when the delay itself is the harm. Notification is attempted when you
+              submit; check the delivery outcome. the override expires in minutes, it runs exactly one command, and another administrator must review it afterwards.
             </span>
           </p>
           <form onSubmit={activate} className="grid gap-4" aria-label="Request an override">
@@ -579,7 +583,7 @@ function OverrideDrawer({ override, now, viewerOperatorId, viewerIsAdmin, busy, 
           { term: "Endpoint", value: <span className={mono}>{override.agent_id}</span> },
           { term: "Stood in for", value: `${override.required_approvals} ${override.required_approvals === 1 ? "approval" : "approvals"}` },
           { term: "Notified", value: sentence(notificationLabel(override)) },
-          ...(detail.consumed_command_id ? [{ term: "Ran as command", value: <span className={mono}>{detail.consumed_command_id.slice(0, 8)}</span> }] : []),
+          ...(detail.consumed_command_id ? [{ term: "Dispatched as command", value: <span className={mono}>{detail.consumed_command_id.slice(0, 8)}</span> }] : []),
           ...(detail.revoke_reason ? [{ term: "Revoke reason", value: detail.revoke_reason }] : []),
           ...(detail.review_note ? [{ term: "Review note", value: detail.review_note }] : []),
         ]}
@@ -619,53 +623,6 @@ function OverrideDrawer({ override, now, viewerOperatorId, viewerIsAdmin, busy, 
   );
 }
 
-/**
- * Confirmation for spending an override. The run API takes no reason (the
- * justification given at activation is what is cited), so this dialog does not
- * ask for one rather than collecting text that would not be recorded.
- */
 function RunDialog({ override, busy, error, onCancel, onConfirm }: { override: EmergencyOverride; busy: boolean; error: string; onCancel: () => void; onConfirm: () => void }) {
-  const panelRef = useModal(true, busy ? () => {} : onCancel);
-  const titleId = useId();
-  const bodyId = useId();
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div aria-hidden="true" className="absolute inset-0 bg-[rgb(23_19_42/45%)]" onClick={busy ? undefined : onCancel} />
-      <div
-        ref={panelRef}
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={bodyId}
-        className="relative w-[min(480px,100%)] rounded-[10px] bg-(--paper) shadow-[0_14px_34px_rgb(24_16_46/12%)]"
-      >
-        <div className="grid gap-4 p-6">
-          <span className="flex size-10 items-center justify-center rounded-full bg-(--amber-soft) text-[#89500b]">
-            <TriangleAlert size={20} aria-hidden="true" />
-          </span>
-          <div className="grid gap-2">
-            <h2 id={titleId} className="m-0 text-lg leading-[1.3] font-semibold text-(--ink)">
-              Run this command now?
-            </h2>
-            <p id={bodyId} className="m-0 text-sm leading-normal text-(--slate)">
-              The {override.kind} command runs on endpoint {override.agent_id.slice(0, 8)} without a second approver, citing this override. It can be used once.
-            </p>
-          </div>
-          {error ? (
-            <p role="alert" className="m-0 text-sm text-(--red)">
-              {error}
-            </p>
-          ) : null}
-        </div>
-        <footer className="flex flex-wrap justify-end gap-2 border-t border-(--line) px-6 py-4">
-          <Button onClick={onCancel} disabled={busy}>
-            Cancel
-          </Button>
-          <Button variant="danger" icon={Play} onClick={onConfirm} disabled={busy} aria-busy={busy || undefined}>
-            Run now
-          </Button>
-        </footer>
-      </div>
-    </div>
-  );
+ return <ConfirmDialog open title="Run this command now?" consequence={"Dispatch " + override.kind + " to endpoint " + override.agent_id.slice(0, 8) + " without a second approver. This spends the override. The API retains the activation justification, not this confirmation reason."} confirmLabel="Run now" busy={busy} error={error || undefined} onCancel={onCancel} onConfirm={onConfirm} />;
 }
