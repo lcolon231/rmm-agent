@@ -159,7 +159,7 @@ function PowerResult({ result }: { result: PowerOperationResult }) {
           items={[
             { term: "Action", value: result.action.replaceAll("_", " ") },
             { term: "Delay", value: result.delaySeconds === null ? "Not applicable" : `${result.delaySeconds} seconds` },
-            { term: "Maintenance window", value: <Mono>{result.maintenanceWindowId ?? "Not required"}</Mono> },
+            { term: "Maintenance window", value: <Mono>{result.maintenanceWindowId ?? "Not recorded"}</Mono> },
             { term: "User policy", value: result.userConsent?.replaceAll("_", " ") ?? "Not applicable" },
             { term: "Reason fingerprint", value: <Mono>{result.reasonSHA256}</Mono> },
           ]}
@@ -351,7 +351,7 @@ function PayloadBlock({ command }: { command: CommandDetailData }) {
               { term: "Reason", value: typeof command.payload.reason === "string" ? command.payload.reason : "—" },
               { term: "Delay", value: typeof command.payload.delay_seconds === "number" ? `${command.payload.delay_seconds} seconds` : "Not applicable" },
               { term: "User policy", value: typeof command.payload.user_consent === "string" ? command.payload.user_consent.replaceAll("_", " ") : "Not applicable" },
-              { term: "Maintenance window", value: <Mono>{typeof command.payload.maintenance_window_id === "string" ? command.payload.maintenance_window_id : "Not required"}</Mono> },
+              { term: "Maintenance window", value: <Mono>{typeof command.payload.maintenance_window_id === "string" ? command.payload.maintenance_window_id : "Not recorded"}</Mono> },
               { term: "Window closes", value: typeof command.payload.maintenance_window_ends_at === "string" ? formatEndpointDateTime(command.payload.maintenance_window_ends_at) : "Not applicable" },
             ]}
           />
@@ -467,7 +467,7 @@ export function CommandDetailView({
         status={<StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>}
         description={
           <>
-            A signed instruction for <span className="font-(family-name:--font-data)">{endpoint.hostname}</span>. Created {formatEndpointDateTime(command.created_at)}.
+            A command record for <span className="font-(family-name:--font-data)">{endpoint.hostname}</span>. Created {formatEndpointDateTime(command.created_at)}.
           </>
         }
       />
@@ -506,3 +506,4 @@ export function CommandDetailView({
     </PageStack>
   );
 }
+

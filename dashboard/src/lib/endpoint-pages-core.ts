@@ -67,7 +67,7 @@ export function custodySteps(command: CommandDetailData): CustodyStep[] {
   if (command.dispatched_at) {
     steps.push({ key: "sent", label: "Sent to the device", detail: "Handed to the device at its check-in.", at: command.dispatched_at, state: "done" });
   } else if (command.status === "expired") {
-    steps.push({ key: "sent", label: "Not sent", detail: "The device did not check in before the command expired.", at: null, state: "pending" });
+    steps.push({ key: "sent", label: "Not sent", detail: "No dispatch time is recorded for this expired command.", at: null, state: "pending" });
   } else {
     steps.push({ key: "sent", label: "Not sent yet", detail: "Waiting for the device to check in.", at: null, state: "pending" });
   }
@@ -103,8 +103,9 @@ export function custodySteps(command: CommandDetailData): CustodyStep[] {
   }
 
   if (command.status === "expired") {
-    steps.push({ key: "expired", label: "Expired", detail: "Its signed validity window closed before a result arrived.", at: command.expires_at, state: "expired" });
+    steps.push({ key: "expired", label: "Expired", detail: "The command is marked expired.", at: command.expires_at, state: "expired" });
   }
 
   return steps;
 }
+
