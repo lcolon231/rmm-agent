@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { ManagedSurface } from "@/components/admin/managed-surface";
+import { PageHeader } from "@/components/shell/page-header";
 import { notFound } from "next/navigation";
 
 import { CreateOperatorForm } from "@/components/create-operator-form";
@@ -19,17 +21,9 @@ export default async function CreateOperatorPage({
   const label = operatorKindLabel(kind);
 
   return (
-    <>
-      <header className="operator-page-head compact">
-        <div>
-          <span>New operator identity</span>
-          <h1>Create {label.toLowerCase()}</h1>
-          <p>
-            Create the sign-in identity now. Script execution remains a separate, default-deny permission.
-          </p>
-        </div>
-      </header>
+    <ManagedSurface>
+<PageHeader breadcrumb={[{ label: "Administration" }, { label: "Create operator" }]} title={`Create ${label.toLowerCase()}`} description="Create a sign-in identity. Script permissions are granted separately." />
       <CreateOperatorForm kind={kind} />
-    </>
+    </ManagedSurface>
   );
 }

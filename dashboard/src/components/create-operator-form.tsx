@@ -67,14 +67,14 @@ export function CreateOperatorForm({ kind }: { kind: OperatorKind }) {
 
   if (created) {
     return (
-      <section className="operator-created" aria-labelledby="operator-created-title">
+      <section className="" aria-labelledby="operator-created-title">
         <CheckCircle2 aria-hidden="true" size={34} />
         <div>
           <span>Identity created</span>
           <h2 id="operator-created-title">{label} ready for sign-in</h2>
           <p><strong>{created.email}</strong> was created as {label.toLowerCase()}.</p>
         </div>
-        <div className="operator-default-deny">
+        <div className="">
           <ShieldCheck aria-hidden="true" size={19} />
           <div>
             <strong>No script permission</strong>
@@ -92,13 +92,13 @@ export function CreateOperatorForm({ kind }: { kind: OperatorKind }) {
   }
 
   return (
-    <form className="operator-create-form" onSubmit={submit}>
-      <Link className="operator-back-link" href="/operators">
+    <form className="" onSubmit={submit}>
+      <Link className="" href="/operators">
         <ArrowLeft aria-hidden="true" size={15} /> Operators
       </Link>
 
-      <section className="operator-role-lock" aria-labelledby="operator-role-title">
-        <span className="operator-role-icon"><RoleIcon aria-hidden="true" size={22} /></span>
+      <section className="" aria-labelledby="operator-role-title">
+        <span className=""><RoleIcon aria-hidden="true" size={22} /></span>
         <div>
           <span>Preselected role</span>
           <h2 id="operator-role-title">{label}</h2>
@@ -108,7 +108,7 @@ export function CreateOperatorForm({ kind }: { kind: OperatorKind }) {
         </div>
       </section>
 
-      <section className="operator-identity-fields">
+      <section className="">
         <div>
           <span>Operator identity</span>
           <h2>Initial sign-in credentials</h2>
@@ -143,7 +143,7 @@ export function CreateOperatorForm({ kind }: { kind: OperatorKind }) {
         </label>
       </section>
 
-      <aside className="operator-create-boundary">
+      <aside className="">
         <ShieldCheck aria-hidden="true" size={20} />
         <div>
           <strong>Script execution starts denied</strong>
@@ -154,7 +154,7 @@ export function CreateOperatorForm({ kind }: { kind: OperatorKind }) {
       </aside>
 
       {error ? (
-        <section className="operator-error-summary" role="alert" aria-labelledby="create-error-title">
+        <section className="" role="alert" aria-labelledby="create-error-title">
           <strong id="create-error-title">Operator was not created</strong>
           <p>{error}</p>
         </section>
