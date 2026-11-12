@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { EnrollmentShell } from "@/components/enrollment/enrollment-shell";
-import { getDashboardSession } from "@/lib/dashboard-session";
 import { redirect } from "next/navigation";
+
+import { DashboardSectionShell } from "@/components/dashboard-shell";
+import { getClientNavigation, type NavigationData } from "@/lib/client-navigation";
+import { getDashboardSession } from "@/lib/dashboard-session";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +12,30 @@ export default async function EnrollmentLayout({ children }: { children: React.R
   const session = await getDashboardSession();
   if (session.kind === "anonymous") redirect("/login");
   if (session.kind === "unavailable") {
-    return <main className="enrollment-standalone-error"><h1>Enrollment management is unavailable</h1><p>Your session could not be verified. No protected data was loaded.</p></main>;
+    return (
+      <main className="enrollment-standalone-error">
+        <h1>Enrollment management is unavailable</h1>
+        <p>Your session could not be verified. No protected data was loaded.</p>
+      </main>
+    );
   }
-  return <EnrollmentShell operator={session.operator}>{children}</EnrollmentShell>;
+
+  let navigation: NavigationData | null = null;
+  let navigationError = false;
+  try {
+    navigation = await getClientNavigation(session.sessionToken);
+  } catch {
+    navigationError = true;
+  }
+
+  return (
+    <DashboardSectionShell
+      activePath="/enrollment"
+      navigation={navigation}
+      navigationError={navigationError}
+      operator={session.operator}
+    >
+      {children}
+    </DashboardSectionShell>
+  );
 }

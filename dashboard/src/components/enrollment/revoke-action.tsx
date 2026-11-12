@@ -2,29 +2,48 @@
 
 "use client";
 
-import { ShieldOff, X } from "lucide-react";
+import { ShieldOff } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useId, useRef, useState } from "react";
+import { useState } from "react";
 
+import { useReportModal } from "@/components/admin/admin-ui";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { reasonProblem } from "@/lib/admin-screens-core";
+
+const CONSEQUENCE = {
+  agent: "Its credentials stop working permanently and any queued commands are expired. To manage the device again it has to be enrolled again.",
+  token: "It can no longer be used to add devices. Devices already enrolled with it are not affected.",
+} as const;
+
+/**
+ * High-risk revocation of an agent or an enrollment token. The reason is
+ * required (3–500 characters) and sent to the API, which keeps it in the
+ * audit record.
+ */
 export function RevokeAction({
   endpoint,
+  kind,
   label,
   subject,
+  onRevoked,
 }: {
   endpoint: string;
+  kind: keyof typeof CONSEQUENCE;
   label: string;
   subject: string;
+  onRevoked?: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const reasonId = useId();
   const router = useRouter();
-  const [reason, setReason] = useState("");
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  useReportModal(open);
 
-  async function revoke() {
-    if (reason.trim().length < 3) {
-      setError("Enter a reason of at least three characters.");
+  async function revoke(reason: string) {
+    const problem = reasonProblem(reason);
+    if (problem) {
+      setError(problem);
       return;
     }
     setPending(true);
@@ -37,13 +56,14 @@ export function RevokeAction({
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null) as { error?: string } | null;
-        setError(body?.error ?? "Revocation failed. Try again.");
+        setError(`${body?.error ?? "Revocation failed. Try again."} Nothing was changed.`);
         return;
       }
-      dialog.current?.close();
+      setOpen(false);
+      onRevoked?.();
       router.refresh();
     } catch {
-      setError("Revocation failed. Check the management service and try again.");
+      setError("The revocation result could not be confirmed. Refresh the record before retrying.");
     } finally {
       setPending(false);
     }
@@ -51,23 +71,27 @@ export function RevokeAction({
 
   return (
     <>
-      <button className="enrollment-danger-link" onClick={() => dialog.current?.showModal()} type="button">
-        <ShieldOff size={15} /> {label}
-      </button>
-      <dialog className="enrollment-dialog" ref={dialog}>
-        <div className="enrollment-dialog-head">
-          <div><span>Trust change</span><h2>{label}</h2></div>
-          <button aria-label="Close dialog" onClick={() => dialog.current?.close()} type="button"><X size={18} /></button>
-        </div>
-        <p>This immediately revokes <strong>{subject}</strong>. The audit log will retain the record.</p>
-        <label htmlFor={reasonId}>Reason</label>
-        <textarea id={reasonId} maxLength={500} onChange={(event) => setReason(event.target.value)} rows={3} value={reason} />
-        {error ? <p className="enrollment-form-error" role="alert">{error}</p> : null}
-        <div className="enrollment-dialog-actions">
-          <button onClick={() => dialog.current?.close()} type="button">Cancel</button>
-          <button className="danger" disabled={pending} onClick={revoke} type="button">{pending ? "Revoking…" : label}</button>
-        </div>
-      </dialog>
+      <Button
+        variant="danger"
+        icon={ShieldOff}
+        onClick={() => {
+          setError("");
+          setOpen(true);
+        }}
+      >
+        {label}
+      </Button>
+      <ConfirmDialog
+        open={open}
+        onCancel={() => setOpen(false)}
+        onConfirm={revoke}
+        title={`Revoke ${subject}?`}
+        consequence={CONSEQUENCE[kind]}
+        confirmLabel={label}
+        busy={pending}
+        error={error || undefined}
+      />
     </>
   );
 }
+

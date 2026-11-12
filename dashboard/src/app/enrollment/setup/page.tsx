@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { ManagedSurface } from "@/components/admin/managed-surface";
+import { PageHeader } from "@/components/shell/page-header";
 import { redirect } from "next/navigation";
 
 import { ClientSiteSetup } from "@/components/enrollment/client-site-setup";
@@ -13,18 +15,9 @@ export default async function ClientSiteSetupPage() {
   const navigation = await getClientNavigation(session.sessionToken);
 
   return (
-    <>
-      <header className="enrollment-page-head compact">
-        <div>
-          <span>Deployment onboarding</span>
-          <h1>Clients and sites</h1>
-          <p>
-            Establish the customer and location boundary required before an
-            enrollment token can be issued.
-          </p>
-        </div>
-      </header>
+    <ManagedSurface>
+<PageHeader breadcrumb={[{ label: "Administration" }, { label: "Client setup" }]} title={"Client setup"} description="Create the client and site needed before issuing an enrollment token." />
       <ClientSiteSetup initialClients={navigation.items} />
-    </>
+    </ManagedSurface>
   );
 }

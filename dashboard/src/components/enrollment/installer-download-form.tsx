@@ -2,9 +2,13 @@
 
 "use client";
 
-import { Download, PackageCheck, ShieldAlert } from "lucide-react";
+import { Download } from "lucide-react";
 import { useState } from "react";
 
+import { StatusNote } from "@/components/admin/admin-ui";
+import { Card } from "@/components/admin/card";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/field";
 import { downloadInstallerPackage } from "@/lib/installer-download-client";
 
 export function InstallerDownloadForm({
@@ -41,62 +45,45 @@ export function InstallerDownloadForm({
   }
 
   return (
-    <form className="enrollment-form" onSubmit={download}>
-      <section>
-        <div className="enrollment-form-heading">
-          <span>01</span>
-          <div>
-            <h2>Choose a site</h2>
-            <p>The package enrolls into this site and its token expires quickly.</p>
-          </div>
-        </div>
-        <div className="enrollment-form-grid">
-          <label className="span-2">
-            Organization / site
-            <select
-              name="site_id"
-              required
-              value={siteId}
-              onChange={(event) => setSiteId(event.target.value)}
-            >
-              <option disabled value="">
-                Select a site
-              </option>
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </section>
-      <p className="enrollment-form-note">
-        <ShieldAlert size={16} /> The download is a ZIP containing the installer and a
-        single-use enrollment token. Anyone with the file can enroll one machine to this
-        site until the token expires — hand it to the technician directly, and don’t email
-        or store it. Each download is recorded for audit.
-      </p>
-      {error ? (
-        <p className="enrollment-form-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {done ? (
-        <p className="enrollment-form-success" role="status">
-          <PackageCheck size={16} /> Your personalized installer is downloading. Extract the
-          ZIP and run the installer from the extracted folder — no token entry is needed.
-        </p>
-      ) : null}
-      <footer>
-        <span>
-          <ShieldAlert size={16} /> The token is delivered inside the ZIP, never in a link
-          or log.
-        </span>
-        <button className="primary" disabled={pending || !siteId} type="submit">
-          <Download size={16} /> {pending ? "Preparing…" : "Download installer"}
-        </button>
-      </footer>
+    <form onSubmit={download} className="grid max-w-[640px] gap-6">
+      <Card title="Installer for one site" sub="The package enrolls into this site, and its token expires quickly.">
+        <Select
+          label="Client / site"
+          name="site_id"
+          required
+          value={siteId}
+          onChange={(event) => setSiteId(event.target.value)}
+        >
+          <option disabled value="">
+            Select a site
+          </option>
+          {sites.map((site) => (
+            <option key={site.id} value={site.id}>
+              {site.label}
+            </option>
+          ))}
+        </Select>
+        <StatusNote tone="warn" title="Treat the file like a password">
+          The ZIP holds the installer and a single-use enrollment token. Anyone with the file can enroll one machine to this site until the token
+          expires, so hand it to the technician directly rather than emailing or storing it. Each download is recorded in the audit log.
+        </StatusNote>
+        {error ? (
+          <StatusNote tone="crit" role="alert">
+            {error}
+          </StatusNote>
+        ) : null}
+        {done ? (
+          <StatusNote tone="ok" role="status">
+            Your installer is downloading. Extract the ZIP and run the installer from the extracted folder; no token entry is needed.
+          </StatusNote>
+        ) : null}
+      </Card>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="m-0 text-xs text-(--muted)">The token travels inside the ZIP, never in a link or log.</p>
+        <Button type="submit" variant="primary" icon={Download} disabled={pending || !siteId}>
+          {pending ? "Preparing…" : "Download installer"}
+        </Button>
+      </div>
     </form>
   );
 }
