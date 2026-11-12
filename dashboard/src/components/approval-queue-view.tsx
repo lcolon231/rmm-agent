@@ -127,6 +127,8 @@ export function ApprovalQueueView({
               : "Approval recorded. It still needs another identity.",
       );
       return null;
+    } catch {
+      return "The decision result could not be confirmed. Refresh the request before retrying.";
     } finally {
       setBusyId(null);
     }
@@ -228,7 +230,7 @@ export function ApprovalQueueView({
 
   const state =
     ordered.length === 0 ? (
-      <EmptyState icon={UserCheck} title="Nothing is waiting" body="Nothing has been raised for approval." />
+      <EmptyState icon={UserCheck} title="Nothing is waiting" body="No readable requests are loaded." />
     ) : visible.length === 0 ? (
       <EmptyState title="No requests match" body="No request is in this state." actionLabel="Clear filters" onAction={() => setFilter("all")} />
     ) : undefined;
@@ -415,8 +417,8 @@ function RequestDrawer({ request, now, viewerOperatorId, viewerCanDecide, busy, 
         </span>
       </p>
 
-      <section aria-label="Exactly what will run" className="grid gap-2.5">
-        <h3 className="m-0 text-sm font-semibold text-(--ink)">Exactly what will run</h3>
+      <section aria-label="Command identity" className="grid gap-2.5">
+        <h3 className="m-0 text-sm font-semibold text-(--ink)">Command identity</h3>
         <DefinitionList
           items={[
             { term: "Command kind", value: <span className={mono}>{request.kind}</span> },
@@ -433,7 +435,7 @@ function RequestDrawer({ request, now, viewerOperatorId, viewerCanDecide, busy, 
         items={[
           { term: "Reason given", value: request.reason },
           { term: "Requested by", value: <span className={mono}>{request.requested_by_email}</span> },
-          ...(request.consumed_command_id ? [{ term: "Ran as command", value: <span className={mono}>{request.consumed_command_id.slice(0, 8)}</span> }] : []),
+          ...(request.consumed_command_id ? [{ term: "Dispatched as command", value: <span className={mono}>{request.consumed_command_id.slice(0, 8)}</span> }] : []),
           ...(request.closed_by_email ? [{ term: "Closed by", value: <span className={mono}>{request.closed_by_email}</span> }] : []),
         ]}
       />

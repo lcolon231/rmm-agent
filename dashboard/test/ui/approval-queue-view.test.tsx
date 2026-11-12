@@ -58,7 +58,7 @@ function openRequest() {
   return screen.getByRole("dialog");
 }
 
-const button = (name: string) => screen.queryByRole("button", { name: new RegExp(name) });
+const button = (name: string) => screen.queryByRole("button", { name });
 
 test("the page follows the template with a breadcrumb and no primary action", () => {
   renderQueue(reviewer);
@@ -108,7 +108,7 @@ test("a role without decide rights sees the request but no decision controls", (
 test("the drawer shows what will run, the fingerprint and that approval is bound to it", () => {
   renderQueue(reviewer);
   const drawer = openRequest();
-  assert.ok(within(drawer).getByRole("heading", { name: "Exactly what will run" }));
+  assert.ok(within(drawer).getByRole("heading", { name: "Command identity" }));
   assert.match(within(drawer).getByLabelText("Fingerprint").textContent ?? "", new RegExp("a".repeat(64)));
   assert.match(within(drawer).getByRole("note").textContent ?? "", /tied to this exact command/);
   assert.ok(within(drawer).getByText("script"));
@@ -121,7 +121,7 @@ test("a second identity must give a reason before the approval is sent", async (
   openRequest();
 
   fireEvent.click(button("Approve")!);
-  assert.equal(screen.getByRole("alert").textContent, "Enter a printable reason of 10 to 512 characters.");
+  assert.equal(within(screen.getByRole("dialog")).getByRole("alert").textContent, "Enter a printable reason of 10 to 512 characters.");
   assert.equal(fetchMock.mock.callCount(), 0);
 
   fireEvent.change(screen.getByLabelText(REASON_LABEL), { target: { value: "Reviewed the script body" } });
@@ -208,3 +208,5 @@ test("requests whose detail failed to load are counted, not silently dropped", (
   assert.ok(screen.getByText("1 request could not be opened and is not listed. Nothing was changed."));
   assert.ok(screen.getByText(/No approval policy is configured/));
 });
+
+
