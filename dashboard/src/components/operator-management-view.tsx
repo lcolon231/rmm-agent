@@ -9,6 +9,7 @@ import {
   UserCog,
   Users,
 } from "lucide-react";
+import { StatusBadge } from "./ui/status-badge";
 import { ManagedSurface } from "./admin/managed-surface";
 import { PageHeader } from "./shell/page-header";
 import { ButtonLink } from "./ui/button";
@@ -149,14 +150,10 @@ export function OperatorManagementView({
                   <tr key={operator.id}>
                     <td>
                       <strong>{operator.email}</strong>
-                      <span className={`operator-account-state ${operator.disabled ? "disabled" : "active"}`}>
-                        {operator.disabled ? "Disabled" : "Active"}
-                      </span>
+                      <StatusBadge tone={operator.disabled ? "off" : "ok"}>{operator.disabled ? "Disabled" : "Active"}</StatusBadge>
                     </td>
                     <td>
-                      <span className={`operator-role role-${operator.role}`}>
-                        {operatorRoleLabel(operator.role)}
-                      </span>
+                      <span className="text-sm">{operatorRoleLabel(operator.role)}</span>
                       {operator.id === currentOperatorId ? <small>Current operator</small> : null}
                     </td>
                     <td>

@@ -142,8 +142,8 @@ export function ClientSiteSetup({
         </div>
       </section>
 
-      <div className="client-site-setup-grid">
-        <form className="client-site-setup-card" onSubmit={createClient}>
+      <div className="grid max-w-[640px] gap-6">
+        <form className="rounded-[10px] border border-(--line) bg-(--paper) p-5" onSubmit={createClient}>
           <header>
             <span className="">01</span>
             <Building2 aria-hidden="true" size={20} />
@@ -187,7 +187,7 @@ export function ClientSiteSetup({
           </footer>
         </form>
 
-        <form className="client-site-setup-card" onSubmit={createSite}>
+        <form className="rounded-[10px] border border-(--line) bg-(--paper) p-5" onSubmit={createSite}>
           <header>
             <span className="">02</span>
             <MapPin aria-hidden="true" size={20} />
