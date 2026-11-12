@@ -266,7 +266,6 @@ export function SignOutEverywhereAction({
     <>
       <Button
         variant="danger"
-        icon={LogOut}
         onClick={() => {
           setError("");
           setNotice("");
@@ -280,25 +279,15 @@ export function SignOutEverywhereAction({
           <StatusNote tone="ok" role="status" title={notice} />
         </div>
       ) : null}
-      <ActionDialog
+      <ConfirmDialog
         open={open}
-        onClose={() => setOpen(false)}
+        onCancel={() => setOpen(false)}
         title={`Sign ${operator.email} out everywhere?`}
-        description={
-          <>
-            <p className="m-0">
-              Every session issued to this operator stops working. The account stays {operator.disabled ? "disabled" : "active"}, and they can sign in
-              again with their current password.
-            </p>
-            {isCurrentOperator ? <p className="m-0">This includes your own session; you will be taken to the sign-in page.</p> : null}
-          </>
-        }
+        consequence={`Every session issued to this operator stops working.${isCurrentOperator ? " This includes your current session." : ""} The API does not store this reason.`}
         confirmLabel={pending ? "Signing out…" : "Sign out everywhere"}
-        confirmVariant="danger"
         onConfirm={revokeSessions}
         busy={pending}
         error={error || undefined}
-        icon={LogOut}
       />
     </>
   );
