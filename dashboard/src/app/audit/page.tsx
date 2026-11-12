@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { ChevronLeft, ChevronRight, Filter, ListChecks, ShieldCheck } from "lucide-react";
+import { ChevronLeft, ChevronRight, ListChecks, ShieldCheck, Anchor } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -12,8 +12,6 @@ import {
   describeChainIntegrity,
   describePublication,
   formatAuditAction,
-  formatAuditSequence,
-  formatAuditTimestamp,
   hasAuditFilters,
   hasIntegrityFailure,
   hasNextAuditPage,
@@ -29,6 +27,15 @@ import {
   type AuditEventPage,
 } from "@/lib/audit";
 import { getDashboardSession } from "@/lib/dashboard-session";
+
+import { PageHeader, PageStack } from "@/components/shell/page-header";
+import { StatRow, StatTile } from "@/components/ui/stat-tile";
+import { TabNav } from "@/components/ui/tab-nav";
+import { Button, ButtonLink } from "@/components/ui/button";
+import { Input, Select } from "@/components/ui/field";
+import { EmptyState, ErrorState } from "@/components/ui/states";
+import { TableFooter } from "@/components/ui/data-table";
+import { AuditEventsTable } from "@/components/compliance/audit-events-table";
 
 export const dynamic = "force-dynamic";
 
@@ -79,166 +86,27 @@ export default async function AuditTimelinePage({
   const failing = hasIntegrityFailure(chainStatement, publicationStatement);
   const pageCount = auditPageCount(events?.total ?? 0);
 
-  return (
-    <>
-      <header className="enrollment-page-head">
-        <div>
-          <span>Tamper-evident evidence</span>
-          <h1>Audit timeline</h1>
-          <p>
-            Every recorded action in sequence order, newest first. Sequence numbers are the values the
-            hash chain binds, so a gap here is a gap in the evidence.
-          </p>
-        </div>
-        <Link className="enrollment-primary-link" href="/audit/anchors">
-          <ShieldCheck size={16} /> Anchors &amp; receipts
-        </Link>
-      </header>
-
-      <AuditIntegrityBanner statement={chainStatement} />
-      <AuditIntegrityBanner statement={publicationStatement} />
-
-      <form className="enrollment-filter audit-filter" method="get">
-        <label>
-          <Filter size={16} />
-          <span className="sr-only">Filter event type</span>
-          <select defaultValue={query.eventType ?? ""} name="event">
-            <option value="">All events</option>
-            {eventTypes.map((eventType) => (
-              <option key={eventType} value={eventType}>
-                {formatAuditAction(eventType)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span className="sr-only">Filter by actor</span>
-          <input defaultValue={query.actor ?? ""} name="actor" placeholder="Actor contains…" type="search" />
-        </label>
-        <label>
-          <span className="sr-only">Filter by agent ID</span>
-          <input defaultValue={query.agentId ?? ""} name="agent" placeholder="Agent ID" type="search" />
-        </label>
-        <label>
-          <span className="sr-only">Events from date (UTC)</span>
-          <input defaultValue={query.dateFrom ?? ""} name="from" type="date" />
-        </label>
-        <label>
-          <span className="sr-only">Events to date (UTC)</span>
-          <input defaultValue={query.dateTo ?? ""} name="to" type="date" />
-        </label>
-        <button type="submit">Apply</button>
-        {hasAuditFilters(query) ? <Link className="audit-filter-clear" href="/audit">Clear</Link> : null}
-      </form>
-
-      <section className="enrollment-panel">
-        <header>
-          <div>
-            <span>Audit register</span>
-            <h2>
-              {events === null ? "Unavailable" : `${events.total} event${events.total === 1 ? "" : "s"}`}
-            </h2>
-            {events === null ? null : (
-              <small>
-                Page {events.page} of {pageCount} · {AUDIT_PAGE_SIZE} per page
-                {events.before_seq === null ? "" : ` · through seq ${events.before_seq}`}
-              </small>
-            )}
-          </div>
-          <ListChecks size={19} />
-        </header>
-
-        {events === null ? (
-          <div className="enrollment-empty" role="alert">
-            <ListChecks size={24} />
-            <h3>The audit timeline could not be loaded</h3>
-            <p>
-              No events are shown because none could be read — this is not evidence that no events
-              exist. Retry, and treat the gap as unexplained until the timeline loads.
-            </p>
-          </div>
-        ) : events.items.length === 0 ? (
-          <div className="enrollment-empty">
-            <ListChecks size={24} />
-            <h3>No events match these filters</h3>
-            <p>
-              {hasAuditFilters(query)
-                ? "Clear or widen the filters to see the surrounding sequence."
-                : "No audit events have been recorded yet."}
-            </p>
-          </div>
-        ) : (
-          <div className="enrollment-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Seq</th>
-                  <th>Action</th>
-                  <th>Actor</th>
-                  <th>Subject</th>
-                  <th>Source</th>
-                  <th>Recorded (UTC)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.items.map((event) => (
-                  <tr key={event.id}>
-                    <td><code>{formatAuditSequence(event.seq)}</code></td>
-                    <td>
-                      <Link href={`/audit/events/${encodeURIComponent(event.id)}`}>
-                        {formatAuditAction(event.action)}
-                      </Link>
-                      <code>{event.id}</code>
-                    </td>
-                    <td>{event.actor}</td>
-                    <td>
-                      {event.agent_id ? <code>agent {event.agent_id}</code> : null}
-                      {event.enrollment_token_id ? <code>token {event.enrollment_token_id}</code> : null}
-                      {!event.agent_id && !event.enrollment_token_id ? "—" : null}
-                    </td>
-                    <td>{event.source_ip ?? "Not recorded"}</td>
-                    <td>{formatAuditTimestamp(event.ts)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {events === null || events.items.length === 0 ? null : (
-          <footer className="enrollment-pagination">
-            <span>
-              Showing {events.items.length} of {events.total} event{events.total === 1 ? "" : "s"}
-            </span>
-            <span className="audit-pager">
-              {query.page > 1 ? (
-                <Link href={auditPageHref(query, query.page - 1, events.before_seq)} rel="prev">
-                  <ChevronLeft size={14} /> Newer
-                </Link>
-              ) : null}
-              {hasNextAuditPage(events.page, events.total) ? (
-                <Link href={auditPageHref(query, query.page + 1, events.before_seq)} rel="next">
-                  Older <ChevronRight size={14} />
-                </Link>
-              ) : null}
-            </span>
-          </footer>
-        )}
-      </section>
-
-      {failing ? null : (
-        <p className="audit-note">
-          Viewing this timeline is itself recorded as an <code>audit_timeline.viewed</code> event, so
-          the register grows as it is read. Paging stays pinned to the sequence ceiling shown above —
-          {query.beforeSeq ? " you are viewing a snapshot; " : " "}
-          {query.beforeSeq ? (
-            <Link href="/audit">reload for the newest events</Link>
-          ) : (
-            "events recorded while you page are picked up on the next fresh load"
-          )}
-          .
-        </p>
-      )}
-    </>
-  );
+  return <PageStack>
+    <PageHeader breadcrumb={[{ label: "Compliance" }, { label: "Audit" }]} title="Audit timeline" description="Recorded actions in sequence order, newest first. Filters may hide intervening events." />
+    <StatRow>
+      <StatTile icon={ListChecks} label="Matching events" value={events?.total ?? "—"} />
+      <StatTile icon={ListChecks} label="Page" value={events ? `${events.page} of ${pageCount}` : "—"} sub={`${AUDIT_PAGE_SIZE} events per page`} />
+      <StatTile icon={ShieldCheck} label="Chain check" value={chain === null ? "Unknown" : chain.intact ? "Verified" : "Failed"} tone={chain === null ? "off" : chain.intact ? "ok" : "crit"} />
+      <StatTile icon={Anchor} label="Published anchors" value={publication?.published ?? "—"} />
+    </StatRow>
+    <TabNav label="Audit views" tabs={[{ label: "Events", href: "/audit", current: true }, { label: "Integrity anchors", href: "/audit/anchors", current: false }]} />
+    <AuditIntegrityBanner statement={chainStatement} /><AuditIntegrityBanner statement={publicationStatement} />
+    <AuditEventsTable rows={events?.items ?? []} filters={<form method="get" className="flex flex-wrap items-end gap-3 border-b border-(--line) p-5">
+      <Select label="Event type" name="event" defaultValue={query.eventType ?? ""}><option value="">All events</option>{eventTypes.map(type => <option key={type} value={type}>{formatAuditAction(type)}</option>)}</Select>
+      <Input label="Actor" name="actor" type="search" defaultValue={query.actor ?? ""} />
+      <Input label="Agent ID" name="agent" type="search" defaultValue={query.agentId ?? ""} />
+      <Input label="From date (UTC)" name="from" type="date" defaultValue={query.dateFrom ?? ""} />
+      <Input label="To date (UTC)" name="to" type="date" defaultValue={query.dateTo ?? ""} />
+      <Button type="submit">Apply</Button>{hasAuditFilters(query) ? <ButtonLink href="/audit" variant="quiet">Clear</ButtonLink> : null}
+    </form>}
+      state={events === null ? <ErrorState title="The audit timeline could not be loaded" body="No events could be read. This is not evidence that no events exist" /> : events.items.length === 0 ? <EmptyState title="No events match these filters" body={hasAuditFilters(query) ? "Clear or widen the filters to see the surrounding sequence." : "No audit events were returned."} /> : undefined}
+      footer={events && events.items.length > 0 ? <TableFooter shown={events.items.length} total={events.total} sortNote={`newest sequence first${events.before_seq === null ? "" : ` · through seq ${events.before_seq}`}`} pagination={<div className="flex gap-3">{query.page > 1 ? <Link href={auditPageHref(query, query.page - 1, events.before_seq)} rel="prev"><ChevronLeft size={14} /> Newer</Link> : null}{hasNextAuditPage(events.page, events.total) ? <Link href={auditPageHref(query, query.page + 1, events.before_seq)} rel="next">Older <ChevronRight size={14} /></Link> : null}</div>} /> : null}
+    />
+    {failing ? null : <p className="text-xs text-(--muted)">Viewing this timeline is recorded as an <code>audit_timeline.viewed</code> event. Paging stays pinned to the sequence ceiling shown above. {query.beforeSeq ? <Link href="/audit">Reload for the newest events.</Link> : "Events recorded while you page appear on the next fresh load."}</p>}
+  </PageStack>;
 }
