@@ -22,8 +22,8 @@ const pipeMode = windows.PIPE_TYPE_MESSAGE | windows.PIPE_READMODE_MESSAGE | win
 
 var clientSession = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetNamedPipeClientSessionId")
 
-func newPipe(name string) (windows.Handle, error) {
-	sd, err := windows.SecurityDescriptorFromString(pipeACL)
+func newPipe(name, acl string) (windows.Handle, error) {
+	sd, err := windows.SecurityDescriptorFromString(acl)
 	if err != nil {
 		return 0, err
 	}
@@ -32,9 +32,12 @@ func newPipe(name string) (windows.Handle, error) {
 	return windows.CreateNamedPipe(path, windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, pipeMode, 1, 1, 256, 0, &sa)
 }
 
-func Serve(ctx context.Context, handle Handler) error { return serve(ctx, Name, handle) }
-func serve(ctx context.Context, name string, handle Handler) error {
-	pipe, err := newPipe(name)
+func Serve(ctx context.Context, handle Handler) error { return serve(ctx, Name, pipeACL, handle) }
+
+// serve takes the DACL so tests can grant their own (non-INTERACTIVE) CI token
+// the same minimal client access mask; production always passes pipeACL.
+func serve(ctx context.Context, name, acl string, handle Handler) error {
+	pipe, err := newPipe(name, acl)
 	if err != nil {
 		return ErrUnavailable
 	}

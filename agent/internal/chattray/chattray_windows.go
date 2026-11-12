@@ -6,7 +6,6 @@ package chattray
 import (
 	"context"
 	_ "embed"
-	"encoding/binary"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -51,10 +50,6 @@ var (
 
 const (
 	wmDestroy      = 0x0002
-	wmLButtonUp    = 0x0202
-	wmLButtonDbl   = 0x0203
-	wmRButtonUp    = 0x0205
-	wmContextMenu  = 0x007B
 	wmApp          = 0x8000
 	wmTrayCallback = wmApp + 1
 	wmChatResult   = wmApp + 2
@@ -75,9 +70,6 @@ const (
 	mfString       = 0x0
 
 	smCxSmIcon = 49
-
-	idOpen = 1
-	idExit = 2
 
 	errAlreadyExists = 183
 )
@@ -127,69 +119,6 @@ type wndClassEx struct {
 	hIconSm       windows.Handle
 }
 
-type action int
-
-const (
-	actNone action = iota
-	actOpen
-	actMenu
-)
-
-// actionForMessage maps a tray notification's mouse event to what the tray does.
-func actionForMessage(m uint32) action {
-	switch m {
-	case wmLButtonUp, wmLButtonDbl:
-		return actOpen
-	case wmRButtonUp, wmContextMenu:
-		return actMenu
-	}
-	return actNone
-}
-
-// pickIcoEntry parses a .ico container and returns the byte range of the image
-// whose width best matches want (0-width means 256). It is pure so it can be
-// unit-tested against the embedded asset.
-func pickIcoEntry(data []byte, want int) (offset, size uint32, err error) {
-	if len(data) < 6 {
-		return 0, 0, ErrUnsupported
-	}
-	if binary.LittleEndian.Uint16(data[0:2]) != 0 || binary.LittleEndian.Uint16(data[2:4]) != 1 {
-		return 0, 0, ErrUnsupported
-	}
-	count := int(binary.LittleEndian.Uint16(data[4:6]))
-	if count == 0 || len(data) < 6+count*16 {
-		return 0, 0, ErrUnsupported
-	}
-	best := -1
-	bestScore := 1 << 30
-	for i := 0; i < count; i++ {
-		e := 6 + i*16
-		w := int(data[e])
-		if w == 0 {
-			w = 256
-		}
-		off := binary.LittleEndian.Uint32(data[e+12 : e+16])
-		sz := binary.LittleEndian.Uint32(data[e+8 : e+12])
-		if off == 0 || sz == 0 || uint64(off)+uint64(sz) > uint64(len(data)) {
-			continue
-		}
-		score := w - want
-		if score < 0 {
-			score = -score
-		}
-		if score < bestScore {
-			bestScore = score
-			best = i
-			offset = off
-			size = sz
-		}
-	}
-	if best < 0 {
-		return 0, 0, ErrUnsupported
-	}
-	return offset, size, nil
-}
-
 func loadIcon(data []byte) (windows.Handle, error) {
 	want, _, _ := pGetSystemMetrics.Call(uintptr(smCxSmIcon))
 	off, size, err := pickIcoEntry(data, int(want))
@@ -214,16 +143,40 @@ func utf16(s string, out []uint16) {
 	}
 }
 
+// trayAPI is the Win32 surface behind the tray's decisions. win32 binds it to
+// user32/shell32; tests substitute fakes to drive wndProc without a desktop.
+type trayAPI struct {
+	notifyIcon    func(op uintptr, nid *notifyIconData)
+	post          func(hwnd windows.Handle, msg uint32, wParam uintptr)
+	defWindowProc func(hwnd windows.Handle, msg uint32, wParam, lParam uintptr) uintptr
+	postQuit      func()
+	destroyWindow func(hwnd windows.Handle)
+	popupMenu     func(hwnd windows.Handle) uintptr
+	requestChat   func(context.Context) error
+}
+
+var win32 = trayAPI{
+	notifyIcon: func(op uintptr, nid *notifyIconData) { pShellNotifyIcon.Call(op, uintptr(unsafe.Pointer(nid))) },
+	post: func(hwnd windows.Handle, msg uint32, wParam uintptr) {
+		pPostMessage.Call(uintptr(hwnd), uintptr(msg), wParam, 0)
+	},
+	defWindowProc: func(hwnd windows.Handle, msg uint32, wParam, lParam uintptr) uintptr {
+		r, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(msg), wParam, lParam)
+		return r
+	},
+	postQuit:      func() { pPostQuitMessage.Call(0) },
+	destroyWindow: func(hwnd windows.Handle) { pDestroyWindow.Call(uintptr(hwnd)) },
+	popupMenu:     popupMenu,
+	requestChat:   chatpipe.Request,
+}
+
 type tray struct {
+	sys     trayAPI
 	hwnd    windows.Handle
 	hicon   windows.Handle
 	taskbar uint32
 	mu      sync.Mutex
 	lastErr string
-}
-
-func (t *tray) notify(op uintptr, nid *notifyIconData) {
-	pShellNotifyIcon.Call(op, uintptr(unsafe.Pointer(nid)))
 }
 
 func (t *tray) baseIcon() notifyIconData {
@@ -241,7 +194,7 @@ func (t *tray) baseIcon() notifyIconData {
 
 func (t *tray) add() {
 	nid := t.baseIcon()
-	t.notify(nimAdd, &nid)
+	t.sys.notifyIcon(nimAdd, &nid)
 }
 
 func (t *tray) balloon(title, body string) {
@@ -250,7 +203,7 @@ func (t *tray) balloon(title, body string) {
 	nid.dwInfoFlags = niifWarning
 	utf16(title, nid.szInfoTitle[:])
 	utf16(body, nid.szInfo[:])
-	t.notify(nimModify, &nid)
+	t.sys.notifyIcon(nimModify, &nid)
 }
 
 func (t *tray) remove() {
@@ -259,14 +212,14 @@ func (t *tray) remove() {
 		hWnd:   t.hwnd,
 		uID:    1,
 	}
-	t.notify(nimDelete, &nid)
+	t.sys.notifyIcon(nimDelete, &nid)
 }
 
 // openChat runs the same pipe request as `rmm-agent chat` off the UI thread and
 // reports failure back to the message loop so a balloon is shown on that thread.
 func (t *tray) openChat() {
 	go func() {
-		err := chatpipe.Request(context.Background())
+		err := t.sys.requestChat(context.Background())
 		ok := uintptr(1)
 		if err != nil {
 			t.mu.Lock()
@@ -274,14 +227,16 @@ func (t *tray) openChat() {
 			t.mu.Unlock()
 			ok = 0
 		}
-		pPostMessage.Call(uintptr(t.hwnd), wmChatResult, ok, 0)
+		t.sys.post(t.hwnd, wmChatResult, ok)
 	}()
 }
 
-func (t *tray) showMenu() {
+// popupMenu shows the Open/Exit menu at the cursor and returns the chosen
+// command, or 0 when dismissed.
+func popupMenu(hwnd windows.Handle) uintptr {
 	menu, _, _ := pCreatePopupMenu.Call()
 	if menu == 0 {
-		return
+		return 0
 	}
 	defer pDestroyMenu.Call(menu)
 	open := windows.StringToUTF16Ptr("Open support chat")
@@ -291,14 +246,18 @@ func (t *tray) showMenu() {
 	var pt point
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 	// A foreground window is required so the menu dismisses on outside clicks.
-	pSetForegroundWindow.Call(uintptr(t.hwnd))
+	pSetForegroundWindow.Call(uintptr(hwnd))
 	cmd, _, _ := pTrackPopupMenu.Call(menu, tpmRightButton|tpmReturnCmd,
-		uintptr(pt.x), uintptr(pt.y), 0, uintptr(t.hwnd), 0)
-	switch cmd {
-	case idOpen:
+		uintptr(pt.x), uintptr(pt.y), 0, uintptr(hwnd), 0)
+	return cmd
+}
+
+func (t *tray) showMenu() {
+	switch actionForMenu(t.sys.popupMenu(t.hwnd)) {
+	case actOpen:
 		t.openChat()
-	case idExit:
-		pDestroyWindow.Call(uintptr(t.hwnd))
+	case actExit:
+		t.sys.destroyWindow(t.hwnd)
 	}
 }
 
@@ -317,15 +276,12 @@ func (t *tray) wndProc(hwnd windows.Handle, msg uint32, wParam, lParam uintptr) 
 			t.mu.Lock()
 			body := t.lastErr
 			t.mu.Unlock()
-			if body == "" {
-				body = "NodeLink Support could not open."
-			}
-			t.balloon("NodeLink Support", body)
+			t.balloon("NodeLink Support", failureBody(body))
 		}
 		return 0
 	case wmDestroy:
 		t.remove()
-		pPostQuitMessage.Call(0)
+		t.sys.postQuit()
 		return 0
 	default:
 		if t.taskbar != 0 && msg == t.taskbar {
@@ -334,8 +290,7 @@ func (t *tray) wndProc(hwnd windows.Handle, msg uint32, wParam, lParam uintptr) 
 			return 0
 		}
 	}
-	r, _, _ := pDefWindowProc.Call(uintptr(hwnd), uintptr(msg), wParam, lParam)
-	return r
+	return t.sys.defWindowProc(hwnd, msg, wParam, lParam)
 }
 
 func run() error {
@@ -350,7 +305,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	t := &tray{hicon: hicon}
+	t := &tray{sys: win32, hicon: hicon}
 
 	hInst, _, _ := pGetModuleHandle.Call(0)
 	className := windows.StringToUTF16Ptr("NodeLinkSupportTray")
