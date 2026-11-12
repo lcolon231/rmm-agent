@@ -2,6 +2,9 @@
 
 "use client";
 
+import { ManagedSurface, useReasonConfirmation } from "./admin/managed-surface";
+import { PageHeader } from "./shell/page-header";
+import { StatRow, StatTile } from "./ui/stat-tile";
 import { KeyRound, LifeBuoy, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useCallback, useState } from "react";
@@ -34,6 +37,7 @@ type MfaSettingsViewProps = {
  */
 export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsViewProps) {
   const [status, setStatus] = useState(initialStatus);
+  const confirmation = useReasonConfirmation();
   const [error, setError] = useState(initialError);
   const [notice, setNotice] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -169,14 +173,7 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
     }
   }
 
-  async function revokeDevice(credential: MfaCredentialRecord) {
-    const reason = window.prompt(
-      `Why are you removing "${credential.name}"? This is recorded in the audit log.`,
-      "",
-    );
-    if (reason === null || reason.trim().length < 3) {
-      return;
-    }
+  async function revokeDevice(credential: MfaCredentialRecord, reason: string) {
     begin();
     try {
       const response = await fetch(`/api/auth/mfa/credentials/${credential.id}/revoke`, {
@@ -196,11 +193,6 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
   }
 
   async function mintRecoveryCodes() {
-    if (!window.confirm(
-      "Generating new recovery codes immediately invalidates any codes you saved before. Continue?",
-    )) {
-      return;
-    }
     begin();
     setRecoveryCodes(null);
     try {
@@ -232,35 +224,28 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
   const stepUpNeeded = status.enrolled && !status.step_up_satisfied;
 
   return (
-    <section className="mfa-settings">
-      <header>
-        <h1>Security keys</h1>
-        <p>
-          A security key proves it is you by signing a challenge that is bound to this
-          site&apos;s domain, so a look-alike phishing page cannot reuse it. NodeLink
-          never receives or stores anything that could be replayed as your key.
-        </p>
-      </header>
+    <ManagedSurface><section>
+<PageHeader breadcrumb={[{ label: "Administration" }, { label: "Security" }]} title="Security keys and MFA" description="Manage your sign-in methods and recovery codes." /><StatRow><StatTile icon={ShieldCheck} label="Registered keys" value={status.credentials.length} /><StatTile icon={ShieldCheck} label="Enrolled" value={status.enrolled ? "Yes" : "No"} /><StatTile icon={ShieldAlert} label="Fresh verification" value={status.step_up_satisfied ? "Satisfied" : "Required"} /></StatRow>
 
       {status.enforcement === "off" ? (
-        <p className="mfa-banner" role="status">
+        <p className="" role="status">
           Multi-factor authentication is turned off for this deployment. Existing keys
           are kept but are not required or usable until it is re-enabled.
         </p>
       ) : null}
 
       {status.enrollment_required && !status.enrolled ? (
-        <p className="mfa-banner mfa-banner-warning" role="alert">
+        <p className="" role="alert">
           <ShieldAlert aria-hidden="true" size={16} /> Your role requires a security key.
           Register one below.
         </p>
       ) : null}
 
-      {error ? <p className="login-error" role="alert">{error}</p> : null}
-      {notice ? <p className="mfa-banner" role="status">{notice}</p> : null}
+      {error ? <p className="" role="alert">{error}</p> : null}
+      {notice ? <p className="" role="status">{notice}</p> : null}
 
       {stepUpNeeded ? (
-        <div className="mfa-banner mfa-banner-warning">
+        <div className="">
           <p>
             Changing security settings needs a fresh confirmation from one of your keys.
             {status.session_methods.includes("recovery_code")
@@ -277,7 +262,7 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
       {status.credentials.length === 0 ? (
         <p>No security keys are registered on this account yet.</p>
       ) : (
-        <ul className="mfa-credential-list">
+        <ul className="">
           {status.credentials.map((credential) => (
             <li key={credential.id}>
               <div>
@@ -290,7 +275,7 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
                   {credential.backup_state ? " · synced passkey" : ""}
                 </small>
               </div>
-              <div className="mfa-credential-actions">
+              <div className="">
                 <button
                   disabled={isBusy || stepUpNeeded}
                   onClick={() => renameDevice(credential)}
@@ -300,7 +285,7 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
                 </button>
                 <button
                   disabled={isBusy || stepUpNeeded}
-                  onClick={() => revokeDevice(credential)}
+                  onClick={() => confirmation.ask("Remove security key?", "This key will no longer authenticate this account.", (reason) => revokeDevice(credential, reason))}
                   type="button"
                 >
                   <Trash2 size={14} /> Remove
@@ -313,7 +298,7 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
 
       <h2>Add a key</h2>
       {!supported ? (
-        <p className="login-error" role="alert">{mfaErrorMessage("unsupported-browser")}</p>
+        <p className="" role="alert">{mfaErrorMessage("unsupported-browser")}</p>
       ) : null}
       <form onSubmit={addDevice}>
         <label htmlFor="device-name">Device name</label>
@@ -342,7 +327,7 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
         — it deliberately cannot change your security settings on its own.
       </p>
       {recoveryCodes ? (
-        <div className="mfa-recovery-codes" role="status">
+        <div className="" role="status">
           <p>
             <strong>Save these now.</strong> They are shown once and cannot be retrieved
             again. Any codes from a previous batch have stopped working.
@@ -354,11 +339,11 @@ export function MfaSettingsView({ initialError, initialStatus }: MfaSettingsView
       ) : null}
       <button
         disabled={isBusy || !status.enrolled || stepUpNeeded}
-        onClick={mintRecoveryCodes}
+        onClick={() => confirmation.ask("Replace recovery codes?", "All previous recovery codes stop working. This API does not store the reason.", mintRecoveryCodes)}
         type="button"
       >
         <LifeBuoy size={16} /> Generate new recovery codes
       </button>
-    </section>
+    {confirmation.dialog}</section></ManagedSurface>
   );
 }
