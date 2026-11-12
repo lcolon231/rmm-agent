@@ -27,7 +27,10 @@ def main() -> int:
     drift = False
     for path, document in outputs.items():
         rendered = public_contracts.render(document)
-        current = path.read_text(encoding="utf-8") if path.exists() else None
+        # Compare newline-normalized: a Windows checkout may hold CRLF copies.
+        current = (
+            path.read_text(encoding="utf-8").replace("\r\n", "\n") if path.exists() else None
+        )
         if current == rendered:
             continue
         drift = True
