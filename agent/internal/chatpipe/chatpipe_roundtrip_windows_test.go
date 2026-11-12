@@ -108,10 +108,14 @@ func awaitReply(t *testing.T, pipe windows.Handle) (status byte, got bool) {
 // pipe or a previous client still holds the single instance. ErrUnavailable is
 // only returned before the opcode is sent, so a retry can never double-open.
 func requestWithin(name string) error {
+	return retryUnavailable(func(ctx context.Context) error { return request(ctx, name) })
+}
+
+func retryUnavailable(send func(context.Context) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for {
-		err := request(ctx, name)
+		err := send(ctx)
 		if err != ErrUnavailable || !pause(ctx) {
 			return err
 		}
@@ -271,9 +275,7 @@ func TestPublicServeAndRequestUseServiceName(t *testing.T) {
 	windows.CloseHandle(probe)
 	opened := make(chan struct{}, 1)
 	startServer(t, Name, func(context.Context, uint32) error { opened <- struct{}{}; return nil })
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := Request(ctx); err != nil {
+	if err := retryUnavailable(Request); err != nil {
 		t.Fatalf("Request = %v", err)
 	}
 	<-opened
