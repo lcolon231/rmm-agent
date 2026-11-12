@@ -1,12 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 "use client";
 
-import { LoaderCircle, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { CalendarClock, CircleAlert, Layers3, ListChecks, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
-import styles from "./patch-policy-manager.module.css";
-
+import { PATCH_POLICIES_DESCRIPTION } from "@/components/patching/copy";
+import { PageHeader, PageStack } from "@/components/shell/page-header";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { cx, focusRing } from "@/components/ui/cx";
+import { DataTable, PrimaryCell, TableFooter, type Column } from "@/components/ui/data-table";
+import { DefinitionList, Drawer } from "@/components/ui/drawer";
+import { Input, Select } from "@/components/ui/field";
+import { FilterBar, FilterChip } from "@/components/ui/filter-bar";
+import { StatRow, StatTile } from "@/components/ui/stat-tile";
+import { EmptyState } from "@/components/ui/states";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { formatDurationSeconds } from "@/lib/maintenance-windows-core";
 import { formatMonitoringTimestamp } from "@/lib/monitoring-core";
 import {
   formatPatchScope,
@@ -22,6 +33,36 @@ const scopeOptions: Array<{ value: PatchScope; label: string }> = [
   { value: "site", label: "Site" },
   { value: "agent", label: "Endpoint" },
 ];
+
+const REBOOT_LABEL: Record<RebootPolicy, string> = { never: "Never", if_required: "If required", forced: "Forced" };
+
+type StateFilter = "all" | "active" | "disabled";
+
+function byName(a: PatchApprovalPolicy, b: PatchApprovalPolicy) {
+  return a.name.localeCompare(b.name);
+}
+
+function appliesTo(policy: PatchApprovalPolicy): ReactNode {
+  return (
+    <PrimaryCell
+      title={formatPatchScope(policy.scope)}
+      sub={policy.scope_id ? <span className="font-(family-name:--font-data)">{policy.scope_id}</span> : "All managed endpoints"}
+    />
+  );
+}
+
+function stateBadge(policy: PatchApprovalPolicy) {
+  return policy.enabled ? <StatusBadge tone="ok">Active</StatusBadge> : <StatusBadge tone="off">Disabled</StatusBadge>;
+}
+
+function Checkbox({ checked, onChange, children }: { checked: boolean; onChange: (value: boolean) => void; children: string }) {
+  return (
+    <label className="flex items-center gap-2.5 text-sm text-(--slate)">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className={cx("size-4 accent-(--primary-strong)", focusRing)} />
+      <span>{children}</span>
+    </label>
+  );
+}
 
 export function PatchPolicyManager({
   initialPolicies,
@@ -43,6 +84,17 @@ export function PatchPolicyManager({
   const [maxAttempts, setMaxAttempts] = useState(2);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [createError, setCreateError] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<PatchApprovalPolicy | null>(null);
+  const [filter, setFilter] = useState<StateFilter>("all");
+
+  const ordered = useMemo(() => [...policies].sort(byName), [policies]);
+  const activeCount = policies.filter((policy) => policy.enabled).length;
+  const shown = ordered.filter((policy) => filter === "all" || (filter === "active") === policy.enabled);
+  const selected = policies.find((policy) => policy.id === selectedId) ?? null;
 
   async function responseBody<T>(response: Response): Promise<T> {
     const body = await response.json().catch(() => null) as (T & { error?: string }) | null;
@@ -53,7 +105,7 @@ export function PatchPolicyManager({
   async function create(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy("create");
-    setError("");
+    setCreateError("");
     try {
       const response = await fetch("/api/patch-policies", {
         method: "POST",
@@ -73,12 +125,13 @@ export function PatchPolicyManager({
         }),
       });
       const body = await responseBody<{ policy: PatchApprovalPolicy }>(response);
-      setPolicies((current) => [...current, body.policy].sort((a, b) => a.name.localeCompare(b.name)));
+      setPolicies((current) => [...current, body.policy].sort(byName));
       setName("");
       setScopeId("");
+      setCreating(false);
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The policy could not be created.");
+      setCreateError(caught instanceof Error ? caught.message : "The policy could not be created.");
     } finally {
       setBusy(null);
     }
@@ -103,10 +156,11 @@ export function PatchPolicyManager({
     }
   }
 
+  // The delete API takes no reason, so the typed reason is a deliberate pause
+  // and is not sent; the deletion itself is recorded by the management service.
   async function remove(policy: PatchApprovalPolicy) {
-    if (!window.confirm(`Delete ${policy.name}? Endpoints it governs revert to Exempt.`)) return;
     setBusy(`delete:${policy.id}`);
-    setError("");
+    setDeleteError("");
     try {
       const response = await fetch(`/api/patch-policies/${encodeURIComponent(policy.id)}`, {
         method: "DELETE",
@@ -114,129 +168,217 @@ export function PatchPolicyManager({
       });
       await responseBody<{ deleted: true }>(response);
       setPolicies((current) => current.filter((item) => item.id !== policy.id));
+      setDeleting(null);
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The policy could not be deleted.");
+      setDeleteError(`${caught instanceof Error ? caught.message : "The policy could not be deleted."} Nothing was changed.`);
     } finally {
       setBusy(null);
     }
   }
 
+  function openCreate() {
+    setCreateError("");
+    setSelectedId(null);
+    setCreating(true);
+  }
+
+  function openDelete(policy: PatchApprovalPolicy) {
+    setDeleteError("");
+    setSelectedId(null);
+    setDeleting(policy);
+  }
+
+  const columns: Column<PatchApprovalPolicy>[] = [
+    { key: "policy", header: "Policy", cell: (policy) => <PrimaryCell title={policy.name} sub={`Version ${policy.current_version}`} /> },
+    { key: "scope", header: "Applies to", cell: appliesTo },
+    { key: "default", header: "Unmatched updates", cell: (policy) => (policy.default_action === "approve" ? "Approved" : "Denied") },
+    { key: "installs", header: "Installs during", cell: (policy) => (policy.require_maintenance_window ? "Maintenance windows only" : "Any time") },
+    { key: "restart", header: "Restart", cell: (policy) => REBOOT_LABEL[policy.reboot_policy] },
+    { key: "rules", header: "Rules", align: "end", cell: (policy) => <span className="tabular-nums">{policy.rule_count}</span> },
+    { key: "state", header: "State", cell: stateBadge },
+  ];
+
+  const tableState =
+    policies.length === 0 ? (
+      <EmptyState
+        icon={ShieldCheck}
+        title="No patch approval policies yet"
+        body={canAdmin ? "Create a policy so the devices it covers stop being exempt." : "Until a policy is created, Windows Update installs proceed without an approval gate."}
+        actionLabel={canAdmin ? "New policy" : undefined}
+        onAction={canAdmin ? openCreate : undefined}
+      />
+    ) : shown.length === 0 ? (
+      <EmptyState title="No policies match" body="Clear the filter to see every policy." actionLabel="Clear filters" onAction={() => setFilter("all")} />
+    ) : undefined;
+
   return (
-    <>
-      {canAdmin ? (
-        <section className="enrollment-panel">
-          <header>
-            <div>
-              <span>New policy</span>
-              <h2>Create a patch approval policy</h2>
-              <small>New policies apply the default action to every update.</small>
+    <PageStack>
+      <PageHeader
+        breadcrumb={[{ label: "Patching" }, { label: "Patch policies" }]}
+        title="Patch policies"
+        description={PATCH_POLICIES_DESCRIPTION}
+        actions={canAdmin ? <Button variant="primary" icon={Plus} onClick={openCreate}>New policy</Button> : null}
+      />
+      <StatRow>
+        <StatTile icon={ShieldCheck} label="Policies" value={policies.length} sub={`${activeCount} active · ${policies.length - activeCount} disabled`} />
+        <StatTile
+          icon={ListChecks}
+          label="Approve by default"
+          value={policies.filter((policy) => policy.default_action === "approve").length}
+          sub="Unmatched updates are approved"
+        />
+        <StatTile
+          icon={CalendarClock}
+          label="Need a window"
+          value={policies.filter((policy) => policy.require_maintenance_window).length}
+          sub="Install only in a maintenance window"
+        />
+        <StatTile icon={Layers3} label="Specific rules" value={policies.reduce((sum, policy) => sum + policy.rule_count, 0)} sub="Across all policies" />
+      </StatRow>
+      <p className="m-0 flex items-start gap-2 text-[13px] text-(--muted)">
+        <Layers3 size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
+        The most specific policy that targets a device governs its installs. Updates no rule matches get the policy default. With no policy, installs proceed unchanged.
+      </p>
+      {canAdmin ? null : (
+        <p role="status" className="m-0 text-sm text-(--muted)">
+          Your role can review patch policies. Creating, enabling, disabling or deleting one needs the administrator role.
+        </p>
+      )}
+      {error && !selected ? (
+        <p role="alert" className="m-0 flex items-center gap-2 rounded-lg bg-(--red-soft) px-4 py-3 text-sm text-(--red)">
+          <CircleAlert size={16} aria-hidden="true" />
+          {error} Nothing was changed.
+        </p>
+      ) : null}
+      <DataTable
+        caption="Patch policies"
+        columns={columns}
+        rows={shown}
+        rowKey={(policy) => policy.id}
+        rowLabel={(policy) => `Show rules for ${policy.name}`}
+        onRowSelect={(policy) => setSelectedId(policy.id)}
+        state={tableState}
+        minWidth={960}
+        filters={
+          <FilterBar>
+            <div role="group" aria-label="Filter by state" className="flex flex-wrap gap-2">
+              <FilterChip selected={filter === "all"} count={policies.length} onClick={() => setFilter("all")}>All</FilterChip>
+              <FilterChip selected={filter === "active"} count={activeCount} onClick={() => setFilter("active")}>Active</FilterChip>
+              <FilterChip selected={filter === "disabled"} count={policies.length - activeCount} onClick={() => setFilter("disabled")}>Disabled</FilterChip>
             </div>
-            <Plus aria-hidden="true" size={19} />
-          </header>
-          <form className={styles.form} onSubmit={create}>
-            <fieldset className={styles.group}>
-              <legend>Policy settings</legend>
-              <div className={styles.grid}>
-                <label className={styles.field}>
-                  <span>Policy name</span>
-                  <input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder="e.g. Workstation baseline" required />
-                </label>
-                <label className={styles.field}>
-                  <span>Scope</span>
-                  <select value={scope} onChange={(e) => setScope(e.target.value as PatchScope)}>
-                    {scopeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </label>
-                {scope !== "global" ? (
-                  <label className={styles.field}>
-                    <span>{formatPatchScope(scope)} ID</span>
-                    <input value={scopeId} onChange={(e) => setScopeId(e.target.value)} maxLength={36} placeholder="Target ID" required />
-                  </label>
-                ) : null}
-                <label className={styles.field}>
-                  <span>Default action</span>
-                  <select value={defaultAction} onChange={(e) => setDefaultAction(e.target.value as PatchDefaultAction)}>
-                    <option value="deny">Deny unmatched updates</option>
-                    <option value="approve">Approve unmatched updates</option>
-                  </select>
-                </label>
-              </div>
-              <label className={styles.check}>
-                <input type="checkbox" checked={requireWindow} onChange={(e) => setRequireWindow(e.target.checked)} />
-                <span>Require an active maintenance window to install</span>
-              </label>
-            </fieldset>
-            <fieldset className={styles.group}>
-              <legend>Installation &amp; reboot</legend>
-              <div className={styles.grid}>
-                <label className={styles.field}>
-                  <span>Reboot policy</span>
-                  <select value={rebootPolicy} onChange={(e) => setRebootPolicy(e.target.value as RebootPolicy)}>
-                    <option value="never">Never</option>
-                    <option value="if_required">If required</option>
-                    <option value="forced">Forced</option>
-                  </select>
-                </label>
-                <label className={styles.field}>
-                  <span>Reboot delay (seconds)</span>
-                  <input type="number" min={60} max={3600} value={rebootDelay} onChange={(e) => setRebootDelay(Number(e.target.value))} />
-                </label>
-                <label className={styles.field}>
-                  <span>Max install attempts</span>
-                  <input type="number" min={1} max={5} value={maxAttempts} onChange={(e) => setMaxAttempts(Number(e.target.value))} />
-                </label>
-              </div>
-              <label className={styles.check}>
-                <input type="checkbox" checked={rebootRequiresNoUser} onChange={(e) => setRebootRequiresNoUser(e.target.checked)} />
-                <span>Only reboot when no user is signed in</span>
-              </label>
-            </fieldset>
-            <div className={styles.footer}>
-              <p>The policy will be enabled when created.</p>
-              <button className={styles.submit} type="submit" disabled={busy === "create"}>
-                {busy === "create" ? <LoaderCircle aria-hidden="true" className="spin" size={15} /> : <Plus aria-hidden="true" size={16} />}
-                Create policy
-              </button>
-            </div>
-          </form>
-        </section>
+          </FilterBar>
+        }
+        footer={shown.length > 0 ? <TableFooter shown={shown.length} total={policies.length} sortNote="by name" /> : null}
+      />
+
+      {selected ? (
+        <Drawer
+          open
+          onClose={() => setSelectedId(null)}
+          context={formatPatchScope(selected.scope)}
+          title={selected.name}
+          sub={selected.scope_id ? <span className="font-(family-name:--font-data)">{selected.scope_id}</span> : "All managed endpoints"}
+          record={`Version ${selected.current_version} · first created ${formatMonitoringTimestamp(selected.created_at)}. Each change is kept as a new version.`}
+          footer={
+            canAdmin ? (
+              <>
+                <Button onClick={() => toggle(selected)} disabled={Boolean(busy)}>
+                  {selected.enabled ? "Disable policy" : "Enable policy"}
+                </Button>
+                <Button variant="danger" icon={Trash2} onClick={() => openDelete(selected)} disabled={Boolean(busy)}>
+                  Delete policy
+                </Button>
+              </>
+            ) : null
+          }
+        >
+          <div className="flex items-center gap-2">{stateBadge(selected)}</div>
+          <section className="grid gap-2.5">
+            <h3 className="m-0 text-sm font-semibold text-(--ink)">Rules</h3>
+            <DefinitionList
+              items={[
+                { term: "Unmatched updates", value: selected.default_action === "approve" ? "Approved" : "Denied" },
+                {
+                  term: "Specific rules",
+                  value: selected.rule_count === 0 ? "None. The default applies to every update." : `${selected.rule_count}`,
+                },
+                { term: "Installs during", value: selected.require_maintenance_window ? "Maintenance windows only" : "Any time" },
+              ]}
+            />
+          </section>
+          <section className="grid gap-2.5">
+            <h3 className="m-0 text-sm font-semibold text-(--ink)">Installation and restart</h3>
+            <DefinitionList
+              items={[
+                { term: "Restart", value: REBOOT_LABEL[selected.reboot_policy] },
+                { term: "Restart delay", value: formatDurationSeconds(selected.reboot_delay_seconds) },
+                { term: "Only when nobody is signed in", value: selected.reboot_requires_no_user ? "Yes" : "No" },
+                { term: "Install attempts", value: `Up to ${selected.max_install_attempts}` },
+                { term: "Policy ID", value: <span className="font-(family-name:--font-data) text-[13px]">{selected.id}</span> },
+              ]}
+            />
+          </section>
+          {error ? <p role="alert" className="m-0 text-sm text-(--red)">{error} Nothing was changed.</p> : null}
+        </Drawer>
       ) : null}
 
-      <section className="enrollment-panel">
-        <header><div><span>Policy register</span><h2>{policies.length} policies</h2><small>Current revisions only; each edit appends an auditable version.</small></div><ShieldCheck size={19} /></header>
-        {policies.length ? (
-          <div className="enrollment-table-wrap">
-            <table>
-              <thead><tr><th>Policy</th><th>Scope</th><th>Status</th><th>Default</th><th>Rules</th><th>Revision</th><th>Created (UTC)</th>{canAdmin ? <th>Actions</th> : null}</tr></thead>
-              <tbody>
-                {policies.map((policy) => (
-                  <tr key={policy.id}>
-                    <td><strong>{policy.name}</strong><code>{policy.id}</code></td>
-                    <td><strong>{formatPatchScope(policy.scope)}</strong><code>{policy.scope_id ?? "All managed endpoints"}</code></td>
-                    <td><span className={`monitoring-status ${policy.enabled ? "enabled" : "disabled"}`}>{policy.enabled ? "Enabled" : "Disabled"}</span></td>
-                    <td>{policy.default_action === "approve" ? "Approve" : "Deny"}</td>
-                    <td>{policy.rule_count}</td>
-                    <td><code>v{policy.current_version}</code></td>
-                    <td>{formatMonitoringTimestamp(policy.created_at)}</td>
-                    {canAdmin ? (
-                      <td>
-                        <div className={styles.actions}>
-                          <button type="button" onClick={() => toggle(policy)} disabled={Boolean(busy)}>{policy.enabled ? "Disable" : "Enable"}</button>
-                          <button className={styles.delete} type="button" onClick={() => remove(policy)} disabled={Boolean(busy)}><Trash2 aria-hidden="true" size={13} /> Delete</button>
-                        </div>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="enrollment-empty"><ShieldCheck size={24} /><h3>No patch approval policies yet</h3><p>{canAdmin ? "Create a policy so governed endpoints leave the Exempt state." : "Until a policy is created, Windows Update installs proceed without an approval gate."}</p></div>
-        )}
-      </section>
-      {error ? <p className="alert-action-error" role="alert">{error}</p> : null}
-    </>
+      {canAdmin && creating ? (
+        <Drawer
+          open
+          onClose={() => setCreating(false)}
+          title="New patch policy"
+          sub="New policies apply the default action to every update and are enabled when created."
+          footer={
+            <>
+              <Button type="submit" form="new-patch-policy" variant="primary" icon={Plus} disabled={busy === "create"} aria-busy={busy === "create" || undefined}>
+                {busy === "create" ? "Creating…" : "Create policy"}
+              </Button>
+              <Button onClick={() => setCreating(false)}>Cancel</Button>
+            </>
+          }
+        >
+          <form id="new-patch-policy" className="grid gap-4" onSubmit={create}>
+            <Input label="Policy name" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder="e.g. Workstation baseline" required />
+            <Select label="Scope" value={scope} onChange={(e) => setScope(e.target.value as PatchScope)}>
+              {scopeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+            {scope !== "global" ? (
+              <Input label={`${formatPatchScope(scope)} ID`} value={scopeId} onChange={(e) => setScopeId(e.target.value)} maxLength={36} placeholder="Target ID" required />
+            ) : null}
+            <Select label="Default action" value={defaultAction} onChange={(e) => setDefaultAction(e.target.value as PatchDefaultAction)}>
+              <option value="deny">Deny unmatched updates</option>
+              <option value="approve">Approve unmatched updates</option>
+            </Select>
+            <Checkbox checked={requireWindow} onChange={setRequireWindow}>Require an active maintenance window to install</Checkbox>
+            <Select label="Reboot policy" value={rebootPolicy} onChange={(e) => setRebootPolicy(e.target.value as RebootPolicy)}>
+              <option value="never">Never</option>
+              <option value="if_required">If required</option>
+              <option value="forced">Forced</option>
+            </Select>
+            <Input label="Reboot delay (seconds)" type="number" min={60} max={3600} value={rebootDelay} onChange={(e) => setRebootDelay(Number(e.target.value))} />
+            <Input label="Max install attempts" type="number" min={1} max={5} value={maxAttempts} onChange={(e) => setMaxAttempts(Number(e.target.value))} />
+            <Checkbox checked={rebootRequiresNoUser} onChange={setRebootRequiresNoUser}>Only reboot when no user is signed in</Checkbox>
+            {createError ? (
+              <p role="alert" className="m-0 flex items-center gap-2 text-sm text-(--red)">
+                <CircleAlert size={16} aria-hidden="true" />
+                {createError} Nothing was changed.
+              </p>
+            ) : null}
+          </form>
+        </Drawer>
+      ) : null}
+
+      <ConfirmDialog
+        open={canAdmin && deleting !== null}
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => (deleting ? remove(deleting) : undefined)}
+        title={deleting ? `Delete ${deleting.name}?` : "Delete policy?"}
+        consequence="Devices it governs fall back to a broader policy if one applies, otherwise they become exempt and their installs are no longer gated. This cannot be undone."
+        confirmLabel="Delete policy"
+        busy={deleting !== null && busy === `delete:${deleting.id}`}
+        error={deleteError || undefined}
+      />
+    </PageStack>
   );
 }
