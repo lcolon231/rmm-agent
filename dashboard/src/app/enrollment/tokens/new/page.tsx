@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { redirect } from "next/navigation";
-import Link from "next/link";
 
 import { CreateTokenForm } from "@/components/enrollment/create-token-form";
+import { EnrollmentHeader } from "@/components/enrollment/enrollment-header";
+import { SiteRequired } from "@/components/enrollment/site-required";
+import { PageStack } from "@/components/shell/page-header";
 import { getClientNavigation } from "@/lib/client-navigation";
 import { getDashboardSession } from "@/lib/dashboard-session";
 
@@ -23,17 +25,17 @@ export default async function CreateEnrollmentTokenPage({
     ? requestedSite
     : undefined;
   return (
-    <>
-      <header className="enrollment-page-head compact"><div><span>New temporary credential</span><h1>Create enrollment token</h1><p>Constrain who, where, and how many agents may enroll before this credential expires.</p></div></header>
+    <PageStack>
+      <EnrollmentHeader
+        tab="tokens"
+        role={session.operator.role}
+        trail={[{ label: "Tokens", href: "/enrollment/tokens" }, { label: "New token" }]}
+        title="Create enrollment token"
+        description="Limit where, how often and until when a new device may use this token to join."
+      />
       {sites.length === 0 ? (
-        <section className="enrollment-empty">
-          <h2>A site is required</h2>
-          <p>Create a client and site in NodeLink before issuing an enrollment token.</p>
-          <Link className="enrollment-primary-link" href="/enrollment/setup">
-            Create client and site
-          </Link>
-        </section>
+        <SiteRequired body="Create a client and site in NodeLink before issuing an enrollment token." />
       ) : <CreateTokenForm initialSiteId={initialSiteId} sites={sites} />}
-    </>
+    </PageStack>
   );
 }

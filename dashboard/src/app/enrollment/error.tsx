@@ -2,6 +2,17 @@
 
 "use client";
 
+import { cardClass } from "@/components/ui/stat-tile";
+import { ErrorState } from "@/components/ui/states";
+
 export default function EnrollmentError({ reset }: { error: Error; reset: () => void }) {
-  return <section className="enrollment-empty" role="alert"><h2>Enrollment data is unavailable</h2><p>The management API did not return a usable response. No action was taken.</p><button onClick={reset}>Try again</button></section>;
+  return (
+    <section className={cardClass}>
+      <ErrorState
+        title="Enrollment data is unavailable"
+        body="The management service did not return a usable response"
+        onRetry={reset}
+      />
+    </section>
+  );
 }
