@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.api.deps import get_current_operator
+from app.api.deps import resolve_operator
 from app.core.config import settings
 from app.core.redaction import scrub_text
 from app.core.tenant_scope import agent_client_filter, assert_agent_visible, assert_client_visible
@@ -100,7 +100,7 @@ def unseal(run, conversation):
 async def authorize(db, authorization, conversation_id=None, client_id=None):
     # No cached operator or identity-map grants across provider waits.
     db.expire_all()
-    operator = await get_current_operator(authorization=authorization, db=db)
+    operator = await resolve_operator(authorization, db)
     require_available(operator)
     conversation = None
     if conversation_id:

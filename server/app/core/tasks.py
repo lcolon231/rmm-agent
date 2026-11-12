@@ -171,7 +171,7 @@ async def _publish_once() -> None:
 async def _retention_once() -> None:
     """Prune expired telemetry and command output, then log a warning if any
     storage class has breached its observability threshold (issue #114)."""
-    from app.core import mfa, retention, sessions
+    from app.core import idempotency, mfa, retention, sessions
 
     async with AsyncSessionLocal() as db:
         result = await retention.prune_expired(db, settings)
@@ -189,8 +189,13 @@ async def _retention_once() -> None:
         sessions_purged = await sessions.purge_ended(
             db, older_than_days=settings.command_output_retention_days
         )
+        # Expired Idempotency-Key reservations (issue #72) can no longer be
+        # replayed; the side effects they guarded are audited on their own.
+        idempotency_purged = await idempotency.prune_expired(db)
         await db.commit()
         status = await retention.storage_status(db, settings)
+    if idempotency_purged:
+        print(f"[retention] purged {idempotency_purged} expired idempotency key(s)")
     if challenges_purged:
         print(f"[retention] purged {challenges_purged} expired MFA challenge(s)")
     if sessions_expired or sessions_purged:

@@ -128,7 +128,8 @@ The code in this repository currently provides:
   maintenance suppression, technician lifecycle actions, durable email, and
   signed generic-webhook notification paths are implemented with live delivery
   history. See `docs/MONITORING.md`, `docs/ALERT-NOTIFICATIONS.md`, and
-  `docs/SIGNED-WEBHOOKS.md`.
+  `docs/SIGNED-WEBHOOKS.md`. The deliverable events are a versioned catalog
+  with a JSON Schema and signed per-event vectors (`docs/WEBHOOK-EVENTS.md`).
 - Buffered PowerShell or shell execution with a five-minute timeout and
   bounded output capture (256 KiB per stream, 384 KiB combined, truncation
   recorded in command and audit data). Completed results are DPAPI-protected
@@ -263,6 +264,15 @@ The code in this repository currently provides:
   Membership administration is audited, token-revoking, and guarded against
   removing the last platform admin. Server-side and API-first; the membership
   management UI is deferred. See `docs/TENANT-AUTHORIZATION.md`.
+- Versioned public API (issue #72, schema `0051`): a registered public v1
+  route set with a committed OpenAPI document guarded by drift and
+  breaking-change tests. Tenant-scoped API tokens are confined to one client,
+  capped by role ceilings, expiring, hash-stored, step-up minted, and refused
+  off the public surface. `Idempotency-Key` covers command dispatch, with
+  per-token rate budgets and an RFC 9745/8594 deprecation policy. Alert
+  notification delivery history and retry are now tenant-scoped. Server-side
+  and API-first; the token management UI is deferred and rate budgets are
+  process-local. See `docs/PUBLIC-API.md`.
 - Deterministic tenant evidence bundles and signed evidence packages
   (issues #79/#80): versioned canonical JSON and normalized CSV, tagged PDF
   summaries, and domain-separated Ed25519-signed deterministic ZIP packages

@@ -22,14 +22,14 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_role
-from app.core import tenant_scope
+from app.core import idempotency, tenant_scope
 from app.core.tenant_scope import (
     agent_client_filter,
     assert_agent_visible,
@@ -1940,6 +1940,16 @@ async def _resolve_script_provenance(
 async def dispatch_command(
     agent_id: str,
     body: CommandCreate,
+    request: Request,
+    idempotency_key: str | None = Header(
+        default=None,
+        alias=idempotency.HEADER,
+        description=(
+            "Optional client retry key (issue #72). A retry with the same key "
+            "and body replays the original response instead of queueing a "
+            "second command."
+        ),
+    ),
     operator: Operator = Depends(require_role(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1948,6 +1958,12 @@ async def dispatch_command(
     The acting operator is recorded in the audit event, so the tamper-evident
     log answers not just *what* ran but *who* ordered it.
     """
+    idem = idempotency.for_request(
+        request, operator, idempotency_key, body.model_dump(mode="json")
+    )
+    replay = await idem.replay(db)
+    if replay is not None:
+        return replay
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -2296,6 +2312,9 @@ async def dispatch_command(
     expires_at = now + timedelta(seconds=body.ttl_seconds)
     if power_window_end is not None:
         expires_at = min(expires_at, power_window_end)
+    # Every gate has passed: claim the idempotency key in the same transaction
+    # that creates the command, so a refusal or crash never strands it.
+    await idem.reserve(db)
     cmd = Command(
         id=str(uuid.uuid4()),
         agent_id=agent_id,
@@ -2374,6 +2393,8 @@ async def dispatch_command(
     # audit-event insert precedes the command update the FK depends on.
     cmd.dispatch_audit_event_id = dispatch_event.id
     await db.flush()
+    if idem.enabled:
+        await idem.complete(db, 200, CommandOut.model_validate(cmd).model_dump_json())
     return cmd
 
 
@@ -3779,6 +3800,24 @@ async def list_monitoring_alert_assignees(
     )
 
 
+async def _assert_delivery_retry_visible(
+    operator: Operator, alert_id: str, db: AsyncSession, *, detail: str
+) -> None:
+    """Tenant gate for retrying a notification delivery (issue #72).
+
+    The delivery belongs to its alert's client. A delivery whose alert or
+    agent is gone -- or that sits in another tenant -- is indistinguishable
+    from one that does not exist.
+    """
+    alert = await db.get(Alert, alert_id)
+    agent = await db.get(Agent, alert.agent_id) if alert is not None else None
+    if agent is None:
+        raise HTTPException(status_code=404, detail=detail)
+    await assert_agent_visible(
+        operator, agent, db, minimum=ClientRole.client_operator, detail=detail
+    )
+
+
 async def _lock_alert_action(
     db: AsyncSession,
     alert_id: str,
@@ -4096,10 +4135,14 @@ async def monitoring_email_alert_status(
 )
 async def list_monitoring_alert_email_deliveries(
     alert_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
-    if await db.get(Alert, alert_id) is None:
+    alert = await db.get(Alert, alert_id)
+    if alert is None:
         raise HTTPException(status_code=404, detail="Monitoring alert not found")
+    # Tenant boundary: delivery history belongs to the alert's client.
+    await _assert_alert_visible(operator, alert, db)
     deliveries = list(
         (
             await db.execute(
@@ -4161,6 +4204,11 @@ async def retry_monitoring_alert_email_delivery(
     )
     if delivery is None:
         raise HTTPException(status_code=404, detail="Email delivery not found")
+    # Tenant boundary: only an operator on the alert's client may retry it,
+    # and a foreign delivery is indistinguishable from a missing one.
+    await _assert_delivery_retry_visible(
+        operator, delivery.alert_id, db, detail="Email delivery not found"
+    )
     if delivery.last_retry_request_id == body.request_id:
         attempts = list(
             (
@@ -4667,10 +4715,15 @@ def _webhook_delivery_out(
     response_model=AlertWebhookDeliveryListOut,
 )
 async def list_monitoring_alert_webhook_deliveries(
-    alert_id: str, db: AsyncSession = Depends(get_db)
+    alert_id: str,
+    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    db: AsyncSession = Depends(get_db),
 ):
-    if await db.get(Alert, alert_id) is None:
+    alert = await db.get(Alert, alert_id)
+    if alert is None:
         raise HTTPException(status_code=404, detail="Monitoring alert not found")
+    # Tenant boundary: delivery history belongs to the alert's client.
+    await _assert_alert_visible(operator, alert, db)
     deliveries = list(
         (
             await db.execute(
@@ -4749,6 +4802,11 @@ async def retry_monitoring_alert_webhook_delivery(
     )
     if delivery is None:
         raise HTTPException(status_code=404, detail="Webhook delivery not found")
+    # Tenant boundary: only an operator on the alert's client may retry it,
+    # and a foreign delivery is indistinguishable from a missing one.
+    await _assert_delivery_retry_visible(
+        operator, delivery.alert_id, db, detail="Webhook delivery not found"
+    )
     endpoint = await db.get(WebhookEndpoint, delivery.endpoint_id)
     endpoint_name = endpoint.name if endpoint else "Deleted endpoint"
     if delivery.last_retry_request_id == body.request_id:

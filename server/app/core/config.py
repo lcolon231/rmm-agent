@@ -76,6 +76,22 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
+    # --- Public API (issue #72) ---
+    # Tenant-scoped API tokens for the versioned public surface. A token's
+    # lifetime is mandatory and bounded; the dashboard keeps using JWTs.
+    api_token_default_ttl_days: int = 30
+    api_token_max_ttl_days: int = 90
+    api_token_max_active_per_operator: int = 20
+    # Per-token request budgets (sliding 60 s window, per process). Mutating
+    # requests count against both budgets.
+    public_api_rate_limit_per_minute: int = 120
+    public_api_mutating_rate_limit_per_minute: int = 30
+    # How long a completed Idempotency-Key reservation replays its response.
+    idempotency_key_ttl_hours: int = 24
+    # Serve /docs, /redoc and /openapi.json. Off in production unless opted in;
+    # the reviewed contract is the committed docs/api/openapi-v1.json.
+    expose_openapi: bool = False
+
     # Failed logins allowed per (client IP, email) within the window before
     # further attempts are rejected with 429.
     login_max_failures: int = 5

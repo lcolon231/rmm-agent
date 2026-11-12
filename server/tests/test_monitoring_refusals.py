@@ -282,8 +282,11 @@ async def test_alert_assign_refuses_unavailable_assignee(client, assignee_id):
 async def test_email_delivery_retry_refusals(
     client, delivery_status, attempt_count, detail
 ):
+    # Retry is tenant-gated through the alert's agent (issue #72), so the
+    # delivery must hang off a real alert on an agent this operator can see.
+    alert_id = await _seed_alert(await _enroll(client), AlertState.open)
     delivery = AlertEmailDelivery(
-        id=str(uuid4()), alert_id=str(uuid4()), alert_event_id=str(uuid4()),
+        id=str(uuid4()), alert_id=alert_id, alert_event_id=str(uuid4()),
         generation=1, event_type=AlertEventType.opened,
         recipient="first@example.test",
         subject="NodeLink alert opened: cpu", text_body="Alert opened",

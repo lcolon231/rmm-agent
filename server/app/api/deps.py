@@ -8,7 +8,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import mfa, sessions
+from app.core import api_tokens, mfa, sessions
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import (
@@ -285,8 +285,20 @@ async def _bind_session(
     return operator
 
 
+def _bearer_value(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token
+
+
 async def get_current_operator(
-    authorization: str | None = Header(default=None, description="Bearer <operator_jwt>"),
+    request: Request,
+    authorization: str | None = Header(
+        default=None, description="Bearer <operator_jwt> or Bearer nlk_<api_token>"
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> Operator:
     """AuthN: resolve the operator from a full-access JWT bearer token.
@@ -299,7 +311,38 @@ async def get_current_operator(
     resolves identity through here, so rejecting the restricted type once means
     a correct password with no second factor buys access to nothing but the MFA
     completion endpoints, which resolve it deliberately and separately.
+
+    A ``nlk_`` bearer is a tenant-scoped API token (issue #72). It resolves to a
+    narrowed, transient principal and is accepted only on routes in the public
+    API registry; see :mod:`app.core.api_tokens`.
     """
+    route = request.scope.get("route")
+    return await resolve_operator(
+        authorization,
+        db,
+        method=request.method,
+        route_path=getattr(route, "path", None),
+    )
+
+
+async def resolve_operator(
+    authorization: str | None,
+    db: AsyncSession,
+    *,
+    method: str | None = None,
+    route_path: str | None = None,
+) -> Operator:
+    """:func:`get_current_operator` without a request.
+
+    Callers outside a route (``method``/``route_path`` unset) can never be
+    satisfied by an API token: no public route matches, so it is refused.
+    """
+    api_tokens.current_token_id.set(None)
+    bearer = _bearer_value(authorization)
+    if bearer is not None and api_tokens.is_api_token(bearer):
+        return await api_tokens.authenticate(
+            db, bearer, method=method or "", route_path=route_path
+        )
     claims = _bearer_claims(authorization)
     if token_type(claims) != TOKEN_TYPE_ACCESS:
         raise HTTPException(
@@ -330,6 +373,25 @@ async def get_mfa_pending_operator(
     return await _operator_for_claims(db, claims)
 
 
+def _refuse_api_token(operator: Operator) -> None:
+    if api_tokens.token_principal(operator) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "api_token_not_permitted",
+                "message": "This operation requires an interactive operator session.",
+            },
+        )
+
+
+async def require_interactive_operator(
+    operator: Operator = Depends(get_current_operator),
+) -> Operator:
+    """AuthZ: refuse API-token principals outright (issue #72)."""
+    _refuse_api_token(operator)
+    return operator
+
+
 def _session_amr(operator: Operator) -> frozenset[str]:
     return getattr(operator, "session_amr", None) or frozenset()
 
@@ -355,6 +417,9 @@ async def require_step_up(
     A recovery-code session never satisfies this, however recently it
     authenticated — see :func:`app.core.mfa.step_up_is_fresh`.
     """
+    # An API token can never satisfy step-up (issue #72): it carries no proof
+    # of a present human, so it fails closed even with MFA off.
+    _refuse_api_token(operator)
     # ``off`` disables the gate outright, and it has to: with MFA off no
     # ceremony can be started, so a gate that still demanded one would be
     # unsatisfiable and would lock every enrolled administrator out of operator
@@ -390,6 +455,7 @@ async def require_mfa_verified(
     makes the codes worth having; it does not satisfy step-up, which is what
     stops them from being a full account takeover.
     """
+    _refuse_api_token(operator)
     if mfa.enforcement_mode() == mfa.ENFORCEMENT_OFF:
         return operator
     if not await mfa.has_active_credential(db, operator.id):

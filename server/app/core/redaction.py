@@ -89,6 +89,15 @@ def _schema(
 # requires an explicit, reviewable policy update.
 AUDIT_DETAIL_SCHEMAS: dict[str, AuditDetailSchema] = {
     "assistant.activity": _schema("conversation_id", "run_id", "tool", "outcome"),
+    # Public API tokens (issue #72). The plaintext and its hash never reach
+    # the log; the display prefix is non-secret by construction.
+    "api_token.created": _schema(
+        "token_id", "prefix", "operator_id", "client_id", "role_ceiling",
+        "client_role_ceiling", "expires_at", "name", digest_fields=("name",),
+    ),
+    "api_token.revoked": _schema(
+        "token_id", "prefix", "operator_id", "client_id", "revoked_by_operator_id",
+    ),
     "agent.enrolled": _schema(
         "hostname",
         "agent_name",

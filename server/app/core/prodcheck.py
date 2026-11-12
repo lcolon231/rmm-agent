@@ -166,6 +166,24 @@ def production_config_problems(settings: Settings) -> list[str]:
                 "key with private material to sign agent routing manifests"
             )
 
+    # Public API (issue #72): a token must always expire, and the per-token
+    # budgets must be real limits, or the bounded-credential promise is void.
+    if not 0 < settings.api_token_default_ttl_days <= settings.api_token_max_ttl_days <= 365:
+        problems.append(
+            "API_TOKEN_DEFAULT_TTL_DAYS and API_TOKEN_MAX_TTL_DAYS must satisfy "
+            "0 < default <= max <= 365"
+        )
+    if (
+        settings.public_api_rate_limit_per_minute <= 0
+        or settings.public_api_mutating_rate_limit_per_minute <= 0
+        or settings.api_token_max_active_per_operator <= 0
+        or settings.idempotency_key_ttl_hours <= 0
+    ):
+        problems.append(
+            "PUBLIC_API_RATE_LIMIT_PER_MINUTE, PUBLIC_API_MUTATING_RATE_LIMIT_PER_MINUTE, "
+            "API_TOKEN_MAX_ACTIVE_PER_OPERATOR and IDEMPOTENCY_KEY_TTL_HOURS must be positive"
+        )
+
     problems.extend(configuration_problems(settings))
     if settings.email_alert_dashboard_base_url:
         dashboard_url = urlparse(settings.email_alert_dashboard_base_url)

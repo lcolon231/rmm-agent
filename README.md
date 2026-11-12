@@ -148,6 +148,7 @@ If you have ten minutes, these files show the core ideas:
 | Justified emergency override of an approval policy | [`server/app/core/emergency_overrides.py`](server/app/core/emergency_overrides.py) |
 | Regional relay routing: signed forwards, residency, signed routing manifest | [`server/app/core/relays.py`](server/app/core/relays.py), [`docs/RELAYS.md`](docs/RELAYS.md) |
 | Agent self-update with automatic rollback | [`agent/internal/selfupdate/`](agent/internal/selfupdate/) |
+| Versioned public API, tenant-scoped API tokens, webhook event catalog | [`docs/PUBLIC-API.md`](docs/PUBLIC-API.md), [`docs/api/openapi-v1.json`](docs/api/openapi-v1.json), [`docs/WEBHOOK-EVENTS.md`](docs/WEBHOOK-EVENTS.md) |
 | Security analysis | [`docs/threat-model.md`](docs/threat-model.md) |
 | Design source of truth | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 
@@ -159,7 +160,9 @@ remediation) are delivered or nearly so, and the fourth (compliance
 productization) is under way. It is not approved for production or regulated
 endpoints and does not claim HIPAA compliance. The two remaining gates before a
 controlled pilot are Authenticode code signing and a recorded multi-day soak
-run.
+run. Milestone 4 work has started: a versioned public API with tenant-scoped
+API tokens and a signed webhook event catalog (issue #72) is implemented server
+side. The dashboard token-management UI is not built yet.
 
 The full feature-by-feature inventory, including what is explicitly not built
 yet, is in [docs/PROJECT-STATUS.md](docs/PROJECT-STATUS.md). The phased plan is

@@ -43,7 +43,7 @@ def sqlite_url(path: Path) -> str:
 def test_assistant_migration_adds_bounded_private_history(tmp_path: Path):
     path = tmp_path / "assistant-migration.db"
     config = migration_config(sqlite_url(path))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0050"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0051"]
     command.upgrade(config, "0041")
     command.upgrade(config, "0042")
     with sqlite3.connect(path) as connection:
@@ -1070,7 +1070,7 @@ def test_community_package_migration_is_additive_and_forward_only(tmp_path: Path
             ("0" * 64,),
         )
         connection.commit()
-    command.upgrade(config, "head")
+    command.upgrade(config, "0050")
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0050"
         tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -1102,6 +1102,7 @@ def test_community_package_migration_is_additive_and_forward_only(tmp_path: Path
             )
     with pytest.raises(RuntimeError, match="forward-only"):
         command.downgrade(config, "0049")
+    command.upgrade(config, "head")
     asyncio.run(_assert_current(sqlite_url(path)))
 
 
@@ -1331,3 +1332,46 @@ def test_orm_metadata_matches_alembic_head_indexes(database_pair: tuple[str, str
         if migrated[table] != orm[table]
     }
     assert drift == {}
+
+
+def test_public_api_token_migration_is_additive_and_forward_only(tmp_path: Path):
+    """0051 (issue #72): API token and idempotency tables, nothing else."""
+    path = tmp_path / "public-api-migration.db"
+    config = migration_config(sqlite_url(path))
+    command.upgrade(config, "0050")
+    with sqlite3.connect(path) as connection:
+        before = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    command.upgrade(config, "0051")
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0051"
+        after = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert after - before == {"api_tokens", "api_idempotency_keys"}
+        connection.execute(
+            "INSERT INTO operators (id, email, password_hash, role, is_platform_admin, "
+            "disabled, token_generation, created_at) VALUES "
+            "('o1', 'a@x', 'h', 'admin', 0, 0, 0, '2026-11-12')"
+        )
+        connection.execute(
+            "INSERT INTO clients (id, name, created_at) VALUES ('c1', 'C', '2026-11-12')"
+        )
+        insert = (
+            "INSERT INTO api_tokens (id, operator_id, client_id, name, prefix, token_hash, "
+            "role_ceiling, client_role_ceiling, operator_token_generation, created_at, "
+            "expires_at) VALUES (?, 'o1', 'c1', 'n', 'nlk_x', ?, ?, ?, 0, "
+            "'2026-11-12', '2026-12-12')"
+        )
+        connection.execute(insert, ("t1", "a" * 64, "readonly", "client_readonly"))
+        with pytest.raises(sqlite3.IntegrityError):  # token hash is unique
+            connection.execute(insert, ("t2", "a" * 64, "readonly", "client_readonly"))
+        with pytest.raises(sqlite3.IntegrityError):  # role ceiling is constrained
+            connection.execute(insert, ("t3", "b" * 64, "root", "client_readonly"))
+        key = (
+            "INSERT INTO api_idempotency_keys (id, principal, idempotency_key, method, "
+            "route, request_sha256, created_at, expires_at) VALUES "
+            "(?, 'api_token:t1', 'k', 'POST', '/r', ?, '2026-11-12', '2026-11-13')"
+        )
+        connection.execute(key, ("i1", "0" * 64))
+        with pytest.raises(sqlite3.IntegrityError):  # one reservation per key
+            connection.execute(key, ("i2", "1" * 64))
+    with pytest.raises(RuntimeError, match="forward-only"):
+        command.downgrade(config, "0050")

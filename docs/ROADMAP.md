@@ -236,7 +236,9 @@ Workstreams:
 - Shared rate limiting, distributed workers, queue-backed task execution, and
   high availability with failure-mode tests.
 - Linux and macOS agents after platform contracts and support policy exist.
-- Versioned public API and webhook event catalog.
+- Versioned public API and webhook event catalog. Implemented server side
+  (#72, `docs/PUBLIC-API.md`, `docs/WEBHOOK-EVENTS.md`); shared cluster-wide
+  rate limiting and a dashboard token UI remain.
 - PSA integrations and Terraform or Ansible deployment automation.
 - Moderated community script repository and signed extension system. The
   in-deployment signed, moderated catalog is implemented (#74,

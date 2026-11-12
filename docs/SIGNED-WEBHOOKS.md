@@ -77,6 +77,7 @@ Each request has these headers:
 | `Idempotency-Key` | `nodelink-webhook/<delivery-id>` |
 | `X-NodeLink-Timestamp` | Unix timestamp captured when delivery was queued |
 | `X-NodeLink-Signature` | `v1=<lowercase HMAC-SHA256 hex>` |
+| `X-NodeLink-Key-Id` | Secret version that signed this delivery (stable across retries; changes after rotation) |
 
 Compute the signature over the exact received body bytes:
 
@@ -91,9 +92,14 @@ window. Record the delivery ID before applying side effects and treat repeats
 as success; NodeLink uses at-least-once delivery.
 
 The canonical JSON body contains `api_version`, `delivery_id`, `event_id`,
-`event_type`, `occurred_at`, and a bounded `alert` object with identifiers,
-severity, state, check key, and timestamps. Receivers should ignore unknown
+`event_type`, `occurred_at`, and `data.alert` with the alert, endpoint, policy,
+and policy-revision identifiers, `check_key`, `generation`, `from_state`,
+`to_state`, `result_status`, and `last_value`. Receivers should ignore unknown
 fields within a known API version and reject unsupported API versions.
+
+The complete event list, the JSON Schema, signed test vectors for every event,
+and the versioning policy are in [`WEBHOOK-EVENTS.md`](WEBHOOK-EVENTS.md)
+(issue #72).
 
 ## Retries, rotation, and recovery
 

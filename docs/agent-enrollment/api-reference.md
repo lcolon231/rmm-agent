@@ -16,8 +16,11 @@ Role mapping:
 - `operator`: token create/revoke plus reads;
 - `readonly`: reads only.
 
-Roles are currently global. `401` means authentication failed; `403` means the
-authenticated role or enrollment credential is not accepted.
+Global roles combine with per-client tenant roles (issue #66, see
+[`../TENANT-AUTHORIZATION.md`](../TENANT-AUTHORIZATION.md)). `401` means
+authentication failed; `403` means the authenticated role or enrollment
+credential is not accepted. Enrollment routes are not part of the public API
+token surface ([`../PUBLIC-API.md`](../PUBLIC-API.md)).
 
 ## Enrollment tokens
 

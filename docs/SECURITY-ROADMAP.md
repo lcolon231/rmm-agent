@@ -226,7 +226,8 @@ SHA-256 digest plus byte count. Policy administration in the dashboard remains
 intentionally read-only. Agent-side evaluation, result ingestion,
 maintenance-window suppression metadata, alert deduplication/state, and the
 live technician alert queue and durable, redacted email transition delivery are
-implemented. Generic signed webhook delivery remains later Milestone 1 work.
+implemented, as is generic signed webhook delivery (issue #46) with a
+versioned event catalog (issue #72, `docs/WEBHOOK-EVENTS.md`).
 
 - Use server-mediated dashboard sessions with secure cookie, CSRF, expiration,
   logout, revocation, and role-change behavior. Do not persist operator bearer
@@ -395,6 +396,19 @@ extensions, cross-platform agents, and relays must preserve tenant scope,
 idempotency, signed-action checks, audit ordering, and evidence completeness.
 Failure injection and region/worker partition tests are required before scale
 claims are made.
+
+- **Implemented (issue #72).** A versioned public v1 API: a registered public
+  route set, a committed OpenAPI document with drift and breaking-change tests,
+  page-based pagination, `Idempotency-Key` on command dispatch, per-token rate
+  budgets, an RFC 9745/8594 deprecation policy, and tenant-scoped API tokens.
+  Each token is confined to one client, capped by role ceilings, refused by
+  step-up and MFA gates, expiring, hash-stored, and audited by attribution. A
+  signed webhook event catalog ships with a JSON Schema and per-event
+  vectors. The work also closed cross-tenant read and retry of alert
+  notification deliveries. Verified by `server/tests/test_api_tokens.py`,
+  `test_idempotency.py`, `test_public_api_contract.py`, and
+  `test_webhook_catalog.py`. See [`PUBLIC-API.md`](PUBLIC-API.md). Shared
+  (cluster-wide) rate limiting and a dashboard token UI are follow-ups.
 
 Signed community script packages (#74, `docs/COMMUNITY-PACKAGES.md`) are in
 place as an in-deployment catalog: publisher-namespace Ed25519 keys, canonical

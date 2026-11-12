@@ -3557,3 +3557,84 @@ class CommunityInstall(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
+
+
+class ApiToken(Base):
+    """A tenant-scoped bearer credential for the public v1 API (issue #72).
+
+    Only ``token_hash`` (SHA-256 of the high-entropy plaintext) is stored; the
+    plaintext is returned once at creation. A token can only ever *narrow* its
+    owner's authority: it is bound to one client the owner is a member of, and
+    its ceilings cap both the global and the per-client role. It dies with the
+    owner's ``token_generation`` (logout-all, membership change), on revoke, or
+    at ``expires_at`` -- whichever comes first.
+    """
+
+    __tablename__ = "api_tokens"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="ux_api_token_hash"),
+        CheckConstraint(
+            "role_ceiling IN ('readonly', 'operator', 'admin')",
+            name="ck_api_token_role_ceiling",
+        ),
+        CheckConstraint(
+            "client_role_ceiling IN "
+            "('client_readonly', 'client_operator', 'client_admin')",
+            name="ck_api_token_client_role_ceiling",
+        ),
+        Index("ix_api_tokens_operator", "operator_id"),
+        Index("ix_api_tokens_client", "client_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Display handle: ``nlk_`` plus the first 6 characters of the secret, so a
+    # leaked token can be matched to its row. 36 of the 256 secret bits are
+    # disclosed, which leaves the remainder far beyond guessing.
+    prefix: Mapped[str] = mapped_column(String(16), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    role_ceiling: Mapped[str] = mapped_column(String(16), nullable=False)
+    client_role_ceiling: Mapped[str] = mapped_column(String(24), nullable=False)
+    operator_token_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[str | None] = mapped_column(String(320))
+
+
+class ApiIdempotencyKey(Base):
+    """One client ``Idempotency-Key`` reservation and its replayable response.
+
+    Unique per (principal, key): a retry of the same logical request replays
+    the stored response instead of repeating the side effect (issue #72).
+    """
+
+    __tablename__ = "api_idempotency_keys"
+    __table_args__ = (
+        UniqueConstraint(
+            "principal", "idempotency_key", name="ux_api_idempotency_principal_key"
+        ),
+        Index("ix_api_idempotency_keys_expires", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    principal: Mapped[str] = mapped_column(String(80), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    method: Mapped[str] = mapped_column(String(8), nullable=False)
+    route: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    response_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
