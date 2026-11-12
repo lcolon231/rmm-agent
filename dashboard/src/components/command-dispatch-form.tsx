@@ -2,7 +2,7 @@
 
 "use client";
 
-import { ArrowLeft, CalendarClock, Send, ShieldCheck, TriangleAlert } from "lucide-react";
+import { ArrowLeft, CalendarClock, Send, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
@@ -28,6 +28,12 @@ import {
   type MaintenanceWindow,
 } from "@/lib/maintenance-windows-core";
 import { formatMonitoringTimestamp } from "@/lib/monitoring-core";
+
+import { inlineLink, Notice } from "./endpoint/section-header";
+import { Button } from "./ui/button";
+import { cx, focusRing } from "./ui/cx";
+import { CodeBlock } from "./ui/drawer";
+import { Input, Select, Textarea } from "./ui/field";
 
 type DispatchFormProps = {
   endpointId: string;
@@ -112,70 +118,42 @@ export function CommandDispatchForm({
     if (!isPowerAction) return null;
     if (coverage === null) {
       return (
-        <div className="power-window-notice unknown" role="status">
-          <TriangleAlert aria-hidden="true" size={16} />
-          <div>
-            <strong>Maintenance window coverage is unverified</strong>
-            <span>
-              The window inventory could not be read, so coverage is unknown here. The server still
-              refuses the dispatch unless a window covers this endpoint.
-            </span>
-          </div>
-          <MaintenanceWindowLink label="Manage windows" />
-        </div>
+        <Notice tone="warn" title="Maintenance window coverage is unverified" action={<MaintenanceWindowLink label="Manage windows" />}>
+          The window inventory could not be read, so coverage is unknown here. The server still
+          refuses the dispatch unless a window covers this endpoint.
+        </Notice>
       );
     }
     if (coverage.status === "no_window") {
       return (
-        <div className="power-window-notice blocked" role="status">
-          <TriangleAlert aria-hidden="true" size={16} />
-          <div>
-            <strong>No maintenance window covers this endpoint</strong>
-            <span>
-              The server will refuse this restart or shutdown. Open a window covering{" "}
-              {hostname} for at least {formatDurationSeconds(powerDelaySeconds)}, then confirm again.
-            </span>
-          </div>
-          <MaintenanceWindowLink label="Create a window" />
-        </div>
+        <Notice tone="crit" title="No maintenance window covers this endpoint" action={<MaintenanceWindowLink label="Create a window" />}>
+          The server will refuse this restart or shutdown. Open a window covering{" "}
+          {hostname} for at least {formatDurationSeconds(powerDelaySeconds)}, then confirm again.
+        </Notice>
       );
     }
     if (coverage.status === "delay_exceeds_window") {
       return (
-        <div className="power-window-notice blocked" role="status">
-          <TriangleAlert aria-hidden="true" size={16} />
-          <div>
-            <strong>The delay outlives the covering window</strong>
-            <span>
-              {coverage.window.name} closes at {formatMonitoringTimestamp(coverage.window.ends_at)} —
-              in {formatDurationSeconds(coverage.secondsRemaining)}, less than the{" "}
-              {formatDurationSeconds(powerDelaySeconds)} delay. Shorten the delay or open a longer window.
-            </span>
-          </div>
-          <MaintenanceWindowLink label="Extend coverage" />
-        </div>
+        <Notice tone="crit" title="The delay outlives the covering window" action={<MaintenanceWindowLink label="Extend coverage" />}>
+          {coverage.window.name} closes at {formatMonitoringTimestamp(coverage.window.ends_at)} —
+          in {formatDurationSeconds(coverage.secondsRemaining)}, less than the{" "}
+          {formatDurationSeconds(powerDelaySeconds)} delay. Shorten the delay or open a longer window.
+        </Notice>
       );
     }
     return (
-      <div className="power-window-notice covered" role="status">
-        <ShieldCheck aria-hidden="true" size={16} />
-        <div>
-          <strong>Covered by {coverage.window.name}</strong>
-          <span>
-            The window closes at {formatMonitoringTimestamp(coverage.window.ends_at)}, in{" "}
-            {formatDurationSeconds(coverage.secondsRemaining)}. The server re-checks coverage when
-            it signs the command.
-          </span>
-        </div>
-        <MaintenanceWindowLink label="Manage windows" />
-      </div>
+      <Notice tone="ok" icon={ShieldCheck} title={`Covered by ${coverage.window.name}`} action={<MaintenanceWindowLink label="Manage windows" />}>
+        The window closes at {formatMonitoringTimestamp(coverage.window.ends_at)}, in{" "}
+        {formatDurationSeconds(coverage.secondsRemaining)}. The server re-checks coverage when
+        it signs the command.
+      </Notice>
     );
   }
 
   function DispatchError() {
     if (!error) return null;
     return (
-      <p className="dispatch-error" role="alert">
+      <p className="m-0 rounded-lg bg-(--red-soft) px-4 py-3 text-sm font-semibold text-(--red)" role="alert">
         {error}
         {isMaintenanceWindowErrorCode(errorCode) ? (
           <>
@@ -191,7 +169,7 @@ export function CommandDispatchForm({
     // Opened in a new tab so the reviewed command, its typed confirmation, and
     // its reason survive the detour to create the window.
     return (
-      <Link className="power-window-link" href={windowHref} rel="noopener" target="_blank">
+      <Link className={cx("inline-flex items-center gap-1 text-sm", inlineLink)} href={windowHref} rel="noopener" target="_blank">
         <CalendarClock aria-hidden="true" size={14} /> {label}
       </Link>
     );
@@ -346,19 +324,17 @@ export function CommandDispatchForm({
 
   if (step.name === "dispatched") {
     return (
-      <div className="dispatch-confirmation" role="status">
-        <ShieldCheck size={18} />
-        <div>
-          <strong>Command signed and queued</strong>
-          <span>
-            The agent will pick it up at its next check-in.{" "}
-            <Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands/${encodeURIComponent(step.commandId)}`}>
-              Follow this command
-            </Link>
-          </span>
-        </div>
-        <button onClick={() => setStep({ name: "compose" })} type="button">Dispatch another</button>
-      </div>
+      <Notice
+        tone="ok"
+        icon={ShieldCheck}
+        title="Command signed and queued"
+        action={<Button size="compact" onClick={() => setStep({ name: "compose" })}>Dispatch another</Button>}
+      >
+        The agent will pick it up at its next check-in.{" "}
+        <Link className={inlineLink} href={`/endpoints/${encodeURIComponent(endpointId)}/commands/${encodeURIComponent(step.commandId)}`}>
+          Follow this command
+        </Link>
+      </Notice>
     );
   }
 
@@ -366,38 +342,38 @@ export function CommandDispatchForm({
     const ttlLabel = ttlOptions.find((option) => option.seconds === step.input.ttl_seconds)?.label
       ?? `${step.input.ttl_seconds} seconds`;
     return (
-      <div className="dispatch-review" role="region" aria-label="Confirm command dispatch">
-        <p>
+      <div className="grid gap-4 rounded-[10px] border border-(--line-strong) bg-(--fog) p-4" role="region" aria-label="Confirm command dispatch">
+        <p className="m-0 text-sm text-(--slate)">
           Review before dispatch. This will sign and queue a{" "}
-          <strong>{commandKindDefinitions.find((d) => d.kind === step.input.kind)?.label}</strong>{" "}
-          command for <strong>{hostname}</strong>, valid for <strong>{ttlLabel}</strong>.
+          <strong className="text-(--ink)">{commandKindDefinitions.find((d) => d.kind === step.input.kind)?.label}</strong>{" "}
+          command for <strong className="font-(family-name:--font-data) text-(--ink)">{hostname}</strong>, valid for <strong className="text-(--ink)">{ttlLabel}</strong>.
           {step.input.kind === "reboot" || step.input.kind === "shutdown"
             ? " The delayed OS action can be cancelled with a separate Cancel pending power action command."
             : " An unpicked command dies at its signed expiry."}
         </p>
-        {step.input.script ? <pre>{step.input.script}</pre> : step.input.kind === "install_updates" ? (
-          <pre>
+        {step.input.script ? <CodeBlock label="Script to sign">{step.input.script}</CodeBlock> : step.input.kind === "install_updates" ? (
+          <CodeBlock label="Updates to install">
             {step.input.install_all
               ? "All applicable non-hidden updates"
               : step.input.update_targets.join("\n")}
-          </pre>
+          </CodeBlock>
         ) : step.input.operation_payload ? (
-          <pre>{JSON.stringify({
+          <CodeBlock label="Operation to sign">{JSON.stringify({
             ...step.input.operation_payload,
             ...(step.input.kind === "file_upload" ? { content_base64: `[${uploadName || "file"}; ${Math.floor(uploadContent.length * 0.75)} bytes]` } : {}),
             ...(step.input.kind === "registry_write" ? { data: "[value withheld from confirmation transcript]" } : {}),
-          }, null, 2)}</pre>
+          }, null, 2)}</CodeBlock>
         ) : (
-          <p className="dispatch-noscript">No script payload — this is a bounded typed operation.</p>
+          <p className="m-0 text-sm text-(--muted)">No script payload — this is a bounded typed operation.</p>
         )}
         {step.input.kind === "reboot" || step.input.kind === "shutdown" ? <CoverageNotice /> : null}
-        <div className="dispatch-review-actions">
-          <button disabled={isSubmitting} onClick={() => setStep({ name: "compose" })} type="button">
-            <ArrowLeft size={15} /> Edit
-          </button>
-          <button className="danger" disabled={isSubmitting} onClick={() => handleConfirm(step.input)} type="button">
-            <Send size={15} /> {isSubmitting ? "Dispatching…" : "Confirm dispatch"}
-          </button>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={isSubmitting} icon={ArrowLeft} onClick={() => setStep({ name: "compose" })}>
+            Edit
+          </Button>
+          <Button variant="primary" disabled={isSubmitting} icon={Send} onClick={() => handleConfirm(step.input)}>
+            {isSubmitting ? "Dispatching…" : "Confirm dispatch"}
+          </Button>
         </div>
         <DispatchError />
       </div>
@@ -406,16 +382,16 @@ export function CommandDispatchForm({
 
   return (
     <form
-      className="dispatch-form"
+      className="grid gap-4"
       onSubmit={(event) => {
         event.preventDefault();
         handleReview();
       }}
     >
-      <div className="dispatch-fields">
-        <label htmlFor="command-kind">Command kind</label>
-        <select
+      <div className={fieldRow}>
+        <Select
           id="command-kind"
+          label="Command kind"
           onChange={(event) => {
             setKind(event.target.value as CommandKind);
             setScript("");
@@ -448,150 +424,121 @@ export function CommandDispatchForm({
           {availableDefinitions.map((d) => (
             <option key={d.kind} value={d.kind}>{d.label}</option>
           ))}
-        </select>
-        <label htmlFor="command-ttl">Valid for</label>
-        <select
+        </Select>
+        <Select
           id="command-ttl"
+          label="Valid for"
           onChange={(event) => setTtlSeconds(Number(event.target.value))}
           value={ttlSeconds}
         >
           {ttlOptions.map((option) => (
             <option key={option.seconds} value={option.seconds}>{option.label}</option>
           ))}
-        </select>
+        </Select>
       </div>
-      <p className="dispatch-kind-note">{definition.description}</p>
+      <p className={hintText}>{definition.description}</p>
       {definition.adminOnly ? (
-        <div className="remediation-policy-band" role="note">
-          <ShieldCheck size={16} />
-          <div>
-            <strong>Managed boundary</strong>
-            <span>
-              {definition.input.startsWith("file_")
-                ? "Only C:\\ProgramData\\NodeLink\\Managed and C:\\Windows\\Temp\\NodeLink."
-                : definition.input.startsWith("registry_")
-                  ? "Only HKLM/HKCU Software\\NodeLink\\Managed in the selected registry view."
-                  : definition.input.startsWith("power_")
-                    ? "Administrator only. Restart and shutdown also require an active maintenance window and an explicit user-session policy."
-                  : definition.input === "event_log_query"
-                    ? "Administrator only. Bounded to allowlisted channels; Security and Defender need elevated-tier acknowledgment. Results are metadata-only — no message text ever leaves the endpoint."
-                  : "The backup must exist in this endpoint's local NodeLink rollback journal."}
-            </span>
-          </div>
-        </div>
+        <Notice tone="info" icon={ShieldCheck} role="note" title="Managed boundary">
+          {definition.input.startsWith("file_")
+            ? "Only C:\\ProgramData\\NodeLink\\Managed and C:\\Windows\\Temp\\NodeLink."
+            : definition.input.startsWith("registry_")
+              ? "Only HKLM/HKCU Software\\NodeLink\\Managed in the selected registry view."
+              : definition.input.startsWith("power_")
+                ? "Administrator only. Restart and shutdown also require an active maintenance window and an explicit user-session policy."
+              : definition.input === "event_log_query"
+                ? "Administrator only. Bounded to allowlisted channels; Security and Defender need elevated-tier acknowledgment. Results are metadata-only — no message text ever leaves the endpoint."
+              : "The backup must exist in this endpoint's local NodeLink rollback journal."}
+        </Notice>
       ) : null}
       {definition.input === "script" ? (
-        <>
-          <label htmlFor="command-script">Script</label>
-          <textarea
-            id="command-script"
-            onChange={(event) => setScript(event.target.value)}
-            placeholder={kind === "powershell" ? "Get-Service | Where-Object Status -eq 'Stopped'" : "systeminfo"}
-            rows={6}
-            spellCheck={false}
-            value={script}
-          />
-        </>
+        <Textarea
+          className={monoField}
+          id="command-script"
+          label="Script"
+          onChange={(event) => setScript(event.target.value)}
+          placeholder={kind === "powershell" ? "Get-Service | Where-Object Status -eq 'Stopped'" : "systeminfo"}
+          rows={6}
+          spellCheck={false}
+          value={script}
+        />
       ) : definition.input === "update_targets" ? (
         <>
-          <label htmlFor="update-targets">KB or Windows Update IDs</label>
-          <textarea
+          <Textarea
+            className={monoField}
             disabled={installAll}
             id="update-targets"
+            label="KB or Windows Update IDs"
             onChange={(event) => setUpdateTargets(event.target.value)}
             placeholder={"KB5101650\n12345678-1234-1234-1234-1234567890ab"}
             rows={5}
             spellCheck={false}
             value={updateTargets}
           />
-          <label className="dispatch-checkbox" htmlFor="install-all-updates">
-            <input
-              checked={installAll}
-              id="install-all-updates"
-              onChange={(event) => {
-                setInstallAll(event.target.checked);
-                if (event.target.checked) setUpdateTargets("");
-              }}
-              type="checkbox"
-            />
-            Install all applicable non-hidden updates
-          </label>
-          <p className="dispatch-kind-note">
+          <Check
+            checked={installAll}
+            id="install-all-updates"
+            label="Install all applicable non-hidden updates"
+            onChange={(checked) => {
+              setInstallAll(checked);
+              if (checked) setUpdateTargets("");
+            }}
+          />
+          <p className={hintText}>
             Use the Update ID shown in Windows Updates inventory for drivers or firmware that do not have a KB number.
           </p>
         </>
       ) : definition.input === "file_upload" ? (
         <>
-          <label htmlFor="managed-upload-path">Managed destination path</label>
-          <input id="managed-upload-path" onChange={(event) => setTargetPath(event.target.value)} placeholder="C:\\ProgramData\\NodeLink\\Managed\\patch.bin" value={targetPath} />
-          <label htmlFor="managed-upload-file">File (32 KiB maximum)</label>
-          <input id="managed-upload-file" onChange={(event) => void loadUpload(event.target.files?.[0])} type="file" />
-          {uploadDigest ? <p className="dispatch-kind-note">SHA-256 <code>{uploadDigest}</code></p> : null}
-          <label className="dispatch-checkbox" htmlFor="managed-upload-overwrite">
-            <input checked={overwrite} id="managed-upload-overwrite" onChange={(event) => setOverwrite(event.target.checked)} type="checkbox" />
-            Replace an existing file after creating rollback metadata
-          </label>
+          <Input className={monoField} id="managed-upload-path" label="Managed destination path" onChange={(event) => setTargetPath(event.target.value)} placeholder="C:\\ProgramData\\NodeLink\\Managed\\patch.bin" value={targetPath} />
+          <Input className="py-2" id="managed-upload-file" label="File (32 KiB maximum)" onChange={(event) => void loadUpload(event.target.files?.[0])} type="file" />
+          {uploadDigest ? <p className={hintText}>Fingerprint (SHA-256) <code className="font-(family-name:--font-data) break-all">{uploadDigest}</code></p> : null}
+          <Check checked={overwrite} id="managed-upload-overwrite" label="Replace an existing file after creating rollback metadata" onChange={setOverwrite} />
         </>
       ) : definition.input === "file_download" ? (
         <>
-          <label htmlFor="managed-download-path">Managed source path</label>
-          <input id="managed-download-path" onChange={(event) => setTargetPath(event.target.value)} placeholder="C:\\ProgramData\\NodeLink\\Managed\\diagnostic.txt" value={targetPath} />
-          <label htmlFor="managed-download-digest">Expected SHA-256 (optional)</label>
-          <input id="managed-download-digest" onChange={(event) => setExpectedDigest(event.target.value)} placeholder="64 lowercase hexadecimal characters" value={expectedDigest} />
+          <Input className={monoField} id="managed-download-path" label="Managed source path" onChange={(event) => setTargetPath(event.target.value)} placeholder="C:\\ProgramData\\NodeLink\\Managed\\diagnostic.txt" value={targetPath} />
+          <Input className={monoField} id="managed-download-digest" label="Expected SHA-256 (optional)" onChange={(event) => setExpectedDigest(event.target.value)} placeholder="64 lowercase hexadecimal characters" value={expectedDigest} />
         </>
       ) : ["registry_read", "registry_write", "registry_delete"].includes(definition.input) ? (
         <>
-          <div className="dispatch-fields">
-            <label htmlFor="registry-hive">Hive</label>
-            <select id="registry-hive" onChange={(event) => setRegistryHive(event.target.value as "HKLM" | "HKCU")} value={registryHive}><option>HKLM</option><option>HKCU</option></select>
-            <label htmlFor="registry-view">Registry view</label>
-            <select id="registry-view" onChange={(event) => setRegistryView(Number(event.target.value) as 32 | 64)} value={registryView}><option value={64}>64-bit</option><option value={32}>32-bit</option></select>
+          <div className={fieldRow}>
+            <Select id="registry-hive" label="Hive" onChange={(event) => setRegistryHive(event.target.value as "HKLM" | "HKCU")} value={registryHive}><option>HKLM</option><option>HKCU</option></Select>
+            <Select id="registry-view" label="Registry view" onChange={(event) => setRegistryView(Number(event.target.value) as 32 | 64)} value={registryView}><option value={64}>64-bit</option><option value={32}>32-bit</option></Select>
           </div>
-          <label htmlFor="registry-key">Managed key</label>
-          <input id="registry-key" onChange={(event) => setRegistryKey(event.target.value)} value={registryKey} />
-          <label htmlFor="registry-value-name">Value name</label>
-          <input id="registry-value-name" onChange={(event) => setRegistryValueName(event.target.value)} value={registryValueName} />
+          <Input className={monoField} id="registry-key" label="Managed key" onChange={(event) => setRegistryKey(event.target.value)} value={registryKey} />
+          <Input className={monoField} id="registry-value-name" label="Value name" onChange={(event) => setRegistryValueName(event.target.value)} value={registryValueName} />
           {definition.input === "registry_write" ? (
             <>
-              <label htmlFor="registry-type">Value type</label>
-              <select id="registry-type" onChange={(event) => setRegistryType(event.target.value)} value={registryType}>
+              <Select id="registry-type" label="Value type" onChange={(event) => setRegistryType(event.target.value)} value={registryType}>
                 <option value="string">String</option><option value="expand_string">Expandable string</option><option value="dword">DWORD</option><option value="qword">QWORD</option><option value="multi_string">Multi-string (one per line)</option><option value="binary">Binary (base64)</option>
-              </select>
-              <label htmlFor="registry-data">Value data</label>
-              <textarea id="registry-data" onChange={(event) => setRegistryData(event.target.value)} rows={4} value={registryData} />
+              </Select>
+              <Textarea className={monoField} id="registry-data" label="Value data" onChange={(event) => setRegistryData(event.target.value)} rows={4} value={registryData} />
             </>
           ) : null}
           {definition.input !== "registry_read" ? (
-            <>
-              <label htmlFor="registry-expected-digest">Current-value SHA-256 (optional compare-and-set)</label>
-              <input id="registry-expected-digest" onChange={(event) => setExpectedDigest(event.target.value)} value={expectedDigest} />
-            </>
+            <Input className={monoField} id="registry-expected-digest" label="Current-value SHA-256 (optional compare-and-set)" onChange={(event) => setExpectedDigest(event.target.value)} value={expectedDigest} />
           ) : null}
           {definition.input === "registry_delete" ? (
-            <label className="dispatch-checkbox" htmlFor="registry-delete-confirm"><input checked={confirmDelete} id="registry-delete-confirm" onChange={(event) => setConfirmDelete(event.target.checked)} type="checkbox" />Confirm deletion of exactly this value</label>
+            <Check checked={confirmDelete} id="registry-delete-confirm" label="Confirm deletion of exactly this value" onChange={setConfirmDelete} />
           ) : null}
         </>
       ) : definition.input === "rollback" ? (
-        <>
-          <label htmlFor="remediation-backup-id">Endpoint-local backup ID</label>
-          <input id="remediation-backup-id" onChange={(event) => setBackupId(event.target.value)} placeholder="32 lowercase hexadecimal characters" value={backupId} />
-        </>
+        <Input className={monoField} id="remediation-backup-id" label="Endpoint-local backup ID" onChange={(event) => setBackupId(event.target.value)} placeholder="32 lowercase hexadecimal characters" value={backupId} />
       ) : definition.input === "power_action" || definition.input === "power_cancel" ? (
         <>
-          <div className="power-operation-band" role="note">
-            <ShieldCheck aria-hidden="true" size={18} />
-            <div>
-              <strong>{definition.input === "power_action" ? "Disruptive endpoint action" : "Safety-preserving cancellation"}</strong>
-              <span>
-                {definition.input === "power_action"
-                  ? "The server verifies the maintenance window and latest user-session evidence before signing."
-                  : "Cancellation is allowed without a maintenance window and is safe when no action is pending."}
-              </span>
-            </div>
-          </div>
-          <label htmlFor="power-reason">Operational reason</label>
-          <textarea
+          <Notice
+            tone={definition.input === "power_action" ? "warn" : "info"}
+            icon={ShieldCheck}
+            role="note"
+            title={definition.input === "power_action" ? "Disruptive endpoint action" : "Safety-preserving cancellation"}
+          >
+            {definition.input === "power_action"
+              ? "The server verifies the maintenance window and latest user-session evidence before signing."
+              : "Cancellation is allowed without a maintenance window and is safe when no action is pending."}
+          </Notice>
+          <Textarea
             id="power-reason"
+            label="Operational reason"
             maxLength={512}
             minLength={10}
             onChange={(event) => setPowerReason(event.target.value)}
@@ -601,39 +548,40 @@ export function CommandDispatchForm({
             value={powerReason}
           />
           {definition.input === "power_action" ? (
-            <div className="dispatch-fields">
-              <label htmlFor="power-delay">Delay before action</label>
-              <select id="power-delay" onChange={(event) => setPowerDelaySeconds(Number(event.target.value))} value={powerDelaySeconds}>
+            <div className={fieldRow}>
+              <Select id="power-delay" label="Delay before action" onChange={(event) => setPowerDelaySeconds(Number(event.target.value))} value={powerDelaySeconds}>
                 <option value={30}>30 seconds</option>
                 <option value={60}>1 minute</option>
                 <option value={300}>5 minutes</option>
                 <option value={900}>15 minutes</option>
                 <option value={1800}>30 minutes</option>
                 <option value={3600}>1 hour</option>
-              </select>
-              <label htmlFor="power-consent">User-session policy</label>
-              <select id="power-consent" onChange={(event) => setUserConsent(event.target.value as "confirmed" | "no_user_session")} value={userConsent}>
+              </Select>
+              <Select id="power-consent" label="User-session policy" onChange={(event) => setUserConsent(event.target.value as "confirmed" | "no_user_session")} value={userConsent}>
                 <option value="confirmed">User consent confirmed</option>
                 <option value="no_user_session">Proceed only with no signed-in user</option>
-              </select>
+              </Select>
             </div>
           ) : null}
           {definition.input === "power_action" ? <CoverageNotice /> : null}
-          <label htmlFor="power-confirmation">Type <code>{hostname}</code> to confirm</label>
-          <input
-            autoComplete="off"
-            id="power-confirmation"
-            onChange={(event) => setPowerConfirmation(event.target.value)}
-            spellCheck={false}
-            value={powerConfirmation}
-          />
+          <div className="grid gap-1.5">
+            <label className={labelText} htmlFor="power-confirmation">Type <code className="font-(family-name:--font-data) text-(--ink)">{hostname}</code> to confirm</label>
+            <input
+              autoComplete="off"
+              className={cx(plainControl, monoField)}
+              id="power-confirmation"
+              onChange={(event) => setPowerConfirmation(event.target.value)}
+              spellCheck={false}
+              value={powerConfirmation}
+            />
+          </div>
         </>
       ) : definition.input === "event_log_query" ? (
         <>
-          <div className="dispatch-fields">
-            <label htmlFor="event-channel">Channel</label>
-            <select
+          <div className={fieldRow}>
+            <Select
               id="event-channel"
+              label="Channel"
               onChange={(event) => {
                 setEventChannel(event.target.value);
                 setEventTierAck(false);
@@ -643,42 +591,59 @@ export function CommandDispatchForm({
               {EVENT_LOG_CHANNELS.map((channel) => (
                 <option key={channel} value={channel}>{channel}</option>
               ))}
-            </select>
-            <label htmlFor="event-window">Time window</label>
-            <select id="event-window" onChange={(event) => setEventWindowSeconds(Number(event.target.value))} value={eventWindowSeconds}>
+            </Select>
+            <Select id="event-window" label="Time window" onChange={(event) => setEventWindowSeconds(Number(event.target.value))} value={eventWindowSeconds}>
               <option value={3600}>Last hour</option>
               <option value={21600}>Last 6 hours</option>
               <option value={86400}>Last 24 hours</option>
               <option value={604800}>Last 7 days</option>
-            </select>
-            <label htmlFor="event-max">Maximum events</label>
-            <select id="event-max" onChange={(event) => setEventMaxEvents(Number(event.target.value))} value={eventMaxEvents}>
+            </Select>
+            <Select id="event-max" label="Maximum events" onChange={(event) => setEventMaxEvents(Number(event.target.value))} value={eventMaxEvents}>
               <option value={50}>50</option>
               <option value={100}>100</option>
               <option value={200}>200</option>
               <option value={500}>500</option>
-            </select>
+            </Select>
           </div>
           {eventLogChannelTier(eventChannel) === "elevated" ? (
-            <label className="dispatch-checkbox" htmlFor="event-tier-ack">
-              <input checked={eventTierAck} id="event-tier-ack" onChange={(event) => setEventTierAck(event.target.checked)} type="checkbox" />
-              I acknowledge this is an elevated-tier channel (audited separately).
-            </label>
+            <Check checked={eventTierAck} id="event-tier-ack" label="I acknowledge this is an elevated-tier channel (audited separately)." onChange={setEventTierAck} />
           ) : null}
-          <label htmlFor="event-providers">Providers (optional, one per line)</label>
-          <textarea id="event-providers" onChange={(event) => setEventProviders(event.target.value)} placeholder={"Microsoft-Windows-Security-Auditing"} rows={2} spellCheck={false} value={eventProviders} />
-          <div className="dispatch-fields">
-            <label htmlFor="event-levels">Levels (optional, 1-5)</label>
-            <input id="event-levels" onChange={(event) => setEventLevels(event.target.value)} placeholder="2, 3" value={eventLevels} />
-            <label htmlFor="event-ids">Event IDs (optional)</label>
-            <input id="event-ids" onChange={(event) => setEventIds(event.target.value)} placeholder="4624, 4625" value={eventIds} />
+          <Textarea className={monoField} id="event-providers" label="Providers (optional, one per line)" onChange={(event) => setEventProviders(event.target.value)} placeholder={"Microsoft-Windows-Security-Auditing"} rows={2} spellCheck={false} value={eventProviders} />
+          <div className={fieldRow}>
+            <Input id="event-levels" label="Levels (optional, 1-5)" onChange={(event) => setEventLevels(event.target.value)} placeholder="2, 3" value={eventLevels} />
+            <Input id="event-ids" label="Event IDs (optional)" onChange={(event) => setEventIds(event.target.value)} placeholder="4624, 4625" value={eventIds} />
           </div>
-          <label htmlFor="event-cursor">Continue from cursor (optional)</label>
-          <input id="event-cursor" inputMode="numeric" onChange={(event) => setEventCursor(event.target.value)} placeholder="next_cursor from a prior page" value={eventCursor} />
+          <Input id="event-cursor" inputMode="numeric" label="Continue from cursor (optional)" onChange={(event) => setEventCursor(event.target.value)} placeholder="next_cursor from a prior page" value={eventCursor} />
         </>
       ) : null}
       <DispatchError />
-      <button type="submit">Review dispatch</button>
+      <div>
+        <Button type="submit" variant="primary">Review dispatch</Button>
+      </div>
     </form>
+  );
+}
+
+const fieldRow = "grid gap-4 min-[640px]:grid-cols-2";
+const hintText = "m-0 text-xs text-(--muted)";
+const labelText = "text-[13px] font-semibold text-(--slate)";
+const monoField = "font-(family-name:--font-data) text-[13px]";
+const plainControl = cx(
+  "h-10 w-full rounded-lg border border-(--line-strong) bg-(--paper) px-3 text-sm text-(--ink)",
+  focusRing,
+);
+
+function Check({ id, label, checked, onChange }: { id: string; label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-2 text-sm text-(--slate)" htmlFor={id}>
+      <input
+        checked={checked}
+        className={cx("mt-0.5 size-4 shrink-0 accent-(--primary-strong)", focusRing)}
+        id={id}
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+      {label}
+    </label>
   );
 }

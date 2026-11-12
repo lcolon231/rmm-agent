@@ -5,6 +5,7 @@ import { getCommandDetail } from "@/lib/command-console";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import { getEndpointDetail } from "@/lib/endpoint-detail";
 import { NodelinkApiError } from "@/lib/nodelink-api";
+import { PageFailure } from "@/components/endpoint/section-header";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
@@ -12,20 +13,24 @@ export const dynamic = "force-dynamic";
 
 export default async function CommandDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ endpointId: string; commandId: string }>;
+  searchParams?: Promise<{ tab?: string | string[] }>;
 }) {
   const session = await getDashboardSession();
   if (session.kind === "anonymous") redirect("/login");
   if (session.kind === "unavailable") {
     return (
-      <main className="detail-failure-page">
-        <section role="alert"><span>Session verification</span><h1>The command record is temporarily unavailable</h1><p>NodeLink could not verify your operator session. No command data was exposed.</p><Link href="/">Return to fleet</Link></section>
-      </main>
+      <PageFailure eyebrow="Session verification" title="The command record is temporarily unavailable" body="NodeLink could not verify your operator session. No command data was exposed.">
+        <Link href="/">Return to Overview</Link>
+      </PageFailure>
     );
   }
 
   const { endpointId, commandId } = await params;
+  const query = (await searchParams) ?? {};
+  const tab = query.tab === "custody" || query.tab === "details" ? query.tab : "output";
 
   let endpoint = null;
   let command = null;
@@ -40,11 +45,12 @@ export default async function CommandDetailPage({
 
   if (endpoint === null || command === null) {
     return (
-      <main className="detail-failure-page">
-        <section role="alert"><span>Command record</span><h1>This command could not be loaded</h1><p>The server did not return the command record. Try again without changing the address.</p><Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands`}>Back to command console</Link><Link href="/">Return to fleet</Link></section>
-      </main>
+      <PageFailure eyebrow="Command record" title="This command could not be loaded" body="The server did not return the command record. Nothing was changed. Try again without changing the address.">
+        <Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands/${encodeURIComponent(commandId)}`}>Try again</Link>
+        <Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands`}>Back to commands</Link>
+      </PageFailure>
     );
   }
 
-  return <CommandDetailView command={command} endpoint={endpoint} operator={session.operator} />;
+  return <CommandDetailView command={command} endpoint={endpoint} operator={session.operator} tab={tab} />;
 }

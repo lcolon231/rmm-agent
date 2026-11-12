@@ -1,25 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { ArrowLeft, GitCompareArrows, History } from "lucide-react";
+import { GitCompareArrows } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { InventoryHistoryTable } from "@/components/endpoint/inventory-history-table";
+import { EndpointSectionHeader, Notice, PageFailure, Panel } from "@/components/endpoint/section-header";
+import { PageStack } from "@/components/shell/page-header";
 import {
   describeItem,
   diffIsEmpty,
   formatInventoryTimestamp,
   formatValue,
   sectionLabel,
-  statusLabel,
-  statusTone,
   totalChanges,
   type InventoryDiffRecord,
 } from "@/lib/inventory-core";
 import { getInventoryDiff, getInventoryHistory, type InventoryHistoryPage } from "@/lib/inventory";
 import { getDashboardSession } from "@/lib/dashboard-session";
+import { getEndpointDetail, type EndpointDetailData } from "@/lib/endpoint-detail";
 import { NodelinkApiError } from "@/lib/nodelink-api";
 
 export const dynamic = "force-dynamic";
+
+const note = "m-0 text-[13px] text-(--muted)";
+const diffLine = "m-0 rounded px-2 py-1 font-(family-name:--font-data) text-[13px] break-words";
 
 export default async function InventorySectionPage({
   params,
@@ -37,11 +42,14 @@ export default async function InventorySectionPage({
 
   let history: InventoryHistoryPage | null = null;
   let diff: InventoryDiffRecord | null = null;
+  let endpoint: EndpointDetailData | null = null;
   try {
-    [history, diff] = await Promise.all([
+    [history, diff, endpoint] = await Promise.all([
       getInventoryHistory(session.sessionToken, endpointId, section, page),
       // The diff is secondary: a failure here must not blank the history.
       getInventoryDiff(session.sessionToken, endpointId, section).catch(() => null),
+      // Only the page header needs the device record; without it the ID stands in.
+      getEndpointDetail(session.sessionToken, endpointId, { historyHours: 1, historyLimit: 10 }).catch(() => null),
     ]);
   } catch (error) {
     if (error instanceof NodelinkApiError && (error.status === 404 || error.status === 422)) {
@@ -54,191 +62,109 @@ export default async function InventorySectionPage({
 
   if (history === null) {
     return (
-      <main className="detail-failure-page">
-        <section role="alert">
-          <span>Inventory history</span>
-          <h1>This section&rsquo;s history could not be loaded</h1>
-          <p>No snapshots are shown because none could be read.</p>
-          <Link href={backHref}>Back to inventory</Link>
-        </section>
-      </main>
+      <PageFailure
+        eyebrow="Inventory history"
+        title="This section's history could not be loaded"
+        body="No snapshots are shown because none could be read. Nothing was changed."
+      >
+        <Link href={`${backHref}/${encodeURIComponent(section)}`}>Try again</Link>
+        <Link href={backHref}>Back to inventory</Link>
+      </PageFailure>
     );
   }
 
+  const label = sectionLabel(section);
+  const changeCount = diff !== null && diff.comparable ? totalChanges(diff.summary) : 0;
+
   return (
-    <main className="workspace section-workspace">
-      <div className="content-column">
-        <header className="enrollment-page-head compact">
-          <div>
-            <span>{sectionLabel(section)}</span>
-            <h1>Change history</h1>
-            <p>
-              {history.total} recorded change{history.total === 1 ? "" : "s"}. A snapshot is stored
-              only when this section&rsquo;s content actually differs, so every row here is a real
-              change rather than a routine collection.
-            </p>
-          </div>
-          <Link className="enrollment-primary-link" href={backHref}>
-            <ArrowLeft size={16} /> Inventory
-          </Link>
-        </header>
+    <PageStack>
+      <EndpointSectionHeader
+        endpointId={endpointId}
+        hostname={endpoint?.hostname ?? endpointId}
+        section="inventory"
+        trail={[{ label }]}
+        description={`${label}: ${history.total} recorded change${history.total === 1 ? "" : "s"}. A snapshot is stored only when this section's content actually differs, so every row is a real change rather than a routine collection.`}
+      />
 
-        <section className="enrollment-panel">
-          <header>
-            <div>
-              <span>Most recent change</span>
-              <h2>
-                {diff === null
-                  ? "Unavailable"
-                  : !diff.comparable
-                    ? "Nothing to compare yet"
-                    : `${totalChanges(diff.summary)} change${totalChanges(diff.summary) === 1 ? "" : "s"}`}
-              </h2>
-            </div>
-            <GitCompareArrows size={19} />
-          </header>
-
+      <Panel
+        title="Most recent change"
+        sub={
+          diff === null
+            ? "Unavailable"
+            : !diff.comparable
+              ? "Nothing to compare yet"
+              : `${changeCount} change${changeCount === 1 ? "" : "s"}`
+        }
+        action={<GitCompareArrows size={18} aria-hidden="true" className="text-(--muted)" />}
+      >
+        <div className="grid gap-4 px-5 py-4">
           {diff === null ? (
-            <p className="inventory-status-note" role="alert">
-              The comparison could not be computed. The history below is unaffected.
-            </p>
+            <Notice tone="warn" role="alert" title="The comparison could not be computed">
+              The history below is unaffected.
+            </Notice>
           ) : !diff.comparable ? (
-            <p className="inventory-status-note">
-              This endpoint has reported this section once and it has not changed since. That is a
-              normal state, not a gap.
-            </p>
+            <p className={note}>This device has reported this section once and it has not changed since. That is a normal state, not a gap.</p>
           ) : diffIsEmpty(diff.diff) ? (
-            <p className="inventory-status-note">
-              The two most recent snapshots differ in metadata only.
-            </p>
+            <p className={note}>The two most recent snapshots differ in metadata only.</p>
           ) : (
-            <div className="inventory-diff">
-              <p className="inventory-status-note">
-                {formatInventoryTimestamp(diff.before?.collected_at ?? null)} →{" "}
-                {formatInventoryTimestamp(diff.after?.collected_at ?? null)}
+            <>
+              <p className={note}>
+                {formatInventoryTimestamp(diff.before?.collected_at ?? null)} → {formatInventoryTimestamp(diff.after?.collected_at ?? null)}
               </p>
 
               {diff.diff.field_changes.length > 0 ? (
-                <table className="inventory-diff-table">
-                  <thead>
-                    <tr>
-                      <th>Field</th>
-                      <th>Was</th>
-                      <th>Now</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {diff.diff.field_changes.map((change) => (
-                      <tr key={change.field}>
-                        <td>{change.field.replaceAll("_", " ")}</td>
-                        <td className="diff-removed">{formatValue(change.from)}</td>
-                        <td className="diff-added">{formatValue(change.to)}</td>
+                <div className="overflow-x-auto rounded-lg border border-(--line)">
+                  <table className="w-full min-w-[480px] border-collapse text-left text-[13px]">
+                    <caption className="sr-only">Changed fields</caption>
+                    <thead className="bg-(--fog) text-xs text-(--muted)">
+                      <tr>
+                        <th scope="col" className="px-3 py-2 font-semibold">Field</th>
+                        <th scope="col" className="px-3 py-2 font-semibold">Was</th>
+                        <th scope="col" className="px-3 py-2 font-semibold">Now</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {diff.diff.field_changes.map((change) => (
+                        <tr key={change.field} className="border-t border-(--line) text-(--slate)">
+                          <td className="px-3 py-2">{change.field.replaceAll("_", " ")}</td>
+                          <td className="px-3 py-2 break-words text-(--red)">{formatValue(change.from)}</td>
+                          <td className="px-3 py-2 break-words text-(--ink)">{formatValue(change.to)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ) : null}
 
               {Object.entries(diff.diff.list_changes).map(([field, change]) => (
-                <div className="inventory-diff-list" key={field}>
-                  <h3>{field.replaceAll("_", " ")}</h3>
+                <section key={field} aria-label={field.replaceAll("_", " ")} className="grid gap-1">
+                  <h3 className="m-0 text-[13px] font-semibold text-(--slate)">{field.replaceAll("_", " ")}</h3>
                   {change.added.map((item, index) => (
-                    <p className="diff-line diff-added" key={`add-${index}`}>
-                      + {describeItem(item)}
+                    <p className={`${diffLine} bg-(--success-soft) text-(--ink)`} key={`add-${index}`}>
+                      <span className="sr-only">Added: </span>+ {describeItem(item)}
                     </p>
                   ))}
                   {change.removed.map((item, index) => (
-                    <p className="diff-line diff-removed" key={`remove-${index}`}>
-                      − {describeItem(item)}
+                    <p className={`${diffLine} bg-(--red-soft) text-(--red)`} key={`remove-${index}`}>
+                      <span className="sr-only">Removed: </span>− {describeItem(item)}
                     </p>
                   ))}
                   {change.changed.map((item, index) => (
-                    <p className="diff-line diff-changed" key={`change-${index}`}>
-                      ~ {item.identity ? formatValue(item.identity) : "item"} —{" "}
+                    <p className={`${diffLine} bg-(--fog) text-(--slate)`} key={`change-${index}`}>
+                      <span className="sr-only">Changed: </span>~ {item.identity ? formatValue(item.identity) : "item"} —{" "}
                       {item.changes
-                        .map(
-                          (field_change) =>
-                            `${field_change.field}: ${formatValue(field_change.from)} → ${formatValue(field_change.to)}`,
-                        )
+                        .map((fieldChange) => `${fieldChange.field}: ${formatValue(fieldChange.from)} → ${formatValue(fieldChange.to)}`)
                         .join("; ")}
                     </p>
                   ))}
-                </div>
+                </section>
               ))}
-            </div>
+            </>
           )}
-        </section>
+        </div>
+      </Panel>
 
-        <section className="enrollment-panel">
-          <header>
-            <div>
-              <span>Snapshots</span>
-              <h2>Newest first</h2>
-            </div>
-            <History size={19} />
-          </header>
-          {history.items.length === 0 ? (
-            <div className="enrollment-empty">
-              <History size={24} />
-              <h3>No snapshots recorded</h3>
-              <p>This endpoint has never reported this section.</p>
-            </div>
-          ) : (
-            <div className="enrollment-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Collected (UTC)</th>
-                    <th>Received</th>
-                    <th>Status</th>
-                    <th>Content hash</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.items.map((item) => (
-                    <tr key={item.id}>
-                      <td>{formatInventoryTimestamp(item.collected_at)}</td>
-                      <td>{formatInventoryTimestamp(item.received_at)}</td>
-                      <td>
-                        <span className={`audit-tone ${statusTone(item.status)}`}>
-                          {statusLabel(item.status)}
-                        </span>
-                      </td>
-                      <td>
-                        <code>{item.content_hash.slice(0, 16)}…</code>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {history.total > history.page_size ? (
-            <footer className="enrollment-pagination">
-              <span>
-                Page {history.page} · {history.total} snapshot
-                {history.total === 1 ? "" : "s"}
-              </span>
-              <span className="audit-pager">
-                {page > 1 ? (
-                  <Link href={`?page=${page - 1}`} rel="prev">
-                    Newer
-                  </Link>
-                ) : null}
-                {history.page * history.page_size < history.total ? (
-                  <Link href={`?page=${page + 1}`} rel="next">
-                    Older
-                  </Link>
-                ) : null}
-              </span>
-            </footer>
-          ) : null}
-          <p className="inventory-status-note">
-            History is bounded by retention. The newest snapshot is never pruned, so an endpoint
-            always keeps its current reported state.
-          </p>
-        </section>
-      </div>
-    </main>
+      <InventoryHistoryTable items={history.items} page={history.page} pageSize={history.page_size} total={history.total} />
+    </PageStack>
   );
 }

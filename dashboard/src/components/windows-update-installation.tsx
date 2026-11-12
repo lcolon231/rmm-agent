@@ -8,7 +8,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  Search,
   Send,
   ShieldCheck,
 } from "lucide-react";
@@ -19,8 +18,6 @@ import { MAX_UPDATE_TARGETS, validateDispatchInput, type DispatchInput } from "@
 import {
   formatInventoryTimestamp,
   statusExplanation,
-  statusLabel,
-  statusTone,
   type InventorySectionStatus,
 } from "@/lib/inventory-core";
 import {
@@ -38,6 +35,13 @@ import {
   type MissingUpdateView,
   type WindowsUpdatesView,
 } from "@/lib/windows-updates-core";
+
+import { InventoryStatus } from "./endpoint/inventory-section-card";
+import { inlineLink, monoText, Notice, Panel } from "./endpoint/section-header";
+import { Button } from "./ui/button";
+import { cx, focusRing } from "./ui/cx";
+import { FilterBar, SearchField } from "./ui/filter-bar";
+import { StatusBadge } from "./ui/status-badge";
 
 type InstallationStep =
   | { name: "select" }
@@ -94,7 +98,6 @@ export function WindowsUpdateInstallation({
     (update) => normalizedKBID(update.kb_id) === null && normalizedUpdateID(update.update_id) !== null,
   ).length;
   const unselectableCount = view.missing.filter((update) => windowsUpdateSelectionKey(update) === null).length;
-  const tone = statusTone(sectionStatus);
   const scanCanBeUsed = (sectionStatus === "ok" || sectionStatus === "partial")
     && !view.error_code;
 
@@ -184,77 +187,72 @@ export function WindowsUpdateInstallation({
   if (step.name === "confirm") {
     const summary = summarizeWindowsUpdateSelection(step.updates);
     return (
-      <section className="enrollment-panel inventory-card windows-update-workflow" id="windows-updates">
-        <header>
-          <div>
-            <span>Windows Updates · confirmation</span>
-            <h2>Review targeted install for {hostname}</h2>
+      <Panel id="windows-updates" title={`Review targeted install for ${hostname}`} sub="Windows updates · confirmation" action={<ShieldCheck aria-hidden="true" size={20} className="text-(--muted)" />}>
+        <div className="grid gap-4 px-5 py-4" role="region" aria-label="Confirm selected Windows updates">
+          <div className="grid grid-cols-3 gap-3">
+            <Count label="Selected" value={summary.updateCount} sub="updates" />
+            <Count label="Drivers" value={summary.driverCount} sub="selected" warn={summary.driverCount > 0} />
+            <Count label="Reboot" value={summary.rebootCount} sub="flagged" warn={summary.rebootCount > 0} />
           </div>
-          <ShieldCheck aria-hidden="true" size={22} />
-        </header>
-        <div className="windows-update-confirmation" role="region" aria-label="Confirm selected Windows updates">
-          <div className="windows-update-risk-totals">
-            <article><span>Selected</span><strong>{summary.updateCount}</strong><small>updates</small></article>
-            <article className={summary.driverCount > 0 ? "warn" : ""}><span>Drivers</span><strong>{summary.driverCount}</strong><small>selected</small></article>
-            <article className={summary.rebootCount > 0 ? "warn" : ""}><span>Reboot</span><strong>{summary.rebootCount}</strong><small>flagged</small></article>
-          </div>
-          <p className={summary.rebootCount > 0 ? "windows-update-reboot-warning" : "windows-update-confirm-note"}>
-            {summary.rebootCount > 0
-              ? "One or more selected updates may restart the endpoint or leave it requiring a restart. Save active work before dispatching."
-              : "Only the KB IDs and Windows Update IDs listed below will be signed and sent. An empty selection cannot be dispatched."}
-          </p>
-          <ul className="windows-update-confirm-list">
+          {summary.rebootCount > 0 ? (
+            <Notice tone="warn" role="note" title="A restart may follow">
+              One or more selected updates may restart the endpoint or leave it requiring a restart. Save active work before dispatching.
+            </Notice>
+          ) : (
+            <p className={note}>Only the KB IDs and Windows Update IDs listed below will be signed and sent. An empty selection cannot be dispatched.</p>
+          )}
+          <ul className="m-0 grid list-none gap-0 rounded-lg border border-(--line) p-0">
             {step.updates.map((update, index) => (
-              <li key={`${windowsUpdateSelectionKey(update)}-${index}`}>
-                <code>{normalizedKBID(update.kb_id) ?? "No KB"}</code>
-                <span>
+              <li key={`${windowsUpdateSelectionKey(update)}-${index}`} className="flex flex-wrap items-start gap-3 border-t border-(--line) px-3 py-2 text-[13px] first:border-t-0">
+                <code className={cx(monoText, "shrink-0 text-(--ink)")}>{normalizedKBID(update.kb_id) ?? "No KB"}</code>
+                <span className="grid min-w-0 flex-1 gap-0.5 text-(--slate)">
                   {update.title}
-                  <small>
+                  <small className="text-xs text-(--muted)">
                     {normalizedUpdateID(update.update_id)
-                      ? <>Update ID <code>{normalizedUpdateID(update.update_id)}</code></>
+                      ? <>Update ID <code className={monoText}>{normalizedUpdateID(update.update_id)}</code></>
                       : "Update ID not reported"}
                   </small>
                 </span>
-                {isDriverUpdate(update) ? <b>Driver</b> : null}
-                {update.reboot_required ? <b>Reboot</b> : null}
+                {isDriverUpdate(update) ? <Tag>Driver</Tag> : null}
+                {update.reboot_required ? <Tag warn>Reboot</Tag> : null}
               </li>
             ))}
           </ul>
-          {error ? <p className="dispatch-error" role="alert">{error}</p> : null}
-          <div className="windows-update-confirm-actions">
-            <button disabled={isSubmitting} onClick={() => setStep({ name: "select" })} type="button">
-              <ChevronLeft size={15} /> Back to selection
-            </button>
-            <button
-              className="danger"
+          {error ? <p className={errorText} role="alert">{error}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={isSubmitting} icon={ChevronLeft} onClick={() => setStep({ name: "select" })}>
+              Back to selection
+            </Button>
+            <Button
+              variant="primary"
               disabled={isSubmitting}
+              icon={Send}
               onClick={() => void dispatchSelection(step.input, summary.updateCount)}
-              type="button"
             >
-              <Send size={15} /> {isSubmitting ? "Dispatching…" : `Install ${summary.updateCount} selected`}
-            </button>
+              {isSubmitting ? "Dispatching…" : `Install ${summary.updateCount} selected`}
+            </Button>
           </div>
         </div>
-      </section>
+      </Panel>
     );
   }
 
   if (step.name === "dispatched") {
     return (
-      <section className="enrollment-panel inventory-card windows-update-workflow" id="windows-updates">
-        <div className="windows-update-dispatched" role="status">
-          <CheckCircle2 aria-hidden="true" size={24} />
-          <div>
-            <strong>{step.updateCount} selected update{step.updateCount === 1 ? "" : "s"} queued</strong>
-            <span>
-              Follow the signed command for installed and failed updates, reboot state, and the agent message. Run a fresh scan after it finishes.
-            </span>
-          </div>
-          <Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands/${encodeURIComponent(step.commandId)}`}>
-            Follow command <ChevronRight size={14} />
-          </Link>
-        </div>
-      </section>
+      <div id="windows-updates">
+        <Notice
+          tone="ok"
+          icon={CheckCircle2}
+          title={`${step.updateCount} selected update${step.updateCount === 1 ? "" : "s"} queued`}
+          action={
+            <Link className={cx(inlineLink, "inline-flex items-center gap-1 text-sm")} href={`/endpoints/${encodeURIComponent(endpointId)}/commands/${encodeURIComponent(step.commandId)}`}>
+              Follow command <ChevronRight size={14} aria-hidden="true" />
+            </Link>
+          }
+        >
+          Follow the signed command for installed and failed updates, reboot state, and the agent message. Run a fresh scan after it finishes.
+        </Notice>
+      </div>
     );
   }
 
@@ -262,123 +260,120 @@ export function WindowsUpdateInstallation({
     && visibleSelectable.every((key) => selectedKeys.has(key));
 
   return (
-    <section className="enrollment-panel inventory-card windows-update-workflow" id="windows-updates">
-      <header>
-        <div>
-          <span>Windows Updates · targeted installation</span>
-          <h2>{view.missing.length} missing update{view.missing.length === 1 ? "" : "s"}</h2>
-          <small>
-            Scanned {formatInventoryTimestamp(view.scanned_at)} · {view.installed.length} installed records
-          </small>
-        </div>
-        <div className="windows-update-status-stack">
-          <span className={`audit-tone ${tone}`}>{statusLabel(sectionStatus)}</span>
-          <span className={`windows-update-freshness ${isStale ? "stale" : "current"}`}>
-            {isStale ? "Stale scan" : "Current scan"}
-          </span>
-        </div>
-      </header>
+    <Panel
+      id="windows-updates"
+      title={`${view.missing.length} missing update${view.missing.length === 1 ? "" : "s"}`}
+      sub={`Windows updates · scanned ${formatInventoryTimestamp(view.scanned_at)} · ${view.installed.length} installed records`}
+      action={
+        <span className="flex flex-wrap items-center gap-2">
+          <InventoryStatus status={sectionStatus} />
+          {isStale ? <StatusBadge tone="warn">Behind</StatusBadge> : <span className="text-xs text-(--muted)">Current scan</span>}
+        </span>
+      }
+    >
+      <div className="grid gap-3 px-5 pt-4">
+        {sectionStatus === "ok" ? null : <p className={note}>{statusExplanation(sectionStatus)}</p>}
+        {view.error_code ? (
+          <Notice tone="crit" role="alert" icon={AlertTriangle} title={`Scan failed with ${view.error_code}`}>
+            Do not install from this inventory.
+          </Notice>
+        ) : null}
+        {view.history_error_code ? (
+          <Notice tone="warn" icon={AlertTriangle} title={`Installed-update history is incomplete (${view.history_error_code})`}>
+            The missing list remains visible.
+          </Notice>
+        ) : null}
+        {isStale ? (
+          <Notice tone="warn" icon={AlertTriangle} title="This scan is at least 24 hours old or has no valid scan time">
+            Run a fresh scan before installing.
+          </Notice>
+        ) : null}
 
-      {sectionStatus === "ok" ? null : (
-        <p className="inventory-status-note">{statusExplanation(sectionStatus)}</p>
-      )}
-      {view.error_code ? (
-        <p className="windows-update-alert" role="alert">
-          <AlertTriangle size={16} /> Scan failed with {view.error_code}. Do not install from this inventory.
+        <p className="m-0 flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-(--slate)">
+          <span><strong className="text-(--ink)">{view.missing.length}</strong> missing</span>
+          <span><strong className="text-(--ink)">{driverCount}</strong> drivers</span>
+          <span><strong className="text-(--ink)">{updateIDOnlyCount}</strong> by Update ID only</span>
+          <span><strong className="text-(--ink)">{unselectableCount}</strong> without an installable ID</span>
+          <span><strong className="text-(--ink)">{view.missing.filter((update) => update.reboot_required).length}</strong> reboot flagged</span>
         </p>
-      ) : null}
-      {view.history_error_code ? (
-        <p className="windows-update-alert" role="status">
-          <AlertTriangle size={16} /> Installed-update history is incomplete ({view.history_error_code}); the missing list remains visible.
-        </p>
-      ) : null}
-      {isStale ? (
-        <p className="windows-update-alert" role="status">
-          <AlertTriangle size={16} /> This scan is at least 24 hours old or has no valid scan time. Run a fresh scan before installing.
-        </p>
-      ) : null}
-
-      <div className="windows-update-summary-strip">
-        <span><strong>{view.missing.length}</strong> missing</span>
-        <span><strong>{driverCount}</strong> drivers</span>
-        <span><strong>{updateIDOnlyCount}</strong> by Update ID only</span>
-        <span><strong>{unselectableCount}</strong> without an installable ID</span>
-        <span><strong>{view.missing.filter((update) => update.reboot_required).length}</strong> reboot flagged</span>
       </div>
 
-      <div className="windows-update-toolbar">
-        <label className="windows-update-search" htmlFor="windows-update-search">
-          <Search aria-hidden="true" size={15} />
-          <span className="sr-only">Search updates</span>
-          <input
+      <div className="mt-3">
+        <FilterBar
+          trailing={
+            <Button
+              variant="primary"
+              disabled={!canDispatch || !trusted || selectedUpdates.length === 0 || !scanCanBeUsed}
+              icon={Download}
+              onClick={reviewSelection}
+            >
+              Review targeted install
+            </Button>
+          }
+        >
+          <SearchField
             id="windows-update-search"
+            label="Search updates"
             onChange={(event) => updateFilters(() => setQuery(event.target.value))}
             placeholder="Search title, KB, Update ID, product, or severity"
-            type="search"
             value={query}
           />
-        </label>
-        <label htmlFor="windows-update-classification">
-          <span className="sr-only">Filter by classification</span>
-          <select
-            id="windows-update-classification"
-            onChange={(event) => updateFilters(() => setClassification(event.target.value))}
-            value={classification}
-          >
-            <option value="">All classifications</option>
-            {classifications.map((value) => <option key={value}>{value}</option>)}
-          </select>
-        </label>
-        <label className="windows-update-driver-filter" htmlFor="windows-update-exclude-drivers">
-          <input
-            checked={excludeDrivers}
-            id="windows-update-exclude-drivers"
-            onChange={(event) => updateFilters(() => setExcludeDrivers(event.target.checked))}
-            type="checkbox"
-          />
-          Exclude drivers
-        </label>
+          <label htmlFor="windows-update-classification">
+            <span className="sr-only">Filter by classification</span>
+            <select
+              className={cx("h-10 rounded-lg border border-(--line-strong) bg-(--paper) px-3 text-sm text-(--ink)", focusRing)}
+              id="windows-update-classification"
+              onChange={(event) => updateFilters(() => setClassification(event.target.value))}
+              value={classification}
+            >
+              <option value="">All classifications</option>
+              {classifications.map((value) => <option key={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-(--slate)" htmlFor="windows-update-exclude-drivers">
+            <input
+              checked={excludeDrivers}
+              className={cx("size-4 accent-(--primary-strong)", focusRing)}
+              id="windows-update-exclude-drivers"
+              onChange={(event) => updateFilters(() => setExcludeDrivers(event.target.checked))}
+              type="checkbox"
+            />
+            Exclude drivers
+          </label>
+        </FilterBar>
       </div>
 
-      <div className="windows-update-selection-bar">
-        <button disabled={visibleSelectable.length === 0} onClick={toggleVisible} type="button">
-          {allVisibleSelected ? "Clear this page" : "Select this page"}
-        </button>
-        <span>{selectedSummary.updateCount} selected · {selectedSummary.driverCount} drivers · {selectedSummary.rebootCount} reboot flagged</span>
-        <button
-          className="primary"
-          disabled={!canDispatch || !trusted || selectedUpdates.length === 0 || !scanCanBeUsed}
-          onClick={reviewSelection}
-          type="button"
-        >
-          <Download size={15} /> Review targeted install
-        </button>
+      <div className="grid gap-3 px-5 py-3">
+        <div className="flex flex-wrap items-center gap-3 text-[13px] text-(--slate)">
+          <Button size="compact" disabled={visibleSelectable.length === 0} onClick={toggleVisible}>
+            {allVisibleSelected ? "Clear this page" : "Select this page"}
+          </Button>
+          <span>{selectedSummary.updateCount} selected · {selectedSummary.driverCount} drivers · {selectedSummary.rebootCount} reboot flagged</span>
+        </div>
+        {!canDispatch ? (
+          <p className={note}>Your role can review updates, but targeted installation requires operator access.</p>
+        ) : !trusted ? (
+          <p className={note}>This endpoint is quarantined or revoked. Restore trust before installing updates.</p>
+        ) : null}
+        {error ? <p className={errorText} role="alert">{error}</p> : null}
       </div>
-
-      {!canDispatch ? (
-        <p className="windows-update-readonly">Your role can review updates, but targeted installation requires operator access.</p>
-      ) : !trusted ? (
-        <p className="windows-update-readonly">This endpoint is quarantined or revoked. Restore trust before installing updates.</p>
-      ) : null}
-      {error ? <p className="dispatch-error" role="alert">{error}</p> : null}
 
       {filtered.length === 0 ? (
-        <div className="windows-update-empty">
-          <strong>No updates match these filters</strong>
-          <span>Clear search filters or include drivers to review the complete scan.</span>
+        <div className="grid gap-1 border-t border-(--line) px-5 py-8 text-center">
+          <strong className="text-sm text-(--ink)">No updates match these filters</strong>
+          <span className="text-[13px] text-(--muted)">Clear search filters or include drivers to review the complete scan.</span>
         </div>
       ) : (
-        <div className="windows-update-table-scroll">
-          <table className="windows-update-table">
-            <thead>
+        <div className="overflow-x-auto border-t border-(--line)">
+          <table className="w-full min-w-[920px] border-collapse text-left text-sm">
+            <caption className="sr-only">Missing Windows updates</caption>
+            <thead className="bg-(--fog)">
               <tr>
-                <th><span className="sr-only">Select</span></th>
-                <th>Update</th>
-                <th>Classification / product</th>
-                <th>Severity</th>
-                <th>Download</th>
-                <th>Reboot</th>
-                <th>Deployment change</th>
+                {["Select", "Update", "Classification / product", "Severity", "Download", "Reboot", "Deployment change"].map((heading, index) => (
+                  <th key={heading} scope="col" className="px-4 py-2.5 text-xs font-semibold whitespace-nowrap text-(--muted)">
+                    {index === 0 ? <span className="sr-only">{heading}</span> : heading}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -388,35 +383,43 @@ export function WindowsUpdateInstallation({
                 const key = windowsUpdateSelectionKey(update);
                 const driver = isDriverUpdate(update);
                 return (
-                  <tr className={key ? "" : "not-selectable"} key={`${update.update_id ?? update.kb_id ?? update.title}-${index}`}>
-                    <td>
+                  <tr className={cx("border-t border-(--line) align-top text-(--slate)", !key && "bg-(--fog)")} key={`${update.update_id ?? update.kb_id ?? update.title}-${index}`}>
+                    <td className="px-4 py-3">
                       <input
                         aria-label={key
                           ? `Select ${kbID ?? `Update ID ${key}`}: ${update.title}`
                           : `${update.title} cannot be selected because it has no valid KB ID or Windows Update ID`}
                         checked={key ? selectedKeys.has(key) : false}
+                        className={cx("size-4 accent-(--primary-strong)", focusRing)}
                         disabled={!key}
                         onChange={(event) => key && toggleUpdate(key, event.target.checked)}
                         type="checkbox"
                       />
                     </td>
-                    <td>
-                      <strong>{update.title}</strong>
-                      <span>
-                        {kbID
-                          ? <code>{kbID}</code>
-                          : updateID
-                            ? <code title="Installed by Windows Update ID">{updateID}</code>
-                            : <em>No valid KB ID or Update ID · cannot be installed from here</em>}
-                        {driver ? <b>Driver</b> : null}
-                        {update.priority_grade ? <b>{update.priority_grade}</b> : null}
+                    <td className="max-w-[360px] px-4 py-3">
+                      <span className="grid gap-1">
+                        <strong className="font-semibold text-(--ink)">{update.title}</strong>
+                        <span className="flex flex-wrap items-center gap-1.5 text-xs text-(--muted)">
+                          {kbID
+                            ? <code className={monoText}>{kbID}</code>
+                            : updateID
+                              ? <code className={monoText} title="Installed by Windows Update ID">{updateID}</code>
+                              : <em>No valid KB ID or Update ID · cannot be installed from here</em>}
+                          {driver ? <Tag>Driver</Tag> : null}
+                          {update.priority_grade ? <Tag>{update.priority_grade}</Tag> : null}
+                        </span>
                       </span>
                     </td>
-                    <td><strong>{update.classification ?? "Unclassified"}</strong><span>{update.product ?? "Product not reported"}</span></td>
-                    <td>{update.severity ?? "Not rated"}</td>
-                    <td>{update.is_downloaded === null ? "Unknown" : update.is_downloaded ? "Downloaded" : "Not downloaded"}</td>
-                    <td className={update.reboot_required ? "warn" : ""}>{update.reboot_required === null ? "Unknown" : update.reboot_required ? "Required" : "No"}</td>
-                    <td>{formatInventoryTimestamp(update.last_deployment_change, "Not reported")}</td>
+                    <td className="px-4 py-3">
+                      <span className="grid gap-0.5">
+                        <span className="font-semibold text-(--ink)">{update.classification ?? "Unclassified"}</span>
+                        <span className="text-xs text-(--muted)">{update.product ?? "Product not reported"}</span>
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">{update.severity ?? "Not rated"}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{update.is_downloaded === null ? "Unknown" : update.is_downloaded ? "Downloaded" : "Not downloaded"}</td>
+                    <td className={cx("px-4 py-3", update.reboot_required && "font-semibold text-[#89500b]")}>{update.reboot_required === null ? "Unknown" : update.reboot_required ? "Required" : "No"}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{formatInventoryTimestamp(update.last_deployment_change, "Not reported")}</td>
                   </tr>
                 );
               })}
@@ -425,18 +428,39 @@ export function WindowsUpdateInstallation({
         </div>
       )}
 
-      <footer className="windows-update-pagination">
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-(--line) px-5 py-3 text-xs text-(--muted)">
         <span>
           Showing {filtered.length === 0 ? 0 : (currentPage - 1) * WINDOWS_UPDATE_PAGE_SIZE + 1}–
           {Math.min(currentPage * WINDOWS_UPDATE_PAGE_SIZE, filtered.length)} of {filtered.length}
         </span>
-        <nav aria-label="Windows Update pages">
-          <button disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)} type="button"><ChevronLeft size={14} /> Previous</button>
-          <span>Page {currentPage} of {pageCount}</span>
-          <button disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)} type="button">Next <ChevronRight size={14} /></button>
+        <nav aria-label="Windows Update pages" className="flex items-center gap-1">
+          <Button size="compact" disabled={currentPage <= 1} icon={ChevronLeft} onClick={() => setPage(currentPage - 1)}>Previous</Button>
+          <span className="px-2">Page {currentPage} of {pageCount}</span>
+          <Button size="compact" disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>Next <ChevronRight size={14} aria-hidden="true" /></Button>
         </nav>
-        <Link href={`/endpoints/${encodeURIComponent(endpointId)}/inventory/windows_updates`}>History &amp; changes <ChevronRight size={14} /></Link>
+        <Link className={cx(inlineLink, "inline-flex items-center gap-1 text-sm")} href={`/endpoints/${encodeURIComponent(endpointId)}/inventory/windows_updates`}>
+          History and changes <ChevronRight size={14} aria-hidden="true" />
+        </Link>
       </footer>
-    </section>
+    </Panel>
+  );
+}
+
+const note = "m-0 text-[13px] text-(--muted)";
+const errorText = "m-0 rounded-lg bg-(--red-soft) px-4 py-3 text-sm font-semibold text-(--red)";
+
+function Count({ label, value, sub, warn = false }: { label: string; value: number; sub: string; warn?: boolean }) {
+  return (
+    <div className={cx("grid gap-0.5 rounded-lg border px-3 py-2", warn ? "border-(--amber) bg-(--amber-soft)" : "border-(--line) bg-(--paper)")}>
+      <span className="text-xs text-(--muted)">{label}</span>
+      <strong className={cx("text-xl font-semibold tabular-nums", warn ? "text-[#89500b]" : "text-(--ink)")}>{value}</strong>
+      <small className="text-xs text-(--muted)">{sub}</small>
+    </div>
+  );
+}
+
+function Tag({ children, warn = false }: { children: string; warn?: boolean }) {
+  return (
+    <b className={cx("rounded-full px-2 py-0.5 text-xs font-semibold", warn ? "bg-(--amber-soft) text-[#89500b]" : "bg-(--fog) text-(--slate)")}>{children}</b>
   );
 }
