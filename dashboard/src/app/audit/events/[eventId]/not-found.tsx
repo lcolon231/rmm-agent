@@ -1,16 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-
-import Link from "next/link";
-
-export default function AuditEventNotFound() {
-  return (
-    <section className="enrollment-empty">
-      <h1>Audit event not found</h1>
-      <p>
-        No event with this identifier exists in the chain. A link may be stale, or the identifier may
-        belong to a different deployment.
-      </p>
-      <Link href="/audit">Back to the timeline</Link>
-    </section>
-  );
-}
+import { PageHeader, PageStack } from "@/components/shell/page-header";
+import { ButtonLink } from "@/components/ui/button";
+export default function AuditEventNotFound() { return <PageStack><PageHeader breadcrumb={[{ label: "Compliance" }, { label: "Audit", href: "/audit" }]} title="Audit event not found" description="No event was found for this identifier. The link may be stale or refer to another deployment." /><ButtonLink href="/audit" variant="secondary">Back to the timeline</ButtonLink></PageStack>; }
