@@ -44,7 +44,7 @@ export default async function InventorySectionPage({
   let diff: InventoryDiffRecord | null = null;
   let endpoint: EndpointDetailData | null = null;
   try {
-    [history, diff, endpoint] = await Promise.all([
+    [history, diff] = await Promise.all([
       getInventoryHistory(session.sessionToken, endpointId, section, page),
       // The diff is secondary: a failure here must not blank the history.
       getInventoryDiff(session.sessionToken, endpointId, section).catch(() => null),
@@ -80,7 +80,7 @@ export default async function InventorySectionPage({
     <PageStack>
       <EndpointSectionHeader
         endpointId={endpointId}
-        hostname={endpoint?.hostname ?? endpointId}
+        hostname={endpointId}
         section="inventory"
         trail={[{ label }]}
         description={`${label}: ${history.total} recorded change${history.total === 1 ? "" : "s"}. A snapshot is stored only when this section's content actually differs, so every row is a real change rather than a routine collection.`}
@@ -103,7 +103,7 @@ export default async function InventorySectionPage({
               The history below is unaffected.
             </Notice>
           ) : !diff.comparable ? (
-            <p className={note}>This device has reported this section once and it has not changed since. That is a normal state, not a gap.</p>
+            <p className={note}>There are not enough comparable snapshots to show a change.</p>
           ) : diffIsEmpty(diff.diff) ? (
             <p className={note}>The two most recent snapshots differ in metadata only.</p>
           ) : (
@@ -168,3 +168,5 @@ export default async function InventorySectionPage({
     </PageStack>
   );
 }
+
+
