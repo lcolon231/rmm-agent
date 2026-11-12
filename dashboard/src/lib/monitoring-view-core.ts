@@ -152,7 +152,8 @@ export function policyStateWord(enabled: boolean): ToneWord {
 }
 
 export function scopeLabel(scope: MonitoringScope, scopeId: string | null): string {
-  if (scope === "global" || !scopeId) return "Every managed device";
+  if (scope === "global") return "Every managed device";
+  if (!scopeId) return "Target not recorded";
   return { client: "One client", site: "One site", agent: "One device", global: "Every managed device" }[scope];
 }
 
@@ -256,3 +257,4 @@ export function paramsWords(params: Record<string, unknown>): string {
   if (entries.length === 0) return "None";
   return entries.map(([key, value]) => `${key.replaceAll("_", " ")}: ${String(value)}`).join(" · ");
 }
+
