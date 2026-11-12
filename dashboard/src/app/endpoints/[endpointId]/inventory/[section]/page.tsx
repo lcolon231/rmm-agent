@@ -18,7 +18,6 @@ import {
 } from "@/lib/inventory-core";
 import { getInventoryDiff, getInventoryHistory, type InventoryHistoryPage } from "@/lib/inventory";
 import { getDashboardSession } from "@/lib/dashboard-session";
-import { getEndpointDetail, type EndpointDetailData } from "@/lib/endpoint-detail";
 import { NodelinkApiError } from "@/lib/nodelink-api";
 
 export const dynamic = "force-dynamic";
@@ -42,14 +41,11 @@ export default async function InventorySectionPage({
 
   let history: InventoryHistoryPage | null = null;
   let diff: InventoryDiffRecord | null = null;
-  let endpoint: EndpointDetailData | null = null;
   try {
     [history, diff] = await Promise.all([
       getInventoryHistory(session.sessionToken, endpointId, section, page),
       // The diff is secondary: a failure here must not blank the history.
       getInventoryDiff(session.sessionToken, endpointId, section).catch(() => null),
-      // Only the page header needs the device record; without it the ID stands in.
-      getEndpointDetail(session.sessionToken, endpointId, { historyHours: 1, historyLimit: 10 }).catch(() => null),
     ]);
   } catch (error) {
     if (error instanceof NodelinkApiError && (error.status === 404 || error.status === 422)) {
@@ -168,5 +164,6 @@ export default async function InventorySectionPage({
     </PageStack>
   );
 }
+
 
 
