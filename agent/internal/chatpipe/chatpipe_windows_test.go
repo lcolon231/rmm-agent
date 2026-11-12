@@ -22,7 +22,7 @@ func TestRemotePipeClientsRejected(t *testing.T) {
 		t.Fatal("remote clients enabled")
 	}
 	name := fmt.Sprintf(`\\.\pipe\nodelink-chat-test-%d-remote`, os.Getpid())
-	pipe, err := newPipe(name)
+	pipe, err := newPipe(name, pipeACL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestNonInteractiveCallerDenied(t *testing.T) {
 	// AccessCheck against a re-parsed SDDL string, which was fragile and does not
 	// prove a real open would fail.
 	name := fmt.Sprintf(`\\.\pipe\nodelink-chat-test-%d-noninteractive`, os.Getpid())
-	pipe, err := newPipe(name)
+	pipe, err := newPipe(name, pipeACL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestExtraBytesDoNotSupplyParametersAndShutdownIsBounded(t *testing.T) {
 	called := make(chan uint32, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- serve(ctx, name, func(_ context.Context, id uint32) error { called <- id; return nil })
+		done <- serve(ctx, name, pipeACL, func(_ context.Context, id uint32) error { called <- id; return nil })
 	}()
 	p, _ := windows.UTF16PtrFromString(name)
 	var pipe windows.Handle

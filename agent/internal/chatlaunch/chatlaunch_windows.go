@@ -9,21 +9,48 @@ import (
 	"unsafe"
 )
 
-func ForSession(session uint32) (*Target, error) {
+// api is the Win32 surface ForSession needs. Production binds it straight to
+// x/sys/windows; tests substitute fakes so the session, token and process
+// decisions run without a second logged-on user or a real browser launch.
+type api struct {
+	activeConsole       func() uint32
+	queryUserToken      func(uint32, *windows.Token) error
+	duplicateTokenEx    func(windows.Token, uint32, *windows.SecurityAttributes, uint32, uint32, *windows.Token) error
+	closeHandle         func(windows.Handle) error
+	systemDirectory     func() (string, error)
+	createEnvironment   func(**uint16, windows.Token, bool) error
+	destroyEnvironment  func(*uint16) error
+	createProcessAsUser func(windows.Token, *uint16, *uint16, *windows.SecurityAttributes, *windows.SecurityAttributes, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error
+}
+
+var system = api{
+	activeConsole:       windows.WTSGetActiveConsoleSessionId,
+	queryUserToken:      windows.WTSQueryUserToken,
+	duplicateTokenEx:    windows.DuplicateTokenEx,
+	closeHandle:         windows.CloseHandle,
+	systemDirectory:     windows.GetSystemDirectory,
+	createEnvironment:   windows.CreateEnvironmentBlock,
+	destroyEnvironment:  windows.DestroyEnvironmentBlock,
+	createProcessAsUser: windows.CreateProcessAsUser,
+}
+
+func ForSession(session uint32) (*Target, error) { return forSession(system, session) }
+
+func forSession(sys api, session uint32) (*Target, error) {
 	if session == 0 || session == 0xffffffff {
 		return nil, ErrNoSession
 	}
 	var user windows.Token
-	if err := windows.WTSQueryUserToken(session, &user); err != nil {
+	if err := sys.queryUserToken(session, &user); err != nil {
 		return nil, ErrNoSession
 	}
-	defer user.Close()
+	defer sys.closeHandle(windows.Handle(user))
 	var primary windows.Token
-	if err := windows.DuplicateTokenEx(user, windows.MAXIMUM_ALLOWED, nil, windows.SecurityImpersonation, windows.TokenPrimary, &primary); err != nil {
+	if err := sys.duplicateTokenEx(user, windows.MAXIMUM_ALLOWED, nil, windows.SecurityImpersonation, windows.TokenPrimary, &primary); err != nil {
 		return nil, ErrLaunch
 	}
-	return &Target{release: func() { primary.Close() }, launch: func(raw string) error {
-		directory, err := windows.GetSystemDirectory()
+	return &Target{release: func() { sys.closeHandle(windows.Handle(primary)) }, launch: func(raw string) error {
+		directory, err := sys.systemDirectory()
 		if err != nil {
 			return ErrLaunch
 		}
@@ -36,23 +63,25 @@ func ForSession(session uint32) (*Target, error) {
 		}
 		desktop, _ := windows.UTF16PtrFromString(`winsta0\default`)
 		var env *uint16
-		if err := windows.CreateEnvironmentBlock(&env, primary, false); err != nil {
+		if err := sys.createEnvironment(&env, primary, false); err != nil {
 			return ErrLaunch
 		}
-		defer windows.DestroyEnvironmentBlock(env)
+		defer sys.destroyEnvironment(env)
 		startup := windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfo{})), Desktop: desktop}
 		var process windows.ProcessInformation
-		if err := windows.CreateProcessAsUser(primary, app, command, nil, nil, false, windows.CREATE_UNICODE_ENVIRONMENT, env, nil, &startup, &process); err != nil {
+		if err := sys.createProcessAsUser(primary, app, command, nil, nil, false, windows.CREATE_UNICODE_ENVIRONMENT, env, nil, &startup, &process); err != nil {
 			return ErrLaunch
 		}
-		windows.CloseHandle(process.Thread)
-		windows.CloseHandle(process.Process)
+		sys.closeHandle(process.Thread)
+		sys.closeHandle(process.Process)
 		return nil
 	}}, nil
 }
 
-func openConsole(raw string) error {
-	target, err := ForSession(windows.WTSGetActiveConsoleSessionId())
+func openConsole(raw string) error { return openConsoleWith(system, raw) }
+
+func openConsoleWith(sys api, raw string) error {
+	target, err := forSession(sys, sys.activeConsole())
 	if err != nil {
 		return err
 	}
