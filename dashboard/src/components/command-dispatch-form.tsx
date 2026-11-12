@@ -31,6 +31,7 @@ import { formatMonitoringTimestamp } from "@/lib/monitoring-core";
 
 import { inlineLink, Notice } from "./endpoint/section-header";
 import { Button } from "./ui/button";
+import { ConfirmDialog } from "./ui/confirm-dialog";
 import { cx, focusRing } from "./ui/cx";
 import { CodeBlock } from "./ui/drawer";
 import { Input, Select, Textarea } from "./ui/field";
@@ -99,6 +100,7 @@ export function CommandDispatchForm({
   const [error, setError] = useState("");
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmingPower, setConfirmingPower] = useState(false);
   // Server-rendered instant during hydration, then the live clock: coverage is
   // time-sensitive and a stale "covered" reading would mislead.
   const nowMs = useSyncExternalStore(subscribeToClock, clockSnapshot, () => serverNowMs);
@@ -371,11 +373,15 @@ export function CommandDispatchForm({
           <Button disabled={isSubmitting} icon={ArrowLeft} onClick={() => setStep({ name: "compose" })}>
             Edit
           </Button>
-          <Button variant="primary" disabled={isSubmitting} icon={Send} onClick={() => handleConfirm(step.input)}>
+          <Button variant="primary" disabled={isSubmitting} icon={Send} onClick={() => isPowerAction ? setConfirmingPower(true) : handleConfirm(step.input)}>
             {isSubmitting ? "Dispatching…" : "Confirm dispatch"}
           </Button>
         </div>
         <DispatchError />
+        <ConfirmDialog open={confirmingPower} onCancel={() => setConfirmingPower(false)} title={`Confirm ${step.input.kind} for ${hostname}?`}
+          consequence="This can interrupt active work. The maintenance window and user-session policy are checked by the server. Enter the operational reason for this action."
+          confirmLabel="Confirm power action" busy={isSubmitting}
+          onConfirm={async (reason) => { await handleConfirm({ ...step.input, operation_payload: { ...step.input.operation_payload, reason } }); setConfirmingPower(false); }} />
       </div>
     );
   }
@@ -647,3 +653,4 @@ function Check({ id, label, checked, onChange }: { id: string; label: string; ch
     </label>
   );
 }
+
