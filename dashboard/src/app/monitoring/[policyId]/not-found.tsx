@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import Link from "next/link";
+import { NotFoundPanel } from "@/components/monitoring/not-found-panel";
 
 export default function MonitoringPolicyNotFound() {
-  return (
-    <section className="enrollment-empty" role="alert">
-      <h1>Monitoring policy not found</h1>
-      <p>The policy may have been deleted or the link is no longer valid.</p>
-      <Link href="/monitoring">Return to monitoring policies</Link>
-    </section>
-  );
+  return <NotFoundPanel role="alert" title="Monitoring policy not found" body="The policy may have been deleted, or the link is no longer valid." href="/monitoring" linkLabel="Back to monitoring policies" />;
 }

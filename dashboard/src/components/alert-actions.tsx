@@ -1,26 +1,70 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 "use client";
 
-import { CheckCircle2, MessageSquareText, UserRoundCheck } from "lucide-react";
+import { Check, CircleCheck, MessageSquareText, UserRoundCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 
 import type { AlertAssignee, MonitoringAlertDetail } from "@/lib/monitoring-core";
 
-type ActionName = "acknowledge" | "assign" | "comments" | "resolve";
-type AlertActionTarget = Pick<
-  MonitoringAlertDetail,
-  "id" | "state" | "version" | "assigned_to_operator_id"
->;
+import { Button } from "./ui/button";
+import { ConfirmDialog } from "./ui/confirm-dialog";
+import { cx } from "./ui/cx";
+import { Select, Textarea } from "./ui/field";
+import { cardClass } from "./ui/stat-tile";
 
-export function AlertActions({
+type ActionName = "acknowledge" | "assign" | "comments" | "resolve";
+type AlertActionTarget = Pick<MonitoringAlertDetail, "id" | "state" | "version" | "assigned_to_operator_id">;
+
+const COMMENT_LIMIT = 2000;
+
+const DONE: Record<ActionName, string> = {
+  acknowledge: "Alert acknowledged.",
+  assign: "Assignment updated.",
+  comments: "Note added.",
+  resolve: "Alert resolved.",
+};
+
+type AlertActionState = {
+  alert: AlertActionTarget;
+  assignees: AlertAssignee[];
+  canManage: boolean;
+  comment: string;
+  setComment: (value: string) => void;
+  assigneeId: string;
+  setAssigneeId: (value: string) => void;
+  busy: ActionName | null;
+  message: string;
+  error: string;
+  /** Which action the error belongs to. */
+  failed: ActionName | null;
+  /** Resolves true when the server confirmed the change. */
+  run: (action: ActionName, commentOverride?: string) => Promise<boolean>;
+};
+
+const AlertActionContext = createContext<AlertActionState | null>(null);
+
+function useAlertActions(): AlertActionState {
+  const value = useContext(AlertActionContext);
+  if (!value) throw new Error("Alert actions must be inside AlertActionsProvider.");
+  return value;
+}
+
+/**
+ * Shares one alert version, note and busy state between the header buttons
+ * and the "Update alert" card, so a note typed in the card goes with
+ * Acknowledge exactly as before.
+ */
+export function AlertActionsProvider({
   alert,
   assignees,
   canManage,
+  children,
 }: {
   alert: AlertActionTarget;
   assignees: AlertAssignee[];
   canManage: boolean;
+  children: ReactNode;
 }) {
   const router = useRouter();
   const [currentAlert, setCurrentAlert] = useState(alert);
@@ -29,26 +73,27 @@ export function AlertActions({
   const [busy, setBusy] = useState<ActionName | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [failed, setFailed] = useState<ActionName | null>(null);
 
-  async function run(action: ActionName, includeComment = true) {
+  async function run(action: ActionName, commentOverride?: string) {
+    const note = (commentOverride ?? comment).trim();
     setBusy(action);
     setError("");
+    setFailed(null);
     setMessage("");
     try {
-      const response = await fetch(`/api/alerts/${encodeURIComponent(alert.id)}/${action}`, {
+      if (note.length > COMMENT_LIMIT) throw new Error(`Keep the note to ${COMMENT_LIMIT.toLocaleString("en-US")} characters.`);
+      const response = await fetch(`/api/alerts/${encodeURIComponent(currentAlert.id)}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           request_id: crypto.randomUUID().replaceAll("-", ""),
           expected_version: currentAlert.version,
-          ...(includeComment && comment.trim() ? { comment: comment.trim() } : {}),
+          ...(note ? { comment: note } : {}),
           ...(action === "assign" ? { assigned_to_operator_id: assigneeId || null } : {}),
         }),
       });
-      const body = await response.json().catch(() => null) as {
-        alert?: MonitoringAlertDetail;
-        error?: string;
-      } | null;
+      const body = (await response.json().catch(() => null)) as { alert?: MonitoringAlertDetail; error?: string } | null;
       if (!response.ok || !body?.alert) throw new Error(body?.error ?? "The update failed.");
       setCurrentAlert({
         id: body.alert.id,
@@ -58,70 +103,122 @@ export function AlertActions({
       });
       setAssigneeId(body.alert.assigned_to_operator_id ?? "");
       setComment("");
-      setMessage({
-        acknowledge: "Alert acknowledged.", assign: "Assignment updated.",
-        comments: "Comment added.", resolve: "Alert resolved.",
-      }[action]);
+      setMessage(DONE[action]);
       router.refresh();
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The update failed.");
+      setFailed(action);
+      return false;
     } finally {
       setBusy(null);
     }
   }
 
-  if (!canManage) {
-    return <p className="alert-readonly-note">Read-only access: an operator or administrator can update this alert.</p>;
+  return (
+    <AlertActionContext.Provider
+      value={{ alert: currentAlert, assignees, canManage, comment, setComment, assigneeId, setAssigneeId, busy, message, error, failed, run }}
+    >
+      {children}
+    </AlertActionContext.Provider>
+  );
+}
+
+/** Header actions: Acknowledge (primary) and the high-risk Resolve alert. */
+export function AlertHeaderActions() {
+  const { alert, canManage, busy, error, failed, run } = useAlertActions();
+  const [resolving, setResolving] = useState(false);
+  if (!canManage) return null;
+
+  async function resolve(reason: string) {
+    if (await run("resolve", reason)) setResolving(false);
   }
 
   return (
-    <section
-      className="alert-action-panel"
-      aria-busy={Boolean(busy)}
-      aria-labelledby="alert-actions-title"
-    >
-      <header>
-        <div><span>Technician controls</span><h2 id="alert-actions-title">Update alert</h2></div>
-        <small>Current version {currentAlert.version}</small>
+    <>
+      {alert.state === "open" ? (
+        <Button variant="primary" icon={Check} onClick={() => void run("acknowledge")} disabled={Boolean(busy)}>
+          {busy === "acknowledge" ? "Saving…" : "Acknowledge"}
+        </Button>
+      ) : null}
+      {alert.state !== "resolved" ? (
+        <Button variant="danger" icon={CircleCheck} onClick={() => setResolving(true)} disabled={Boolean(busy)}>
+          Resolve alert
+        </Button>
+      ) : null}
+      <ConfirmDialog
+        open={resolving}
+        onCancel={() => setResolving(false)}
+        onConfirm={resolve}
+        title="Mark this alert as resolved?"
+        consequence="Only resolve it once the problem is fixed. If the check fails again, the alert opens again. Your reason is saved as a note on the alert."
+        confirmLabel={busy === "resolve" ? "Resolving…" : "Resolve alert"}
+        busy={busy === "resolve"}
+        error={failed === "resolve" ? error : undefined}
+      />
+    </>
+  );
+}
+
+/** Assignment and notes. Read-only operators see why the controls are missing. */
+export function AlertWorkPanel() {
+  const { assignees, canManage, comment, setComment, assigneeId, setAssigneeId, busy, message, error, failed, run } = useAlertActions();
+
+  if (!canManage) {
+    return (
+      <p className={cx(cardClass, "m-0 px-5 py-4 text-sm text-(--muted)")}>
+        You have read-only access. An operator or administrator can acknowledge, assign or resolve this alert.
+      </p>
+    );
+  }
+
+  return (
+    <section aria-labelledby="alert-actions-title" aria-busy={Boolean(busy)} className={cx(cardClass, "overflow-hidden")}>
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-(--line) px-5 py-4">
+        <div className="grid gap-0.5">
+          <h2 id="alert-actions-title" className="m-0 text-base font-semibold text-(--ink)">
+            Update alert
+          </h2>
+          <p className="m-0 text-xs text-(--muted)">A note typed here is saved with Acknowledge, an assignment change, or on its own.</p>
+        </div>
       </header>
-      <label>
-        <span>Assignment</span>
-        <select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} disabled={Boolean(busy)}>
-          <option value="">Unassigned</option>
-          {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.email}</option>)}
-        </select>
-      </label>
-      <label>
-        <span>Technician note</span>
-        <textarea
+      <div className="grid gap-4 px-5 py-4">
+        <Select label="Assigned to" value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} disabled={Boolean(busy)}>
+          <option value="">Nobody</option>
+          {assignees.map((assignee) => (
+            <option key={assignee.id} value={assignee.id}>
+              {assignee.email}
+            </option>
+          ))}
+        </Select>
+        <Textarea
+          label="Note"
+          hint={`${comment.length.toLocaleString("en-US")} of ${COMMENT_LIMIT.toLocaleString("en-US")} characters`}
           value={comment}
           onChange={(event) => setComment(event.target.value)}
-          maxLength={2000}
-          placeholder="Add investigation context or resolution evidence…"
+          maxLength={COMMENT_LIMIT}
+          placeholder="What you checked, or what you changed"
           disabled={Boolean(busy)}
         />
-        <small>{comment.length}/2,000 characters</small>
-      </label>
-      <div className="alert-action-buttons">
-        {currentAlert.state === "open" ? (
-          <button type="button" onClick={() => run("acknowledge")} disabled={Boolean(busy)}>
-            <CheckCircle2 size={16} />{busy === "acknowledge" ? "Saving…" : "Acknowledge"}
-          </button>
+        <div className="flex flex-wrap gap-2">
+          <Button icon={UserRoundCheck} onClick={() => void run("assign")} disabled={Boolean(busy)}>
+            {busy === "assign" ? "Saving…" : "Save assignment"}
+          </Button>
+          <Button icon={MessageSquareText} onClick={() => void run("comments")} disabled={Boolean(busy) || !comment.trim()}>
+            {busy === "comments" ? "Saving…" : "Add note"}
+          </Button>
+        </div>
+        {message ? (
+          <p role="status" className="m-0 text-sm font-semibold text-(--success)">
+            {message}
+          </p>
         ) : null}
-        <button type="button" onClick={() => run("assign")} disabled={Boolean(busy)}>
-          <UserRoundCheck size={16} />{busy === "assign" ? "Saving…" : "Save assignment"}
-        </button>
-        <button type="button" onClick={() => run("comments")} disabled={Boolean(busy) || !comment.trim()}>
-          <MessageSquareText size={16} />{busy === "comments" ? "Saving…" : "Add comment"}
-        </button>
-        {currentAlert.state !== "resolved" ? (
-          <button type="button" className="resolve" onClick={() => run("resolve")} disabled={Boolean(busy) || !comment.trim()}>
-            <CheckCircle2 size={16} />{busy === "resolve" ? "Resolving…" : "Resolve alert"}
-          </button>
+        {error && failed !== "resolve" ? (
+          <p role="alert" className="m-0 text-sm text-(--red)">
+            {error}
+          </p>
         ) : null}
       </div>
-      {message ? <p className="alert-action-success" role="status">{message}</p> : null}
-      {error ? <p className="alert-action-error" role="alert">{error}</p> : null}
     </section>
   );
 }
