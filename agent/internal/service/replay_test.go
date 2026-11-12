@@ -2,6 +2,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/client"
+	"github.com/lcolon231/rmm/agent/internal/inventory"
 )
 
 func TestMain(m *testing.M) {
@@ -17,6 +19,9 @@ func TestMain(m *testing.M) {
 	// Unit tests run as an ordinary developer account and need to reload their
 	// own temporary files; DPAPI protection is still exercised.
 	applySeenStoreACL = func(string) error { return nil }
+	// Loop tests exercise check-in control flow, not collection; the
+	// inventory package tests its own collectors.
+	collectInventory = func(context.Context) []inventory.Section { return []inventory.Section{} }
 	os.Exit(m.Run())
 }
 

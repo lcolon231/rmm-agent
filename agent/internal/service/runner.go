@@ -219,6 +219,11 @@ func (a *Agent) RunOnce(ctx context.Context) error {
 
 // loop runs the enroll-then-check-in cycle. ctx signals shutdown; execCtx backs
 // running child processes so they can outlive a stop request briefly.
+// collectInventory is the per-process inventory snapshot. Tests replace it:
+// the real Windows collector spawns PowerShell per section (30s timeout each),
+// which can outlast a loop test's whole deadline on a busy machine.
+var collectInventory = inventory.Collect
+
 func (a *Agent) loop(ctx, execCtx context.Context) error {
 	b := newBackoff(a.backoffInitial, a.backoffMax, 2.0, rand.New(rand.NewSource(time.Now().UnixNano())))
 
@@ -498,7 +503,7 @@ func (a *Agent) checkIn(ctx, execCtx context.Context, s *session) error {
 	// changes rarely and collection spawns PowerShell, so re-collecting on each
 	// beat would cost far more than it could ever discover.
 	if s.inventorySections == nil {
-		s.inventorySections = inventory.Collect(ctx)
+		s.inventorySections = collectInventory(ctx)
 	}
 	ack, err := s.api.HeartbeatWithPendingResults(
 		ctx, sample, inventory.Hashes(s.inventorySections), pendingResultNotices(s.seen, 256),
