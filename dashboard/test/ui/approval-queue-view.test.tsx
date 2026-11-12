@@ -8,7 +8,7 @@ import type { ApprovalPolicy, ApprovalRequestDetail } from "@/lib/approvals-core
 
 const requester = "op-requester";
 const reviewer = "op-reviewer";
-const REASON_LABEL = "Reason (kept in the audit record)";
+const REASON_LABEL = /Reason/;
 
 const pending: ApprovalRequestDetail = {
   id: "req-1",

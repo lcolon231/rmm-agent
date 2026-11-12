@@ -80,7 +80,7 @@ test("a high-risk action cannot be confirmed without a reason for the audit reco
   render(<DialogHarness onConfirm={(reason) => reasons.push(reason)} />);
   const dialog = screen.getByRole("alertdialog", { name: "Restart PHX-FD-02?" });
   const confirm = within(dialog).getByRole("button", { name: "Restart device" }) as HTMLButtonElement;
-  const reason = within(dialog).getByLabelText("Reason (kept in the audit record)");
+  const reason = within(dialog).getByLabelText("Reason (required)");
 
   assert.equal(document.activeElement, reason, "focus starts in the reason box");
   assert.equal(confirm.disabled, true);
@@ -108,10 +108,10 @@ test("a confirm dialog opens with an empty reason every time", () => {
   const { rerender } = render(
     <ConfirmDialog open onCancel={() => {}} onConfirm={() => {}} title="Revoke token?" consequence="It stops working." confirmLabel="Revoke token" />,
   );
-  fireEvent.change(screen.getByLabelText("Reason (kept in the audit record)"), { target: { value: "Leaked" } });
+  fireEvent.change(screen.getByLabelText("Reason (required)"), { target: { value: "Leaked" } });
   rerender(<ConfirmDialog open={false} onCancel={() => {}} onConfirm={() => {}} title="Revoke token?" consequence="It stops working." confirmLabel="Revoke token" />);
   rerender(<ConfirmDialog open onCancel={() => {}} onConfirm={() => {}} title="Revoke token?" consequence="It stops working." confirmLabel="Revoke token" />);
-  assert.equal((screen.getByLabelText("Reason (kept in the audit record)") as HTMLTextAreaElement).value, "");
+  assert.equal((screen.getByLabelText("Reason (required)") as HTMLTextAreaElement).value, "");
 });
 
 function DrawerHarness() {

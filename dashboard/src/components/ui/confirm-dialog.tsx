@@ -12,7 +12,7 @@ import { useModal } from "./use-modal";
 type ConfirmDialogProps = {
   open: boolean;
   onCancel: () => void;
-  /** Receives the trimmed reason, which belongs in the audit record. */
+  /** Receives the trimmed reason; forward it when the action API accepts one. */
   onConfirm: (reason: string) => void | Promise<void>;
   /** The question, e.g. "Restart PHX-FD-02?" */
   title: string;
@@ -26,7 +26,7 @@ type ConfirmDialogProps = {
 
 /**
  * Every high-risk action goes through here. Confirm stays disabled until a
- * reason is given, because the reason is kept in the audit record.
+ * reason is given. The calling action determines whether its API stores it.
  */
 export function ConfirmDialog(props: ConfirmDialogProps) {
   if (!props.open) return null;
@@ -74,7 +74,7 @@ function ConfirmDialogPanel({ onCancel, onConfirm, title, consequence, confirmLa
             </div>
             <Textarea
               ref={reasonRef}
-              label="Reason (kept in the audit record)"
+              label="Reason (required)"
               value={reason}
               onChange={(event) => setReason(event.target.value)}
               required
