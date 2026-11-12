@@ -93,7 +93,7 @@ export default async function EndpointInventoryPage({
           icon={CircleAlert}
           label="Could not be read"
           value={attention.length}
-          sub={attention.length ? "Unread is not the same as fine" : "Every reported section was read"}
+          sub={attention.length ? "Unread is not the same as fine" : "No collection failures reported"}
           tone={attention.length ? "crit" : "off"}
         />
         <StatTile icon={ListX} label="Never reported" value={inventory.missing_sections.length} tone={inventory.missing_sections.length ? "warn" : "off"} />
@@ -102,7 +102,7 @@ export default async function EndpointInventoryPage({
 
       {attention.length > 0 ? (
         <Notice tone="crit" role="alert" title={`${attention.length} section${attention.length === 1 ? "" : "s"} could not be read`}>
-          {attention.map((section) => sectionLabel(section.section)).join(", ")}. Absence of data here means nobody looked — not that nothing is configured.
+          {attention.map((section) => sectionLabel(section.section)).join(", ")}. These sections could not be collected; their configuration is unknown.
         </Notice>
       ) : null}
 
@@ -111,7 +111,7 @@ export default async function EndpointInventoryPage({
           <EmptyState
             icon={HardDrive}
             title="This device has not reported inventory yet"
-            body="A newly enrolled agent reports on its next check-in. Nothing is missing until it has had one."
+            body="No inventory is available yet. Collection may still be pending."
           />
         </div>
       ) : (
@@ -152,3 +152,4 @@ export default async function EndpointInventoryPage({
     </PageStack>
   );
 }
+
