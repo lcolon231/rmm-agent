@@ -2,17 +2,57 @@
 
 "use client";
 
-import { Calendar, Play, Plus, Power, Trash2 } from "lucide-react";
+import { Pause, Play, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import type { ScheduledTaskItem } from "@/lib/scheduled-tasks-core";
 
-export function ScheduleRowActions({ task }: { task: ScheduledTaskItem }) {
+import { Button } from "../ui/button";
+import { Drawer } from "../ui/drawer";
+import { Input, Select, Textarea } from "../ui/field";
+import { useModal } from "../ui/use-modal";
+
+/**
+ * Delete confirmation. The delete API takes no reason, so unlike ConfirmDialog
+ * this does not ask for one: asking would suggest it is kept when it is not.
+ */
+function ConfirmDelete({ name, busy, onCancel, onConfirm }: { name: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const panelRef = useModal(true, busy ? () => {} : onCancel);
+  const titleId = useId();
+  const bodyId = useId();
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div aria-hidden="true" className="absolute inset-0 bg-[rgb(23_19_42/45%)]" onClick={busy ? undefined : onCancel} />
+      <div ref={panelRef} role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={bodyId}
+        className="relative w-[min(480px,100%)] rounded-[10px] bg-(--paper) shadow-[0_14px_34px_rgb(24_16_46/12%)]">
+        <div className="grid gap-4 p-6">
+          <span className="flex size-10 items-center justify-center rounded-full bg-(--amber-soft) text-[#89500b]">
+            <TriangleAlert size={20} aria-hidden="true" />
+          </span>
+          <div className="grid gap-2">
+            <h2 id={titleId} className="m-0 text-lg leading-[1.3] font-semibold text-(--ink)">Delete {name}?</h2>
+            <p id={bodyId} className="m-0 text-sm leading-normal text-(--slate)">
+              It stops running and cannot be brought back. Runs it already sent stay in Tasks, and the deletion is recorded in the audit log.
+            </p>
+          </div>
+        </div>
+        <footer className="flex flex-wrap justify-end gap-2 border-t border-(--line) px-6 py-4">
+          <Button onClick={onCancel} disabled={busy}>Cancel</Button>
+          <Button variant="danger" onClick={onConfirm} disabled={busy} aria-busy={busy || undefined}>Delete schedule</Button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+/** Pause/resume, run now and delete for one schedule; shown in its drawer. */
+export function ScheduleActions({ task, onDeleted }: { task: ScheduledTaskItem; onDeleted?: () => void }) {
   const router = useRouter();
   const [toggling, setToggling] = useState(false);
   const [running, setRunning] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const handleToggle = async () => {
@@ -20,11 +60,11 @@ export function ScheduleRowActions({ task }: { task: ScheduledTaskItem }) {
     setMessage(null);
     try {
       const res = await fetch(`/api/schedules/${task.id}/toggle`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to toggle schedule");
+      if (!res.ok) throw new Error("The schedule was not changed.");
       router.refresh();
     } catch (err: unknown) {
       const error = err as Error;
-      setMessage(error.message || "Toggle failed");
+      setMessage(error.message || "The schedule was not changed.");
     } finally {
       setToggling(false);
     }
@@ -36,70 +76,50 @@ export function ScheduleRowActions({ task }: { task: ScheduledTaskItem }) {
     try {
       const res = await fetch(`/api/schedules/${task.id}/run-now`, { method: "POST" });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to trigger schedule");
-      setMessage(`Dispatched to ${data.dispatched} agent(s)`);
+      if (!res.ok) throw new Error(data.error || "The schedule did not run. Nothing was sent.");
+      setMessage(`Sent to ${data.dispatched} device${data.dispatched === 1 ? "" : "s"}.`);
       router.refresh();
     } catch (err: unknown) {
       const error = err as Error;
-      setMessage(error.message || "Run failed");
+      setMessage(error.message || "The schedule did not run. Nothing was sent.");
     } finally {
       setRunning(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to delete schedule "${task.name}"?`)) return;
     setDeleting(true);
     setMessage(null);
     try {
       const res = await fetch(`/api/schedules/${task.id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete schedule");
+      if (!res.ok) throw new Error("The schedule was not deleted.");
+      setConfirming(false);
+      onDeleted?.();
       router.refresh();
     } catch (err: unknown) {
       const error = err as Error;
-      setMessage(error.message || "Delete failed");
+      setConfirming(false);
+      setMessage(error.message || "The schedule was not deleted.");
     } finally {
       setDeleting(false);
     }
   };
 
   return (
-    <div className="schedule-row-actions">
-      {message ? <small className="schedule-status-msg">{message}</small> : null}
-      <button
-        type="button"
-        className={`schedule-btn toggle ${task.enabled ? "enabled" : "disabled"}`}
-        disabled={toggling}
-        onClick={handleToggle}
-        title={task.enabled ? "Disable schedule" : "Enable schedule"}
-      >
-        <Power size={14} />
-        <span>{task.enabled ? "Enabled" : "Disabled"}</span>
-      </button>
-      <button
-        type="button"
-        className="schedule-btn run-now"
-        disabled={running || !task.enabled}
-        onClick={handleRunNow}
-        title="Run now"
-      >
-        <Play size={14} />
-        <span>Run now</span>
-      </button>
-      <button
-        type="button"
-        className="schedule-btn delete"
-        disabled={deleting}
-        onClick={handleDelete}
-        title="Delete schedule"
-      >
-        <Trash2 size={14} />
-      </button>
+    <div className="grid w-full gap-3">
+      {message ? <p role="status" className="m-0 text-sm text-(--slate)">{message}</p> : null}
+      <div className="flex flex-wrap gap-2">
+        <Button icon={Play} disabled={running || !task.enabled} onClick={handleRunNow}>Run now</Button>
+        <Button icon={task.enabled ? Pause : Play} disabled={toggling} onClick={handleToggle}>{task.enabled ? "Pause schedule" : "Resume schedule"}</Button>
+        <Button variant="danger" icon={Trash2} disabled={deleting} onClick={() => setConfirming(true)}>Delete</Button>
+      </div>
+      {confirming ? <ConfirmDelete name={task.name} busy={deleting} onCancel={() => setConfirming(false)} onConfirm={handleDelete} /> : null}
     </div>
   );
 }
 
-export function CreateScheduleButton() {
+/** "New schedule": the primary action; the form opens in a drawer. */
+export function NewScheduleButton() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -113,6 +133,7 @@ export function CreateScheduleButton() {
   const [timezone, setTimezone] = useState("UTC");
   const [kind, setKind] = useState("powershell");
   const [commandText, setCommandText] = useState("");
+  const formId = useId();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,7 +162,7 @@ export function CreateScheduleButton() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || data.error || "Failed to create schedule");
+      if (!res.ok) throw new Error(data.detail || data.error || "The schedule was not created.");
 
       setOpen(false);
       setName("");
@@ -151,7 +172,7 @@ export function CreateScheduleButton() {
       router.refresh();
     } catch (err: unknown) {
       const error = err as Error;
-      setError(error.message || "Create failed");
+      setError(error.message || "The schedule was not created.");
     } finally {
       setLoading(false);
     }
@@ -159,123 +180,47 @@ export function CreateScheduleButton() {
 
   return (
     <>
-      <button type="button" className="enrollment-btn-primary" onClick={() => setOpen(true)}>
-        <Plus size={16} />
-        <span>Create schedule</span>
-      </button>
-
-      {open ? (
-        <div className="schedule-modal-overlay">
-          <div className="schedule-modal">
-            <header>
-              <h2><Calendar size={18} /> New recurring task schedule</h2>
-              <button type="button" className="close-btn" onClick={() => setOpen(false)}>×</button>
-            </header>
-            <form onSubmit={handleSubmit}>
-              {error ? <div className="schedule-error-banner">{error}</div> : null}
-
-              <label>
-                <span>Schedule name</span>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Daily Disk Cleanup"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </label>
-
-              <label>
-                <span>Description (optional)</span>
-                <input
-                  type="text"
-                  placeholder="Briefly state purpose"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </label>
-
-              <div className="form-row">
-                <label>
-                  <span>Target scope</span>
-                  <select
-                    value={targetType}
-                    onChange={(e) => setTargetType(e.target.value as "agent" | "site")}
-                  >
-                    <option value="agent">Single Agent</option>
-                    <option value="site">Entire Site</option>
-                  </select>
-                </label>
-
-                <label>
-                  <span>Target ID (Agent or Site UUID)</span>
-                  <input
-                    type="text"
-                    required
-                    placeholder="UUID string"
-                    value={targetId}
-                    onChange={(e) => setTargetId(e.target.value)}
-                  />
-                </label>
-              </div>
-
-              <div className="form-row">
-                <label>
-                  <span>Cron expression</span>
-                  <input
-                    type="text"
-                    required
-                    placeholder="0 * * * *"
-                    value={cronExpression}
-                    onChange={(e) => setCronExpression(e.target.value)}
-                  />
-                </label>
-
-                <label>
-                  <span>Timezone</span>
-                  <select value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-                    <option value="UTC">UTC</option>
-                    <option value="America/New_York">America/New_York (EDT/EST)</option>
-                    <option value="America/Chicago">America/Chicago (CDT/CST)</option>
-                    <option value="America/Los_Angeles">America/Los_Angeles (PDT/PST)</option>
-                    <option value="Europe/London">Europe/London (BST/GMT)</option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="form-row">
-                <label>
-                  <span>Execution kind</span>
-                  <select value={kind} onChange={(e) => setKind(e.target.value)}>
-                    <option value="powershell">PowerShell</option>
-                    <option value="shell">Shell / CMD</option>
-                  </select>
-                </label>
-              </div>
-
-              <label>
-                <span>Command / Script content</span>
-                <textarea
-                  required
-                  rows={4}
-                  placeholder="Get-Process | Where-Object WorkingSet -gt 100MB"
-                  value={commandText}
-                  onChange={(e) => setCommandText(e.target.value)}
-                />
-              </label>
-
-              <footer>
-                <button type="button" className="btn-secondary" onClick={() => setOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="enrollment-btn-primary" disabled={loading}>
-                  {loading ? "Creating..." : "Save Schedule"}
-                </button>
-              </footer>
-            </form>
-          </div>
-        </div>
-      ) : null}
+      <Button variant="primary" icon={Plus} onClick={() => setOpen(true)}>New schedule</Button>
+      <Drawer
+        open={open}
+        onClose={() => setOpen(false)}
+        context="Schedules"
+        title="New schedule"
+        sub="It is active as soon as it is saved. A device still busy with the same kind of command is skipped for that run."
+        footer={
+          <>
+            <Button type="submit" form={formId} variant="primary" disabled={loading}>{loading ? "Saving…" : "Save schedule"}</Button>
+            <Button onClick={() => setOpen(false)}>Cancel</Button>
+          </>
+        }
+      >
+        <form id={formId} onSubmit={handleSubmit} className="grid gap-4">
+          {error ? <p role="alert" className="m-0 rounded-lg bg-(--red-soft) px-4 py-3 text-sm text-(--red)">{error} Nothing was saved.</p> : null}
+          <Input label="Name" required placeholder="Weekly disk cleanup" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} />
+          <Select label="Applies to" value={targetType} onChange={(e) => setTargetType(e.target.value as "agent" | "site")}>
+            <option value="agent">One device</option>
+            <option value="site">Every device at a site</option>
+          </Select>
+          <Input label={targetType === "site" ? "Site ID" : "Device ID"} required value={targetId} onChange={(e) => setTargetId(e.target.value)}
+            className="font-(family-name:--font-data) text-[13px]" />
+          <Input label="When it runs (cron)" hint="Minute, hour, day, month, weekday. 0 * * * * is every hour." required placeholder="0 * * * *"
+            value={cronExpression} onChange={(e) => setCronExpression(e.target.value)} className="font-(family-name:--font-data) text-[13px]" />
+          <Select label="Time zone" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+            <option value="UTC">UTC</option>
+            <option value="America/New_York">America/New_York (EDT/EST)</option>
+            <option value="America/Chicago">America/Chicago (CDT/CST)</option>
+            <option value="America/Los_Angeles">America/Los_Angeles (PDT/PST)</option>
+            <option value="Europe/London">Europe/London (BST/GMT)</option>
+          </Select>
+          <Select label="Kind" value={kind} onChange={(e) => setKind(e.target.value)}>
+            <option value="powershell">PowerShell</option>
+            <option value="shell">Shell</option>
+          </Select>
+          <Textarea label="Command or script" required rows={5} placeholder="Get-Process | Where-Object WorkingSet -gt 100MB" value={commandText}
+            onChange={(e) => setCommandText(e.target.value)} spellCheck={false} className="font-(family-name:--font-data) text-[13px]" />
+        </form>
+      </Drawer>
     </>
   );
 }
