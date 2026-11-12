@@ -210,3 +210,10 @@ test("requests whose detail failed to load are counted, not silently dropped", (
 });
 
 
+
+test("a network failure during rejection leaves the reason dialog open with an uncertain result", async (t) => {
+ t.mock.method(globalThis,"fetch",async()=>{throw new TypeError("offline");});
+ renderQueue(reviewer);openRequest();fireEvent.click(button("Reject request")!);
+ const dialog=within(screen.getByRole("alertdialog"));fireEvent.change(dialog.getByLabelText(REASON_LABEL),{target:{value:"Wrong target device"}});fireEvent.click(dialog.getByRole("button",{name:"Reject request"}));
+ assert.ok(await dialog.findByText("The decision result could not be confirmed. Refresh the request before retrying."));
+});

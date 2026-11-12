@@ -54,7 +54,7 @@ Sign-in, MFA and emergency sign-in share a scrollable 420px card on the fog back
 
 ## Verification and maintenance
 
-From `dashboard/`: `npx tsc --noEmit`, `npx eslint src test`, `npm test`, `npm run test:coverage`, and `npx next build`. Keep coverage floors intact and raise them when justified. UI tests exercise role gates, reason requirements, exact request bodies, refused changes, masked credentials, URL pagination and unknown states. Browser checks were not run during this work, as required by the continuation brief.
+From `dashboard/`: `npx tsc --noEmit`, `npx eslint src test`, `npm test`, `npm run test:coverage`, and `npx next build`. Both test tiers use tsx so c8 does not double-count functions at native-stripped versus transpiled source locations. Keep coverage floors intact and raise them when justified. UI tests exercise role gates, reason requirements, exact request bodies, refused changes, masked credentials, URL pagination and unknown states. Browser checks were not run during this work, as required by the continuation brief.
 
 `scripts/prune-unused-css.mjs` parses globals.css with PostCSS, checks TypeScript string/template references, removes dead selectors individually, and drops empty at-rules. It preserves dynamic class prefixes and conservatively keeps complex selectors. Run without `--write` to inspect, with `--write` to apply. Retained legacy remote-session and unavailable-state styles must continue to work; typography remains at least 12px.
 

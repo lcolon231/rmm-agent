@@ -29,7 +29,7 @@ root.walkRules(rule => {
   // Escaped/functional selectors need a full selector parser: keep conservatively.
   if (/\\|:(?:is|where|has)\(/.test(positive)) { kept++; return true; }
   const classes = [...positive.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map(match => match[1]);
-  const retain = classes.every(used); retain ? kept++ : removed++; return retain;
+  const retain = classes.every(used); if (retain) kept++; else removed++; return retain;
  });
  if (selectors.length) rule.selector = selectors.join(", "); else rule.remove();
 });

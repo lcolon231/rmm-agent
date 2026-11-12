@@ -1,12 +1,22 @@
 {
   "all": true,
-  "src": ["src"],
-  "include": ["src/**"],
-  "extension": [".ts", ".tsx"],
-  "reporter": ["text-summary", "json-summary"],
+  "src": [
+    "src"
+  ],
+  "include": [
+    "src/**"
+  ],
+  "extension": [
+    ".ts",
+    ".tsx"
+  ],
+  "reporter": [
+    "text-summary",
+    "json-summary"
+  ],
   "check-coverage": true,
-  "lines": 49,
-  "statements": 49,
-  "functions": 63,
+  "lines": 65,
+  "statements": 65,
+  "functions": 72,
   "branches": 81
 }
