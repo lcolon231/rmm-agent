@@ -99,7 +99,7 @@ function RunDrawer({ run, onClose }: { run: TaskRunItem | null; onClose: () => v
       context={<span className="font-(family-name:--font-data)">{run.hostname ?? "Unknown device"}</span>}
       title={kindLabel(run.kind)}
       sub={<span className="font-(family-name:--font-data)">{run.id}</span>}
-      record={`Sent by ${run.actor_email ?? "an unrecorded operator"} · ${formatTaskRunTimestamp(run.dispatched_at ?? run.created_at)}`}
+      record={`Requested by ${run.actor_email ?? "an unrecorded operator"} · ${formatTaskRunTimestamp(run.created_at)}`}
       footer={
         <>
           <ButtonLink href={runHref(run)} variant="primary">Open run and output</ButtonLink>
@@ -119,7 +119,7 @@ function RunDrawer({ run, onClose }: { run: TaskRunItem | null; onClose: () => v
           { term: "Device", value: <span className="font-(family-name:--font-data)">{run.hostname ?? "Unknown device"}</span> },
           { term: "Started by", value: run.actor_email ?? "Not recorded" },
           { term: "Origin", value: origin(run) },
-          { term: "Sent", value: formatTaskRunTimestamp(run.dispatched_at ?? run.created_at) },
+          { term: "Sent", value: formatTaskRunTimestamp(run.dispatched_at) },
           { term: "Finished", value: formatTaskRunTimestamp(run.completed_at) },
           { term: "Attempt", value: String(run.attempt) },
         ]}
@@ -151,7 +151,7 @@ export function TaskRunsView({ history, filters, filtered, pageSize, pageCount }
     { key: "device", header: "Device", cell: (run) => <PrimaryCell mono title={run.hostname ?? "Unknown device"} sub={run.agent_id} /> },
     { key: "actor", header: "Started by", cell: (run) => run.actor_email ?? <span className="text-(--muted)">Not recorded</span> },
     { key: "origin", header: "Origin", cell: origin },
-    { key: "sent", header: "Sent (UTC)", cell: (run) => formatTaskRunTimestamp(run.dispatched_at ?? run.created_at) },
+    { key: "sent", header: "Sent (UTC)", cell: (run) => formatTaskRunTimestamp(run.dispatched_at) },
   ];
 
   const state = history === null ? (
@@ -186,10 +186,11 @@ export function TaskRunsView({ history, filters, filtered, pageSize, pageCount }
         minWidth={1000}
         filters={<FilterBar><FilterForm filters={filters} filtered={filtered} /></FilterBar>}
         footer={history && rows.length > 0
-          ? <TableFooter shown={rows.length} total={history.total} sortNote={`failed first on this page, then newest · ${pageSize} per page`} pagination={<Pagination filters={filters} page={history.page} pageCount={pageCount} />} />
+          ? <TableFooter shown={rows.length} total={history.total} sortNote={`failed, expired, waiting, running, completed on this page · ${pageSize} per page`} pagination={<Pagination filters={filters} page={history.page} pageCount={pageCount} />} />
           : null}
       />
       <RunDrawer run={selected} onClose={() => setSelected(null)} />
     </PageStack>
   );
 }
+
