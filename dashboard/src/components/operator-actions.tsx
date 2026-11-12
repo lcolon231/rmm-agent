@@ -2,7 +2,7 @@
 
 "use client";
 
-import { LogOut, ShieldCheck, ShieldOff } from "lucide-react";
+import { ShieldCheck, ShieldOff } from "lucide-react";
 import { useState } from "react";
 
 import { ActionDialog, StatusNote, useReportModal } from "@/components/admin/admin-ui";
@@ -292,3 +292,4 @@ export function SignOutEverywhereAction({
     </>
   );
 }
+

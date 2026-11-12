@@ -249,8 +249,7 @@ export function BreakGlassView({
       <h2>Credentials</h2>
       {accounts.length === 0 ? (
         <p className="">
-          <ShieldAlert aria-hidden="true" size={16} /> No emergency credential is
-          provisioned. 
+          <ShieldAlert aria-hidden="true" size={16} /> No emergency credential records are loaded. 
         </p>
       ) : (
         <ul className="">
@@ -318,3 +317,4 @@ export function BreakGlassView({
     {confirmation.dialog}</section></ManagedSurface>
   );
 }
+

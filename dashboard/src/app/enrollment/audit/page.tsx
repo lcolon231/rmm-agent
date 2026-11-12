@@ -2,6 +2,7 @@
 
 import { ManagedSurface } from "@/components/admin/managed-surface";
 import { PageHeader } from "@/components/shell/page-header";
+import { ButtonLink } from "@/components/ui/button";
 import { Filter, ListChecks } from "lucide-react";
 import { redirect } from "next/navigation";
 
@@ -27,7 +28,7 @@ export default async function EnrollmentAuditPage({ searchParams }: { searchPara
   const data = await getAuditEvents(session.sessionToken, { eventType, page });
   return (
     <ManagedSurface>
-<PageHeader breadcrumb={[{ label: "Administration" }, { label: "Enrollment activity" }]} title={"Enrollment activity"} description="Recorded enrollment, credential and token changes." />
+<PageHeader breadcrumb={[{ label: "Administration" }, { label: "Enrollment activity" }]} actions={<ButtonLink href="/audit" variant="secondary">Full audit log</ButtonLink>} title={"Enrollment activity"} description="Recorded enrollment, credential and token changes." />
       <form className="" method="get"><label><Filter size={16} /><span className="sr-only">Filter event type</span><select defaultValue={eventType ?? ""} name="event"><option value="">All enrollment events</option>{eventOptions.map((event) => <option key={event} value={event}>{event.replaceAll(".", " ")}</option>)}</select></label><button type="submit">Apply</button></form>
       <section className="">
         <header><div><span>Audit register</span><h2>{data.total} event{data.total === 1 ? "" : "s"}</h2></div><ListChecks size={19} /></header>
@@ -40,3 +41,4 @@ export default async function EnrollmentAuditPage({ searchParams }: { searchPara
     </ManagedSurface>
   );
 }
+

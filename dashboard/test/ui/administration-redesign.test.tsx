@@ -41,3 +41,19 @@ test("unavailable sessions are not described as an empty session inventory", () 
   assert.match(screen.getByRole("alert").textContent ?? "", /unavailable/);
   assert.equal(screen.queryByRole("button"), null);
 });
+
+import { OperatorStatusAction } from "@/components/operator-account-actions";
+import type { OperatorRecord } from "@/lib/operator-management-core";
+test("operator disabling preserves the reason and final-administrator refusal", async (t) => {
+  let body: unknown;
+  t.mock.method(globalThis, "fetch", async (_url: RequestInfo | URL, init?: RequestInit) => { body = JSON.parse(init?.body as string); return Response.json({ error: "Final administrator cannot be disabled" }, { status: 409 }); });
+  render(<OperatorStatusAction operator={{ id: "o1", email: "admin@example.test", role: "admin", disabled: false } as OperatorRecord} isCurrentOperator={false} onUpdated={() => assert.fail("Refused change must not update the record")} />);
+  fireEvent.click(screen.getByRole("button", { name: "Disable" }));
+  const dialog = within(screen.getByRole("alertdialog"));
+  assert.equal((dialog.getByRole("button", { name: "Disable operator" }) as HTMLButtonElement).disabled, true);
+  fireEvent.change(dialog.getByRole("textbox"), { target: { value: "Account retired" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Disable operator" }));
+  await waitFor(() => assert.match(screen.getByRole("alertdialog").textContent ?? "", /Final administrator/));
+  assert.deepEqual(body, { disabled: true, reason: "Account retired" });
+});
+

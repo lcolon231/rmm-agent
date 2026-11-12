@@ -63,7 +63,7 @@ export function RevokeAction({
       onRevoked?.();
       router.refresh();
     } catch {
-      setError("Revocation failed. Check the management service and try again. Nothing was changed.");
+      setError("The revocation result could not be confirmed. Refresh the record before retrying.");
     } finally {
       setPending(false);
     }
@@ -94,3 +94,4 @@ export function RevokeAction({
     </>
   );
 }
+
