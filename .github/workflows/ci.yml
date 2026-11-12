@@ -241,7 +241,7 @@ jobs:
           dashboard_pid=$!
           trap 'kill "$dashboard_pid"' EXIT
           for attempt in {1..30}; do
-            if curl --fail --silent --show-error http://127.0.0.1:3000/login | grep -q "Sign in to operations"; then
+            if curl --fail --silent --show-error http://127.0.0.1:3000/login | grep -q '<h1 id="login-title">Sign in</h1>'; then
               exit 0
             fi
             sleep 1
