@@ -97,3 +97,24 @@ test("confirming posts the reviewed input once and refreshes the endpoint", asyn
   await waitFor(() => assert.equal(refresh.mock.callCount(), 1));
   assert.equal(screen.getByRole("link", { name: "Follow this command" }).getAttribute("href"), `/endpoints/${endpointId}/commands/cmd-9`);
 });
+
+test("power dispatch requires a dialog reason and sends it with the existing hostname safeguard", async (t) => {
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => Response.json({ command: { id: "power-1" } }, { status: 201 }));
+  renderForm({ canExecuteScripts: false, isAdmin: true });
+  chooseKind("reboot");
+  fireEvent.change(screen.getByLabelText("Operational reason"), { target: { value: "Planned reboot" } });
+  fireEvent.change(screen.getByLabelText(/to confirm/), { target: { value: hostname } });
+  review();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm dispatch" }));
+  assert.equal(fetchMock.mock.callCount(), 0);
+  const confirm = screen.getByRole("button", { name: "Confirm power action" }) as HTMLButtonElement;
+  assert.equal(confirm.disabled, true);
+  fireEvent.change(screen.getByRole("textbox", { name: /Reason/ }), { target: { value: "Approved maintenance" } });
+  fireEvent.click(confirm);
+  await screen.findByText("Command signed and queued");
+  const [, init] = fetchMock.mock.calls[0].arguments as [string, RequestInit];
+  const input = JSON.parse(String(init.body));
+  assert.equal(input.operation_payload.reason, "Approved maintenance");
+  assert.equal(input.operation_payload.confirm, true);
+});
+

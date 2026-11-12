@@ -34,8 +34,6 @@ export default async function PatchComplianceLayout({ children }: { children: Re
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Fleet assurance"
-      sectionTitle="Patch compliance"
     >
       {children}
     </DashboardSectionShell>

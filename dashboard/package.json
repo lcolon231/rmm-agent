@@ -13,7 +13,7 @@
     "lint": "eslint",
     "smoke:production": "node scripts/production-smoke.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --import ./test/support/module-hooks.mjs --test \"test/*.test.ts\" && npm run test:ui",
+    "test": "node --import tsx --import ./test/support/module-hooks.mjs --test \"test/*.test.ts\" && npm run test:ui",
     "test:coverage": "c8 npm test",
     "validate:env": "node --experimental-strip-types scripts/validate-environment.ts",
     "test:ui": "node --import tsx --import ./test/ui/setup-dom.ts --experimental-test-module-mocks --test \"test/ui/**/*.test.tsx\""

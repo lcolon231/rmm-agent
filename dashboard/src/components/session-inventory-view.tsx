@@ -2,6 +2,7 @@
 
 "use client";
 
+import { ManagedSurface, useReasonConfirmation } from "./admin/managed-surface";
 import { LogOut, Monitor, ShieldAlert, Siren } from "lucide-react";
 import { useCallback, useState } from "react";
 
@@ -34,6 +35,7 @@ export function SessionInventoryView({
   initialSessions,
 }: SessionInventoryViewProps) {
   const [sessions, setSessions] = useState(initialSessions);
+  const confirmation = useReasonConfirmation();
   const [error, setError] = useState(initialError);
   const [notice, setNotice] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -54,18 +56,12 @@ export function SessionInventoryView({
     if (response.ok) setSessions(await response.json() as SessionRecord[]);
   }, []);
 
-  async function revoke(session: SessionRecord) {
+  async function revoke(session: SessionRecord, reason: string) {
     if (session.is_current) {
       setError("This is the session you are using. Sign out instead.");
       return;
     }
-    const reason = window.prompt(
-      "Why are you ending this session? This is recorded in the audit log.",
-      "",
-    );
-    if (reason === null || reason.trim().length < 3) return;
-
-    setError("");
+setError("");
     setNotice("");
     setIsBusy(true);
     try {
@@ -85,18 +81,7 @@ export function SessionInventoryView({
     }
   }
 
-  async function revokeOthers() {
-    if (!window.confirm(
-      "Sign out every other device? You will stay signed in here.",
-    )) {
-      return;
-    }
-    const reason = window.prompt(
-      "Why are you signing out your other devices?",
-      "Suspected credential compromise",
-    );
-    if (reason === null || reason.trim().length < 3) return;
-
+  async function revokeOthers(reason: string) {
     setError("");
     setNotice("");
     setIsBusy(true);
@@ -122,7 +107,7 @@ export function SessionInventoryView({
 
   if (!sessions) {
     return (
-      <section className="mfa-settings" role="alert">
+      <section className="" role="alert">
         <h2>Active sessions</h2>
         <p>{error || "Your sessions could not be loaded."}</p>
       </section>
@@ -135,9 +120,9 @@ export function SessionInventoryView({
   const warning = inventoryWarning(sessions);
 
   return (
-    <section className="mfa-settings session-inventory">
+    <ManagedSurface><section>
       <header>
-        <h1>Active sessions</h1>
+        <h2>Active sessions</h2>
         <p>
           Every device signed in to this account. Ending a session takes effect on
           its next request — the sign-in stops working immediately rather than
@@ -146,14 +131,14 @@ export function SessionInventoryView({
       </header>
 
       {warning ? (
-        <p className="mfa-banner mfa-banner-warning" role="alert">
+        <p className="" role="alert">
           <ShieldAlert aria-hidden="true" size={16} /> {warning}
         </p>
       ) : null}
-      {error ? <p className="login-error" role="alert">{error}</p> : null}
-      {notice ? <p className="mfa-banner" role="status">{notice}</p> : null}
+      {error ? <p className="" role="alert">{error}</p> : null}
+      {notice ? <p className="" role="status">{notice}</p> : null}
 
-      <ul className="session-list">
+      <ul className="">
         {live.map((session) => (
           <li key={session.id} className={session.is_current ? "session-current" : undefined}>
             <div>
@@ -161,9 +146,9 @@ export function SessionInventoryView({
                 {session.is_break_glass ? <Siren aria-hidden="true" size={14} /> : <Monitor aria-hidden="true" size={14} />}
                 {" "}
                 {describeClient(session.user_agent)}
-                {session.is_current ? <span className="session-badge">This device</span> : null}
-                {session.is_break_glass ? <span className="session-badge session-badge-alarm">Emergency</span> : null}
-                {sessionIsPasswordOnly(session) ? <span className="session-badge session-badge-warn">Password only</span> : null}
+                {session.is_current ? <span className="">This device</span> : null}
+                {session.is_break_glass ? <span className="">Emergency</span> : null}
+                {sessionIsPasswordOnly(session) ? <span className="">Password only</span> : null}
               </strong>
               <small>
                 {describeAuthMethods(session.auth_methods)}
@@ -176,7 +161,7 @@ export function SessionInventoryView({
             </div>
             <button
               disabled={isBusy || session.is_current}
-              onClick={() => revoke(session)}
+              onClick={() => confirmation.ask("End this session?", "The session stops working on its next request.", (reason) => revoke(session, reason))}
               type="button"
             >
               <LogOut size={14} /> End
@@ -185,14 +170,14 @@ export function SessionInventoryView({
         ))}
       </ul>
 
-      <button disabled={isBusy || live.length < 2} onClick={revokeOthers} type="button">
+      <button disabled={isBusy || live.length < 2} onClick={() => confirmation.ask("Sign out other devices?", "Your current session stays signed in.", revokeOthers)} type="button">
         <LogOut size={16} /> Sign out all other devices
       </button>
 
       {ended.length > 0 ? (
         <>
           <h2>Recently ended</h2>
-          <ul className="session-list session-list-ended">
+          <ul className="">
             {ended.map((session) => (
               <li key={session.id}>
                 <div>
@@ -207,6 +192,7 @@ export function SessionInventoryView({
           </ul>
         </>
       ) : null}
-    </section>
+    {confirmation.dialog}</section></ManagedSurface>
   );
 }
+

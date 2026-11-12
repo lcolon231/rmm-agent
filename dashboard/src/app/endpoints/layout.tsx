@@ -34,8 +34,6 @@ export default async function EndpointsLayout({ children }: { children: React.Re
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Fleet Operations"
-      sectionTitle="Managed Endpoints"
     >
       {children}
     </DashboardSectionShell>

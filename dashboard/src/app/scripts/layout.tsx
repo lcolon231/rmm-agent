@@ -12,5 +12,5 @@ export default async function ScriptsLayout({ children }: { children: React.Reac
   let navigation: NavigationData | null = null; let navigationError = false;
   try { navigation = await getClientNavigation(session.sessionToken); } catch { navigationError = true; }
   return <DashboardSectionShell activePath="/scripts" navigation={navigation} navigationError={navigationError}
-    operator={session.operator} sectionLabel="Automation" sectionTitle="Versioned script library">{children}</DashboardSectionShell>;
+    operator={session.operator}>{children}</DashboardSectionShell>;
 }

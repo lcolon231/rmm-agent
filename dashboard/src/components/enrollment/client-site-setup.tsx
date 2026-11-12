@@ -130,7 +130,7 @@ export function ClientSiteSetup({
 
   return (
     <>
-      <section className="setup-boundary-banner">
+      <section className="">
         <ShieldCheck aria-hidden="true" size={22} />
         <div>
           <strong>First-run provisioning</strong>
@@ -142,10 +142,10 @@ export function ClientSiteSetup({
         </div>
       </section>
 
-      <div className="client-site-setup-grid">
-        <form className="client-site-setup-card" onSubmit={createClient}>
+      <div className="grid max-w-[640px] gap-6">
+        <form className="rounded-[10px] border border-(--line) bg-(--paper) p-5" onSubmit={createClient}>
           <header>
-            <span className="setup-step">01</span>
+            <span className="">01</span>
             <Building2 aria-hidden="true" size={20} />
             <div>
               <span>Customer boundary</span>
@@ -168,13 +168,13 @@ export function ClientSiteSetup({
             />
           </label>
           {clientError ? (
-            <section className="enrollment-form-error" role="alert">
+            <section className="" role="alert">
               <strong>Client was not created</strong>
               <span>{clientError}</span>
             </section>
           ) : null}
           {createdClient ? (
-            <p className="setup-success" role="status">
+            <p className="" role="status">
               <CheckCircle2 aria-hidden="true" size={15} />
               {createdClient.name} created and selected for the next step.
             </p>
@@ -187,9 +187,9 @@ export function ClientSiteSetup({
           </footer>
         </form>
 
-        <form className="client-site-setup-card" onSubmit={createSite}>
+        <form className="rounded-[10px] border border-(--line) bg-(--paper) p-5" onSubmit={createSite}>
           <header>
-            <span className="setup-step">02</span>
+            <span className="">02</span>
             <MapPin aria-hidden="true" size={20} />
             <div>
               <span>Enrollment destination</span>
@@ -227,13 +227,13 @@ export function ClientSiteSetup({
             />
           </label>
           {siteError ? (
-            <section className="enrollment-form-error" role="alert">
+            <section className="" role="alert">
               <strong>Site was not created</strong>
               <span>{siteError}</span>
             </section>
           ) : null}
           {createdSite ? (
-            <p className="setup-success" role="status">
+            <p className="" role="status">
               <CheckCircle2 aria-hidden="true" size={15} />
               {createdSite.name} is ready for enrollment.
             </p>
@@ -252,7 +252,7 @@ export function ClientSiteSetup({
       </div>
 
       {createdSite ? (
-        <section className="setup-next-step">
+        <section className="">
           <CheckCircle2 aria-hidden="true" size={24} />
           <div>
             <span>Provisioning boundary ready</span>

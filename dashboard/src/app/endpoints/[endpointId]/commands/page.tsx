@@ -7,6 +7,7 @@ import { getEndpointDetail } from "@/lib/endpoint-detail";
 import { getMaintenanceWindows } from "@/lib/maintenance-windows";
 import type { MaintenanceWindow } from "@/lib/maintenance-windows-core";
 import { NodelinkApiError } from "@/lib/nodelink-api";
+import { PageFailure } from "@/components/endpoint/section-header";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
@@ -23,9 +24,9 @@ export default async function EndpointCommandsPage({
   if (session.kind === "anonymous") redirect("/login");
   if (session.kind === "unavailable") {
     return (
-      <main className="detail-failure-page">
-        <section role="alert"><span>Session verification</span><h1>The command console is temporarily unavailable</h1><p>NodeLink could not verify your operator session. No command data was exposed.</p><Link href="/">Return to fleet</Link></section>
-      </main>
+      <PageFailure eyebrow="Session verification" title="The command console is temporarily unavailable" body="NodeLink could not verify your operator session. No command data was exposed.">
+        <Link href="/">Return to Overview</Link>
+      </PageFailure>
     );
   }
 
@@ -47,9 +48,10 @@ export default async function EndpointCommandsPage({
 
   if (endpoint === null || history === null) {
     return (
-      <main className="detail-failure-page">
-        <section role="alert"><span>Command console</span><h1>Command history could not be loaded</h1><p>The server did not return this endpoint&apos;s command data. Try again without changing the endpoint.</p><Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands`}>Try again</Link><Link href="/">Return to fleet</Link></section>
-      </main>
+      <PageFailure eyebrow="Commands" title="Command history could not be loaded" body="The server did not return this device's command data. Nothing was changed. Try again without changing the device.">
+        <Link href={`/endpoints/${encodeURIComponent(endpointId)}/commands`}>Try again</Link>
+        <Link href={`/endpoints/${encodeURIComponent(endpointId)}`}>Back to the device</Link>
+      </PageFailure>
     );
   }
 

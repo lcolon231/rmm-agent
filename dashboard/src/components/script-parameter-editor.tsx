@@ -4,6 +4,10 @@
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import type { ScriptParameter, ScriptParameterKind } from "@/lib/script-library-core";
 
+import { Button } from "./ui/button";
+import { cx, focusRing } from "./ui/cx";
+import { Input, Select } from "./ui/field";
+
 export type ParameterDraft = {
   id: string; key: string; label: string; description: string; kind: ScriptParameterKind;
   required: boolean; defaultEnabled: boolean; defaultValue: string;
@@ -68,22 +72,67 @@ export function parameterPayload(drafts: ParameterDraft[]) {
   });
 }
 
+const checkClass = "flex items-center gap-2 text-[13px] text-(--slate)";
+
 export function ScriptParameterEditor({ value, onChange }: { value: ParameterDraft[]; onChange: (next: ParameterDraft[]) => void }) {
   function update(id: string, patch: Partial<ParameterDraft>) { onChange(value.map((item) => item.id === id ? { ...item, ...patch } : item)); }
-  return <section className="script-parameter-editor wide"><header><div><KeyRound size={17} /><span><strong>Typed parameters</strong><small>Immutable with this version · referenced as NL_PARAM_Key</small></span></div>
-    <button type="button" disabled={value.length >= 32} onClick={() => onChange([...value, newParameterDraft()])}><Plus size={14} />Add parameter</button></header>
-    {value.length === 0 ? <p>No runtime values. This version executes with source-only inputs.</p> : <div className="script-parameter-list">{value.map((parameter, index) => <article key={parameter.id}>
-      <div className="script-parameter-sequence"><span>{String(index + 1).padStart(2, "0")}</span><button type="button" aria-label={`Remove ${parameter.label || "parameter"}`} onClick={() => onChange(value.filter((item) => item.id !== parameter.id))}><Trash2 size={14} /></button></div>
-      <label>Key<input value={parameter.key} maxLength={64} placeholder="ServiceName" onChange={(event) => update(parameter.id, { key: event.target.value })} /></label>
-      <label>Label<input value={parameter.label} maxLength={100} placeholder="Service name" onChange={(event) => update(parameter.id, { label: event.target.value })} /></label>
-      <label>Type<select value={parameter.kind} onChange={(event) => update(parameter.id, { kind: event.target.value as ScriptParameterKind, defaultEnabled: false, defaultValue: "" })}><option value="string">String</option><option value="number">Number</option><option value="boolean">Boolean</option><option value="choice">Choice</option><option value="secret">Secret</option></select></label>
-      <label className="wide">Description<input value={parameter.description} maxLength={500} onChange={(event) => update(parameter.id, { description: event.target.value })} /></label>
-      {parameter.kind === "choice" ? <label className="wide">Choices <small>comma-separated</small><input value={parameter.choices} placeholder="safe, force" onChange={(event) => update(parameter.id, { choices: event.target.value })} /></label> : null}
-      {parameter.kind === "string" || parameter.kind === "secret" ? <><label>Minimum length<input type="number" min={0} max={16384} value={parameter.minLength} onChange={(event) => update(parameter.id, { minLength: event.target.value })} /></label><label>Maximum length<input type="number" min={1} max={16384} value={parameter.maxLength} onChange={(event) => update(parameter.id, { maxLength: event.target.value })} /></label></> : null}
-      {parameter.kind === "number" ? <><label>Minimum<input type="number" value={parameter.minimum} onChange={(event) => update(parameter.id, { minimum: event.target.value })} /></label><label>Maximum<input type="number" value={parameter.maximum} onChange={(event) => update(parameter.id, { maximum: event.target.value })} /></label></> : null}
-      <label className="script-check"><input type="checkbox" checked={parameter.required && !parameter.defaultEnabled} disabled={parameter.defaultEnabled} onChange={(event) => update(parameter.id, { required: event.target.checked })} />Required each run</label>
-      {parameter.kind !== "secret" ? <label className="script-check"><input type="checkbox" checked={parameter.defaultEnabled} onChange={(event) => update(parameter.id, { defaultEnabled: event.target.checked, required: event.target.checked ? false : parameter.required })} />Use a default</label> : <small className="script-secret-note">Secret defaults are never stored.</small>}
-      {parameter.defaultEnabled && parameter.kind !== "secret" ? <label className="wide">Default {parameter.kind === "boolean" ? <select value={parameter.defaultValue || "false"} onChange={(event) => update(parameter.id, { defaultValue: event.target.value })}><option value="false">False</option><option value="true">True</option></select> : <input value={parameter.defaultValue} onChange={(event) => update(parameter.id, { defaultValue: event.target.value })} />}</label> : null}
-    </article>)}</div>}
-  </section>;
+  return (
+    <fieldset className="m-0 grid gap-3 rounded-lg border border-(--line) p-4">
+      <legend className="px-1 text-[13px] font-semibold text-(--slate)">Parameters</legend>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="m-0 flex items-start gap-2 text-xs text-(--muted)">
+          <KeyRound size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span>Values the script asks for each time it runs. They are saved with this version and cannot be changed later. In the script, read them as <code className="font-(family-name:--font-data)">NL_PARAM_Key</code>.</span>
+        </p>
+        <Button size="compact" icon={Plus} disabled={value.length >= 32} onClick={() => onChange([...value, newParameterDraft()])}>Add parameter</Button>
+      </div>
+      {value.length === 0 ? <p className="m-0 text-sm text-(--muted)">No parameters. The script runs without asking for values.</p> : (
+        <ol className="m-0 grid list-none gap-3 p-0">
+          {value.map((parameter, index) => (
+            <li key={parameter.id} className="grid gap-3 rounded-lg bg-(--fog) p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[13px] font-semibold text-(--slate)">Parameter {index + 1}</span>
+                <button type="button" aria-label={`Remove ${parameter.label || "parameter"}`} onClick={() => onChange(value.filter((item) => item.id !== parameter.id))}
+                  className={cx("flex size-9 items-center justify-center rounded-lg text-(--red) hover:bg-(--red-soft)", focusRing)}>
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              </div>
+              <div className="grid gap-3 min-[720px]:grid-cols-3">
+                <Input label="Key" value={parameter.key} maxLength={64} placeholder="ServiceName" onChange={(event) => update(parameter.id, { key: event.target.value })} />
+                <Input label="Label" value={parameter.label} maxLength={100} placeholder="Service name" onChange={(event) => update(parameter.id, { label: event.target.value })} />
+                <Select label="Type" value={parameter.kind} onChange={(event) => update(parameter.id, { kind: event.target.value as ScriptParameterKind, defaultEnabled: false, defaultValue: "" })}>
+                  <option value="string">Text</option><option value="number">Number</option><option value="boolean">Yes or no</option><option value="choice">Choice</option><option value="secret">Secret</option>
+                </Select>
+              </div>
+              <Input label="Description" value={parameter.description} maxLength={500} onChange={(event) => update(parameter.id, { description: event.target.value })} />
+              {parameter.kind === "choice" ? <Input label="Choices" hint="Separate with commas" value={parameter.choices} placeholder="safe, force" onChange={(event) => update(parameter.id, { choices: event.target.value })} /> : null}
+              {parameter.kind === "string" || parameter.kind === "secret" ? (
+                <div className="grid gap-3 min-[720px]:grid-cols-2">
+                  <Input label="Minimum length" type="number" min={0} max={16384} value={parameter.minLength} onChange={(event) => update(parameter.id, { minLength: event.target.value })} />
+                  <Input label="Maximum length" type="number" min={1} max={16384} value={parameter.maxLength} onChange={(event) => update(parameter.id, { maxLength: event.target.value })} />
+                </div>
+              ) : null}
+              {parameter.kind === "number" ? (
+                <div className="grid gap-3 min-[720px]:grid-cols-2">
+                  <Input label="Minimum" type="number" value={parameter.minimum} onChange={(event) => update(parameter.id, { minimum: event.target.value })} />
+                  <Input label="Maximum" type="number" value={parameter.maximum} onChange={(event) => update(parameter.id, { maximum: event.target.value })} />
+                </div>
+              ) : null}
+              <div className="flex flex-wrap gap-x-6 gap-y-2">
+                <label className={checkClass}><input type="checkbox" checked={parameter.required && !parameter.defaultEnabled} disabled={parameter.defaultEnabled} onChange={(event) => update(parameter.id, { required: event.target.checked })} />Required each run</label>
+                {parameter.kind !== "secret"
+                  ? <label className={checkClass}><input type="checkbox" checked={parameter.defaultEnabled} onChange={(event) => update(parameter.id, { defaultEnabled: event.target.checked, required: event.target.checked ? false : parameter.required })} />Use a default</label>
+                  : <span className="text-xs text-(--muted)">Secrets never have a saved default.</span>}
+              </div>
+              {parameter.defaultEnabled && parameter.kind !== "secret" ? (
+                parameter.kind === "boolean"
+                  ? <Select label="Default" value={parameter.defaultValue || "false"} onChange={(event) => update(parameter.id, { defaultValue: event.target.value })}><option value="false">No</option><option value="true">Yes</option></Select>
+                  : <Input label="Default" value={parameter.defaultValue} onChange={(event) => update(parameter.id, { defaultValue: event.target.value })} />
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      )}
+    </fieldset>
+  );
 }

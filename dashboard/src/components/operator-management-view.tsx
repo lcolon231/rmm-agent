@@ -8,9 +8,12 @@ import {
   ShieldCheck,
   UserCog,
   Users,
-  Wrench,
 } from "lucide-react";
-import Link from "next/link";
+import { StatusBadge } from "./ui/status-badge";
+import { ManagedSurface } from "./admin/managed-surface";
+import { PageHeader } from "./shell/page-header";
+import { ButtonLink } from "./ui/button";
+import { StatRow, StatTile } from "./ui/stat-tile";
 import { useState } from "react";
 
 import {
@@ -87,23 +90,10 @@ export function OperatorManagementView({
   }
 
   return (
-    <>
-      <header className="operator-page-head">
-        <div>
-          <span>Identity and privilege administration</span>
-          <h1>Operators</h1>
-          <p>
-            Create administrators and technicians, review explicit script scope, and invalidate sessions.
-            Role never implies arbitrary-script permission.
-          </p>
-        </div>
-        <div className="operator-create-links">
-          <Link href="/operators/new/technician"><Wrench aria-hidden="true" size={16} /> Create technician</Link>
-          <Link className="primary" href="/operators/new/administrator"><ShieldCheck aria-hidden="true" size={16} /> Create administrator</Link>
-        </div>
-      </header>
+    <ManagedSurface>
+<PageHeader breadcrumb={[{ label: "Administration" }, { label: "Operators" }]} title="Operators" description="Manage operator accounts, explicit script permissions and sessions." actions={<><ButtonLink href="/operators/new/technician" variant="primary">Create technician</ButtonLink><ButtonLink href="/operators/new/administrator">Create administrator</ButtonLink></>} /><StatRow><StatTile icon={Users} label="Operators" value={operators?.length ?? "—"} /><StatTile icon={ShieldCheck} label="Administrators" value={operators ? operators.filter((operator) => operator.role === "admin").length : "—"} /><StatTile icon={UserCog} label="Disabled" value={operators ? operators.filter((operator) => operator.disabled).length : "—"} /></StatRow>
 
-      <section className="operator-boundary-banner">
+      <section className="">
         <ShieldCheck aria-hidden="true" size={23} />
         <div>
           <strong>Arbitrary scripts are default-deny</strong>
@@ -114,14 +104,14 @@ export function OperatorManagementView({
       </section>
 
       {error ? (
-        <section className="operator-error-summary" role="alert" aria-labelledby="operator-list-error">
+        <section className="" role="alert" aria-labelledby="operator-list-error">
           <strong id="operator-list-error">Operator records could not be loaded</strong>
           <p>{error}</p>
           <button onClick={loadOperators} type="button"><RefreshCw aria-hidden="true" size={14} /> Try again</button>
         </section>
       ) : null}
 
-      <section className="operator-register" aria-busy={loading}>
+      <section className="" aria-busy={loading}>
         <header>
           <div>
             <span>Access register</span>
@@ -133,18 +123,18 @@ export function OperatorManagementView({
         </header>
 
         {loading && !operators ? (
-          <div className="operator-empty" role="status">
-            <RefreshCw aria-hidden="true" className="operator-loading-icon" size={24} />
+          <div className="" role="status">
+            <RefreshCw aria-hidden="true" className="" size={24} />
             <strong>Loading operator records</strong>
           </div>
         ) : operators?.length === 0 ? (
-          <div className="operator-empty">
+          <div className="">
             <Users aria-hidden="true" size={25} />
             <strong>No operators found</strong>
             <span>Create an administrator or technician to begin.</span>
           </div>
         ) : operators ? (
-          <div className="operator-table-wrap">
+          <div className="overflow-x-auto">
             <table>
               <thead>
                 <tr>
@@ -160,19 +150,15 @@ export function OperatorManagementView({
                   <tr key={operator.id}>
                     <td>
                       <strong>{operator.email}</strong>
-                      <span className={`operator-account-state ${operator.disabled ? "disabled" : "active"}`}>
-                        {operator.disabled ? "Disabled" : "Active"}
-                      </span>
+                      <StatusBadge tone={operator.disabled ? "off" : "ok"}>{operator.disabled ? "Disabled" : "Active"}</StatusBadge>
                     </td>
                     <td>
-                      <span className={`operator-role role-${operator.role}`}>
-                        {operatorRoleLabel(operator.role)}
-                      </span>
+                      <span className="text-sm">{operatorRoleLabel(operator.role)}</span>
                       {operator.id === currentOperatorId ? <small>Current operator</small> : null}
                     </td>
                     <td>
                       {operator.script_execution_scope ? (
-                        <div className="operator-permission granted">
+                        <div className="">
                           <ShieldCheck aria-hidden="true" size={17} />
                           <div>
                             <strong>{scriptPermissionScopeLabel(operator.script_execution_scope)} permission</strong>
@@ -184,7 +170,7 @@ export function OperatorManagementView({
                           </div>
                         </div>
                       ) : (
-                        <div className="operator-permission denied">
+                        <div className="">
                           <AlertTriangle aria-hidden="true" size={17} />
                           <div><strong>No script permission</strong><span>Default deny</span></div>
                         </div>
@@ -192,7 +178,7 @@ export function OperatorManagementView({
                     </td>
                     <td><time dateTime={operator.created_at}>{formatOperatorCreatedAtUtc(operator.created_at)}</time></td>
                     <td>
-                      <div className="operator-row-actions">
+                      <div className="">
                         <OperatorRoleAction
                           isCurrentOperator={operator.id === currentOperatorId}
                           onUpdated={updateOperator}
@@ -221,7 +207,7 @@ export function OperatorManagementView({
         ) : null}
       </section>
 
-      <aside className="operator-limitations">
+      <aside className="">
         <UserCog aria-hidden="true" size={19} />
         <div>
           <strong>Current administration boundary</strong>
@@ -230,6 +216,6 @@ export function OperatorManagementView({
           </span>
         </div>
       </aside>
-    </>
+    </ManagedSurface>
   );
 }

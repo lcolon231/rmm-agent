@@ -38,8 +38,6 @@ export default async function EmergencyOverridesLayout({
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Authorization"
-      sectionTitle="Emergency overrides"
     >
       {children}
     </DashboardSectionShell>

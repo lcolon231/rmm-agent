@@ -3,6 +3,9 @@
 "use client";
 
 import { ArrowRight, Siren } from "lucide-react";
+import Link from "next/link";
+import { AuthFrame } from "./auth/auth-frame";
+import { Button } from "./ui/button";
 import type { FormEvent } from "react";
 import { useState } from "react";
 
@@ -54,18 +57,12 @@ export function BreakGlassActivateForm() {
   }
 
   return (
-    <main className="login-page">
-      <section className="login-panel" aria-labelledby="bg-title">
-        <div className="login-brand">
-          <span className="brand-mark"><span /><span /><span /></span>
-          <strong>NodeLink</strong>
-        </div>
-        <span className="login-eyebrow"><Siren size={15} /> Emergency access</span>
-        <h1 id="bg-title">Break-glass sign-in</h1>
-        <p>
+    <AuthFrame>
+        <h1 id="bg-title">Emergency access</h1>
+        <p className="rounded-lg bg-(--amber-soft) p-4 text-[#89500b]">
           For use only when normal sign-in is impossible. This grants a
           short-lived administrator session without a second factor. Every use is
-          recorded, alerts the platform administrators, and must be reviewed
+          recorded and must be reviewed
           afterwards. If you can sign in normally, do that instead.
         </p>
         <form onSubmit={submit}>
@@ -90,16 +87,16 @@ export function BreakGlassActivateForm() {
             required
             type="text"
           />
-          {error ? <p className="login-error" role="alert">{error}</p> : null}
-          <button disabled={isBusy} type="submit">
-            <Siren size={16} /> {isBusy ? "Verifying…" : "Break glass"} <ArrowRight size={16} />
-          </button>
+          {error ? <p className="rounded-lg bg-(--red-soft) p-3 text-(--red)" role="alert">{error}</p> : null}
+          <Button variant="danger" disabled={isBusy} type="submit">
+            <Siren size={16} /> {isBusy ? "Verifying…" : "Start emergency session"} <ArrowRight size={16} />
+          </Button>
         </form>
         <small>
           The session this creates expires far sooner than a normal one, and is
           marked as emergency access everywhere it appears.
         </small>
-      </section>
-    </main>
+      <Link href="/login">Back to normal sign in</Link>
+    </AuthFrame>
   );
 }

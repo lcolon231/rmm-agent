@@ -34,8 +34,6 @@ export default async function MonitoringLayout({ children }: { children: React.R
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Operations"
-      sectionTitle="Monitoring and alerts"
     >
       {children}
     </DashboardSectionShell>

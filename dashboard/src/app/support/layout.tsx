@@ -34,8 +34,6 @@ export default async function SupportLayout({ children }: { children: React.Reac
       navigation={navigation}
       navigationError={navigationError}
       operator={session.operator}
-      sectionLabel="Operations"
-      sectionTitle="Support chat"
     >
       {children}
     </DashboardSectionShell>

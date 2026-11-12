@@ -17,8 +17,19 @@ const getEndpointDetail = mock.fn(() => loadDetail());
 mock.module("@/lib/dashboard-session", { namedExports: { getDashboardSession: async () => session } });
 mock.module("@/lib/endpoint-detail", { namedExports: { getEndpointDetail } });
 mock.module("@/lib/nodelink-api", { namedExports: { NodelinkApiError } });
+let loadAlerts: () => Promise<unknown> = async () => [];
+let loadCommands: () => Promise<unknown> = async () => ({ items: [] });
+mock.module("@/lib/monitoring", { namedExports: { getMonitoringAlerts: () => loadAlerts() } });
+mock.module("@/lib/command-console", { namedExports: { getCommandHistory: () => loadCommands() } });
 mock.module("@/components/endpoint-detail-view", {
-  namedExports: { EndpointDetailView: ({ endpoint }: { endpoint: { hostname: string } }) => <h1>Detail for {endpoint.hostname}</h1> },
+  namedExports: {
+    EndpointDetailView: ({ endpoint, status, commands, tab }: { endpoint: { hostname: string }; status: { label: string }; commands: unknown[] | null; tab: string }) => (
+      <>
+        <h1>Detail for {endpoint.hostname}</h1>
+        <p>status:{status.label} tab:{tab} commands:{commands === null ? "unavailable" : commands.length}</p>
+      </>
+    ),
+  },
 });
 mock.module("next/navigation", {
   namedExports: {
@@ -32,8 +43,8 @@ const { default: EndpointPage } = await import("@/app/endpoints/[endpointId]/pag
 const operator = { id: "op-1", email: "tech@example.com", role: "technician" };
 const signedIn: DashboardSessionState = { kind: "authenticated", operator, sessionToken: "session-token" } as DashboardSessionState;
 
-function visit(endpointId: string, hours?: string) {
-  return EndpointPage({ params: Promise.resolve({ endpointId }), searchParams: Promise.resolve({ hours }) });
+function visit(endpointId: string, hours?: string, tab?: string) {
+  return EndpointPage({ params: Promise.resolve({ endpointId }), searchParams: Promise.resolve({ hours, tab }) });
 }
 
 test("an anonymous visitor is redirected to sign in", async () => {
@@ -73,4 +84,23 @@ test("an out-of-range history window falls back to 24 hours", async () => {
   render(await visit("agent-1", "9999"));
   assert.ok(screen.getByRole("heading", { name: "Detail for WS-042" }));
   assert.deepEqual(getEndpointDetail.mock.calls[0].arguments, ["session-token", "agent-1", { historyHours: 24, historyLimit: 500 }]);
+});
+
+test("status comes from open alerts for this device, and command history failing does not hide the device", async () => {
+  session = signedIn;
+  loadDetail = async () => ({ id: "agent-1", hostname: "WS-042", status: "online", current_telemetry: null });
+  loadAlerts = async () => [{ agent_id: "agent-1", state: "open", last_result_status: "critical" }, { agent_id: "other", state: "open", last_result_status: "critical" }];
+  loadCommands = async () => { throw new NodelinkApiError(500, "down"); };
+  render(await visit("agent-1", undefined, "remote"));
+  assert.ok(screen.getByRole("heading", { name: "Detail for WS-042" }));
+  assert.equal(screen.getByText(/^status:/).textContent, "status:Critical tab:remote commands:unavailable");
+});
+
+test("when alerts cannot load the device is not called critical", async () => {
+  session = signedIn;
+  loadDetail = async () => ({ id: "agent-1", hostname: "WS-042", status: "online", current_telemetry: null });
+  loadAlerts = async () => { throw new NodelinkApiError(500, "down"); };
+  loadCommands = async () => ({ items: [] });
+  render(await visit("agent-1", undefined, "bogus"));
+  assert.equal(screen.getByText(/^status:/).textContent, "status:Healthy tab:summary commands:0");
 });

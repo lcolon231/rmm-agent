@@ -5,11 +5,11 @@ import { RefreshCw, Webhook } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import {
-  formatAlertEventType,
-  formatMonitoringTimestamp,
-  type AlertWebhookDelivery,
-} from "@/lib/monitoring-core";
+import { formatMonitoringTimestamp, type AlertWebhookDelivery } from "@/lib/monitoring-core";
+import { alertEventWord, webhookDeliveryWord } from "@/lib/monitoring-view-core";
+
+import { DeliveryCard, DeliveryRow } from "./alerts/delivery-card";
+import { Button } from "./ui/button";
 
 export function WebhookDeliveryHistory({
   initialDeliveries,
@@ -54,58 +54,41 @@ export function WebhookDeliveryHistory({
   }
 
   return (
-    <section className="enrollment-panel email-delivery-panel webhook-delivery-panel">
-      <header>
-        <div><span>Signed event ledger</span><h2>{deliveries.length} webhook deliveries</h2></div>
-        <Webhook size={19} />
-      </header>
-      {deliveries.length ? (
-        <div className="email-delivery-ledger">
-          {deliveries.map((delivery) => (
-            <article key={delivery.id} className={delivery.status}>
-              <span className="email-delivery-rail" aria-hidden="true" />
-              <div className="email-delivery-copy">
-                <div>
-                  <strong>{formatAlertEventType(delivery.event_type)}</strong>
-                  <span className={`email-delivery-status ${delivery.status}`}>{delivery.status}</span>
-                </div>
-                <p>{delivery.endpoint_name} · {delivery.destination} · generation {delivery.generation}</p>
-                <small>
-                  Delivery {delivery.id.slice(0, 8)}… · {delivery.attempt_count} of {delivery.max_attempts} automatic attempts
-                  {delivery.last_http_status ? ` · HTTP ${delivery.last_http_status}` : ""}
-                  {delivery.last_error_code ? ` · ${delivery.last_error_code.replaceAll("_", " ")}` : ""}
-                </small>
-                {delivery.attempts.length ? (
-                  <details>
-                    <summary>Attempt history</summary>
-                    <ol>{delivery.attempts.map((attempt) => (
-                      <li key={attempt.id}>
-                        <span>Attempt {attempt.attempt_number}: {attempt.status}{attempt.http_status ? ` · HTTP ${attempt.http_status}` : ""}{attempt.error_code ? ` · ${attempt.error_code.replaceAll("_", " ")}` : ""}</span>
-                        <time>{formatMonitoringTimestamp(attempt.completed_at ?? attempt.created_at)}</time>
-                      </li>
-                    ))}</ol>
-                  </details>
-                ) : null}
-              </div>
-              <div className="email-delivery-meta">
-                <time>{formatMonitoringTimestamp(delivery.delivered_at ?? delivery.created_at)}</time>
-                {delivery.status === "failed" && canManage ? (
-                  <button type="button" onClick={() => retry(delivery.id)} disabled={Boolean(busy)}>
-                    <RefreshCw size={13} />{busy === delivery.id ? "Queuing…" : "Retry"}
-                  </button>
-                ) : null}
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <div className="enrollment-empty">
-          <Webhook size={24} />
-          <h3>No webhook deliveries</h3>
-          <p>No destination subscribed to this alert transition, or the transition was suppressed.</p>
-        </div>
-      )}
-      {error ? <p className="alert-action-error" role="alert">{error}</p> : null}
-    </section>
+    <DeliveryCard
+      title="Webhooks"
+      sub={`${deliveries.length} signed ${deliveries.length === 1 ? "webhook" : "webhooks"} for this alert.`}
+      icon={Webhook}
+      emptyTitle="No webhooks for this alert"
+      emptyBody="No webhook destination is subscribed to this kind of change, or the change was not sent."
+      error={error}
+    >
+      {deliveries.map((delivery) => (
+        <DeliveryRow
+          key={delivery.id}
+          word={webhookDeliveryWord(delivery.status)}
+          title={<>{delivery.endpoint_name} · <span className="font-(family-name:--font-data)">{delivery.destination}</span></>}
+          detail={[
+            `${alertEventWord(delivery.event_type)} · ${delivery.attempt_count} of ${delivery.max_attempts} automatic attempts`,
+            [
+              delivery.last_http_status ? `Last response HTTP ${delivery.last_http_status}` : null,
+              delivery.last_error_code ? `Last error: ${delivery.last_error_code.replaceAll("_", " ")}` : null,
+            ].filter(Boolean).join(" · ") || null,
+          ]}
+          time={formatMonitoringTimestamp(delivery.delivered_at ?? delivery.created_at)}
+          attempts={delivery.attempts.map((attempt) => ({
+            id: attempt.id,
+            text: `Attempt ${attempt.attempt_number}: ${attempt.status}${attempt.http_status ? ` · HTTP ${attempt.http_status}` : ""}${attempt.error_code ? ` · ${attempt.error_code.replaceAll("_", " ")}` : ""}`,
+            time: formatMonitoringTimestamp(attempt.completed_at ?? attempt.created_at),
+          }))}
+          action={
+            delivery.status === "failed" && canManage ? (
+              <Button size="compact" icon={RefreshCw} onClick={() => retry(delivery.id)} disabled={Boolean(busy)}>
+                {busy === delivery.id ? "Queuing…" : "Send again"}
+              </Button>
+            ) : null
+          }
+        />
+      ))}
+    </DeliveryCard>
   );
 }

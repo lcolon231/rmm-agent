@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { EnrollmentHeader } from "@/components/enrollment/enrollment-header";
 import { InstallerDownloadForm } from "@/components/enrollment/installer-download-form";
+import { SiteRequired } from "@/components/enrollment/site-required";
+import { PageStack } from "@/components/shell/page-header";
 import { getClientNavigation } from "@/lib/client-navigation";
 import { getDashboardSession } from "@/lib/dashboard-session";
 
@@ -27,28 +29,19 @@ export default async function DownloadInstallerPage({
       : undefined;
 
   return (
-    <>
-      <header className="enrollment-page-head compact">
-        <div>
-          <span>Zero-touch deployment</span>
-          <h1>Download agent installer</h1>
-          <p>
-            Package the agent for a site with a short-lived, single-use enrollment token
-            built in. The person running it never types a server address or token.
-          </p>
-        </div>
-      </header>
+    <PageStack>
+      <EnrollmentHeader
+        tab="installer"
+        role={session.operator.role}
+        trail={[{ label: "Installer" }]}
+        title="Download an installer"
+        description="Package the agent for one site with a short-lived, single-use token built in. Whoever runs it never types a server address or token."
+      />
       {sites.length === 0 ? (
-        <section className="enrollment-empty">
-          <h2>A site is required</h2>
-          <p>Create a client and site in NodeLink before downloading an installer.</p>
-          <Link className="enrollment-primary-link" href="/enrollment/setup">
-            Create client and site
-          </Link>
-        </section>
+        <SiteRequired body="Create a client and site in NodeLink before downloading an installer." />
       ) : (
         <InstallerDownloadForm initialSiteId={initialSiteId} sites={sites} />
       )}
-    </>
+    </PageStack>
   );
 }

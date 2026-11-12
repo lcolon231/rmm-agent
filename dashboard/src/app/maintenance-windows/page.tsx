@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { CalendarClock } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import {
@@ -8,6 +7,10 @@ import {
   type MaintenanceWindowPrefill,
   type ScopeTargetOption,
 } from "@/components/maintenance-window-manager";
+import { MAINTENANCE_WINDOWS_DESCRIPTION } from "@/components/patching/copy";
+import { PageHeader, PageStack } from "@/components/shell/page-header";
+import { cardClass } from "@/components/ui/stat-tile";
+import { ErrorState } from "@/components/ui/states";
 import { getClientNavigation } from "@/lib/client-navigation";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import { getEndpointList } from "@/lib/endpoint-list";
@@ -84,38 +87,33 @@ export default async function MaintenanceWindowsPage({
   // eslint-disable-next-line react-hooks/purity
   const renderedAt = Date.now();
 
-  return (
-    <>
-      <header className="enrollment-page-head">
-        <div>
-          <span>Change control</span>
-          <h1>Maintenance windows</h1>
-          <p>
-            A window is the prerequisite the management service enforces before it will sign a
-            restart or shutdown, and it suppresses alerting for everything it covers. Nothing here
-            weakens that check — the server re-evaluates coverage when the command is signed.
-          </p>
-        </div>
-        <span className="webhook-version-mark"><CalendarClock size={15} /> Server-enforced</span>
-      </header>
-
-      {windows === null ? (
-        <div className="enrollment-empty" role="alert">
-          <CalendarClock size={26} />
-          <h3>Maintenance windows could not be loaded</h3>
-          <p>No windows are shown because the management service response could not be verified.</p>
-        </div>
-      ) : (
-        <MaintenanceWindowManager
-          canManage={session.operator.role !== "readonly"}
-          clients={clients}
-          endpoints={endpoints}
-          initialWindows={windows}
-          prefill={prefill}
-          serverNowMs={renderedAt}
-          sites={sites}
+  if (windows === null) {
+    return (
+      <PageStack>
+        <PageHeader
+          breadcrumb={[{ label: "Patching" }, { label: "Maintenance windows" }]}
+          title="Maintenance windows"
+          description={MAINTENANCE_WINDOWS_DESCRIPTION}
         />
-      )}
-    </>
+        <div className={cardClass}>
+          <ErrorState
+            title="Maintenance windows could not be loaded"
+            body="No windows are shown because the management service response could not be verified"
+          />
+        </div>
+      </PageStack>
+    );
+  }
+
+  return (
+    <MaintenanceWindowManager
+      canManage={session.operator.role !== "readonly"}
+      clients={clients}
+      endpoints={endpoints}
+      initialWindows={windows}
+      prefill={prefill}
+      serverNowMs={renderedAt}
+      sites={sites}
+    />
   );
 }

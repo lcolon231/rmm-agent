@@ -2,7 +2,10 @@
 
 "use client";
 
-import { ArrowRight, KeyRound, LifeBuoy, Mail, ShieldCheck } from "lucide-react";
+import { ArrowRight, KeyRound, LifeBuoy, Mail } from "lucide-react";
+import Link from "next/link";
+import { AuthFrame } from "./auth/auth-frame";
+import { Button } from "./ui/button";
 import type { FormEvent } from "react";
 import { useCallback, useState } from "react";
 
@@ -225,13 +228,7 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
   }
 
   return (
-    <main className="login-page">
-      <section className="login-panel" aria-labelledby="mfa-title">
-        <div className="login-brand">
-          <span className="brand-mark"><span /><span /><span /></span>
-          <strong>NodeLink</strong>
-        </div>
-        <span className="login-eyebrow"><ShieldCheck size={15} /> Second factor</span>
+    <AuthFrame>
 
         {enrollmentRequired ? (
           <>
@@ -253,10 +250,10 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
                 required
                 type="text"
               />
-              {error ? <p className="login-error" role="alert">{error}</p> : null}
-              <button disabled={isBusy || !supported} type="submit">
+              {error ? <p className="rounded-lg bg-(--red-soft) p-3 text-(--red)" role="alert">{error}</p> : null}
+              <Button variant="primary" disabled={isBusy || !supported} type="submit">
                 <KeyRound size={16} /> {isBusy ? "Waiting for your key…" : "Register and continue"} <ArrowRight size={16} />
-              </button>
+              </Button>
             </form>
           </>
         ) : mode === "recovery" ? (
@@ -279,25 +276,24 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
                 spellCheck={false}
                 type="text"
               />
-              {error ? <p className="login-error" role="alert">{error}</p> : null}
-              <button disabled={isBusy} type="submit">
+              {error ? <p className="rounded-lg bg-(--red-soft) p-3 text-(--red)" role="alert">{error}</p> : null}
+              <Button variant="primary" disabled={isBusy} type="submit">
                 <LifeBuoy size={16} /> {isBusy ? "Checking…" : "Sign in with recovery code"} <ArrowRight size={16} />
-              </button>
+              </Button>
             </form>
-            <button
-              className="login-secondary"
+            <Button variant="quiet"
               onClick={() => { setMode("assert"); setError(""); }}
               type="button"
             >
               Use my security key instead
-            </button>
+            </Button>
           </>
         ) : mode === "email" ? (
           <>
             <h1 id="mfa-title">Check your email</h1>
             {codeSent ? (
               <p>
-                We sent a code to {destination || "your email address"}. It expires
+                A code was requested for {destination || "your email address"}. If it arrives, it expires
                 shortly and works once. Signing in this way lets you register a
                 security key, but not change your security settings until you do.
               </p>
@@ -322,72 +318,68 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
                   spellCheck={false}
                   type="text"
                 />
-                {error ? <p className="login-error" role="alert">{error}</p> : null}
-                <button disabled={isBusy} type="submit">
+                {error ? <p className="rounded-lg bg-(--red-soft) p-3 text-(--red)" role="alert">{error}</p> : null}
+                <Button variant="primary" disabled={isBusy} type="submit">
                   <Mail size={16} /> {isBusy ? "Checking..." : "Sign in with the code"} <ArrowRight size={16} />
-                </button>
+                </Button>
               </form>
             ) : (
               <>
-                {error ? <p className="login-error" role="alert">{error}</p> : null}
-                <button disabled={isBusy} onClick={requestEmailCode} type="button">
+                {error ? <p className="rounded-lg bg-(--red-soft) p-3 text-(--red)" role="alert">{error}</p> : null}
+                <Button variant="primary" disabled={isBusy} onClick={requestEmailCode} type="button">
                   <Mail size={16} /> {isBusy ? "Sending..." : "Email me a code"} <ArrowRight size={16} />
-                </button>
+                </Button>
               </>
             )}
             {codeSent ? (
-              <button
-                className="login-secondary"
+              <Button variant="quiet"
                 disabled={isBusy}
                 onClick={requestEmailCode}
                 type="button"
               >
                 Send another code
-              </button>
+              </Button>
             ) : null}
             {keyAvailable ? (
-              <button
-                className="login-secondary"
+              <Button variant="quiet"
                 onClick={() => { setMode("assert"); setError(""); }}
                 type="button"
               >
                 Use my security key instead
-              </button>
+              </Button>
             ) : null}
           </>
         ) : (
           <>
             <h1 id="mfa-title">Confirm it&apos;s you</h1>
-            <p>
+            <p className="rounded-lg border border-dashed border-(--line-strong) p-4">
               Touch your security key, or approve the prompt from your device&apos;s
               built-in authenticator, to finish signing in.
             </p>
             {!supported ? (
-              <p className="login-error" role="alert">
+              <p className="rounded-lg bg-(--red-soft) p-3 text-(--red)" role="alert">
                 {mfaErrorMessage("unsupported-browser")}
               </p>
             ) : null}
-            {error ? <p className="login-error" role="alert">{error}</p> : null}
-            <button disabled={isBusy || !supported} onClick={runAssertion} type="button">
+            {error ? <p className="rounded-lg bg-(--red-soft) p-3 text-(--red)" role="alert">{error}</p> : null}
+            <Button variant="primary" disabled={isBusy || !supported} onClick={runAssertion} type="button">
               <KeyRound size={16} /> {isBusy ? "Waiting for your key…" : "Use security key"} <ArrowRight size={16} />
-            </button>
+            </Button>
             {recoveryAvailable ? (
-              <button
-                className="login-secondary"
+              <Button variant="quiet"
                 onClick={() => { setMode("recovery"); setError(""); }}
                 type="button"
               >
                 Lost your key? Use a recovery code
-              </button>
+              </Button>
             ) : null}
             {emailAvailable ? (
-              <button
-                className="login-secondary"
+              <Button variant="quiet"
                 onClick={() => { setMode("email"); setError(""); }}
                 type="button"
               >
                 Email me a code instead
-              </button>
+              </Button>
             ) : null}
           </>
         )}
@@ -396,7 +388,7 @@ export function MfaChallengeForm({ enrollmentRequired, methods }: MfaChallengeFo
           Signing in from a different site will not work: your key is bound to this
           domain, which is what makes it resistant to phishing.
         </small>
-      </section>
-    </main>
+      <Link href="/login">Back to normal sign in</Link>
+    </AuthFrame>
   );
 }
