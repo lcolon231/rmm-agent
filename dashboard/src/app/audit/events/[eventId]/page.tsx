@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { ArrowLeft, FileClock } from "lucide-react";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import {
@@ -14,6 +12,12 @@ import {
 import { getAuditEvent } from "@/lib/audit";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import { NodelinkApiError } from "@/lib/nodelink-api";
+
+import { PageHeader, PageStack } from "@/components/shell/page-header";
+import { ButtonLink } from "@/components/ui/button";
+import { DefinitionList } from "@/components/ui/drawer";
+import { EmptyState, ErrorState } from "@/components/ui/states";
+import { cardClass } from "@/components/ui/stat-tile";
 
 export const dynamic = "force-dynamic";
 
@@ -36,74 +40,20 @@ export default async function AuditEventPage({
     loadFailed = true;
   }
 
-  if (loadFailed || event === null) {
-    return (
-      <section className="enrollment-empty" role="alert">
-        <FileClock size={24} />
-        <h1>This audit event could not be loaded</h1>
-        <p>No record is shown because none could be read. Retry before drawing any conclusion from its absence.</p>
-        <Link href="/audit">Back to the timeline</Link>
-      </section>
-    );
-  }
-
+  if (loadFailed || event === null) return <PageStack><PageHeader breadcrumb={[{ label: "Compliance" }, { label: "Audit", href: "/audit" }]} title="Audit event" /><ErrorState title="This audit event could not be loaded" body="No record could be read. Retry before drawing a conclusion from its absence" /><ButtonLink href="/audit" variant="secondary">Back to the timeline</ButtonLink></PageStack>;
   const rows = auditDetailRows(event.detail);
-
-  return (
-    <>
-      <header className="enrollment-page-head compact">
-        <div>
-          <span>Audit event</span>
-          <h1>{formatAuditAction(event.action)}</h1>
-          <p>
-            Sequence {formatAuditSequence(event.seq)} · recorded {formatAuditTimestamp(event.ts)}. Detail
-            fields were sanitized by the redaction policy before they were hashed, so these are the exact
-            values chain and anchor verification cover.
-          </p>
-        </div>
-        <Link className="enrollment-primary-link" href="/audit">
-          <ArrowLeft size={16} /> Timeline
-        </Link>
-      </header>
-
-      <section className="enrollment-panel">
-        <header><div><span>Identity</span><h2>Recorded fields</h2></div></header>
-        <dl className="audit-fields">
-          <div><dt>Event ID</dt><dd><code>{event.id}</code></dd></div>
-          <div><dt>Sequence</dt><dd><code>{formatAuditSequence(event.seq)}</code></dd></div>
-          <div><dt>Action</dt><dd><code>{event.action}</code></dd></div>
-          <div><dt>Actor</dt><dd>{event.actor}</dd></div>
-          <div><dt>Actor user ID</dt><dd>{event.actor_user_id ? <code>{event.actor_user_id}</code> : "—"}</dd></div>
-          <div><dt>Agent</dt><dd>{event.agent_id ? <code>{event.agent_id}</code> : "—"}</dd></div>
-          <div><dt>Enrollment token</dt><dd>{event.enrollment_token_id ? <code>{event.enrollment_token_id}</code> : "—"}</dd></div>
-          <div><dt>Organization</dt><dd>{event.organization_id ? <code>{event.organization_id}</code> : "—"}</dd></div>
-          <div><dt>Source IP</dt><dd>{event.source_ip ?? "Not recorded"}</dd></div>
-          <div><dt>Recorded</dt><dd>{formatAuditTimestamp(event.ts)}</dd></div>
-        </dl>
-      </section>
-
-      <section className="enrollment-panel">
-        <header>
-          <div><span>Sanitized detail</span><h2>{rows.length} field{rows.length === 1 ? "" : "s"}</h2></div>
-          <FileClock size={19} />
-        </header>
-        {rows.length === 0 ? (
-          <div className="enrollment-empty">
-            <FileClock size={24} />
-            <h3>This action records no detail fields</h3>
-            <p>Its accountability evidence is the actor, action, subject, and sequence position above.</p>
-          </div>
-        ) : (
-          <dl className="audit-fields">
-            {rows.map((row) => (
-              <div key={row.key}>
-                <dt>{row.key}</dt>
-                <dd><code>{row.value}</code></dd>
-              </div>
-            ))}
-          </dl>
-        )}
-      </section>
-    </>
-  );
+  return <PageStack>
+    <PageHeader breadcrumb={[{ label: "Compliance" }, { label: "Audit", href: "/audit" }, { label: "Event" }]} title={formatAuditAction(event.action)} description={`Sequence ${formatAuditSequence(event.seq)} · recorded ${formatAuditTimestamp(event.ts)}. This page displays stored fields; it does not independently verify this entry.`} actions={<ButtonLink href="/audit/anchors" variant="secondary">Integrity anchors</ButtonLink>} />
+    <div className="grid gap-6 min-[1100px]:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+      <section className={`${cardClass} grid content-start gap-4 p-5`}><h2 className="text-base font-semibold">Recorded detail</h2>{rows.length === 0 ? <EmptyState title="No detail fields" body="See the actor, action, subject and sequence in the recorded fields." /> : <DefinitionList items={rows.map(row => ({ term: row.key, value: <code className="break-all whitespace-pre-wrap">{row.value}</code> }))} />}</section>
+      <section className={`${cardClass} grid content-start gap-4 p-5`}><h2 className="text-base font-semibold">At a glance</h2><DefinitionList items={[
+        { term: "Event ID", value: <code className="break-all">{event.id}</code> },
+        { term: "Sequence", value: formatAuditSequence(event.seq) },
+        { term: "Action", value: event.action }, { term: "Actor", value: event.actor },
+        { term: "Actor user ID", value: event.actor_user_id ?? "—" }, { term: "Agent", value: event.agent_id ?? "—" },
+        { term: "Enrollment token", value: event.enrollment_token_id ?? "—" }, { term: "Organization", value: event.organization_id ?? "—" },
+        { term: "Source IP", value: event.source_ip ?? "Not recorded" }, { term: "Recorded", value: formatAuditTimestamp(event.ts) },
+      ]} /></section>
+    </div>
+  </PageStack>;
 }
