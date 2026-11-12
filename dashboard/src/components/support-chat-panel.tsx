@@ -2,7 +2,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { chatStateFromUnknown, mergeMessages, readChatAccess, type ChatAccess, type ChatMessage, type ChatState } from "@/lib/support-chat-core";
-import styles from "./support-chat-panel.module.css";
+import { bubbleClass, BubbleMeta, messageListClass } from "./support/chat-layout";
+import { Button } from "./ui/button";
+import { cx } from "./ui/cx";
+import { Textarea } from "./ui/field";
+import { cardClass } from "./ui/stat-tile";
 
 export function SupportChatPanel() {
   const access = useRef<ChatAccess | null>(null);
@@ -105,27 +109,32 @@ export function SupportChatPanel() {
 
   const canSend = state?.status === "open" && state.notice_acknowledged && !expired;
   const tooLarge = new TextEncoder().encode(draft).length > 4096;
-  return <main className={styles.page}><section className={styles.panel}>
-    <header><span className={styles.brand}>NODELINK</span><h1>Support</h1><p>Talk with your IT support team.</p></header>
-    {error && <p role="alert" className={styles.error}>{error}</p>}
-    {!state && !error && <p role="status">Connecting to support…</p>}
-    {state?.status === "closed" && <p role="status">This conversation is closed. You can close this tab.</p>}
-    {state?.status === "open" && !state.notice_acknowledged && <section className={styles.notice} aria-label="Recording notice">
-      <h2>Before you start</h2><p>This conversation is recorded and linked to your computer. Your IT support team can read it.
-      {state.retention_days > 0 ? ` The configured retention period is ${state.retention_days} days after the conversation closes.` : " Automatic transcript deletion is disabled."}
-      </p><p>Avoid sending passwords or other sensitive information.</p>
-      <button disabled={sending} onClick={() => void submit("notice")}>I acknowledge — continue</button>
-    </section>}
-    <ol className={styles.messages} aria-label="Conversation" aria-live="polite" aria-relevant="additions">
-      {messages.map(m => <li key={m.seq} className={m.sender === "end_user" ? styles.own : styles.reply}>
-        <strong>{m.sender === "end_user" ? "You" : "Support team"}</strong><p>{m.body}</p><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-      </li>)}
-    </ol>
-    <form onSubmit={e => { e.preventDefault(); void submit("messages"); }} className={styles.composer}>
-      <label htmlFor="support-message">Your message</label>
-      <textarea id="support-message" value={draft} onChange={e => setDraft(e.target.value)} disabled={!canSend || sending} rows={3} maxLength={4096} placeholder="How can we help?" />
-      {tooLarge && <p role="alert">Message is too long (maximum 4,096 bytes).</p>}
-      <button disabled={!canSend || sending || !draft.trim() || tooLarge}>{sending ? "Sending…" : "Send message"}</button>
-    </form>
-  </section></main>;
+  return <main className="min-h-screen bg-(--fog) px-4 py-10 text-(--slate) max-[540px]:p-0">
+    <section className={cx(cardClass, "mx-auto max-w-[700px] overflow-hidden max-[540px]:min-h-screen max-[540px]:rounded-none")}>
+      <header className="border-b border-(--line) px-6 py-5">
+        <p className="m-0 text-[13px] font-semibold text-(--primary-strong)">NodeLink</p>
+        <h1 className="m-0 mt-1 text-2xl leading-[1.3] font-semibold text-(--ink)">Support</h1>
+        <p className="m-0 mt-1 text-sm text-(--muted)">Talk with your IT support team.</p>
+      </header>
+      {error && <p role="alert" className="m-0 border-b border-(--line) bg-(--red-soft) px-6 py-3 text-sm text-(--red)">{error}</p>}
+      {!state && !error && <p role="status" className="m-0 px-6 py-4 text-sm text-(--muted)">Connecting to support…</p>}
+      {state?.status === "closed" && <p role="status" className="m-0 px-6 py-4 text-sm text-(--muted)">This conversation is closed. You can close this tab.</p>}
+      {state?.status === "open" && !state.notice_acknowledged && <section className="m-6 grid gap-2 rounded-[10px] border border-(--line) bg-(--primary-tint) p-5 text-sm leading-normal" aria-label="Recording notice">
+        <h2 className="m-0 text-base font-semibold text-(--ink)">Before you start</h2><p className="m-0">This conversation is recorded and linked to your computer. Your IT support team can read it.
+        {state.retention_days > 0 ? ` The configured retention period is ${state.retention_days} days after the conversation closes.` : " Automatic transcript deletion is disabled."}
+        </p><p className="m-0">Avoid sending passwords or other sensitive information.</p>
+        <div><Button variant="primary" disabled={sending} onClick={() => void submit("notice")}>I acknowledge — continue</Button></div>
+      </section>}
+      <ol className={messageListClass} aria-label="Conversation" aria-live="polite" aria-relevant="additions">
+        {messages.map(m => <li key={m.seq} className={bubbleClass(m.sender === "end_user" ? "mine" : "theirs")}>
+          <BubbleMeta who={m.sender === "end_user" ? "You" : "Support team"} time={new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} dateTime={m.created_at} />
+          <p className="m-0 whitespace-pre-wrap">{m.body}</p>
+        </li>)}
+      </ol>
+      <form onSubmit={e => { e.preventDefault(); void submit("messages"); }} className="grid gap-3 border-t border-(--line) px-6 py-5">
+        <Textarea id="support-message" label="Your message" value={draft} onChange={e => setDraft(e.target.value)} disabled={!canSend || sending} rows={3} maxLength={4096} placeholder="How can we help?"
+          error={tooLarge ? "Message is too long (maximum 4,096 bytes)." : undefined} />
+        <div className="flex justify-end"><Button type="submit" variant="primary" disabled={!canSend || sending || !draft.trim() || tooLarge}>{sending ? "Sending…" : "Send"}</Button></div>
+      </form>
+    </section></main>;
 }

@@ -2,10 +2,13 @@
 
 import { redirect } from "next/navigation";
 
+import { PageHeader, PageStack } from "@/components/shell/page-header";
+import { ChatPanes, SUPPORT_DESCRIPTION } from "@/components/support/chat-layout";
+import { SupportConversationList } from "@/components/support/conversation-list";
 import { SupportConversationView } from "@/components/support-conversation-view";
 import { getDashboardSession } from "@/lib/dashboard-session";
-import { getSupportTranscript } from "@/lib/support";
-import type { OperatorTranscript } from "@/lib/support-chat-core";
+import { getSupportConversations, getSupportTranscript } from "@/lib/support";
+import type { OperatorConversation, OperatorTranscript } from "@/lib/support-chat-core";
 
 export const dynamic = "force-dynamic";
 
@@ -23,5 +26,26 @@ export default async function SupportConversationPage({ params }: { params: Prom
     initial = null;
   }
 
-  return <SupportConversationView conversationId={conversationId} initial={initial} />;
+  // The list pane is loaded after the transcript, so the conversation just
+  // opened already shows its unread count cleared. Its failure never hides
+  // the thread.
+  let conversations: OperatorConversation[] | null = null;
+  try {
+    conversations = await getSupportConversations(session.sessionToken);
+  } catch {
+    conversations = null;
+  }
+
+  return (
+    <PageStack>
+      <PageHeader
+        breadcrumb={[{ label: "Support" }, { label: "Support chat", href: "/support" }, { label: initial?.endpoint ?? "Conversation" }]}
+        title="Support chat"
+        description={SUPPORT_DESCRIPTION}
+      />
+      <ChatPanes list={<SupportConversationList conversations={conversations} selectedId={conversationId} />}>
+        <SupportConversationView conversationId={conversationId} initial={initial} />
+      </ChatPanes>
+    </PageStack>
+  );
 }
