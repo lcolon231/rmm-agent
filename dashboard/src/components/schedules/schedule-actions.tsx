@@ -2,7 +2,7 @@
 
 "use client";
 
-import { Pause, Play, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { Pause, Play, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
@@ -11,40 +11,7 @@ import type { ScheduledTaskItem } from "@/lib/scheduled-tasks-core";
 import { Button } from "../ui/button";
 import { Drawer } from "../ui/drawer";
 import { Input, Select, Textarea } from "../ui/field";
-import { useModal } from "../ui/use-modal";
-
-/**
- * Delete confirmation. The delete API takes no reason, so unlike ConfirmDialog
- * this does not ask for one: asking would suggest it is kept when it is not.
- */
-function ConfirmDelete({ name, busy, onCancel, onConfirm }: { name: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
-  const panelRef = useModal(true, busy ? () => {} : onCancel);
-  const titleId = useId();
-  const bodyId = useId();
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div aria-hidden="true" className="absolute inset-0 bg-[rgb(23_19_42/45%)]" onClick={busy ? undefined : onCancel} />
-      <div ref={panelRef} role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={bodyId}
-        className="relative w-[min(480px,100%)] rounded-[10px] bg-(--paper) shadow-[0_14px_34px_rgb(24_16_46/12%)]">
-        <div className="grid gap-4 p-6">
-          <span className="flex size-10 items-center justify-center rounded-full bg-(--amber-soft) text-[#89500b]">
-            <TriangleAlert size={20} aria-hidden="true" />
-          </span>
-          <div className="grid gap-2">
-            <h2 id={titleId} className="m-0 text-lg leading-[1.3] font-semibold text-(--ink)">Delete {name}?</h2>
-            <p id={bodyId} className="m-0 text-sm leading-normal text-(--slate)">
-              It stops running and cannot be brought back. Runs it already sent stay in Tasks, and the deletion is recorded in the audit log.
-            </p>
-          </div>
-        </div>
-        <footer className="flex flex-wrap justify-end gap-2 border-t border-(--line) px-6 py-4">
-          <Button onClick={onCancel} disabled={busy}>Cancel</Button>
-          <Button variant="danger" onClick={onConfirm} disabled={busy} aria-busy={busy || undefined}>Delete schedule</Button>
-        </footer>
-      </div>
-    </div>
-  );
-}
+import { ConfirmDialog } from "../ui/confirm-dialog";
 
 /** Pause/resume, run now and delete for one schedule; shown in its drawer. */
 export function ScheduleActions({ task, onDeleted }: { task: ScheduledTaskItem; onDeleted?: () => void }) {
@@ -113,7 +80,7 @@ export function ScheduleActions({ task, onDeleted }: { task: ScheduledTaskItem; 
         <Button icon={task.enabled ? Pause : Play} disabled={toggling} onClick={handleToggle}>{task.enabled ? "Pause schedule" : "Resume schedule"}</Button>
         <Button variant="danger" icon={Trash2} disabled={deleting} onClick={() => setConfirming(true)}>Delete</Button>
       </div>
-      {confirming ? <ConfirmDelete name={task.name} busy={deleting} onCancel={() => setConfirming(false)} onConfirm={handleDelete} /> : null}
+      {confirming ? <ConfirmDialog open title={`Delete ${task.name}?`} consequence="Future runs stop. Existing task records remain. This cannot be undone. The reason entered here is not sent by this API." confirmLabel="Delete schedule" busy={deleting} onCancel={() => setConfirming(false)} onConfirm={handleDelete} /> : null}
     </div>
   );
 }
@@ -224,3 +191,4 @@ export function NewScheduleButton() {
     </>
   );
 }
+
