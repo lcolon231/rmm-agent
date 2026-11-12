@@ -7,11 +7,7 @@ import { getDashboardSession } from "@/lib/dashboard-session";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Emergency sign-in (issue #69). Deliberately not linked from the sign-in page:
- * it is a documented URL for an incident runbook, not a visible alternative to
- * signing in normally.
- */
+/** Emergency sign-in with the existing sealed credential flow. */
 export default async function BreakGlassLoginPage() {
   const session = await getDashboardSession();
   if (session.kind === "authenticated") {
