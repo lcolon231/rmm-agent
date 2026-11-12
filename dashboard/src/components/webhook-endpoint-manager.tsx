@@ -1,22 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 "use client";
 
-import {
-  Check,
-  Clipboard,
-  KeyRound,
-  Link2,
-  LoaderCircle,
-  Pencil,
-  Plus,
-  RefreshCw,
-  ShieldCheck,
-  Trash2,
-  Webhook,
-  X,
-} from "lucide-react";
+import { Check, CircleCheck, CircleX, Clipboard, KeyRound, Pencil, Plus, RefreshCw, Trash2, Webhook, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 
 import {
   formatMonitoringTimestamp,
@@ -26,28 +13,35 @@ import {
   type WebhookEventType,
   type WebhookStatus,
 } from "@/lib/monitoring-core";
+import { alertEventWord, policyStateWord } from "@/lib/monitoring-view-core";
 
-const eventOptions: Array<{ value: WebhookEventType; label: string }> = [
-  { value: "opened", label: "Opened" },
-  { value: "reopened", label: "Reopened" },
-  { value: "acknowledged", label: "Acknowledged" },
-  { value: "manual_resolution", label: "Manual resolution" },
-  { value: "automatic_recovery", label: "Automatic recovery" },
-  { value: "policy_revised", label: "Policy revised" },
-  { value: "policy_deleted", label: "Policy deleted" },
-  { value: "policy_superseded", label: "Policy superseded" },
+import { MonitoringTabs } from "./monitoring/monitoring-tabs";
+import { PageHeader, PageStack } from "./shell/page-header";
+import { Button } from "./ui/button";
+import { ConfirmDialog } from "./ui/confirm-dialog";
+import { cx } from "./ui/cx";
+import { DataTable, PrimaryCell, TableFooter, type Column } from "./ui/data-table";
+import { DefinitionList, Drawer } from "./ui/drawer";
+import { Input } from "./ui/field";
+import { StatRow, StatTile } from "./ui/stat-tile";
+import { EmptyState } from "./ui/states";
+import { StatusBadge, toneStyles } from "./ui/status-badge";
+
+const EVENT_TYPES: WebhookEventType[] = [
+  "opened",
+  "reopened",
+  "acknowledged",
+  "manual_resolution",
+  "automatic_recovery",
+  "policy_revised",
+  "policy_deleted",
+  "policy_superseded",
 ];
 
-const defaultEvents: WebhookEventType[] = [
-  "opened", "reopened", "acknowledged", "manual_resolution", "automatic_recovery",
-];
+const defaultEvents: WebhookEventType[] = ["opened", "reopened", "acknowledged", "manual_resolution", "automatic_recovery"];
 
 function requestId() {
   return crypto.randomUUID().replaceAll("-", "");
-}
-
-function eventLabel(value: WebhookEventType) {
-  return eventOptions.find((item) => item.value === value)?.label ?? value;
 }
 
 function publicEndpoint(endpoint: WebhookEndpointSecret): WebhookEndpoint {
@@ -66,6 +60,38 @@ function publicEndpoint(endpoint: WebhookEndpointSecret): WebhookEndpoint {
   };
 }
 
+function validationWords(validation: WebhookDestinationValidation): { tone: "ok" | "crit" | "off"; text: string } {
+  const code = validation.code ? ` · ${validation.code.replaceAll("_", " ")}` : "";
+  if (validation.state === "valid") {
+    const count = validation.resolved_address_count;
+    return { tone: "ok", text: `Address check passed · ${count} public ${count === 1 ? "address" : "addresses"}${code}` };
+  }
+  if (validation.state === "invalid") return { tone: "crit", text: `Address check failed${code}` };
+  if (validation.state === "unsupported") return { tone: "off", text: `This address cannot be used${code}` };
+  return { tone: "off", text: `The address could not be checked right now${code}` };
+}
+
+function EventChoices({ legend, selected, onToggle, disabled }: { legend: string; selected: WebhookEventType[]; onToggle: (value: WebhookEventType) => void; disabled?: boolean }) {
+  return (
+    <fieldset className="m-0 grid gap-2 border-0 p-0" disabled={disabled}>
+      <legend className="mb-1.5 p-0 text-[13px] font-semibold text-(--slate)">{legend}</legend>
+      {EVENT_TYPES.map((value) => (
+        <label key={value} className="flex items-center gap-2 text-sm text-(--ink)">
+          <input type="checkbox" className="size-4 accent-(--primary-strong)" checked={selected.includes(value)} onChange={() => onToggle(value)} />
+          <span>{alertEventWord(value)}</span>
+        </label>
+      ))}
+      {selected.length === 0 ? <p className="m-0 text-xs text-[#89500b]">Choose at least one change to send.</p> : null}
+    </fieldset>
+  );
+}
+
+function toggled(value: WebhookEventType, selected: WebhookEventType[]) {
+  return selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value];
+}
+
+type Pending = { kind: "rotate" | "remove"; endpoint: WebhookEndpoint };
+
 export function WebhookEndpointManager({
   initialEndpoints,
   status,
@@ -79,6 +105,7 @@ export function WebhookEndpointManager({
 }) {
   const router = useRouter();
   const [endpoints, setEndpoints] = useState(initialEndpoints);
+  const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [events, setEvents] = useState<WebhookEventType[]>(defaultEvents);
@@ -87,28 +114,23 @@ export function WebhookEndpointManager({
   const [secretReveal, setSecretReveal] = useState<WebhookEndpointSecret | null>(null);
   const [copied, setCopied] = useState(false);
   const [validations, setValidations] = useState<Record<string, WebhookDestinationValidation>>({});
-  const [editing, setEditing] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editUrl, setEditUrl] = useState("");
   const [editEvents, setEditEvents] = useState<WebhookEventType[]>([]);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [pendingError, setPendingError] = useState("");
 
-  function toggleEvent(
-    value: WebhookEventType,
-    selected: WebhookEventType[],
-    update: (next: WebhookEventType[]) => void,
-  ) {
-    update(selected.includes(value)
-      ? selected.filter((item) => item !== value)
-      : [...selected, value]);
-  }
+  const selected = endpoints.find((item) => item.id === selectedId) ?? null;
 
   async function responseBody<T>(response: Response): Promise<T> {
-    const body = await response.json().catch(() => null) as (T & { error?: string }) | null;
+    const body = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
     if (!response.ok || !body) throw new Error(body?.error ?? "The change could not be confirmed.");
     return body;
   }
 
-  async function create(event: React.FormEvent<HTMLFormElement>) {
+  async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy("create");
     setError("");
@@ -126,6 +148,7 @@ export function WebhookEndpointManager({
       setUrl("");
       setEvents(defaultEvents);
       setCopied(false);
+      setCreating(false);
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The endpoint could not be created.");
@@ -138,10 +161,7 @@ export function WebhookEndpointManager({
     setBusy(`validate:${endpoint.id}`);
     setError("");
     try {
-      const response = await fetch(
-        `/api/webhook-endpoints/${encodeURIComponent(endpoint.id)}/validate`,
-        { method: "POST" },
-      );
+      const response = await fetch(`/api/webhook-endpoints/${encodeURIComponent(endpoint.id)}/validate`, { method: "POST" });
       const body = await responseBody<{ validation: WebhookDestinationValidation }>(response);
       setValidations((current) => ({ ...current, [endpoint.id]: body.validation }));
     } catch (caught) {
@@ -151,25 +171,18 @@ export function WebhookEndpointManager({
     }
   }
 
-  async function update(
-    endpoint: WebhookEndpoint,
-    change: Partial<Pick<WebhookEndpoint, "name" | "enabled" | "event_types">> & { url?: string },
-  ) {
+  async function update(endpoint: WebhookEndpoint, change: Partial<Pick<WebhookEndpoint, "name" | "enabled" | "event_types">> & { url?: string }) {
     setBusy(`update:${endpoint.id}`);
     setError("");
     try {
       const response = await fetch(`/api/webhook-endpoints/${encodeURIComponent(endpoint.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          request_id: requestId(), expected_version: endpoint.version, ...change,
-        }),
+        body: JSON.stringify({ request_id: requestId(), expected_version: endpoint.version, ...change }),
       });
       const body = await responseBody<{ endpoint: WebhookEndpoint }>(response);
-      setEndpoints((current) => current.map((item) => (
-        item.id === endpoint.id ? body.endpoint : item
-      )));
-      setEditing(null);
+      setEndpoints((current) => current.map((item) => (item.id === endpoint.id ? body.endpoint : item)));
+      setEditing(false);
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The endpoint could not be updated.");
@@ -179,37 +192,31 @@ export function WebhookEndpointManager({
   }
 
   async function rotate(endpoint: WebhookEndpoint) {
-    if (!window.confirm(`Rotate the signing secret for ${endpoint.name}? Existing queued deliveries keep their original key.`)) return;
     setBusy(`rotate:${endpoint.id}`);
-    setError("");
+    setPendingError("");
     try {
-      const response = await fetch(
-        `/api/webhook-endpoints/${encodeURIComponent(endpoint.id)}/rotate`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ request_id: requestId(), expected_version: endpoint.version }),
-        },
-      );
+      const response = await fetch(`/api/webhook-endpoints/${encodeURIComponent(endpoint.id)}/rotate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: requestId(), expected_version: endpoint.version }),
+      });
       const body = await responseBody<{ endpoint: WebhookEndpointSecret }>(response);
       const rotatedEndpoint = publicEndpoint(body.endpoint);
-      setEndpoints((current) => current.map((item) => (
-        item.id === endpoint.id ? rotatedEndpoint : item
-      )));
+      setEndpoints((current) => current.map((item) => (item.id === endpoint.id ? rotatedEndpoint : item)));
       setSecretReveal(body.endpoint);
       setCopied(false);
+      setPending(null);
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The secret could not be rotated.");
+      setPendingError(caught instanceof Error ? caught.message : "The secret could not be rotated.");
     } finally {
       setBusy(null);
     }
   }
 
   async function remove(endpoint: WebhookEndpoint) {
-    if (!window.confirm(`Remove ${endpoint.name}? Its historical delivery ledger remains available.`)) return;
     setBusy(`delete:${endpoint.id}`);
-    setError("");
+    setPendingError("");
     try {
       const response = await fetch(`/api/webhook-endpoints/${encodeURIComponent(endpoint.id)}`, {
         method: "DELETE",
@@ -218,19 +225,33 @@ export function WebhookEndpointManager({
       });
       await responseBody<{ deleted: true }>(response);
       setEndpoints((current) => current.filter((item) => item.id !== endpoint.id));
+      setPending(null);
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The endpoint could not be removed.");
+      setPendingError(caught instanceof Error ? caught.message : "The endpoint could not be removed.");
     } finally {
       setBusy(null);
     }
   }
 
+  function openEndpoint(endpoint: WebhookEndpoint) {
+    setSelectedId(endpoint.id);
+    setEditing(false);
+  }
+
   function beginEdit(endpoint: WebhookEndpoint) {
-    setEditing(endpoint.id);
+    setEditing(true);
     setEditName(endpoint.name);
     setEditUrl("");
     setEditEvents(endpoint.event_types);
+  }
+
+  /** The confirmation replaces the drawer so only one dialog is open at a time. */
+  function askFirst(kind: Pending["kind"], endpoint: WebhookEndpoint) {
+    setSelectedId(null);
+    setEditing(false);
+    setPendingError("");
+    setPending({ kind, endpoint });
   }
 
   async function copySecret() {
@@ -239,89 +260,263 @@ export function WebhookEndpointManager({
     setCopied(true);
   }
 
-  return (
-    <>
-      <section className="webhook-signal-path" aria-label="Webhook delivery contract">
-        <span><Link2 size={16} /> Public HTTPS destination</span>
-        <i aria-hidden="true" />
-        <span><KeyRound size={16} /> HMAC-SHA256 · v1</span>
-        <i aria-hidden="true" />
-        <span><ShieldCheck size={16} /> Pinned address + TLS name</span>
-      </section>
+  const enabledCount = endpoints.filter((item) => item.enabled).length;
+  const delivered = status.counts.delivered;
+  const failed = status.counts.failed;
 
-      <section className="monitoring-summary-grid webhook-summary-grid">
-        <section><span>Destinations</span><strong>{endpoints.length} / {status.endpoint_limit}</strong></section>
-        <section><span>Enabled</span><strong>{endpoints.filter((item) => item.enabled).length}</strong></section>
-        <section><span>Delivered</span><strong>{status.counts.delivered ?? 0}</strong></section>
-        <section><span>Failed</span><strong>{status.counts.failed ?? 0}</strong></section>
-      </section>
+  const columns: Column<WebhookEndpoint>[] = [
+    {
+      key: "destination",
+      header: "Destination",
+      cell: (endpoint) => <PrimaryCell title={endpoint.name} sub={<span className="font-(family-name:--font-data)">{endpoint.url}</span>} />,
+    },
+    { key: "events", header: "Sends", cell: (endpoint) => `${endpoint.event_types.length} of ${EVENT_TYPES.length} kinds of change` },
+    {
+      key: "key",
+      header: "Signing key",
+      cell: (endpoint) => (
+        <span className="font-(family-name:--font-data) text-[13px]">
+          v{endpoint.current_secret_version} · {endpoint.current_secret_key_id.slice(0, 8)}…
+        </span>
+      ),
+    },
+    { key: "updated", header: "Updated", cell: (endpoint) => formatMonitoringTimestamp(endpoint.updated_at) },
+    {
+      key: "state",
+      header: "State",
+      cell: (endpoint) => {
+        const word = policyStateWord(endpoint.enabled);
+        return <StatusBadge tone={word.tone}>{word.label}</StatusBadge>;
+      },
+    },
+  ];
+
+  const tableState =
+    endpoints.length === 0 ? (
+      <EmptyState
+        icon={Webhook}
+        title="No webhook destinations"
+        body={canAdmin ? "Add the first destination to send signed alert changes to another system." : "An administrator has not set up a destination yet."}
+      />
+    ) : undefined;
+
+  return (
+    <PageStack>
+      <PageHeader
+        breadcrumb={[{ label: "Devices" }, { label: "Monitoring", href: "/monitoring" }, { label: "Webhook destinations" }]}
+        title="Webhook destinations"
+        description="Other systems NodeLink tells when an alert changes. Each delivery is signed so the receiver can check it came from NodeLink."
+        actions={
+          canAdmin ? (
+            <Button variant="primary" icon={Plus} onClick={() => setCreating(true)} disabled={!status.encryption_key_configured}>
+              Add a webhook
+            </Button>
+          ) : null
+        }
+      />
+      <StatRow>
+        <StatTile icon={Webhook} label="Destinations" value={endpoints.length} sub={`Up to ${status.endpoint_limit} allowed`} />
+        <StatTile icon={CircleCheck} label="Active" tone={enabledCount ? "ok" : "off"} value={enabledCount} sub={`${endpoints.length - enabledCount} disabled`} />
+        <StatTile icon={Check} label="Delivered" tone="ok" value={delivered ?? "—"} sub="All deliveries so far" />
+        <StatTile icon={CircleX} label="Failed" tone={failed === undefined ? "off" : failed ? "crit" : "ok"} value={failed ?? "—"} sub="All deliveries so far" />
+      </StatRow>
+      <MonitoringTabs current="webhooks" />
 
       {!status.encryption_key_configured ? (
-        <section className="webhook-config-warning" role="alert">
-          <KeyRound size={19} />
-          <div><strong>Secret encryption is unavailable</strong><span>Set WEBHOOK_SECRET_ENCRYPTION_KEY before creating or rotating destinations.</span></div>
-        </section>
+        <div role="alert" className={cx("flex items-start gap-3 rounded-lg px-4 py-3", toneStyles.warn.surface)}>
+          <KeyRound size={18} aria-hidden="true" className={cx("mt-0.5 shrink-0", toneStyles.warn.text)} />
+          <p className="m-0 grid gap-0.5 text-sm">
+            <span className={cx("font-semibold", toneStyles.warn.text)}>Signing secrets cannot be stored yet</span>
+            <span className="text-(--slate)">
+              Set <span className="font-(family-name:--font-data)">WEBHOOK_SECRET_ENCRYPTION_KEY</span> on the server before adding a destination or rotating a secret.
+            </span>
+          </p>
+        </div>
       ) : null}
 
       {secretReveal ? (
-        <section className="webhook-secret-reveal" role="status">
-          <div><span>Copy now · shown once</span><h2>{secretReveal.name} signing secret</h2><p>Store this in the receiving service. NodeLink keeps only an encrypted copy and will not show it again.</p></div>
-          <code>{secretReveal.secret}</code>
-          <div className="webhook-secret-actions">
-            <button type="button" onClick={copySecret}>{copied ? <Check size={14} /> : <Clipboard size={14} />}{copied ? "Copied" : "Copy secret"}</button>
-            <button type="button" onClick={() => setSecretReveal(null)}><X size={14} /> Dismiss</button>
+        <section role="status" aria-label="New signing secret" className={cx("grid gap-3 rounded-lg px-4 py-4", toneStyles.warn.surface)}>
+          <div className="grid gap-0.5 text-sm">
+            <span className={cx("font-semibold", toneStyles.warn.text)}>Copy the signing secret for {secretReveal.name} now</span>
+            <span className="text-(--slate)">Store it in the receiving system. NodeLink keeps only an encrypted copy and will not show it again.</span>
+          </div>
+          <code className="block overflow-x-auto rounded-lg bg-(--ink-deep) p-3 font-(family-name:--font-data) text-[13px] break-all text-(--chrome-text)">{secretReveal.secret}</code>
+          <div className="flex flex-wrap gap-2">
+            <Button size="compact" icon={copied ? Check : Clipboard} onClick={() => void copySecret()}>
+              {copied ? "Copied" : "Copy secret"}
+            </Button>
+            <Button size="compact" variant="quiet" icon={X} onClick={() => setSecretReveal(null)}>
+              Dismiss
+            </Button>
           </div>
         </section>
       ) : null}
 
-      {canAdmin ? (
-        <section className="enrollment-panel webhook-create-panel">
-          <header><div><span>New destination</span><h2>Connect an alert receiver</h2><small>The URL is resolved and checked before any secret is created.</small></div><Plus size={19} /></header>
-          <form onSubmit={create}>
-            <label><span>Name</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} placeholder="Primary incident relay" required /></label>
-            <label><span>Public HTTPS URL</span><input value={url} onChange={(event) => setUrl(event.target.value)} maxLength={2048} placeholder="https://hooks.example.com/nodelink" inputMode="url" required /></label>
-            <fieldset>
-              <legend>Alert transitions</legend>
-              {eventOptions.map((item) => <label key={item.value}><input type="checkbox" checked={events.includes(item.value)} onChange={() => toggleEvent(item.value, events, setEvents)} /><span>{item.label}</span></label>)}
-            </fieldset>
-            <button type="submit" disabled={busy === "create" || events.length === 0 || !status.encryption_key_configured}>{busy === "create" ? <LoaderCircle className="spin" size={15} /> : <Webhook size={15} />} Create destination</button>
-          </form>
-        </section>
+      {error ? (
+        <p role="alert" className="m-0 text-sm text-(--red)">
+          {error}
+        </p>
       ) : null}
 
-      <section className="enrollment-panel webhook-endpoint-panel">
-        <header><div><span>Destination register</span><h2>{endpoints.length} signed webhook destinations</h2><small>URLs are masked after save. Paths, query values, and secrets never return to the dashboard.</small></div><Webhook size={19} /></header>
-        {endpoints.length ? <div className="webhook-endpoint-list">
-          {endpoints.map((endpoint) => {
-            const validation = validations[endpoint.id];
-            const isEditing = editing === endpoint.id;
-            return <article key={endpoint.id} className={endpoint.enabled ? "enabled" : "disabled"}>
-              <span className="webhook-endpoint-rail" aria-hidden="true" />
-              <div className="webhook-endpoint-main">
-                <div className="webhook-endpoint-title"><div><strong>{endpoint.name}</strong><code>{endpoint.url}</code></div><span className={`monitoring-status ${endpoint.enabled ? "enabled" : "disabled"}`}>{endpoint.enabled ? "Enabled" : "Disabled"}</span></div>
-                <div className="webhook-event-tags">{endpoint.event_types.map((item) => <span key={item}>{eventLabel(item)}</span>)}</div>
-                <dl><div><dt>Signing key</dt><dd>v{endpoint.current_secret_version} · <code>{endpoint.current_secret_key_id.slice(0, 8)}…</code></dd></div><div><dt>Updated</dt><dd>{formatMonitoringTimestamp(endpoint.updated_at)}</dd></div>{validation ? <div><dt>Validation</dt><dd className={`webhook-validation ${validation.state}`}>{validation.state}{validation.code ? ` · ${validation.code.replaceAll("_", " ")}` : ` · ${validation.resolved_address_count} public address${validation.resolved_address_count === 1 ? "" : "es"}`}</dd></div> : null}</dl>
-                {isEditing ? <form className="webhook-edit-form" onSubmit={(event) => { event.preventDefault(); void update(endpoint, { name: editName, event_types: editEvents, ...(editUrl.trim() ? { url: editUrl.trim() } : {}) }); }}>
-                  <label><span>Name</span><input value={editName} onChange={(event) => setEditName(event.target.value)} required /></label>
-                  <label><span>Replace URL <small>(leave blank to keep it)</small></span><input value={editUrl} onChange={(event) => setEditUrl(event.target.value)} placeholder="https://new.example.com/nodelink" /></label>
-                  <fieldset><legend>Transitions</legend>{eventOptions.map((item) => <label key={item.value}><input type="checkbox" checked={editEvents.includes(item.value)} onChange={() => toggleEvent(item.value, editEvents, setEditEvents)} /><span>{item.label}</span></label>)}</fieldset>
-                  <div><button type="submit" disabled={editEvents.length === 0 || busy === `update:${endpoint.id}`}>Save changes</button><button type="button" onClick={() => setEditing(null)}>Cancel</button></div>
-                </form> : null}
+      <DataTable
+        caption="Webhook destinations"
+        columns={columns}
+        rows={endpoints}
+        rowKey={(endpoint) => endpoint.id}
+        rowLabel={(endpoint) => `Open ${endpoint.name}`}
+        onRowSelect={openEndpoint}
+        state={tableState}
+        minWidth={820}
+        footer={endpoints.length ? <TableFooter shown={endpoints.length} total={endpoints.length} sortNote="by name" /> : null}
+      />
+      <p className="m-0 text-[13px] text-(--muted)">
+        Deliveries go only to public HTTPS addresses and are signed with HMAC-SHA256 in the <span className="font-(family-name:--font-data)">X-NodeLink-Signature</span> header. Saved addresses are
+        shown masked; paths, query values and secrets are never sent back to the dashboard. Each alert page lists the webhooks sent for it.
+      </p>
+
+      {selected ? (
+        <Drawer
+          open
+          onClose={() => {
+            setSelectedId(null);
+            setEditing(false);
+          }}
+          context="Webhook destination"
+          title={selected.name}
+          sub={<span className="font-(family-name:--font-data)">{selected.url}</span>}
+          record={`Added ${formatMonitoringTimestamp(selected.created_at)} · last changed ${formatMonitoringTimestamp(selected.updated_at)}`}
+          footer={
+            canOperate ? (
+              <Button icon={RefreshCw} onClick={() => void validate(selected)} disabled={Boolean(busy)}>
+                {busy === `validate:${selected.id}` ? "Checking…" : "Check address"}
+              </Button>
+            ) : null
+          }
+        >
+          <DefinitionList
+            items={[
+              { term: "State", value: <StatusBadge tone={policyStateWord(selected.enabled).tone}>{policyStateWord(selected.enabled).label}</StatusBadge> },
+              { term: "Sends", value: selected.event_types.map((item) => alertEventWord(item)).join(" · ") },
+              {
+                term: "Signing key",
+                value: (
+                  <span className="font-(family-name:--font-data) text-[13px]">
+                    v{selected.current_secret_version} · {selected.current_secret_key_id.slice(0, 8)}…
+                  </span>
+                ),
+              },
+              ...(validations[selected.id]
+                ? [
+                    {
+                      term: "Address check",
+                      value: (() => {
+                        const words = validationWords(validations[selected.id]);
+                        return <span className={toneStyles[words.tone].text}>{words.text}</span>;
+                      })(),
+                    },
+                  ]
+                : []),
+            ]}
+          />
+          {canAdmin && editing ? (
+            <form
+              aria-label="Edit destination"
+              className="grid gap-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void update(selected, { name: editName, event_types: editEvents, ...(editUrl.trim() ? { url: editUrl.trim() } : {}) });
+              }}
+            >
+              <Input label="Name" value={editName} onChange={(event) => setEditName(event.target.value)} required />
+              <Input
+                label="Replace address"
+                hint="Leave blank to keep the current address."
+                value={editUrl}
+                onChange={(event) => setEditUrl(event.target.value)}
+                placeholder="https://new.example.com/nodelink"
+              />
+              <EventChoices legend="Changes to send" selected={editEvents} onToggle={(value) => setEditEvents((current) => toggled(value, current))} />
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" variant="primary" disabled={editEvents.length === 0 || busy === `update:${selected.id}`}>
+                  {busy === `update:${selected.id}` ? "Saving…" : "Save changes"}
+                </Button>
+                <Button onClick={() => setEditing(false)}>Cancel</Button>
               </div>
-              <div className="webhook-endpoint-actions">
-                {canOperate ? <button type="button" onClick={() => validate(endpoint)} disabled={Boolean(busy)}><RefreshCw size={13} /> {busy === `validate:${endpoint.id}` ? "Checking…" : "Validate"}</button> : null}
-                {canAdmin ? <>
-                  <button type="button" onClick={() => beginEdit(endpoint)} disabled={Boolean(busy)}><Pencil size={13} /> Edit</button>
-                  <button type="button" onClick={() => update(endpoint, { enabled: !endpoint.enabled })} disabled={Boolean(busy)}>{endpoint.enabled ? "Disable" : "Enable"}</button>
-                  <button type="button" onClick={() => rotate(endpoint)} disabled={Boolean(busy)}><KeyRound size={13} /> Rotate secret</button>
-                  <button className="danger" type="button" onClick={() => remove(endpoint)} disabled={Boolean(busy)}><Trash2 size={13} /> Remove</button>
-                </> : null}
+            </form>
+          ) : null}
+          {canAdmin && !editing ? (
+            <div className="grid gap-2">
+              <h3 className="m-0 text-sm font-semibold text-(--ink)">Manage</h3>
+              <div className="flex flex-wrap gap-2">
+                <Button size="compact" icon={Pencil} onClick={() => beginEdit(selected)} disabled={Boolean(busy)}>
+                  Edit
+                </Button>
+                <Button size="compact" onClick={() => void update(selected, { enabled: !selected.enabled })} disabled={Boolean(busy)}>
+                  {selected.enabled ? "Disable" : "Enable"}
+                </Button>
+                <Button size="compact" variant="danger" icon={KeyRound} onClick={() => askFirst("rotate", selected)} disabled={Boolean(busy)}>
+                  Rotate secret
+                </Button>
+                <Button size="compact" variant="danger" icon={Trash2} onClick={() => askFirst("remove", selected)} disabled={Boolean(busy)}>
+                  Remove
+                </Button>
               </div>
-            </article>;
-          })}
-        </div> : <div className="enrollment-empty"><Webhook size={25} /><h3>No webhook destinations</h3><p>{canAdmin ? "Create the first destination to send signed alert transitions." : "An administrator has not configured a destination yet."}</p></div>}
-      </section>
-      {error ? <p className="alert-action-error" role="alert">{error}</p> : null}
-    </>
+            </div>
+          ) : null}
+          {error ? (
+            <p role="alert" className="m-0 text-sm text-(--red)">
+              {error}
+            </p>
+          ) : null}
+        </Drawer>
+      ) : null}
+
+      {canAdmin && creating ? (
+        <Drawer open onClose={() => setCreating(false)} context="Webhook destinations" title="Add a webhook" sub="The address is looked up and checked before any secret is created.">
+          <form aria-label="Add a webhook" className="grid gap-4" onSubmit={create}>
+            <Input label="Name" value={name} onChange={(event) => setName(event.target.value)} maxLength={200} placeholder="Main incident relay" required />
+            <Input
+              label="Public HTTPS address"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              maxLength={2048}
+              placeholder="https://hooks.example.com/nodelink"
+              inputMode="url"
+              required
+            />
+            <EventChoices legend="Changes to send" selected={events} onToggle={(value) => setEvents((current) => toggled(value, current))} />
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" variant="primary" icon={Webhook} disabled={busy === "create" || events.length === 0 || !status.encryption_key_configured}>
+                {busy === "create" ? "Adding…" : "Add destination"}
+              </Button>
+              <Button onClick={() => setCreating(false)}>Cancel</Button>
+            </div>
+            {error ? (
+              <p role="alert" className="m-0 text-sm text-(--red)">
+                {error}
+              </p>
+            ) : null}
+          </form>
+        </Drawer>
+      ) : null}
+
+      <ConfirmDialog
+        open={canAdmin && pending !== null}
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          if (!pending) return;
+          return pending.kind === "rotate" ? rotate(pending.endpoint) : remove(pending.endpoint);
+        }}
+        title={pending?.kind === "remove" ? `Remove ${pending.endpoint.name}?` : `Rotate the signing secret for ${pending?.endpoint.name ?? "this destination"}?`}
+        consequence={
+          pending?.kind === "remove"
+            ? "NodeLink stops sending alert changes to this destination. Its past deliveries stay listed on each alert."
+            : "A new secret is shown once and the receiver must be updated to accept it. Deliveries already queued keep their original key."
+        }
+        confirmLabel={pending?.kind === "remove" ? (busy?.startsWith("delete:") ? "Removing…" : "Remove destination") : busy?.startsWith("rotate:") ? "Rotating…" : "Rotate secret"}
+        busy={Boolean(busy?.startsWith("delete:") || busy?.startsWith("rotate:"))}
+        error={pendingError || undefined}
+      />
+    </PageStack>
   );
 }

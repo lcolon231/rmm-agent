@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import Link from "next/link";
+
+import { NotFoundPanel } from "@/components/monitoring/not-found-panel";
+
 export default function AlertNotFound() {
-  return <div className="enrollment-empty"><h1>Alert not found</h1><p>It may have been removed with its endpoint.</p><Link href="/monitoring">Return to monitoring</Link></div>;
+  return <NotFoundPanel title="Alert not found" body="It may have been removed with its device, or the link is no longer valid." href="/alerts" linkLabel="Back to Alerts" />;
 }
