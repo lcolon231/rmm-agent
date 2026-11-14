@@ -54,10 +54,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     id: "support",
     label: "Support",
     icon: MessagesSquare,
-    items: [
-      { label: "Support chat", href: "/support" },
-      { label: "AI assistant", href: "/assistant" },
-    ],
+    items: [{ label: "Support chat", href: "/support" }],
   },
   {
     id: "compliance",

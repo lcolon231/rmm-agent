@@ -6,6 +6,7 @@ import { beforeEach, mock, test } from "node:test";
 import { render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 
+import { loadAssistantContext } from "@/lib/assistant-context-core";
 import type { DashboardSessionState } from "@/lib/dashboard-auth-core";
 import type { EndpointListItem } from "@/lib/endpoint-list";
 
@@ -44,7 +45,12 @@ function reset() {
 }
 
 mock.module("@/lib/dashboard-session", { namedExports: { getDashboardSession: async () => session } });
-mock.module("@/lib/client-navigation", { namedExports: { getClientNavigation: (...args: unknown[]) => loaders.navigation(...args) } });
+mock.module("@/lib/assistant-context", {
+  namedExports: {
+    getAssistantContext: (...args: unknown[]) =>
+      loadAssistantContext({ navigation: () => loaders.navigation(...args), status: async () => ({ state: "available" }) }),
+  },
+});
 mock.module("@/lib/endpoint-list", {
   namedExports: { getEndpointList: (...args: unknown[]) => { endpointCalls.push(args[1]); return loaders.endpoints(...args); } },
 });

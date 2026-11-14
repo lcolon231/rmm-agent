@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { NavigationData } from "@/lib/client-navigation";
 import type { DashboardOperator } from "@/lib/dashboard-auth-core";
 
+import { AssistantWidget } from "../assistant/assistant-widget";
 import { useModal } from "../ui/use-modal";
 import { anchorLine, IntegrityHeadline } from "./integrity";
 import { activeHref as findActiveHref, groupForHref, visibleGroups } from "./nav-groups";
@@ -28,6 +29,8 @@ export type AppShellProps = {
   selectedSiteId?: string;
   selectionError?: boolean;
   alertCount?: number;
+  /** Assistant pilot state from `getAssistantContext`; omit to leave the floating assistant off. */
+  assistantState?: string;
   children: ReactNode;
 };
 
@@ -104,6 +107,7 @@ export function AppShell({
   selectedSiteId,
   selectionError = false,
   alertCount,
+  assistantState,
   children,
 }: AppShellProps) {
   const pathname = usePathname() ?? activePath;
@@ -126,6 +130,7 @@ export function AppShell({
   const groups = useMemo(() => visibleGroups(operator.role), [operator.role]);
   const active = findActiveHref(pathname, groups);
   const client = navigation?.items.find((item) => item.id === selectedClientId);
+  const assistantClients = useMemo(() => navigation?.items.map(({ id, name }) => ({ id, name })) ?? [], [navigation]);
   const site = client?.sites.find((item) => item.id === selectedSiteId);
 
   const data: SidebarData = {
@@ -209,6 +214,7 @@ export function AppShell({
           <RecordFooter integrity={integrity} operatorEmail={operator.email} />
         </main>
       </div>
+      {assistantState !== undefined ? <AssistantWidget clients={assistantClients} state={assistantState} pathname={pathname} /> : null}
     </div>
   );
 }

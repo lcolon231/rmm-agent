@@ -1,6 +1,8 @@
 # Dashboard AI assistant pilot
 
-Release 1 is read-only. Open **AI assistant**, select a client, and ask “Which
+Release 1 is read-only. Open the assistant from the launcher in the bottom-right
+corner of any dashboard page (it stays open as you move between pages, and
+`/assistant` remains as a full-page view), select a client, and ask “Which
 endpoints are offline?” Results contain permission-filtered device links, last-seen
 timestamps, observed data and a separately labelled model interpretation. Endpoint
 detail pages also link into an investigation with their client and endpoint context.

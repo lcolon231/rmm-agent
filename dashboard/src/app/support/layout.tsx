@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { DashboardSectionShell } from "@/components/dashboard-shell";
-import { getClientNavigation, type NavigationData } from "@/lib/client-navigation";
+import { getAssistantContext } from "@/lib/assistant-context";
 import { getDashboardSession } from "@/lib/dashboard-session";
 
 export const dynamic = "force-dynamic";
@@ -20,19 +20,14 @@ export default async function SupportLayout({ children }: { children: React.Reac
     );
   }
 
-  let navigation: NavigationData | null = null;
-  let navigationError = false;
-  try {
-    navigation = await getClientNavigation(session.sessionToken);
-  } catch {
-    navigationError = true;
-  }
+  const assistant = await getAssistantContext(session.sessionToken);
 
   return (
     <DashboardSectionShell
       activePath="/support"
-      navigation={navigation}
-      navigationError={navigationError}
+      navigation={assistant.clients}
+      navigationError={!assistant.clients}
+      assistantState={assistant.state}
       operator={session.operator}
     >
       {children}

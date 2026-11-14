@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 import { render, screen } from "@testing-library/react";
 
+import { loadAssistantContext } from "@/lib/assistant-context-core";
 import type { DashboardSessionState } from "@/lib/dashboard-auth-core";
 
 class NavigationSignal extends Error {}
@@ -19,13 +20,18 @@ mock.module("@/lib/dashboard-session", { namedExports: { getDashboardSession: as
 mock.module("@/lib/community-packages", {
   namedExports: { listCommunityPublishers, listCommunityPackages, listCommunityInstalls },
 });
-mock.module("@/lib/client-navigation", { namedExports: { getClientNavigation: async () => { throw new Error("nav down"); } } });
+mock.module("@/lib/assistant-context", {
+  namedExports: {
+    getAssistantContext: () =>
+      loadAssistantContext({ navigation: async () => { throw new Error("nav down"); }, status: async () => ({ state: "available" }) }),
+  },
+});
 mock.module("@/components/community-repository-view", {
   namedExports: { CommunityRepositoryView: (props: Record<string, unknown>) => { viewProps = props; return <p>view:{String(props.initialError || "ok")}</p>; } },
 });
 mock.module("@/components/dashboard-shell", {
-  namedExports: { DashboardSectionShell: ({ children, activePath, navigationError }: { children: React.ReactNode; activePath: string; navigationError: boolean }) =>
-    <section data-active={activePath} data-nav-error={String(navigationError)}>{children}</section> },
+  namedExports: { DashboardSectionShell: ({ children, activePath, navigationError, assistantState }: { children: React.ReactNode; activePath: string; navigationError: boolean; assistantState?: string }) =>
+    <section data-active={activePath} data-nav-error={String(navigationError)} data-assistant={assistantState}>{children}</section> },
 });
 mock.module("next/navigation", {
   namedExports: { redirect: (to: string) => { throw new NavigationSignal(`redirect:${to}`); } },
@@ -56,6 +62,7 @@ test("the layout keeps rendering when navigation cannot load", async () => {
   const shell = container.querySelector("section");
   assert.equal(shell?.getAttribute("data-active"), "/community");
   assert.equal(shell?.getAttribute("data-nav-error"), "true");
+  assert.equal(shell?.getAttribute("data-assistant"), "available", "the layout hands the assistant state to the shell");
 });
 
 test("loaded data is passed through with the operator's role", async () => {

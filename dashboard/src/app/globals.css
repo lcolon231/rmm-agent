@@ -355,6 +355,7 @@
 .shell-error { margin: 0; padding: 10px 20px; color: var(--red); font-size: 12px; font-weight: 700; background: var(--red-soft); border-top: 1px solid #e5b8b8; }
 .shell-panel button:focus-visible, .shell-panel input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .shell-panel .spin { animation: shell-spin .8s linear infinite; }
+@keyframes assistant-panel-in { from { opacity: 0; transform: translateY(8px); } }
 @keyframes shell-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .shell-panel .spin { animation: none; } }
 @keyframes detail-shimmer { to { background-position: -300% 0; } }

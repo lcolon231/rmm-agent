@@ -7,7 +7,7 @@ import { OverviewView, type OverviewData } from "@/components/overview-view";
 import { AppShell } from "@/components/shell/app-shell";
 import { getApprovalRequests } from "@/lib/approvals";
 import { getAuditEventPage } from "@/lib/audit";
-import { getClientNavigation, type NavigationData } from "@/lib/client-navigation";
+import { getAssistantContext } from "@/lib/assistant-context";
 import { attentionDevices, indexOpenAlerts } from "@/lib/device-status-core";
 import { getDashboardSession } from "@/lib/dashboard-session";
 import { getEndpointList, type EndpointListData } from "@/lib/endpoint-list";
@@ -47,13 +47,8 @@ export default async function Home({ searchParams }: HomePageProps) {
   const query = await searchParams;
   const token = session.sessionToken;
 
-  let navigation: NavigationData | null = null;
-  let navigationError = false;
-  try {
-    navigation = await getClientNavigation(token);
-  } catch {
-    navigationError = true;
-  }
+  const assistant = await getAssistantContext(token);
+  const navigation = assistant.clients;
 
   const requestedClientId = typeof query.client === "string" ? query.client : undefined;
   const requestedSiteId = typeof query.site === "string" ? query.site : undefined;
@@ -111,7 +106,8 @@ export default async function Home({ searchParams }: HomePageProps) {
     <AppShell
       activePath="/"
       navigation={navigation}
-      navigationError={navigationError}
+      navigationError={!navigation}
+      assistantState={assistant.state}
       operator={session.operator}
       selectedClientId={clientId}
       selectedSiteId={siteId}

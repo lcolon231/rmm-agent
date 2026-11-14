@@ -12,7 +12,7 @@ The shared shell has seven groups:
 | Devices | Endpoints, Alerts, Monitoring, webhook destinations |
 | Patching | Patch compliance, Patch policies, Maintenance windows |
 | Automation | Script library, Community scripts, Tasks, Schedules |
-| Support | Support chat, AI assistant |
+| Support | Support chat (the AI assistant is a floating launcher on every page, not a sidebar destination) |
 | Compliance | Approvals, Audit events and integrity anchors, Emergency overrides |
 | Administration | Enrollment, Operators, Security keys and MFA, Break-glass |
 

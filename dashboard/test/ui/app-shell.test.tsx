@@ -192,3 +192,18 @@ test("global search submits to the device list with a bounded query", () => {
     globalThis.fetch = original;
   }
 });
+
+test("the assistant launcher appears only when the shell is given an assistant state", (t) => {
+  stubFetch(t);
+  const without = renderShell();
+  assert.equal(screen.queryByRole("button", { name: "AI assistant" }), null);
+  without.unmount();
+
+  render(
+    <AppShell activePath="/endpoints" navigation={{ items: [], truncated: false }} navigationError={false} operator={readonly} assistantState="disabled">
+      <p>Page body</p>
+    </AppShell>,
+  );
+  assert.equal(screen.getByRole("button", { name: "AI assistant" }).getAttribute("aria-expanded"), "false");
+  assert.equal(within(fullNav()).queryByRole("link", { name: "AI assistant" }), null, "the sidebar entry is gone");
+});
