@@ -52,8 +52,12 @@ token, redaction, or the server.
 - **Single instance per session** via a named mutex; the icon re-adds itself on
   `TaskbarCreated` (Explorer restart).
 - **Autostart:** the installer drops an all-users Startup shortcut
-  "NodeLink Support" → `rmm-agent.exe tray`, created on install and removed on
-  uninstall, launching for every user at logon as a non-elevated process.
+  "NodeLink Support" → `rmm-agent-tray.exe tray`, created on install and removed
+  on uninstall, launching for every user at logon as a non-elevated process.
+  `rmm-agent-tray.exe` is the same command built with `-H=windowsgui`, so logon
+  opens no console or Windows Terminal window (issue #322); `rmm-agent.exe`
+  stays the console-subsystem CLI and service binary. Without a console, `tray`
+  and `chat` errors appear in a message box instead of on stderr.
 - **Icon:** a multi-resolution `.ico` embedded with `//go:embed`; loaded with
   `CreateIconFromResourceEx` (no temp file). Swapping the `.ico` file needs no
   code change.
