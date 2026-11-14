@@ -190,16 +190,37 @@ Get-Content "C:\Program Files\NodeLink\Agent\config.json"
 # The token must NOT appear in the agent log.
 Select-String -Path "$env:ProgramData\NodeLink\logs\rmm-agent.log" -Pattern "nlenr_" -Quiet
 #   -> should be False (no match)
-```
+
+# Both NodeLink Support shortcuts launch the GUI-subsystem build
+# (rmm-agent-tray.exe), never the console build, so no console window opens
+# (issue #322).
+Test-Path "C:\Program Files\NodeLink\Agent\rmm-agent-tray.exe"  # True
+$Shell = New-Object -ComObject WScript.Shell
 
 # The discoverable Start-menu shortcut exists once and runs the chat command.
 $SupportShortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\NodeLink Support.lnk"
 Test-Path $SupportShortcut                                        # True
-$Shell = New-Object -ComObject WScript.Shell
 $Shortcut = $Shell.CreateShortcut($SupportShortcut)
-$Shortcut.TargetPath -eq "C:\Program Files\NodeLink\Agent\rmm-agent.exe" # True
+$Shortcut.TargetPath -eq "C:\Program Files\NodeLink\Agent\rmm-agent-tray.exe" # True
 $Shortcut.Arguments -eq "chat"                                  # True
 (Get-ChildItem (Split-Path $SupportShortcut) -Filter "NodeLink Support.lnk").Count # 1
+
+# The all-users Startup shortcut runs the tray at every logon.
+$TrayShortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\NodeLink Support.lnk"
+$Tray = $Shell.CreateShortcut($TrayShortcut)
+$Tray.TargetPath -eq "C:\Program Files\NodeLink\Agent\rmm-agent-tray.exe" # True
+$Tray.Arguments -eq "tray"                                      # True
+```
+
+**Verify as a standard user (sign out, then sign in):**
+
+- No console or Windows Terminal window appears at logon, and the NodeLink
+  Support icon appears in the notification area.
+- Start → **NodeLink Support** opens the chat in the browser with no console
+  flash.
+- With the service stopped (`Stop-Service NodeLinkAgent` from an admin shell),
+  Start → **NodeLink Support** shows a "NodeLink Support" error dialog saying the
+  service is unavailable. Start the service again afterwards.
 
 **Verify on the server/dashboard:**
 
@@ -343,6 +364,7 @@ $AfterExeVersion = & "$AgentDir\rmm-agent.exe" version   # the upgraded version
 ```
 
 $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($SupportShortcut)
+$Shortcut.TargetPath -eq "$AgentDir\rmm-agent-tray.exe"          # True (repointed on upgrade)
 $Shortcut.Arguments -eq "chat"                                  # True
 (Get-ChildItem (Split-Path $SupportShortcut) -Filter "NodeLink Support.lnk").Count # 1
 # Launch it from Start as the signed-in standard user; no UAC prompt appears.

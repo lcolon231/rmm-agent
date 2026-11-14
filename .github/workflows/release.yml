@@ -158,6 +158,8 @@ jobs:
           $env:GOOS = 'windows'
           $env:GOARCH = 'amd64'
           go build -ldflags "-s -w -X main.version=$env:VERSION" -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
+          # GUI-subsystem twin for the NodeLink Support shortcuts (issue #322).
+          go build -ldflags "-H=windowsgui -s -w -X main.version=$env:VERSION" -o bin/rmm-agent-tray-windows-amd64.exe ./cmd/agent
 
       # The exact binary the installer is about to embed must report the
       # release version (issue #179). The installer compile asserts this again
@@ -165,6 +167,14 @@ jobs:
       - name: Verify the embedded agent version matches the release tag
         working-directory: agent
         run: .\bin\rmm-agent-windows-amd64.exe version -expect ${{ steps.version.outputs.version }}
+
+      # PowerShell does not wait for a GUI-subsystem program or set
+      # $LASTEXITCODE for it, so wait on the process explicitly.
+      - name: Verify the embedded tray version matches the release tag
+        working-directory: agent
+        run: |
+          $p = Start-Process -FilePath .\bin\rmm-agent-tray-windows-amd64.exe -ArgumentList 'version -expect ${{ steps.version.outputs.version }}' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "tray binary version check exited $($p.ExitCode)" }
 
       # Pinned to the 6.x line to match installer/NodeLinkAgent.iss.
       - name: Install Inno Setup

@@ -94,10 +94,19 @@ jobs:
         run: |
           $env:GOOS = 'windows'; $env:GOARCH = 'amd64'
           go build -ldflags "-X main.version=0.0.0-ci" -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
+          go build -ldflags "-H=windowsgui -X main.version=0.0.0-ci" -o bin/rmm-agent-tray-windows-amd64.exe ./cmd/agent
 
       - name: Verify the embedded agent version
         working-directory: agent
         run: .\bin\rmm-agent-windows-amd64.exe version -expect 0.0.0-ci
+
+      # PowerShell does not wait for a GUI-subsystem program or set
+      # $LASTEXITCODE for it, so wait on the process explicitly (issue #322).
+      - name: Verify the embedded tray version
+        working-directory: agent
+        run: |
+          $p = Start-Process -FilePath .\bin\rmm-agent-tray-windows-amd64.exe -ArgumentList 'version -expect 0.0.0-ci' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "tray binary version check exited $($p.ExitCode)" }
 
       # GitHub windows-latest runners run elevated, so the SCM operations the
       # agent performs (register/start/stop/delete a service) are permitted.
@@ -115,6 +124,7 @@ jobs:
         run: |
           $env:GOOS = 'windows'; $env:GOARCH = 'amd64'
           go build -ldflags "-X main.version=0.0.1-ci" -o bin/rmm-agent-windows-amd64-next.exe ./cmd/agent
+          go build -ldflags "-H=windowsgui -X main.version=0.0.1-ci" -o bin/rmm-agent-tray-windows-amd64-next.exe ./cmd/agent
 
       # Pinned to the 6.x line to match installer/NodeLinkAgent.iss and the
       # release workflow (bump both together when moving to IS7).
@@ -133,7 +143,7 @@ jobs:
           & $iscc $server /DAgentExe=..\agent\bin\rmm-agent-windows-amd64.exe NodeLinkAgent.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC exited $LASTEXITCODE" }
           $env:NODELINK_VERSION = '0.0.1-ci'
-          & $iscc $server /DAgentExe=..\agent\bin\rmm-agent-windows-amd64-next.exe NodeLinkAgent.iss
+          & $iscc $server /DAgentExe=..\agent\bin\rmm-agent-windows-amd64-next.exe /DTrayExe=..\agent\bin\rmm-agent-tray-windows-amd64-next.exe NodeLinkAgent.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC exited $LASTEXITCODE" }
 
       # Sidecar-only token, /TOKEN over sidecar, tokenless upgrade that keeps

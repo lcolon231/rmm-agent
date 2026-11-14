@@ -54,21 +54,21 @@ func main() {
 	switch sub {
 	case "chat":
 		if len(args) != 0 {
-			fmt.Fprintln(os.Stderr, "usage: rmm-agent chat")
+			reportUserError(os.Stderr, hasConsole(), showUserError, fmt.Errorf("usage: rmm-agent chat"))
 			os.Exit(2)
 		}
 		if err := chatpipe.Request(context.Background()); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			reportUserError(os.Stderr, hasConsole(), showUserError, err)
 			os.Exit(1)
 		}
 		fmt.Println("NodeLink Support opened in your browser.")
 	case "tray":
 		if len(args) != 0 {
-			fmt.Fprintln(os.Stderr, "usage: rmm-agent tray")
+			reportUserError(os.Stderr, hasConsole(), showUserError, fmt.Errorf("usage: rmm-agent tray"))
 			os.Exit(2)
 		}
 		if err := chattray.Run(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			reportUserError(os.Stderr, hasConsole(), showUserError, err)
 			os.Exit(1)
 		}
 	case "run":
