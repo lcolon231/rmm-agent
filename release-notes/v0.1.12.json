@@ -1,0 +1,159 @@
+{
+  "format": "nodelink-release-note-source-v1",
+  "release": {
+    "tag": "v0.1.12",
+    "title": "NodeLink v0.1.12 ships the versioned public API, governance controls, and a console-free support tray",
+    "intended_use": "Limited pilot deployment to owned Windows x64 endpoints after the sole repository owner reviewed and accepted the release evidence. This is a feature release on top of v0.1.11 that adds seven forward-only database migrations (0045 through 0051). It adds the versioned public API v1 with tenant-scoped nlk_ API tokens, idempotent command dispatch, per-token rate limits, and a webhook event catalog (#72); justified, single-use emergency overrides for approval policies (#65); an immutable evidence vault with retention and legal hold (#81); per-tenant retention policies (#88); a moderated, publisher-signed community script repository (#74); support-chat transcript retention and lifecycle auditing (#237); the relay-routing control plane and agent capability, disabled by default and without a deployable relay service (#87, partial); a complete dashboard redesign; and a GUI-subsystem tray build so no console window opens at logon (#322). It also fixes several authorization and integrity defects listed under security impact. It is not approved for multi-tenant, high-availability, or production multi-region relay claims."
+  },
+  "server": {
+    "tag": "v0.1.12",
+    "deployment": "Deploy source from the exact commit bound to v0.1.12 by the release workflow. v0.1.12 has substantial server changes relative to v0.1.11 and requires `alembic upgrade head` from 0044 to 0051 before the new server starts; the startup revision guard refuses a mismatched schema. Take and verify a fresh pre-migration backup of the live 0044 database first, because 0046 through 0051 are forward-only. Deploy order is migrate, then server, then dashboard, then agents: the redesigned dashboard calls the new emergency-override and community routes. All new subsystems default to inert or safe settings: RELAY_ROUTING_ENABLED=false, EVIDENCE_VAULT_BACKEND=none, new destructive retention classes default to 0 (keep forever), and EXPOSE_OPENAPI=false. support_chat_base_url is still required for support chat."
+  },
+  "agent": {
+    "version": "0.1.12",
+    "artifacts": [
+      "rmm-agent-windows-amd64.exe",
+      "rmm-agent-linux-amd64",
+      "rmm-agent-darwin-arm64"
+    ]
+  },
+  "installer": {
+    "version": "0.1.12",
+    "filename": "NodeLinkAgentSetup-0.1.12.exe"
+  },
+  "database": {
+    "alembic_revision": "0051",
+    "compatible_from": [
+      "0001",
+      "0012",
+      "0029",
+      "0035",
+      "0042",
+      "0044"
+    ],
+    "migration_policy": "Migrations are forward-only. v0.1.12 adds seven additive revisions: 0045 (support-chat lifecycle index), 0046 (emergency overrides), 0047 (evidence vault and legal holds), 0048 (relay regions, relays, keys, residency policies, forward receipts), 0049 (tenant retention policies), 0050 (community script repository), and 0051 (public API tokens and idempotency keys). None drops or rewrites existing data. 0045 has a reversible downgrade; 0046 through 0051 refuse to downgrade, so returning below them requires the exact-revision restore in docs/ROLLBACK.md. A v0.1.11 database at 0044 upgrades directly to 0051. Older databases upgrade forward to 0051 through the same guarded paths documented for v0.1.9 through v0.1.11. Never edit a revision or perform an in-place downgrade."
+  },
+  "protocols": {
+    "command_envelopes": [
+      "command-v3"
+    ],
+    "mixed_version_behavior": "command-v3 is unchanged and no command kind or envelope is added or removed, so signed command delivery is protocol-identical across a mixed fleet. The agent adds one capability, relay-routing (#304), advertised on all builds. The heartbeat response gains an optional signed routing_manifest field, sent only when RELAY_ROUTING_ENABLED is on and the agent advertises relay-routing; v0.1.11 and earlier agents never receive it and ignore unknown fields, and strict residency never strands an agent that lacks the capability (legacy_direct_agents reports how many remain). The server's inventory hash now matches Go's json.Marshal byte for byte (#295); this needs no agent change, and each previously mismatched section is re-sent once after upgrade and then dedupes normally. The no-console Support shortcuts (#322) need the 0.1.12 installer. Roll the database, server, and dashboard out before the agent."
+  },
+  "known_limitations": [
+    "First retention sweep: after upgrade, transcripts of support conversations closed more than support_chat_retention_days ago (default 30) are pruned (#237). Open conversations are never pruned. Raise support_chat_retention_days before upgrading if older closed transcripts must be kept. Counsel review of the 30-day default and the notice wording is recommended.",
+    "Relays (#87, partial): v0.1.12 ships only the relay control plane and agent routing. No deployable relay service exists (blocked on #84 and #85). Residency is ingress-only; the database is not regional. Heartbeat fields other than commands, keys, and routes are not end-to-end signed through a relay. Do not describe NodeLink as having production multi-region relays.",
+    "Public API (#72): there is no dashboard token-management UI, API-token rate limits are process-local, GET /monitoring/alerts is beta, and webhook destinations remain deployment-level.",
+    "Evidence vault (#81): API-only, with no dashboard UI. It has not been verified against live S3, MinIO, or B2 (only against moto). Loss of a cross-region replica is not detected, and the filesystem backend is immutable only on a WORM mount.",
+    "Tenant retention policies (#88): there is no dashboard UI (#311). Audit events, anchors, and receipts are never pruned. This is a control, not a compliance claim.",
+    "Community scripts (#74): there is no remote feed or federation, no agent-side sandbox, no package dependencies, and no tenant-scoped catalogs. Moderation is accountable human review, not semantic analysis.",
+    "Emergency override (#65): one override covers one command on one endpoint. Expiry is capped at 60 minutes and is not configurable, notification is email only, and scheduled tasks and shell sessions remain refused. A compromised admin who also controls the second factor can run one governed command alone on an opted-in policy.",
+    "Dashboard redesign: the redesign was not browser-verified end to end before release, and some prototype actions and statistics were omitted. The schedule delete action calls a route that does not exist and returns 404.",
+    "#24: Windows agent and installer artifacts, including the new rmm-agent-tray.exe, are not Authenticode signed, so SmartScreen or antivirus warnings remain possible. Signed self-update artifacts use the existing Ed25519 command-signing trust, not Authenticode.",
+    "#84: Enrollment and API-token rate limits, counters, and metrics are process-local; no multi-worker or high-availability protection claim is made.",
+    "#126: Empty deployments must bootstrap the first client and site through the existing administrative API before using enrollment.",
+    "Endpoint inventory, monitoring, patching, remediation, self-update, and support chat are Windows-first; Linux and macOS remain development-only builds.",
+    "Alert email and signed webhook delivery are best-effort with process-local state; alert delivery is inert until an operator configures a provider and assigns a monitoring policy containing an offline check.",
+    "#179: an agent's reported version refreshes only on a successful authenticated heartbeat, so an offline, quarantined, or unauthenticated endpoint keeps displaying its last recorded version.",
+    "Agent self-update is disabled by default and must be explicitly enrolled into a channel and targeted by an admin-authorized rollout; it never applies itself without an operator-published, signed release.",
+    "Bounded credential reattachment is limited by agent_credential_reattach_window_seconds, 30 days by default; an endpoint powered off longer than that window still requires manual re-enrollment.",
+    "This manifest's rollback evidence was produced against a disposable local PostgreSQL 18.4 cluster seeded with a representative dataset, not against a production database. The cluster was migrated to 0044 with v0.1.11 code, backed up with deploy/backup/nodelink-backup.sh, restored and verified with verify_restore.py, and forward-migrated through 0045 to 0051 with v0.1.12 code without error. Before promoting, take and verify a fresh backup of the real 0044 database and keep it as the actual rollback recovery point."
+  ],
+  "upgrade": {
+    "prerequisites": [
+      "Pause enrollment, command dispatch, scheduled-task execution, agent self-update rollouts, server promotion, and external agent rollout automation.",
+      "Take a fresh verified backup of the live 0044 database with deploy/backup/nodelink-backup.sh, restore it into a disposable database, and confirm verify_restore.py reports verified at 0044. Migrations 0046 through 0051 are forward-only, so this backup is the only rollback path to v0.1.11.",
+      "Review support_chat_retention_days before upgrading. The first retention sweep prunes transcripts of conversations closed more than that many days ago (default 30). Remove support_chat_idle_close_seconds if it is set; it no longer exists and is ignored.",
+      "Confirm the HTTPS public URL, the server-only dashboard API URL, and support_chat_base_url are configured and reachable over HTTPS. Leave RELAY_ROUTING_ENABLED, EVIDENCE_VAULT_BACKEND, and EXPOSE_OPENAPI at their defaults unless that subsystem is deliberately being enabled.",
+      "Verify every release artifact checksum and GitHub build-provenance attestation, and confirm each agent binary reports 0.1.12 via `rmm-agent version -expect 0.1.12` rather than the unstamped 0.1.0-dev fallback."
+    ],
+    "steps": [
+      "Run `alembic upgrade head` against the live database and confirm Alembic current reports 0051.",
+      "Deploy the server from the workflow-bound v0.1.12 source commit, then the dashboard, before touching agents.",
+      "Deploy the checksum-verified Windows installer to one owned canary endpoint before expanding the rollout. The installer upgrades in place, keeps the agent's identity and credentials, and retargets both NodeLink Support shortcuts to the new rmm-agent-tray.exe.",
+      "Leave every agent's update_channel unset (the default) until self-update has been separately qualified on the pilot topology."
+    ],
+    "verification": [
+      "Confirm Alembic current reports 0051, and that health, readiness, metrics, login, and the production configuration checks pass over verified HTTPS.",
+      "Confirm the upgraded canary endpoint keeps its agent ID and credentials and reports agent version 0.1.12 after its first heartbeat.",
+      "On the canary, sign out and back in. Confirm no console or Windows Terminal window appears, the tray icon is present, the Start-menu NodeLink Support entry opens the chat in the browser with no console flash, and a NodeLink Support error dialog appears when the service is stopped.",
+      "Sign in to the redesigned dashboard and confirm endpoint, command-detail, support-chat, emergency-override, and community pages load for an operator in the right client membership.",
+      "Confirm /docs, /redoc, and /openapi.json are not exposed in production, that public API responses carry the NodeLink-API-Version header, and that heartbeat, audit sequence, token revocation, and agent revocation behavior are unchanged."
+    ]
+  },
+  "rollback": {
+    "decision_path": [
+      "v0.1.12 adds migrations 0045 through 0051, and 0046 through 0051 refuse to downgrade. A rollback to v0.1.11 therefore requires restoring the verified pre-migration 0044 backup and accepting the loss of every write made after that recovery point. This was rehearsed for this tag with server/scripts/plan_release_rollback.py, and the retained plan records status ready, action restore_backup_then_redeploy, restore_required true, current revision 0051, and target revision 0044.",
+      "To roll back, pause rollout and agent self-update, stop the v0.1.12 server, restore the verified 0044 backup with deploy/backup/nodelink-restore.sh into a fresh database, run verify_restore.py against it with --expected-schema-revision 0044, point DATABASE_URL at it, and redeploy the v0.1.11 server, dashboard, and agent or installer artifacts.",
+      "Rolling back removes the public API and its tokens, emergency overrides, the evidence vault, tenant retention policies, the community repository, relay routing, and the dashboard redesign. v0.1.12 agents keep working against a v0.1.11 server; they stop receiving routing manifests, and installers downgraded to v0.1.11 point the Support shortcuts back at rmm-agent.exe.",
+      "If artifact, audit, or startup verification fails before any production write after the migration, prefer the restore over a forward fix. Once production writes have accumulated, weigh the data-loss window against a reviewed forward fix."
+    ],
+    "target": {
+      "server": {
+        "tag": "v0.1.11",
+        "commit": "5c7739f4b977572fcfbe7f9c6d4ac927a2f8931c"
+      },
+      "agent": {
+        "version": "0.1.11",
+        "sha256s": {
+          "rmm-agent-windows-amd64.exe": "6e2352e3f8aa321490f9926977d4beed1fa68826778740293d9ba80bb86285d7",
+          "rmm-agent-linux-amd64": "d9dbf385149571a78d9cdbbb60b1641eb69863eff86994fc5042d9a4a427c090",
+          "rmm-agent-darwin-arm64": "44a4f0bbd07aa939a02f8733b10be9b318c85839fb6a88267074e4783d571097"
+        }
+      },
+      "installer": {
+        "filename": "NodeLinkAgentSetup-0.1.11.exe",
+        "sha256": "68390b83d5d6866ee01959cd8e1a153fa105a0fee8d7df32029b687bf8185960"
+      },
+      "database": {
+        "alembic_revision": "0044",
+        "backup_manifest": {
+          "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/bea93250d283b1e807dba649ed691921766b7747/release-notes/evidence/v0.1.12/nodelink-backup-20261116T231433Z.manifest.json",
+          "sha256": "3422c9b69cc5ca7f26f7517408b2d9d46a0cddf03c8a4a78a36622f3f507c826"
+        }
+      },
+      "protocols": {
+        "command_envelopes": [
+          "command-v3"
+        ]
+      }
+    }
+  },
+  "security_impact": {
+    "summary": "v0.1.12 adds a new credential type, tenant-scoped nlk_ public API bearer tokens, and several new authenticated surfaces: the public API v1, emergency override activation, the evidence vault, the community repository with publisher-signed packages, and the relay control plane with Ed25519 forward-signing keys. Each reuses the existing operator authentication, step-up, and tenant boundary. It also fixes cross-tenant, approval-bypass, agent-trust, and dashboard session-validation defects. It adds no command kind or envelope.",
+    "fixed_vulnerabilities": [
+      "#321: alert email and webhook delivery history and retry were readable and retryable across tenants. Both are now gated through the alert's agent: a cross-tenant request returns 404, and retry requires client_operator.",
+      "#292 (fixed by #299): the agent self-update rollout ignored approval policies covering agent_self_update. Governed endpoints are now skipped with approval_required and audited.",
+      "#291 (fixed by #306): a quarantined or otherwise non-active agent could submit self-update reports, moving its stored agent_version and feeding the canary halt rule, and replayed reports appended duplicate audit events. Such reports are now refused with 403 agent_not_active, and reports are idempotent per agent and release.",
+      "#280 (fixed by #297): the dashboard BFF trusted the session cookie alone for shell-session, command, remote-desktop, support-chat-start, and logout routes. It now revalidates the session (401 when revoked, 503 when /auth/me is unreachable), enforces role floors, allowlists responses, and prefixes patch-compliance CSV cells against formula injection.",
+      "#286 (fixed by #294): two approvers deciding a 2-of-2 request concurrently could leave it pending forever. The request row is now locked FOR UPDATE.",
+      "#282 (fixed by #296): dashboard shell-output polling now fails closed on 4xx and malformed responses instead of reconnecting indefinitely.",
+      "#87 hardening (#304): the agent ignores an unsigned key bundle and drops chat-launch URLs that arrive through a relay, so a TLS-terminating relay cannot inject keys or launch URLs.",
+      "#237 (#267): chat transcripts that may carry PHI are no longer retained indefinitely after a conversation closes."
+    ],
+    "new_risks": [
+      "nlk_ API tokens are unattended bearer credentials. They are stored only as SHA-256, shown once, minted only with step-up, confined to one client, capped at role ceilings, accepted only on public routes, and refused by step-up and MFA gates; per-token rate limits are process-local.",
+      "Emergency override deliberately re-admits a single-person decision on policies that opt in. Activation needs step-up, binds to one exact payload, is single-use, expires within 60 minutes, emails alert recipients, and requires review by someone other than the activator.",
+      "Through a relay, heartbeat fields other than commands, keys, and routes (monitoring_checks, inventory_requested, trust_state) are not end-to-end signed, so a compromised relay could alter monitoring assignments but cannot execute commands. Relay routing is off by default.",
+      "Community packages run without an agent-side sandbox. Dispatch is refused for revoked or blocked versions and for capability or content mismatches, and refusals are audited.",
+      "#24 and #84 remain open. Windows binaries, including the new rmm-agent-tray.exe, remain unsigned pending Authenticode."
+    ],
+    "operator_actions": [
+      "Verify every artifact checksum and build-provenance attestation before deploying, and continue to expect an unsigned-binary SmartScreen or antivirus prompt until Authenticode signing lands under #24.",
+      "Take and verify a fresh backup of the real 0044 database before running the 0045 to 0051 migrations, and retain it as the rollback recovery point.",
+      "Review support_chat_retention_days before the first post-upgrade retention sweep.",
+      "Configure EMAIL_ALERT_RECIPIENTS and a transactional email provider before opting any approval policy into emergency override; otherwise every override is flagged unnotified.",
+      "Keep EXPOSE_OPENAPI false in production, issue nlk_ API tokens with the shortest practical TTL, and revoke them when no longer needed.",
+      "Leave RELAY_ROUTING_ENABLED off; no deployable relay service ships in this release."
+    ]
+  },
+  "evidence": {
+    "backup_verification": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/bea93250d283b1e807dba649ed691921766b7747/release-notes/evidence/v0.1.12/restore-verification-0044.json",
+      "sha256": "d42a5dac4f1eb52b3863473a4ef6c7625b4b5e187a7013c042048510ae0781d3"
+    },
+    "rollback_rehearsal": {
+      "url": "https://raw.githubusercontent.com/lcolon231/rmm-agent/bea93250d283b1e807dba649ed691921766b7747/release-notes/evidence/v0.1.12/rollback-plan-v0112-to-v0111.json",
+      "sha256": "3811af968065210f6335d22d0304d2686fd4822ac0dd322b5c8e2cb93aea4b20"
+    }
+  }
+}
