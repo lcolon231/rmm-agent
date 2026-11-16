@@ -81,3 +81,26 @@ def test_installer_refuses_a_binary_that_disagrees_with_the_release_version():
     # installer, so the file name, AppVersion, and embedded binary cannot drift
     # apart. It stays off only for a version-less local scratch compile.
     assert "#if VersionEnv != \"\"" in source
+
+
+def test_gui_tray_build_is_stamped_and_verified_everywhere():
+    """The GUI-subsystem tray binary (issue #322) gets the same stamp guard."""
+    script = BUILD_SCRIPT.read_text(encoding="utf-8")
+    assert '-ldflags "$LDFLAGS -H=windowsgui"' in script
+    assert '"$OUT/rmm-agent-tray-windows-amd64.exe" version --expect "$VERSION"' in script
+
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    assert '-H=windowsgui -X main.version=$env:VERSION' in release
+    # PowerShell does not wait for a GUI exe; the check must wait explicitly.
+    assert "rmm-agent-tray-windows-amd64.exe -ArgumentList 'version', '-expect'" in release
+    assert release.index("tray version mismatch") < release.index("ISCC.exe")
+
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+    assert '-ldflags "-H=windowsgui -X main.version=0.0.0-ci"' in ci
+    assert '-ldflags "-H=windowsgui -X main.version=0.0.1-ci"' in ci
+    assert r"/DTrayExe=..\agent\bin\rmm-agent-tray-windows-amd64.exe" in ci
+    assert r"/DTrayExe=..\agent\bin\rmm-agent-tray-windows-amd64-next.exe" in ci
+
+    installer = INSTALLER.read_text(encoding="utf-8")
+    assert "#if TrayVersionCheck != 0" in installer
+    assert "#error The tray binary does not report NODELINK_VERSION" in installer

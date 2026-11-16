@@ -100,6 +100,7 @@ skip-prompt logic). On a Windows box with Go and
 ```powershell
 # Build the agent binary the installer wraps (Git Bash / WSL), then compile:
 cd agent; ./build.sh 0.1.2          # -> agent\bin\rmm-agent-windows-amd64.exe
+                                    #    + agent\bin\rmm-agent-tray-windows-amd64.exe (GUI build)
 cd ..\installer
 $env:NODELINK_VERSION = '0.1.2'
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" NodeLinkAgent.iss
@@ -192,14 +193,40 @@ Select-String -Path "$env:ProgramData\NodeLink\logs\rmm-agent.log" -Pattern "nle
 #   -> should be False (no match)
 ```
 
+```powershell
+# Both Support shortcuts target the GUI-subsystem build, never the console
+# rmm-agent.exe, so no console window opens (issue #322).
+$TrayExe = "C:\Program Files\NodeLink\Agent\rmm-agent-tray.exe"
+Test-Path $TrayExe                                                # True
+$Shell = New-Object -ComObject WScript.Shell
+
 # The discoverable Start-menu shortcut exists once and runs the chat command.
 $SupportShortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\NodeLink Support.lnk"
 Test-Path $SupportShortcut                                        # True
-$Shell = New-Object -ComObject WScript.Shell
 $Shortcut = $Shell.CreateShortcut($SupportShortcut)
-$Shortcut.TargetPath -eq "C:\Program Files\NodeLink\Agent\rmm-agent.exe" # True
-$Shortcut.Arguments -eq "chat"                                  # True
+$Shortcut.TargetPath -eq $TrayExe                                 # True
+$Shortcut.Arguments -eq "chat"                                    # True
 (Get-ChildItem (Split-Path $SupportShortcut) -Filter "NodeLink Support.lnk").Count # 1
+
+# The all-users Startup shortcut launches the tray at logon.
+$StartupShortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\NodeLink Support.lnk"
+$Tray = $Shell.CreateShortcut($StartupShortcut)
+$Tray.TargetPath -eq $TrayExe                                     # True
+$Tray.Arguments -eq "tray"                                        # True
+```
+
+**Verify as the signed-in standard user (no console, issue #322):**
+
+1. Sign out and back in. **No console or Windows Terminal window may appear**;
+   the NodeLink tray icon appears in the notification area.
+2. Launch **NodeLink Support** from Start. The chat opens in the browser with no
+   console flash and no UAC prompt.
+3. From an admin PowerShell run `Stop-Service NodeLinkAgent`, then launch
+   **NodeLink Support** from Start again. An error dialog titled
+   "NodeLink Support" must appear (service unavailable). Run
+   `Start-Service NodeLinkAgent` afterwards.
+4. `& "C:\Program Files\NodeLink\Agent\rmm-agent.exe" version` still prints the
+   version to the console (the CLI build is unchanged).
 
 **Verify on the server/dashboard:**
 
@@ -343,6 +370,8 @@ $AfterExeVersion = & "$AgentDir\rmm-agent.exe" version   # the upgraded version
 ```
 
 $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($SupportShortcut)
+$Shortcut.TargetPath -eq "$AgentDir\rmm-agent-tray.exe"         # True (an upgrade from a
+                                                                # pre-#322 build retargets it)
 $Shortcut.Arguments -eq "chat"                                  # True
 (Get-ChildItem (Split-Path $SupportShortcut) -Filter "NodeLink Support.lnk").Count # 1
 # Launch it from Start as the signed-in standard user; no UAC prompt appears.

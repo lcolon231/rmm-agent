@@ -14,6 +14,13 @@ echo "Building NodeLink RMM agent ${VERSION}"
 echo " -> windows/amd64"
 GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o "$OUT/rmm-agent-windows-amd64.exe" ./cmd/agent
 
+# The same source built for the GUI subsystem, for the Start-menu and Startup
+# shortcuts (`chat`, `tray`). A console-subsystem binary launched from a
+# shortcut gets a console window that stays open for the whole tray session
+# (issue #322); the CLI verbs and the service keep the console build above.
+echo " -> windows/amd64 (tray, GUI subsystem)"
+GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS -H=windowsgui" -o "$OUT/rmm-agent-tray-windows-amd64.exe" ./cmd/agent
+
 echo " -> linux/amd64"
 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o "$OUT/rmm-agent-linux-amd64" ./cmd/agent
 
@@ -35,6 +42,9 @@ esac
 if [ -n "$VERIFY" ]; then
   echo " -> verifying embedded version"
   "$VERIFY" version --expect "$VERSION" >/dev/null
+  if [ "$HOST_TARGET" = "windows/amd64" ]; then
+    "$OUT/rmm-agent-tray-windows-amd64.exe" version --expect "$VERSION" >/dev/null
+  fi
 else
   echo " !! host is $HOST_TARGET; no built artifact can run here to verify the version stamp" >&2
 fi

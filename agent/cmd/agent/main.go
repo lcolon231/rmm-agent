@@ -58,17 +58,17 @@ func main() {
 			os.Exit(2)
 		}
 		if err := chatpipe.Request(context.Background()); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			reportError(err)
 			os.Exit(1)
 		}
-		fmt.Println("NodeLink Support opened in your browser.")
+		reportInfo("NodeLink Support opened in your browser.")
 	case "tray":
 		if len(args) != 0 {
 			fmt.Fprintln(os.Stderr, "usage: rmm-agent tray")
 			os.Exit(2)
 		}
 		if err := chattray.Run(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			reportError(err)
 			os.Exit(1)
 		}
 	case "run":

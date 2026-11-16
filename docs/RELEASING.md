@@ -64,8 +64,11 @@ drill is still required. Do not describe a tagged artifact as production-ready. 
    - `SHA256SUMS.txt`
    - `NodeLinkAgentSetup-<version>.exe` — the graphical Windows installer
      (built on a Windows runner from `installer/NodeLinkAgent.iss`; see
-     `installer/README.md`). Like the raw binaries it is **unsigned**;
-     Authenticode signing slots in at the same place (below). Linux/macOS have
+     `installer/README.md`). It also embeds `rmm-agent-tray.exe`, the same
+     agent built for the GUI subsystem (`-H=windowsgui`) behind the Support
+     shortcuts (issue #322); that binary is not published separately. Like the
+     raw binaries it is **unsigned**; Authenticode signing slots in at the same
+     place (below) and must cover both embedded binaries. Linux/macOS have
      no installer — those platforms use the foreground/systemd path described
      in `agent/README.md`.
    - `RELEASE-NOTES.md` and `release-evidence-<version>.json` — the validated

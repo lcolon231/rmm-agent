@@ -158,13 +158,23 @@ jobs:
           $env:GOOS = 'windows'
           $env:GOARCH = 'amd64'
           go build -ldflags "-s -w -X main.version=$env:VERSION" -o bin/rmm-agent-windows-amd64.exe ./cmd/agent
+          # GUI-subsystem twin behind the Support shortcuts (issue #322).
+          go build -ldflags "-s -w -H=windowsgui -X main.version=$env:VERSION" -o bin/rmm-agent-tray-windows-amd64.exe ./cmd/agent
 
-      # The exact binary the installer is about to embed must report the
+      # The exact binaries the installer is about to embed must report the
       # release version (issue #179). The installer compile asserts this again
       # through ISPP, so an unstamped binary can never reach an installer.
+      # PowerShell does not wait for a GUI-subsystem exe, so the tray check
+      # goes through Start-Process -Wait to get a real exit code.
+      # A future Authenticode signing step must sign both binaries here, before
+      # ISCC embeds them.
       - name: Verify the embedded agent version matches the release tag
         working-directory: agent
-        run: .\bin\rmm-agent-windows-amd64.exe version -expect ${{ steps.version.outputs.version }}
+        run: |
+          .\bin\rmm-agent-windows-amd64.exe version -expect ${{ steps.version.outputs.version }}
+          if ($LASTEXITCODE -ne 0) { throw "agent version mismatch" }
+          $p = Start-Process -FilePath .\bin\rmm-agent-tray-windows-amd64.exe -ArgumentList 'version', '-expect', '${{ steps.version.outputs.version }}' -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "tray version mismatch" }
 
       # Pinned to the 6.x line to match installer/NodeLinkAgent.iss.
       - name: Install Inno Setup

@@ -91,7 +91,8 @@ Prerequisites:
 Steps (from the repo root, on Windows):
 
 ```powershell
-# 1. Build the agent — produces agent\bin\rmm-agent-windows-amd64.exe
+# 1. Build the agent — produces agent\bin\rmm-agent-windows-amd64.exe and its
+#    GUI-subsystem twin agent\bin\rmm-agent-tray-windows-amd64.exe
 cd agent
 ./build.sh 0.1.0          # from Git Bash / WSL; or plain `go build` per agent/README.md
 
@@ -115,6 +116,11 @@ The output lands at `installer\Output\NodeLinkAgentSetup-<version>.exe`.
 - The agent binary is sourced from `..\agent\bin\rmm-agent-windows-amd64.exe`
   by default; point elsewhere with `/DAgentExe=<path>` on the `ISCC` command
   line (this is how CI could feed a differently-named build).
+- The Support shortcuts (Startup `tray`, Start-menu `chat`) launch
+  `rmm-agent-tray.exe`, the same agent built with `-ldflags -H=windowsgui`, so
+  no console window opens (issue #322). It is sourced from
+  `..\agent\bin\rmm-agent-tray-windows-amd64.exe` (override with
+  `/DTrayExe=<path>`) and passes the same `version -expect` check.
 
 In CI, the release workflow (`.github/workflows/release.yml`) builds the
 installer on a `windows-latest` runner and attaches it to the GitHub Release
