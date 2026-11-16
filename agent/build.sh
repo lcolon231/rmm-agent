@@ -14,6 +14,13 @@ echo "Building NodeLink RMM agent ${VERSION}"
 echo " -> windows/amd64"
 GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o "$OUT/rmm-agent-windows-amd64.exe" ./cmd/agent
 
+# The same command built for the GUI subsystem (issue #322). The installer
+# points the NodeLink Support Startup (tray) and Start-menu (chat) shortcuts at
+# this copy so no console or Windows Terminal window opens at logon. The
+# console build above stays the CLI and the service binary.
+echo " -> windows/amd64 (gui: tray/chat)"
+GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $LDFLAGS" -o "$OUT/rmm-agent-tray-windows-amd64.exe" ./cmd/agent
+
 echo " -> linux/amd64"
 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o "$OUT/rmm-agent-linux-amd64" ./cmd/agent
 
@@ -35,6 +42,10 @@ esac
 if [ -n "$VERIFY" ]; then
   echo " -> verifying embedded version"
   "$VERIFY" version --expect "$VERSION" >/dev/null
+  if [ "$HOST_TARGET" = "windows/amd64" ]; then
+    # Exit code only: a GUI-subsystem binary has no console to print to.
+    "$OUT/rmm-agent-tray-windows-amd64.exe" version --expect "$VERSION" >/dev/null
+  fi
 else
   echo " !! host is $HOST_TARGET; no built artifact can run here to verify the version stamp" >&2
 fi

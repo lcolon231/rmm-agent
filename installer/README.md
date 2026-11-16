@@ -51,7 +51,10 @@ The clean-VM validation runbook for this flow is
 ## What the setup does
 
 1. Requires Administrator (UAC) — registering a Windows service needs elevation.
-2. Installs `rmm-agent.exe` to `C:\Program Files\NodeLink\Agent`.
+2. Installs `rmm-agent.exe` to `C:\Program Files\NodeLink\Agent`, plus
+   `rmm-agent-tray.exe`, a GUI-subsystem build of the same command. The
+   NodeLink Support Startup (`tray`) and Start-menu (`chat`) shortcuts launch
+   the GUI build so no console window opens (issue #322).
 3. Detects whether the selected install directory has a supported protected
    `identity.json` and a usable token-free `config.json`. If so, setup enters
    **upgrade mode**, skips all token handling, and preserves both files. An
@@ -115,6 +118,10 @@ The output lands at `installer\Output\NodeLinkAgentSetup-<version>.exe`.
 - The agent binary is sourced from `..\agent\bin\rmm-agent-windows-amd64.exe`
   by default; point elsewhere with `/DAgentExe=<path>` on the `ISCC` command
   line (this is how CI could feed a differently-named build).
+- The tray binary is sourced from
+  `..\agent\bin\rmm-agent-tray-windows-amd64.exe` (`build.sh` produces it with
+  `-ldflags "-H=windowsgui ..."`); override with `/DTrayExe=<path>`. It passes
+  the same `version -expect` compile-time gate.
 
 In CI, the release workflow (`.github/workflows/release.yml`) builds the
 installer on a `windows-latest` runner and attaches it to the GitHub Release

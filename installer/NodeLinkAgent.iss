@@ -17,7 +17,10 @@
 ;   ISCC NodeLinkAgent.iss
 ;
 ; The agent binary is expected at ..\agent\bin\rmm-agent-windows-amd64.exe
-; (the agent/build.sh output); override with /DAgentExe=<path>.
+; (the agent/build.sh output); override with /DAgentExe=<path>. Its
+; GUI-subsystem twin (issue #322), launched only by the NodeLink Support
+; shortcuts, is expected at ..\agent\bin\rmm-agent-tray-windows-amd64.exe;
+; override with /DTrayExe=<path>.
 
 #define VersionEnv GetEnv("NODELINK_VERSION")
 #if VersionEnv == ""
@@ -28,6 +31,10 @@
 
 #ifndef AgentExe
   #define AgentExe "..\agent\bin\rmm-agent-windows-amd64.exe"
+#endif
+
+#ifndef TrayExe
+  #define TrayExe "..\agent\bin\rmm-agent-tray-windows-amd64.exe"
 #endif
 
 ; Refuse to wrap a binary that is not stamped with this installer's version
@@ -53,6 +60,17 @@
   #define AgentVersionCheck Exec(AgentExeToVerify, "version -expect " + MyVersion, SourcePath)
   #if AgentVersionCheck != 0
     #error The agent binary does not report NODELINK_VERSION. Rebuild it with -ldflags "-X main.version=$NODELINK_VERSION" before compiling this installer.
+  #endif
+  ; The GUI-subsystem tray binary passes the same gate. ISPP's Exec waits for
+  ; it and returns its exit code even though it has no console.
+  #if Pos(":", TrayExe) == 0
+    #define TrayExeToVerify AddBackslash(SourcePath) + TrayExe
+  #else
+    #define TrayExeToVerify TrayExe
+  #endif
+  #define TrayVersionCheck Exec(TrayExeToVerify, "version -expect " + MyVersion, SourcePath)
+  #if TrayVersionCheck != 0
+    #error The tray binary does not report NODELINK_VERSION. Rebuild it with -ldflags "-H=windowsgui -X main.version=$NODELINK_VERSION" before compiling this installer.
   #endif
 #endif
 
@@ -103,6 +121,10 @@ FinishedLabel=Setup has finished installing [name] on your computer.%n%nThe agen
 
 [Files]
 Source: "{#AgentExe}"; DestDir: "{app}"; DestName: "rmm-agent.exe"; Flags: ignoreversion
+; GUI-subsystem build of the same command (issue #322). Only the NodeLink
+; Support shortcuts below launch it, so logon opens no console or Windows
+; Terminal window. rmm-agent.exe stays the CLI and the service binary.
+Source: "{#TrayExe}"; DestDir: "{app}"; DestName: "rmm-agent-tray.exe"; Flags: ignoreversion
 ; The same release binary is extracted to {tmp} only for the read-only upgrade
 ; preflight that runs before ssInstall changes the service or install dir.
 Source: "{#AgentExe}"; DestDir: "{tmp}"; DestName: "{#UpgradeValidatorExe}"; Flags: dontcopy
@@ -114,12 +136,12 @@ Source: "..\agent\internal\chattray\nodelink.ico"; DestDir: "{app}"; DestName: "
 ; All-users Startup shortcut: launches the NodeLink Support tray for every user
 ; at logon, as a non-elevated process (the chat pipe admits INTERACTIVE only).
 ; Inno removes it automatically on uninstall.
-Name: "{commonstartup}\NodeLink Support"; Filename: "{app}\rmm-agent.exe"; Parameters: "tray"; IconFilename: "{app}\nodelink.ico"; Comment: "Start a NodeLink Support chat"
+Name: "{commonstartup}\NodeLink Support"; Filename: "{app}\rmm-agent-tray.exe"; Parameters: "tray"; IconFilename: "{app}\nodelink.ico"; Comment: "Start a NodeLink Support chat"
 ; All-users Start-menu shortcut: the interactive user explicitly asks the
 ; service to create a conversation and launch the browser in that user's
 ; session. A fixed name makes install and upgrade idempotent; Inno removes it
 ; automatically on uninstall.
-Name: "{commonprograms}\NodeLink Support"; Filename: "{app}\rmm-agent.exe"; Parameters: "chat"; IconFilename: "{app}\nodelink.ico"; Comment: "Open a NodeLink Support chat"
+Name: "{commonprograms}\NodeLink Support"; Filename: "{app}\rmm-agent-tray.exe"; Parameters: "chat"; IconFilename: "{app}\nodelink.ico"; Comment: "Open a NodeLink Support chat"
 
 [UninstallRun]
 ; Stop + deregister the service while rmm-agent.exe still exists on disk.

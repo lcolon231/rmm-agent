@@ -7,8 +7,9 @@ verifies that:
 
   * every ``GOOS=.. GOARCH=..`` build in ``agent/build.sh`` corresponds to a
     declared target, and every declared target is built there;
-  * every ``rmm-agent-<goos>-<goarch>`` artifact referenced in the release
-    workflow corresponds to a declared target;
+  * every ``rmm-agent-<goos>-<goarch>`` artifact (or its ``rmm-agent-tray-``
+    GUI-subsystem flavor) referenced in the release workflow corresponds to a
+    declared target;
   * at least one ``supported`` target exists and it is windows/amd64 (the
     primary product target).
 
@@ -57,8 +58,10 @@ def build_sh_targets() -> set[str]:
 
 def release_artifact_targets() -> set[str]:
     text = RELEASE_YML.read_text()
-    # Match artifact basenames rmm-agent-<goos>-<goarch>[.exe].
-    names = re.findall(r"rmm-agent-([a-z0-9]+)-([a-z0-9]+)", text)
+    # Match artifact basenames rmm-agent[-<flavor>]-<goos>-<goarch>[.exe]. The
+    # GUI-subsystem "tray" flavor (issue #322) is the same os/arch target built
+    # with different link flags, not a new architecture.
+    names = re.findall(r"rmm-agent-(?:tray-)?([a-z0-9]+)-([a-z0-9]+)", text)
     return {f"{goos}/{goarch}" for goos, goarch in names}
 
 
