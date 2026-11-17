@@ -4,7 +4,7 @@
 SQLite serializes writers and ignores ``SELECT ... FOR UPDATE`` and advisory
 locks, so row-lock and constraint races only mean something on PostgreSQL.
 Tests marked ``postgres`` run against the disposable server in
-``TEST_POSTGRES_URL`` (the CI ``server`` job's postgres:16 service) and are
+``TEST_POSTGRES_URL`` (the CI ``server`` job's postgres:18 service) and are
 skipped without it.
 
 Each test gets its own throwaway database rather than a schema: alembic's
