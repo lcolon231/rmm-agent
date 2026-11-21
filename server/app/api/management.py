@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_role
+from app.api.tenant_access import TenantAccess, tenant_access
 from app.core import idempotency, tenant_scope
 from app.core.tenant_scope import (
     agent_client_filter,
@@ -1568,7 +1569,7 @@ async def list_endpoints(
 @router.get("/endpoints/{endpoint_id}", response_model=EndpointDetailOut)
 async def get_endpoint_detail(
     endpoint_id: str,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     history_hours: int = Query(default=24, ge=1, le=168),
     history_limit: int = Query(default=144, ge=10, le=500),
     db: AsyncSession = Depends(get_db),
@@ -1584,7 +1585,8 @@ async def get_endpoint_detail(
         raise HTTPException(status_code=404, detail="Endpoint not found")
 
     agent, client, site = endpoint_row
-    await assert_client_visible(operator, client.id, db, detail="Endpoint not found")
+    await access.authorize_client(client.id, not_found="Endpoint not found")
+    operator = access.operator
     latest_heartbeat = await db.scalar(
         select(Heartbeat)
         .where(Heartbeat.agent_id == agent.id)
@@ -1628,10 +1630,8 @@ async def get_endpoint_detail(
             else "current"
         )
 
-    await audit.record(
-        db,
-        action="endpoint_detail.viewed",
-        actor=operator.email,
+    await access.record(
+        "endpoint_detail.viewed",
         agent_id=agent.id,
         detail={
             "history_hours": history_hours,
@@ -1671,14 +1671,9 @@ async def get_endpoint_detail(
 @router.get("/agents/{agent_id}", response_model=AgentOut)
 async def get_agent(
     agent_id: str,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
-    db: AsyncSession = Depends(get_db),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
 ):
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    await assert_agent_visible(operator, agent, db, detail="Agent not found")
-    return agent
+    return await access.agent(agent_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -1696,31 +1691,25 @@ def _trust_conflict(agent: Agent, wanted: str) -> HTTPException:
 
 
 async def _apply_trust_change(
-    db: AsyncSession,
+    access: TenantAccess,
     agent: Agent,
     new_state: AgentTrustState,
     reason: str,
-    operator: Operator,
     action: str,
 ) -> Agent:
     previous = agent.trust_state
     agent.trust_state = new_state
     agent.trust_state_reason = reason
     agent.trust_state_changed_at = _now()
-    agent.trust_state_changed_by = operator.email
-    site = await db.get(Site, agent.site_id)
-    await audit.record(
-        db,
-        action=action,
-        actor=operator.email,
-        actor_user_id=operator.id,
-        agent_id=agent.id,
-        organization_id=site.client_id if site else None,
-        detail={
+    agent.trust_state_changed_by = access.operator.email
+    await access.record(
+        action,
+        {
             "previous_trust_state": previous.value,
             "trust_state": new_state.value,
             "reason": reason,
         },
+        agent_id=agent.id,
     )
     return agent
 
@@ -1729,8 +1718,9 @@ async def _apply_trust_change(
 async def quarantine_agent(
     agent_id: str,
     body: TrustStateChange,
-    operator: Operator = Depends(require_role(OperatorRole.operator)),
-    db: AsyncSession = Depends(get_db),
+    access: TenantAccess = Depends(
+        tenant_access(OperatorRole.operator, ClientRole.client_operator)
+    ),
 ):
     """Suspend trust in an agent without destroying its identity.
 
@@ -1738,17 +1728,11 @@ async def quarantine_agent(
     see it is alive), but receives no commands, may not submit results, and has
     no telemetry or inventory recorded. Reversible via restore.
     """
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    await assert_agent_visible(
-        operator, agent, db,
-        minimum=ClientRole.client_operator, detail="Agent not found",
-    )
+    agent = await access.agent(agent_id)
     if agent.trust_state != AgentTrustState.active:
         raise _trust_conflict(agent, AgentTrustState.quarantined.value)
     return await _apply_trust_change(
-        db, agent, AgentTrustState.quarantined, body.reason, operator, "agent.quarantined"
+        access, agent, AgentTrustState.quarantined, body.reason, "agent.quarantined"
     )
 
 
@@ -1756,22 +1740,17 @@ async def quarantine_agent(
 async def restore_agent(
     agent_id: str,
     body: TrustStateChange,
-    operator: Operator = Depends(require_role(OperatorRole.operator)),
-    db: AsyncSession = Depends(get_db),
+    access: TenantAccess = Depends(
+        tenant_access(OperatorRole.operator, ClientRole.client_operator)
+    ),
 ):
     """Return a quarantined agent to active. Revoked agents cannot be restored —
     revocation is terminal and the endpoint must re-enroll as a new identity."""
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    await assert_agent_visible(
-        operator, agent, db,
-        minimum=ClientRole.client_operator, detail="Agent not found",
-    )
+    agent = await access.agent(agent_id)
     if agent.trust_state != AgentTrustState.quarantined:
         raise _trust_conflict(agent, AgentTrustState.active.value)
     return await _apply_trust_change(
-        db, agent, AgentTrustState.active, body.reason, operator, "agent.restored"
+        access, agent, AgentTrustState.active, body.reason, "agent.restored"
     )
 
 
@@ -1779,7 +1758,9 @@ async def restore_agent(
 async def revoke_agent(
     agent_id: str,
     body: TrustStateChange,
-    operator: Operator = Depends(require_role(OperatorRole.admin)),
+    access: TenantAccess = Depends(
+        tenant_access(OperatorRole.admin, ClientRole.client_admin)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Permanently revoke an agent's credentials (admin only — irreversible).
@@ -1788,13 +1769,7 @@ async def revoke_agent(
     or dispatched-but-unreported commands are expired so nothing issued under
     the old trust can be delivered or complete later.
     """
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    await assert_agent_visible(
-        operator, agent, db,
-        minimum=ClientRole.client_admin, detail="Agent not found",
-    )
+    agent = await access.agent(agent_id)
     if agent.trust_state == AgentTrustState.revoked:
         raise _trust_conflict(agent, AgentTrustState.revoked.value)
 
@@ -1817,17 +1792,15 @@ async def revoke_agent(
         expired_ids.append(cmd.id)
 
     agent = await _apply_trust_change(
-        db, agent, AgentTrustState.revoked, body.reason, operator, "agent.revoked"
+        access, agent, AgentTrustState.revoked, body.reason, "agent.revoked"
     )
     agent.revoked_at = _now()
     metrics.increment("agent_revoked_total")
     if expired_ids:
-        await audit.record(
-            db,
-            action="agent.commands_expired_on_revoke",
-            actor=operator.email,
+        await access.record(
+            "agent.commands_expired_on_revoke",
+            {"command_ids": sorted(expired_ids)},
             agent_id=agent.id,
-            detail={"command_ids": sorted(expired_ids)},
         )
     return agent
 
@@ -2420,14 +2393,11 @@ async def list_commands(
     agent_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated command history for one endpoint, newest first."""
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    await assert_agent_visible(operator, agent, db, detail="Agent not found")
+    await access.agent(agent_id)
     total = (
         await db.execute(
             select(func.count()).select_from(Command).where(Command.agent_id == agent_id)
@@ -2479,7 +2449,7 @@ async def list_commands(
 async def get_command(
     agent_id: str,
     command_id: str,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
     """One command's signed-envelope evidence and bounded result streams.
@@ -2488,10 +2458,8 @@ async def get_command(
     which can contain sensitive endpoint data, so the record must show who
     read it.
     """
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Command not found")
-    await assert_agent_visible(operator, agent, db, detail="Command not found")
+    await access.agent(agent_id, not_found="Command not found")
+    operator = access.operator
     cmd = (
         await db.execute(
             select(Command).where(
@@ -2510,17 +2478,15 @@ async def get_command(
         and cmd.kind != CommandKind.scan_packages
         and operator.role != OperatorRole.admin
     ):
-        await audit.record(
-            db,
-            action="command_detail.access_denied",
-            actor=operator.email,
-            agent_id=agent_id,
-            detail={
+        await access.record(
+            "command_detail.access_denied",
+            {
                 "command_id": cmd.id,
                 "kind": cmd.kind.value,
                 "operator_role": operator.role.value,
                 "reason": "administrator_role_required",
             },
+            agent_id=agent_id,
         )
         await db.commit()
         raise HTTPException(
@@ -2529,12 +2495,10 @@ async def get_command(
         )
     detail = CommandDetailOut.model_validate(cmd)
     detail.status = _effective_command_status(cmd, _now())
-    await audit.record(
-        db,
-        action="command_detail.viewed",
-        actor=operator.email,
+    await access.record(
+        "command_detail.viewed",
+        {"command_id": cmd.id, "status": detail.status.value},
         agent_id=agent_id,
-        detail={"command_id": cmd.id, "status": detail.status.value},
     )
     return detail
 
@@ -2851,13 +2815,10 @@ async def list_monitoring_policy_revisions(
 )
 async def get_agent_effective_monitoring_policy(
     agent_id: str,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    await assert_agent_visible(operator, agent, db, detail="Agent not found")
+    agent = await access.agent(agent_id)
     checks = await monitoring_core.resolve_effective_policy(db, agent)
     return EffectivePolicyOut(
         agent_id=agent.id,
@@ -3223,13 +3184,10 @@ async def delete_patch_policy(
 )
 async def get_agent_effective_patch_policy(
     agent_id: str,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    await assert_agent_visible(operator, agent, db, detail="Agent not found")
+    agent = await access.agent(agent_id)
     effective = await patch_core.resolve_effective_patch_policy(db, agent)
     missing = await patch_core.latest_missing_updates(db, agent_id)
     if effective is None:
@@ -3436,13 +3394,10 @@ async def list_patch_compliance(
 )
 async def get_agent_patch_compliance(
     agent_id: str,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    await assert_agent_visible(operator, agent, db, detail="Agent not found")
+    agent = await access.agent(agent_id)
     now = _now()
     compliance = await compliance_core.endpoint_compliance(
         db,
@@ -3489,7 +3444,7 @@ async def get_agent_patch_compliance(
 )
 async def get_agent_patch_compliance_history(
     agent_id: str,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     limit: int = Query(
         default=settings.patch_compliance_history_limit,
         ge=1,
@@ -3497,10 +3452,7 @@ async def get_agent_patch_compliance_history(
     ),
     db: AsyncSession = Depends(get_db),
 ):
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    await assert_agent_visible(operator, agent, db, detail="Agent not found")
+    agent = await access.agent(agent_id)
     points = await compliance_core.endpoint_history(db, agent, _now(), limit)
     effective = await patch_core.resolve_effective_patch_policy(db, agent)
     return ComplianceHistoryOut(
@@ -3614,13 +3566,10 @@ async def list_agent_monitoring_results(
     agent_id: str,
     check_key: str | None = Query(default=None, max_length=64),
     limit: int = Query(default=100, ge=1, le=500),
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
-    agent = await db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    await assert_agent_visible(operator, agent, db, detail="Agent not found")
+    await access.agent(agent_id)
     conditions = [CheckResult.agent_id == agent_id]
     if check_key is not None:
         conditions.append(CheckResult.check_key == check_key)
@@ -4943,7 +4892,7 @@ async def enrollment_dashboard(
 @router.get("/endpoints/{endpoint_id}/inventory", response_model=InventoryOut)
 async def get_endpoint_inventory(
     endpoint_id: str,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
     """The endpoint's current inventory: the newest snapshot per section.
@@ -4952,10 +4901,7 @@ async def get_endpoint_inventory(
     listed separately rather than omitted, so "we have no data for this" is
     visible instead of looking like the section does not exist.
     """
-    agent = await db.get(Agent, endpoint_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Endpoint not found")
-    await assert_agent_visible(operator, agent, db, detail="Endpoint not found")
+    await access.agent(endpoint_id, not_found="Endpoint not found")
 
     latest = await inventory.latest_sections(db, endpoint_id)
     items = [
@@ -4965,10 +4911,8 @@ async def get_endpoint_inventory(
     missing = [
         section for section in InventorySection if section.value not in latest
     ]
-    await audit.record(
-        db,
-        action="inventory.viewed",
-        actor=operator.email,
+    await access.record(
+        "inventory.viewed",
         agent_id=endpoint_id,
         detail={
             "sections": sorted(latest),
@@ -4987,7 +4931,7 @@ async def get_endpoint_inventory(
 async def get_inventory_history(
     endpoint_id: str,
     section: InventorySection,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -4998,10 +4942,7 @@ async def get_inventory_history(
     *changes* rather than a sample of every collection. Retention bounds how far
     back it reaches; the newest row is never pruned.
     """
-    agent = await db.get(Agent, endpoint_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Endpoint not found")
-    await assert_agent_visible(operator, agent, db, detail="Endpoint not found")
+    await access.agent(endpoint_id, not_found="Endpoint not found")
 
     filters = [
         AgentInventorySnapshot.agent_id == endpoint_id,
@@ -5043,7 +4984,7 @@ async def get_inventory_history(
 async def get_inventory_diff(
     endpoint_id: str,
     section: InventorySection,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     from_snapshot: str | None = Query(default=None, max_length=36),
     to_snapshot: str | None = Query(default=None, max_length=36),
     db: AsyncSession = Depends(get_db),
@@ -5055,10 +4996,7 @@ async def get_inventory_diff(
     snapshots must belong to this endpoint and this section — a diff across
     endpoints would silently compare unrelated machines.
     """
-    agent = await db.get(Agent, endpoint_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Endpoint not found")
-    await assert_agent_visible(operator, agent, db, detail="Endpoint not found")
+    await access.agent(endpoint_id, not_found="Endpoint not found")
 
     async def _load(snapshot_id: str) -> AgentInventorySnapshot:
         row = await db.get(AgentInventorySnapshot, snapshot_id)
@@ -5111,10 +5049,8 @@ async def get_inventory_diff(
     computed = inventory_diff.diff_payloads(
         section.value, before.payload, after.payload
     )
-    await audit.record(
-        db,
-        action="inventory.diff_viewed",
-        actor=operator.email,
+    await access.record(
+        "inventory.diff_viewed",
         agent_id=endpoint_id,
         detail={
             "section": section.value,

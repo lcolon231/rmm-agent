@@ -112,7 +112,11 @@ accept an action. It currently contains:
   default-deny and centralized in `app/core/tenant_scope.py`; a cross-tenant
   resource is indistinguishable from a missing one (404). Membership grant/revoke
   and the platform-admin flag are platform-admin-only, audited, and bump the
-  target's token generation. See [`TENANT-AUTHORIZATION.md`](TENANT-AUTHORIZATION.md).
+  target's token generation. By-id handlers apply the boundary through the
+  request-scoped `app/api/tenant_access.py` dependency (issue #327, in
+  progress), which also attributes their audit events to the resolved client; a
+  route-table test keeps new by-id routes from bypassing it. See
+  [`TENANT-AUTHORIZATION.md`](TENANT-AUTHORIZATION.md).
 - Tenant-scoped API tokens (issue #72): an operator may mint an opaque
   `nlk_` bearer (SHA-256 stored, shown once, step-up required) for integrations.
   It resolves to a transient, narrowed copy of its owner: confined to one

@@ -28,3 +28,11 @@ def client_ip(request: Request) -> str:
     # saw; anything left of it is caller-controlled and untrustworthy.
     candidate = forwarded.split(",")[-1].strip()
     return candidate or direct
+
+
+USER_AGENT_MAX = 500
+
+
+def user_agent(request: Request) -> str | None:
+    """The caller's User-Agent as stored on audit rows: bounded, never empty."""
+    return request.headers.get("user-agent", "")[:USER_AGENT_MAX] or None

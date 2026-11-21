@@ -9,9 +9,30 @@ A feature branch records its release-visible consequences here as it lands.
 When a tag is cut, they are folded into that tag's manifest and the entry is
 cleared, so this file lists only what no manifest carries yet.
 
+## Pending
+
+- **More complete tenant attribution on audit events (#327).** Handlers moved
+  onto the request-scoped tenant access module now record the owning client as
+  `organization_id`, and fill `actor_user_id`, source IP and user agent, on
+  every audit event they write. In this change that covers the agent and
+  endpoint detail, inventory, trust-change (quarantine, restore, revoke, and the
+  revoke-time command expiry), command history and detail, effective
+  monitoring/patch policy, patch compliance, and monitoring results routes;
+  before, several of these (for example `command_detail.viewed`,
+  `inventory.viewed` and `agent.commands_expired_on_revoke`) carried no
+  `organization_id`, actor id, IP or user agent. Tenant-filtered audit views
+  and evidence exports become more complete for new events; historical rows are
+  not backfilled (the hash chain is unchanged because these columns are outside
+  the hashed document). Audit action names are unchanged.
+- **One status-code change (#327): dangling agents fail closed for platform
+  admins on tiered routes.** Quarantine, restore and revoke of an agent whose
+  site no longer exists now return `404` for a platform admin too; before, the
+  platform-admin bypass let the action through. Reads of such an agent already
+  returned `404`. No other API response or status code changes.
+
 ## Carried
 
-Nothing pending. Everything merged between v0.1.11 and v0.1.12 is stated in
+Everything merged between v0.1.11 and v0.1.12 is stated in
 [`v0.1.12.json`](v0.1.12.json): the public API v1 and `nlk_` tokens (#72),
 emergency overrides (#65), the evidence vault (#81), tenant retention policies
 (#88), the community repository (#74), support-chat retention (#237), relay

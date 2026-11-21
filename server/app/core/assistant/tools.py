@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 
 from app.api import management
+from app.api.tenant_access import TenantAccess
 from app.core import inventory_diff, patch_compliance
 from app.core.assistant import policy
 from app.core.config import settings
@@ -89,6 +90,11 @@ async def execute(name, args, db, operator, conversation):
     if endpoint_id:
         await source(endpoint_id)
 
+    def read_access() -> TenantAccess:
+        # Handlers migrated to tenant access (#327) take it in place of the
+        # operator. Fresh per call; there is no HTTP request to attribute.
+        return TenantAccess(operator=operator, db=db, request=None, tier=None)
+
     if name == "list_endpoints":
         response = await management.list_endpoints(
             operator=operator, client_id=client_id, site_id=None,
@@ -104,17 +110,17 @@ async def execute(name, args, db, operator, conversation):
                 "has_more": args.page * 25 < response.total,
                 "status_basis": "NodeLink recorded status; last_seen_at is the last received heartbeat."}
     elif name == "endpoint_detail":
-        response = await management.get_endpoint_detail(endpoint_id, operator, history_hours=24, history_limit=10, db=db)
+        response = await management.get_endpoint_detail(endpoint_id, read_access(), history_hours=24, history_limit=10, db=db)
         data = fields(response, "id hostname os os_version agent_version status last_seen_at telemetry_freshness stale_after_seconds history_truncated")
         data["current_telemetry"] = fields(response.current_telemetry, "ts cpu_percent mem_percent disk_percent uptime_seconds") if response.current_telemetry else None
         data["telemetry"] = [fields(row, "ts cpu_percent mem_percent disk_percent uptime_seconds") for row in response.telemetry]
     elif name == "inventory":
-        response = await management.get_endpoint_inventory(endpoint_id, operator, db)
+        response = await management.get_endpoint_inventory(endpoint_id, read_access(), db)
         selected = next((row for row in response.sections if row.section.value == args.section), None)
         data = {"section": args.section, "missing": selected is None, "snapshot": snapshot(selected) if selected else None}
     elif name in ("inventory_history", "inventory_changes"):
         response = await management.get_inventory_history(
-            endpoint_id, InventorySection(args.section), operator,
+            endpoint_id, InventorySection(args.section), read_access(),
             page=args.page if name == "inventory_history" else 1,
             page_size=5 if name == "inventory_history" else 2, db=db,
         )

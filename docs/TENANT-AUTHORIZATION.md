@@ -270,6 +270,50 @@ The boundary is implemented in `server/app/core/tenant_scope.py` and applied at:
   `operator.platform_admin_changed`), and each bumps the target's
   `token_generation`.
 
+### Request-scoped tenant access (issue #327)
+
+**In progress.** The module, its tests and the route-table guard are
+implemented now; handler migration proceeds area by area, and the routes still
+calling the asserts by hand are listed in the guard's `ALLOWLIST`. Migrated so
+far: the agent-keyed management handlers (agent and endpoint detail, trust
+changes, command history and detail, inventory, effective monitoring/patch
+policy, patch compliance, monitoring results). Command dispatch is still on the
+allowlist because it audits `tenant.access_denied` before its 404.
+
+By-id handlers apply the boundary through one dependency,
+`server/app/api/tenant_access.py`, rather than calling the asserts above by
+hand. A route declares its global role floor and default client tier once:
+
+```python
+access: TenantAccess = Depends(
+    tenant_access(OperatorRole.operator, ClientRole.client_operator)
+)
+```
+
+and loads what it needs with `access.agent(id)`, `access.client(id)`,
+`access.site(id)` or `access.alert(id)`. Each loader returns the authorized
+row, or raises `404` (missing, cross-tenant, or dangling parent -- identical
+bodies; a dangling parent is a 404 for a platform admin too) or `403`
+(visible, under-tier). A loader may raise the tier for one
+call (`tier=ClientRole.client_admin`) or keep a coded 404 body
+(`not_found={"code": ...}`). `tenant_scope` stays the implementation.
+
+The resolved client is cached as `access.client_id`, and `access.record(action,
+detail, agent_id=...)` writes the audit event with actor, actor id, source IP,
+user agent (500 chars) and that client as `organization_id`. With no tenant
+resolved the event carries no `organization_id`; when one request authorizes
+resources in two tenants, inference refuses and the handler must pass
+`organization_id` explicitly.
+
+`server/tests/test_tenant_access_routes.py` enumerates the route table and fails
+CI when a route whose path takes `agent_id`, `client_id`, `site_id` or
+`alert_id` does not depend on `tenant_access(...)`, unless it is in the reviewed
+`ALLOWLIST` with a reason. (`endpoint_id` is guarded too: on `/endpoints/...`
+it is an agent id, and the webhook-endpoint config routes that reuse the name
+are allowlisted.) The allowlist also holds the routes not yet migrated;
+it fails when an entry is stale, so it shrinks as migration proceeds. The
+module's own tenancy matrix is in `server/tests/test_tenant_access.py`.
+
 ### Per-client role gate
 
 v1 enforces both **visibility** (membership required to see a client at all;
