@@ -42,7 +42,8 @@ from app.models.models import (
     Site,
 )
 
-NotFound = str | dict
+# A 404 ``detail``: prose, or a coded body such as ``{"code": ...}``.
+NotFoundDetail = str | dict
 
 # Marker for "use the tier the route declared". ``None`` is a real tier value
 # meaning "visibility only", so it cannot double as the default.
@@ -89,7 +90,7 @@ class TenantAccess:
         client_id: str | None,
         *,
         tier: ClientRole | None | object = _ROUTE_TIER,
-        not_found: NotFound = "Not found",
+        not_found: NotFoundDetail = "Not found",
     ) -> None:
         """Gate on a client id the handler resolved itself.
 
@@ -115,7 +116,7 @@ class TenantAccess:
         elif self._client_id != client_id:
             self._client_id = _AMBIGUOUS
 
-    async def _load(self, model, key: str, not_found: NotFound):
+    async def _load(self, model, key: str, not_found: NotFoundDetail):
         row = await self._db.get(model, key)
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found)
@@ -126,7 +127,7 @@ class TenantAccess:
         client_id: str,
         *,
         tier: ClientRole | None | object = _ROUTE_TIER,
-        not_found: NotFound = "Client not found",
+        not_found: NotFoundDetail = "Client not found",
     ) -> Client:
         client = await self._load(Client, client_id, not_found)
         await self.authorize_client(client.id, tier=tier, not_found=not_found)
@@ -137,7 +138,7 @@ class TenantAccess:
         site_id: str,
         *,
         tier: ClientRole | None | object = _ROUTE_TIER,
-        not_found: NotFound = "Site not found",
+        not_found: NotFoundDetail = "Site not found",
     ) -> Site:
         site = await self._load(Site, site_id, not_found)
         await self.authorize_client(site.client_id, tier=tier, not_found=not_found)
@@ -148,7 +149,7 @@ class TenantAccess:
         agent_id: str,
         *,
         tier: ClientRole | None | object = _ROUTE_TIER,
-        not_found: NotFound = "Agent not found",
+        not_found: NotFoundDetail = "Agent not found",
     ) -> Agent:
         agent = await self._load(Agent, agent_id, not_found)
         client_id = await tenant_scope.agent_client_id(agent, self._db)
@@ -160,7 +161,7 @@ class TenantAccess:
         alert_id: str,
         *,
         tier: ClientRole | None | object = _ROUTE_TIER,
-        not_found: NotFound = "Alert not found",
+        not_found: NotFoundDetail = "Alert not found",
     ) -> Alert:
         """An alert belongs to its agent's client; an orphaned alert is a 404."""
         alert = await self._load(Alert, alert_id, not_found)
@@ -174,7 +175,6 @@ class TenantAccess:
         *,
         agent_id: str | None = None,
         organization_id: str | None | object = _INFER,
-        **subjects: str | None,
     ) -> AuditEvent:
         """Append an audit event attributed to this request.
 
@@ -182,8 +182,11 @@ class TenantAccess:
         ``organization_id`` is the resolved tenant (``None`` when nothing
         tenant-owned was loaded, e.g. a deployment-wide setting). Pass
         ``organization_id`` explicitly only for the rare request that spans
-        two tenants -- inference refuses to pick one. ``subjects`` forwards
-        the remaining :func:`app.core.audit.record` subject ids unchanged.
+        two tenants -- inference refuses to pick one.
+
+        Callers pass ``action`` as a literal first argument: that is the shape
+        ``tests/test_redaction.py::_source_audit_actions`` parses to prove each
+        action has a redaction schema.
         """
         if organization_id is _INFER:
             if self._client_id is _AMBIGUOUS:
@@ -202,7 +205,6 @@ class TenantAccess:
             source_ip=client_ip(request) if request is not None else None,
             user_agent=user_agent(request) if request is not None else None,
             detail=detail,
-            **subjects,
         )
 
 

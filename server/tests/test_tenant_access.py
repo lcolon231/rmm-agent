@@ -126,8 +126,27 @@ async def _status(awaitable) -> int:
     return 200
 
 
+LOADERS = ["agent", "client", "site", "alert"]
+_DEFAULT_404 = {
+    "agent": "Agent not found", "client": "Client not found",
+    "site": "Site not found", "alert": "Alert not found",
+}
+
+
+def _resource_id(world: World, kind: str) -> str:
+    return {
+        "agent": world.agent_a, "client": world.client_a,
+        "site": world.site_a, "alert": world.alert_a,
+    }[kind].id
+
+
+def _load(access: TenantAccess, world: World, kind: str, **kwargs):
+    """Call the ``kind`` loader for client A's resource of that kind."""
+    return getattr(access, kind)(_resource_id(world, kind), **kwargs)
+
+
 # --------------------------------------------------------------------------- #
-# Agent loader
+# Loaders: the tenancy matrix
 # --------------------------------------------------------------------------- #
 async def test_agent_without_membership_is_404(world):
     operator = await _operator(world.db)
@@ -149,26 +168,66 @@ _R, _O, _A = ClientRole.client_readonly, ClientRole.client_operator, ClientRole.
         (_A, None, 200), (_A, _O, 200), (_A, _A, 200),
     ],
 )
-async def test_agent_tier_matrix(world, held, tier, expected):
+@pytest.mark.parametrize("kind", LOADERS)
+async def test_loader_tier_matrix(world, kind, held, tier, expected):
     operator = await _operator(world.db, role=held, client=world.client_a)
     access = _access(world, operator, tier=tier)
-    assert await _status(access.agent(world.agent_a.id)) == expected
+    assert await _status(_load(access, world, kind)) == expected
+
+
+@pytest.mark.parametrize("kind", LOADERS)
+async def test_loader_without_membership_is_404_with_its_default_detail(world, kind):
+    operator = await _operator(world.db)
+    with pytest.raises(HTTPException) as exc:
+        await _load(_access(world, operator), world, kind)
+    assert (exc.value.status_code, exc.value.detail) == (404, _DEFAULT_404[kind])
+
+
+@pytest.mark.parametrize("kind", LOADERS)
+async def test_loader_missing_row_is_404(world, kind):
+    operator = await _operator(world.db, platform_admin=True)
+    with pytest.raises(HTTPException) as exc:
+        await getattr(_access(world, operator), kind)("no-such-id")
+    assert (exc.value.status_code, exc.value.detail) == (404, _DEFAULT_404[kind])
+
+
+@pytest.mark.parametrize("kind", LOADERS)
+async def test_loader_platform_admin_passes_every_tier(world, kind):
+    operator = await _operator(world.db, platform_admin=True)
+    access = _access(world, operator, tier=_A)
+    assert await _status(_load(access, world, kind)) == 200
+    assert access.client_id == world.client_a.id
+
+
+@pytest.mark.parametrize("kind", LOADERS)
+async def test_loader_membership_in_another_client_is_404(world, kind):
+    operator = await _operator(world.db, role=_A, client=world.client_b)
+    assert await _status(_load(_access(world, operator, tier=_O), world, kind)) == 404
+
+
+@pytest.mark.parametrize("kind", LOADERS)
+async def test_loader_keeps_a_coded_not_found_body(world, kind):
+    operator = await _operator(world.db)
+    with pytest.raises(HTTPException) as exc:
+        await _load(_access(world, operator), world, kind, not_found={"code": "x"})
+    assert exc.value.detail == {"code": "x"}
+
+
+@pytest.mark.parametrize("kind", LOADERS)
+async def test_loader_api_token_is_capped_at_its_ceiling(world, kind):
+    """A token (#72) for client A capped at client_readonly, owner is client_admin."""
+    operator = await _operator(world.db, role=_A, client=world.client_a)
+    operator.api_token_client_id = world.client_a.id
+    operator.api_token_client_role = _R
+    operator.api_token_owner_platform_admin = False
+    assert await _status(_load(_access(world, operator), world, kind)) == 200
+    assert await _status(_load(_access(world, operator, tier=_O), world, kind)) == 403
 
 
 async def test_agent_returns_the_loaded_row(world):
     operator = await _operator(world.db, role=_R, client=world.client_a)
     agent = await _access(world, operator).agent(world.agent_a.id)
     assert agent.id == world.agent_a.id
-
-
-async def test_membership_in_another_client_is_404_not_403(world):
-    operator = await _operator(world.db, role=_A, client=world.client_b)
-    assert await _status(_access(world, operator, tier=_O).agent(world.agent_a.id)) == 404
-
-
-async def test_platform_admin_passes_every_tier(world):
-    operator = await _operator(world.db, platform_admin=True)
-    assert await _status(_access(world, operator, tier=_A).agent(world.agent_a.id)) == 200
 
 
 async def test_override_tier_beats_route_tier(world):
@@ -196,15 +255,6 @@ async def test_agent_with_dangling_site_is_404_even_for_platform_admin(world, ti
     operator = await _operator(world.db, platform_admin=True)
     access = _access(world, operator, tier=tier)
     assert await _status(access.agent(world.dangling_agent.id)) == 404
-
-
-async def test_coded_not_found_detail_is_preserved(world):
-    operator = await _operator(world.db)
-    with pytest.raises(HTTPException) as exc:
-        await _access(world, operator).agent(
-            world.agent_a.id, not_found={"code": "agent_not_found"}
-        )
-    assert exc.value.detail == {"code": "agent_not_found"}
 
 
 async def test_api_token_principal_is_confined_and_capped(world):

@@ -24,7 +24,13 @@ from fastapi.routing import APIRoute  # noqa: E402
 from app.api.tenant_access import is_tenant_access_dependency  # noqa: E402
 from app.main import app  # noqa: E402
 
-TENANT_ID_PARAMS = {"agent_id", "client_id", "site_id", "alert_id"}
+# ``endpoint_id`` is an agent id on /endpoints/... routes; the webhook routes
+# that reuse the name are allowlisted below.
+TENANT_ID_PARAMS = {"agent_id", "endpoint_id", "client_id", "site_id", "alert_id"}
+
+_WEBHOOK_CONFIG = (
+    "endpoint_id names a deployment-level webhook endpoint, not a tenant resource"
+)
 
 _NOT_YET = "not yet migrated (#327)"
 
@@ -33,8 +39,16 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/auth/operators/{operator_id}/client-memberships/{client_id}/revoke"):
         "platform-admin membership administration; client_id names the grant, "
         "not a resource the caller acts inside",
+    ("PUT", "/api/v1/monitoring/webhook-endpoints/{endpoint_id}"): _WEBHOOK_CONFIG,
+    ("DELETE", "/api/v1/monitoring/webhook-endpoints/{endpoint_id}"): _WEBHOOK_CONFIG,
+    ("POST", "/api/v1/monitoring/webhook-endpoints/{endpoint_id}/validate"):
+        _WEBHOOK_CONFIG,
+    ("POST", "/api/v1/monitoring/webhook-endpoints/{endpoint_id}/rotate-secret"):
+        _WEBHOOK_CONFIG,
+    # Migration backlog: agent-keyed management (step 1).
     ("POST", "/api/v1/agents/{agent_id}/commands"):
-        "audits tenant.access_denied before its 404; needs a denial-audit hook",
+        _NOT_YET + "; audits tenant.access_denied before its 404, so it needs "
+        "a denial-audit hook on the loader",
     # Migration backlog: clients and sites.
     ("GET", "/api/v1/clients/{client_id}"): _NOT_YET,
     ("GET", "/api/v1/sites/{site_id}"): _NOT_YET,

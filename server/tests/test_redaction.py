@@ -1690,6 +1690,23 @@ def _source_audit_actions() -> tuple[set[str], int]:
                     actions.add(action_kw.value)
                 else:
                     dynamic_record_calls += 1
+            # TenantAccess.record(action, detail, ...) (issue #327).
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "record"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "access"
+            ):
+                action_arg = node.args[0] if node.args else next(
+                    (kw.value for kw in node.keywords if kw.arg == "action"),
+                    None,
+                )
+                if isinstance(action_arg, ast.Constant) and isinstance(
+                    action_arg.value, str
+                ):
+                    actions.add(action_arg.value)
+                else:
+                    dynamic_record_calls += 1
             if (
                 isinstance(node.func, ast.Name)
                 and node.func.id == "_apply_trust_change"
@@ -1706,7 +1723,9 @@ def _source_audit_actions() -> tuple[set[str], int]:
 
 def test_every_production_action_has_exact_schema_and_documentation():
     source_actions, dynamic_calls = _source_audit_actions()
-    assert dynamic_calls == 1  # _apply_trust_change(action=...)
+    # _apply_trust_change(action=...), and TenantAccess.record forwarding its
+    # caller's action to audit.record.
+    assert dynamic_calls == 2
     assert source_actions == set(AUDIT_DETAIL_SCHEMAS)
     assert set(PRODUCER_DETAILS) == set(AUDIT_DETAIL_SCHEMAS)
 

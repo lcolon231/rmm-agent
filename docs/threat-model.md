@@ -44,6 +44,15 @@ authentication and role-based authorization:
   tenant command-dispatch attempt is additionally recorded as
   `tenant.access_denied`. Membership grant/revoke and the platform-admin flag are
   platform-admin-only, audited, and bump `token_generation`.
+- **By-id enforcement point (issue #327, In progress).** By-id handlers are
+  moving onto one request-scoped dependency, `app/api/tenant_access.py`, which
+  loads the resource, applies the `tenant_scope` gate, and writes audit events
+  with the resolved client as `organization_id` -- so a handler cannot forget
+  the gate or the tenant attribution. A dangling parent (e.g. an agent whose
+  site is gone) is a 404 for every principal, platform admin included. A
+  route-table test fails CI when a route with a tenant-owned id in its path
+  bypasses the dependency; routes not yet migrated sit on its reviewed
+  allowlist, so the residual risk is confined to that list.
 - **Public API tokens (issue #72).** An `nlk_` API token is an unattended
   bearer credential, so it can only ever narrow its owner. It is confined to one
   client, even for a platform-admin owner. Its global and client roles are

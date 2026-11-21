@@ -1570,7 +1570,7 @@ async def list_endpoints(
 @router.get("/endpoints/{endpoint_id}", response_model=EndpointDetailOut)
 async def get_endpoint_detail(
     endpoint_id: str,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     history_hours: int = Query(default=24, ge=1, le=168),
     history_limit: int = Query(default=144, ge=10, le=500),
     db: AsyncSession = Depends(get_db),
@@ -1586,7 +1586,8 @@ async def get_endpoint_detail(
         raise HTTPException(status_code=404, detail="Endpoint not found")
 
     agent, client, site = endpoint_row
-    await assert_client_visible(operator, client.id, db, detail="Endpoint not found")
+    await access.authorize_client(client.id, not_found="Endpoint not found")
+    operator = access.operator
     latest_heartbeat = await db.scalar(
         select(Heartbeat)
         .where(Heartbeat.agent_id == agent.id)
@@ -1630,10 +1631,8 @@ async def get_endpoint_detail(
             else "current"
         )
 
-    await audit.record(
-        db,
-        action="endpoint_detail.viewed",
-        actor=operator.email,
+    await access.record(
+        "endpoint_detail.viewed",
         agent_id=agent.id,
         detail={
             "history_hours": history_hours,
@@ -4894,7 +4893,7 @@ async def enrollment_dashboard(
 @router.get("/endpoints/{endpoint_id}/inventory", response_model=InventoryOut)
 async def get_endpoint_inventory(
     endpoint_id: str,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
     """The endpoint's current inventory: the newest snapshot per section.
@@ -4903,10 +4902,7 @@ async def get_endpoint_inventory(
     listed separately rather than omitted, so "we have no data for this" is
     visible instead of looking like the section does not exist.
     """
-    agent = await db.get(Agent, endpoint_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Endpoint not found")
-    await assert_agent_visible(operator, agent, db, detail="Endpoint not found")
+    agent = await access.agent(endpoint_id, not_found="Endpoint not found")
 
     latest = await inventory.latest_sections(db, endpoint_id)
     items = [
@@ -4916,10 +4912,8 @@ async def get_endpoint_inventory(
     missing = [
         section for section in InventorySection if section.value not in latest
     ]
-    await audit.record(
-        db,
-        action="inventory.viewed",
-        actor=operator.email,
+    await access.record(
+        "inventory.viewed",
         agent_id=endpoint_id,
         detail={
             "sections": sorted(latest),
@@ -4938,7 +4932,7 @@ async def get_endpoint_inventory(
 async def get_inventory_history(
     endpoint_id: str,
     section: InventorySection,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -4949,10 +4943,7 @@ async def get_inventory_history(
     *changes* rather than a sample of every collection. Retention bounds how far
     back it reaches; the newest row is never pruned.
     """
-    agent = await db.get(Agent, endpoint_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Endpoint not found")
-    await assert_agent_visible(operator, agent, db, detail="Endpoint not found")
+    agent = await access.agent(endpoint_id, not_found="Endpoint not found")
 
     filters = [
         AgentInventorySnapshot.agent_id == endpoint_id,
@@ -4994,7 +4985,7 @@ async def get_inventory_history(
 async def get_inventory_diff(
     endpoint_id: str,
     section: InventorySection,
-    operator: Operator = Depends(require_role(OperatorRole.readonly)),
+    access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     from_snapshot: str | None = Query(default=None, max_length=36),
     to_snapshot: str | None = Query(default=None, max_length=36),
     db: AsyncSession = Depends(get_db),
@@ -5006,10 +4997,7 @@ async def get_inventory_diff(
     snapshots must belong to this endpoint and this section — a diff across
     endpoints would silently compare unrelated machines.
     """
-    agent = await db.get(Agent, endpoint_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Endpoint not found")
-    await assert_agent_visible(operator, agent, db, detail="Endpoint not found")
+    agent = await access.agent(endpoint_id, not_found="Endpoint not found")
 
     async def _load(snapshot_id: str) -> AgentInventorySnapshot:
         row = await db.get(AgentInventorySnapshot, snapshot_id)
@@ -5062,10 +5050,8 @@ async def get_inventory_diff(
     computed = inventory_diff.diff_payloads(
         section.value, before.payload, after.payload
     )
-    await audit.record(
-        db,
-        action="inventory.diff_viewed",
-        actor=operator.email,
+    await access.record(
+        "inventory.diff_viewed",
         agent_id=endpoint_id,
         detail={
             "section": section.value,
