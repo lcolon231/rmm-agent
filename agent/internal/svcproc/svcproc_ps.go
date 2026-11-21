@@ -3,6 +3,7 @@ package svcproc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -31,12 +32,19 @@ func script(body, target string, timeout time.Duration) pwsh.Script {
 }
 
 // failureDetail is the text to report for a failed run: PowerShell writes
-// errors to stderr, but a script's own message may be on stdout.
-func failureDetail(res pwsh.Result) string {
+// errors to stderr, but a script's own message may be on stdout. A run that
+// printed nothing, such as one killed at its timeout, reports err instead.
+func failureDetail(res pwsh.Result, err error) string {
 	if text := strings.TrimSpace(string(res.Stderr)); text != "" {
 		return text
 	}
-	return strings.TrimSpace(string(res.Stdout))
+	if text := strings.TrimSpace(string(res.Stdout)); text != "" {
+		return text
+	}
+	if err != nil && !errors.As(err, new(*pwsh.ExitError)) {
+		return err.Error()
+	}
+	return ""
 }
 
 const (
@@ -49,7 +57,7 @@ const (
 func psListServices(ctx context.Context, run pwsh.Runner) ([]ServiceInfo, error) {
 	res, err := run(ctx, script(listServicesScript, "", listTimeout))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, failureDetail(res))
+		return nil, fmt.Errorf("%w: %s", err, failureDetail(res, nil))
 	}
 	out := res.Stdout
 	var rows []struct {
@@ -75,7 +83,7 @@ func psListServices(ctx context.Context, run pwsh.Runner) ([]ServiceInfo, error)
 func psListProcesses(ctx context.Context, run pwsh.Runner) ([]ProcessInfo, error) {
 	res, err := run(ctx, script(listProcessesScript, "", listTimeout))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, failureDetail(res))
+		return nil, fmt.Errorf("%w: %s", err, failureDetail(res, nil))
 	}
 	out := res.Stdout
 	var rows []struct {
@@ -121,7 +129,7 @@ func psControlService(ctx context.Context, run pwsh.Runner, name, action string)
 		return "", fmt.Errorf("service does not exist")
 	}
 	if err != nil {
-		return "", fmt.Errorf("%s", firstLine(failureDetail(res)))
+		return "", fmt.Errorf("%s", firstLine(failureDetail(res, err)))
 	}
 	return lastLine(text), nil
 }
@@ -144,7 +152,7 @@ func psProcessName(ctx context.Context, run pwsh.Runner, pid int) (string, error
 func psTerminateProcess(ctx context.Context, run pwsh.Runner, pid int) error {
 	res, err := run(ctx, script(terminateScript, strconv.Itoa(pid), controlTimeout))
 	if err != nil {
-		return fmt.Errorf("%s", firstLine(failureDetail(res)))
+		return fmt.Errorf("%s", firstLine(failureDetail(res, err)))
 	}
 	return nil
 }

@@ -43,6 +43,10 @@ func Exec(ctx context.Context, s Script) (Result, error) {
 		res.ExitCode = -1
 	}
 
+	if runErr == nil {
+		// A clean exit stands even if the deadline passed while Run returned.
+		return res, nil
+	}
 	// Check the contexts before the exit status: a killed process also exits
 	// non-zero, and the caller needs to know why it stopped.
 	if ctx.Err() != nil {
@@ -55,8 +59,5 @@ func Exec(ctx context.Context, s Script) (Result, error) {
 	if errors.As(runErr, &exitErr) {
 		return res, &ExitError{Code: res.ExitCode}
 	}
-	if runErr != nil {
-		return res, fmt.Errorf("run powershell: %w", runErr)
-	}
-	return res, nil
+	return res, fmt.Errorf("run powershell: %w", runErr)
 }

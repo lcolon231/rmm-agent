@@ -3,6 +3,7 @@ package svcproc
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -175,6 +176,18 @@ func TestPSControlService(t *testing.T) {
 				t.Fatalf("psControlService = (%q, %v), want %q", got, err, tc.want)
 			}
 		})
+	}
+}
+
+// A run that produced no output must still say why it failed, so a timed-out
+// control action does not surface as an unexplained failure.
+func TestPSControlFailuresWithoutOutputReportTheRunError(t *testing.T) {
+	fake := &pwshtest.Fake{Reply: pwshtest.Fail(fmt.Errorf("%w after 1m30s", pwsh.ErrTimeout))}
+	if _, err := psControlService(context.Background(), fake.Run, "Spooler", ActionStop); err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("control error = %v, want the timeout", err)
+	}
+	if err := psTerminateProcess(context.Background(), fake.Run, 4242); err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("terminate error = %v, want the timeout", err)
 	}
 }
 

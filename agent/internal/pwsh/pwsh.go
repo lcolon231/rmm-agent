@@ -2,8 +2,10 @@
 
 // Package pwsh is the agent's one way to run a Windows PowerShell script.
 //
-// Every invocation uses the same hardened flag set, the same timeout and kill
-// handling, and keeps stdout and stderr apart. Caller data never enters the
+// Every run through Exec uses the same hardened flag set, the same timeout and
+// kill handling, and keeps stdout and stderr apart. The executor, which runs
+// operator scripts under its own Job Object, shares only the flag set through
+// Args and StdinArgs. Caller data never enters the
 // script text: a Script's Env entries reach the child as environment variables
 // the body reads as $env:NAME, so a hostile service name or file path cannot
 // change what PowerShell runs.
