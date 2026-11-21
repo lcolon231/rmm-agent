@@ -51,7 +51,7 @@ def _hash_event(prev_hash: str, ts_iso: str, actor: str, action: str,
                 agent_id: str | None, detail: dict,
                 seq: int | None = None,
                 hash_schema: int = HASH_SCHEMA_SEQUENCED) -> str:
-    doc = {
+    doc: dict[str, object] = {
         "prev_hash": prev_hash,
         "ts": ts_iso,
         "actor": actor,
@@ -114,6 +114,13 @@ async def record(
     credential shapes therefore fail or are transformed before the
     tamper-evident chain is touched. The stored safe representation is the only
     representation ever hashed, keeping chain/anchor verification reproducible.
+
+    ``tests/test_redaction.py::_source_audit_actions`` proves every production
+    action has a schema by parsing ``app/`` for calls shaped
+    ``audit.record(action="...")``. A wrapper that forwards its caller's action
+    hides those actions from it: teach the scanner the new call shape, and
+    include ``test_redaction.py`` in any targeted run that adds or moves a
+    producer.
     """
     detail = sanitize_audit_detail(action, detail if detail is not None else {})
     # Attribute work done through a public-API token (issue #72) to the token

@@ -19,7 +19,6 @@ from app.models.models import (
     Agent,
     AgentStatus,
     EnrollmentToken,
-    Operator,
     Site,
 )
 from app.schemas.schemas import EnrollRequest

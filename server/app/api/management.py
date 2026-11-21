@@ -207,7 +207,6 @@ from app.schemas.monitoring import (
     AlertWebhookDeliveryListOut,
     AlertWebhookDeliveryOut,
     AlertWebhookRetry,
-    AlertEventOut,
     AlertListOut,
     AlertOut,
     AlertResolve,

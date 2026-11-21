@@ -134,7 +134,7 @@ async def resolve_membership(
     ).scalar_one_or_none()
     if token_client is None:
         return membership
-    ceiling: ClientRole = operator.api_token_client_role
+    ceiling: ClientRole = getattr(operator, "api_token_client_role")
     if membership is None:
         if not getattr(operator, "api_token_owner_platform_admin", False):
             return None

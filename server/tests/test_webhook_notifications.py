@@ -6,7 +6,6 @@ import base64
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
 
 os.environ.setdefault(
     "DATABASE_URL", "sqlite+aiosqlite:///./test_webhook_notifications.db"

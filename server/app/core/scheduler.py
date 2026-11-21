@@ -2,9 +2,8 @@
 """Recurring task scheduler engine and timezone-aware cron calculator (issue #49)."""
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 import uuid
 
@@ -12,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import approvals as approvals_core
-from app.core import audit, metrics, patch_policies as patch_core
+from app.core import audit, patch_policies as patch_core
 from app.core.command_envelope import (
     COMMAND_ENVELOPE_V2,
     COMMAND_ENVELOPE_V3,
@@ -20,7 +19,6 @@ from app.core.command_envelope import (
     format_command_time,
     select_command_envelope_version,
 )
-from app.core.config import settings
 from app.core.security import active_signing_key, sign_command
 from app.models.models import (
     Agent,

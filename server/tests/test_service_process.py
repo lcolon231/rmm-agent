@@ -24,7 +24,6 @@ from app.main import app
 from tests._tenancy import grant_all_memberships  # noqa: E402
 from app.models.models import (  # noqa: E402
     AuditEvent,
-    Command,
     CommandKind,
     Operator,
     OperatorRole,

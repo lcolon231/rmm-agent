@@ -28,7 +28,6 @@ from app.models.models import (
     Agent,
     OperatorSessionEndReason,
     Client,
-    ClientRole,
     Operator,
     OperatorClientMembership,
     OperatorRole,

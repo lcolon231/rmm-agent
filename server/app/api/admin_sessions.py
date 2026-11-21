@@ -16,7 +16,6 @@ audit trail no successful activation can avoid.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError

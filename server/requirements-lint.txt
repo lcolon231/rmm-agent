@@ -1,0 +1,4 @@
+# Lint and typecheck tools for the CI `server-lint` job. Pinned so a tool
+# release cannot turn main red without a code change.
+ruff==0.17.6
+mypy==2.4.1

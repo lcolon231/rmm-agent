@@ -35,7 +35,6 @@ from app.models.models import (  # noqa: E402
     AuditEvent,
     Command,
     CommandKind,
-    MaintenanceWindow,
     Operator,
     OperatorRole,
     ScheduleConcurrencyPolicy,
