@@ -9,9 +9,24 @@ A feature branch records its release-visible consequences here as it lands.
 When a tag is cut, they are folded into that tag's manifest and the entry is
 cleared, so this file lists only what no manifest carries yet.
 
+## Pending
+
+- **More complete tenant attribution on audit events (#327).** Handlers moved
+  onto the request-scoped tenant access module now record the owning client as
+  `organization_id`, plus source IP and user agent, on every audit event they
+  write. In this change that covers the agent detail, trust-change (quarantine,
+  restore, revoke, and the revoke-time command expiry), command history and
+  detail, effective monitoring/patch policy, patch compliance, and monitoring
+  results routes; before, several of these (for example
+  `command_detail.viewed` and `agent.commands_expired_on_revoke`) carried no
+  `organization_id`. Tenant-filtered audit views and evidence exports become
+  more complete for new events; historical rows are not backfilled (the hash
+  chain is unchanged because these columns are outside the hashed document).
+  No API response, status code, or audit action name changes.
+
 ## Carried
 
-Nothing pending. Everything merged between v0.1.11 and v0.1.12 is stated in
+Everything merged between v0.1.11 and v0.1.12 is stated in
 [`v0.1.12.json`](v0.1.12.json): the public API v1 and `nlk_` tokens (#72),
 emergency overrides (#65), the evidence vault (#81), tenant retention policies
 (#88), the community repository (#74), support-chat retention (#237), relay
