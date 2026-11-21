@@ -33,7 +33,6 @@ from app.core.command_envelope import COMMAND_ENVELOPE_V3  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.models.models import (  # noqa: E402
     AgentInventorySnapshot,
-    AgentTrustState,
     AuditEvent,
     Operator,
     OperatorRole,

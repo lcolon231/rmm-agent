@@ -20,7 +20,6 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("COMMAND_SIGNING_KEY_PATH", "command_signing_key.pem")
 
 import httpx  # noqa: E402
-import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 
 from app.core import webhook_notifications  # noqa: E402

@@ -3,7 +3,6 @@
 from dataclasses import asdict
 from datetime import timedelta
 
-from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import func, select
 

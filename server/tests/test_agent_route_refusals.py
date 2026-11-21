@@ -30,7 +30,6 @@ os.environ.setdefault("COMMAND_SIGNING_KEY_PATH", "command_signing_key.pem")
 import httpx  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
-from sqlalchemy import select  # noqa: E402
 
 from app.core import agent_updates as updates  # noqa: E402
 from app.core import monitoring as monitoring_core  # noqa: E402
