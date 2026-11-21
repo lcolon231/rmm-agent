@@ -5,16 +5,24 @@ NodeLink is a self-hosted endpoint-management platform for regulated small busin
 ## Tenancy and identity
 
 **Client**:
-A customer organization whose endpoints are managed; the unit of tenancy and isolation.
-_Avoid_: tenant (outside the authorization model), organization, customer, account
+The unit of isolation: a set of sites and endpoints that only operators with a client membership (or a platform admin) can see. Usually a customer of the MSP, but the MSP's own machines are a client too.
+_Avoid_: tenant, organization, customer, account
+
+**Client boundary**:
+The default-deny rule that an operator sees and acts only within clients they hold a membership for; a resource in another client is indistinguishable from one that does not exist.
+_Avoid_: tenant boundary, tenant isolation, multi-tenancy (as the name of the rule)
 
 **Site**:
 A location or grouping of endpoints within exactly one client.
 _Avoid_: location, group, office
 
 **Operator**:
-A person who signs in to NodeLink to manage endpoints.
-_Avoid_: user, technician (except in dashboard copy), admin (as a noun for any operator)
+A person who signs in to NodeLink to manage endpoints. In copy shown to the person at an endpoint (such as support chat), "technician" is acceptable.
+_Avoid_: user, technician (in docs and code), admin (as a noun for any operator)
+
+**End user**:
+The person using a managed endpoint, who never signs in to NodeLink.
+_Avoid_: user (unqualified), customer, client
 
 **Operator role**:
 An operator's deployment-wide tier: `readonly`, `operator`, or `admin`.
@@ -29,11 +37,11 @@ An operator's tier within one client: `client_readonly`, `client_operator`, or `
 _Avoid_: tenant role, per-client permission
 
 **Platform admin**:
-The only kind of operator that crosses the client boundary.
+The only kind of operator that crosses the client boundary; holds no client membership of its own.
 _Avoid_: superuser, root, global admin
 
 **API token**:
-An opaque `nlk_` bearer an operator mints for an integration, confined to one client and capped below its owner.
+A bearer credential an operator mints for an integration, confined to one client and capped at or below its owner's roles.
 _Avoid_: personal access token, API key
 
 **Script scope**:
@@ -61,8 +69,8 @@ _Avoid_: backup code
 ## Endpoints and agents
 
 **Endpoint**:
-A managed computer.
-_Avoid_: device, machine, host, node
+A managed computer, always belonging to one site.
+_Avoid_: device (including dashboard copy), machine, host, node
 
 **Agent**:
 The NodeLink software and enrolled identity on one endpoint.
@@ -147,7 +155,7 @@ An operator-owned, line-oriented, live PowerShell session on one endpoint.
 _Avoid_: terminal, remote shell, console
 
 **Support chat**:
-A text conversation started by the person at an endpoint and answered by an operator; never remote control.
+A text conversation started by an end user and answered by an operator; never remote control.
 _Avoid_: live chat, helpdesk, ticket
 
 ## Scripts
