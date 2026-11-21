@@ -31,6 +31,12 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
+# The signing keys are gitignored, so a fresh worktree has none; generate them
+# the way CI does, or nearly every command-dispatch test fails on a missing file.
+if [ ! -f command_signing_key.pem ]; then
+  "$PYTHON" scripts/gen_command_keys.py > /dev/null || exit 2
+fi
+
 log="${RUN_TESTS_LOG:-$(mktemp "${TMPDIR:-/tmp}/run-tests.XXXXXX.log")}"
 
 PYTHONPATH=. "$PYTHON" -m pytest -q -p no:cacheprovider --tb=short \
