@@ -6,7 +6,9 @@ package svcproc
 import (
 	"context"
 	"testing"
-	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
+	"github.com/lcolon231/rmm/agent/internal/pwsh/pwshtest"
 )
 
 // The platform functions must route through the runPS seam; the glue itself is
@@ -14,12 +16,11 @@ import (
 func TestWindowsPlatformFunctionsUseRunPSSeam(t *testing.T) {
 	orig := runPS
 	t.Cleanup(func() { runPS = orig })
-	var calls []psCall
 	reply := ""
-	runPS = func(_ context.Context, timeout time.Duration, arg, script string) ([]byte, error) {
-		calls = append(calls, psCall{timeout: timeout, arg: arg, script: script})
-		return []byte(reply), nil
-	}
+	fake := &pwshtest.Fake{Reply: func(pwsh.Script) (pwsh.Result, error) {
+		return pwsh.Result{Stdout: []byte(reply)}, nil
+	}}
+	runPS = fake.Run
 	ctx := context.Background()
 
 	reply = `{"Name":"Spooler","State":"Running"}`
@@ -42,7 +43,8 @@ func TestWindowsPlatformFunctionsUseRunPSSeam(t *testing.T) {
 	if err := platformTerminateProcess(ctx, 7); err != nil {
 		t.Fatalf("platformTerminateProcess = %v", err)
 	}
-	if len(calls) != 5 || calls[2].arg != "Spooler" || calls[4].arg != "7" {
+	calls := fake.Calls()
+	if len(calls) != 5 || calls[2].Env["NL_ARG"] != "Spooler" || calls[4].Env["NL_ARG"] != "7" {
 		t.Fatalf("unexpected runner calls: %+v", calls)
 	}
 }

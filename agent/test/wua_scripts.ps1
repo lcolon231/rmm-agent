@@ -67,6 +67,7 @@ function Get-GoJsonTags([string]$Path, [string]$Type) {
 
 $scanScript    = Get-GoRawString $scanSource 'psScript'
 $installScript = Get-GoRawString $installSource 'psInstallScript'
+$installPrefix = Get-GoRawString $installGo 'psInstallPrefix'
 
 $rawScanKeys     = Get-GoJsonTags $scanSource 'rawScan'
 $missingFields   = Get-GoStringList $scanGo 'missingFields'
@@ -229,11 +230,19 @@ function Invoke-Case([string]$FakeDef, [string]$Body) {
     return [pscustomobject]@{ Json = ($raw | ConvertFrom-Json -AsHashtable); Raw = $raw; Noise = $noise }
 }
 
-# The install command line prefix, built the same way Install() builds it.
+# The install prefix as Install() runs it: the agent passes the selection as
+# NL_* environment arguments (installEnv) and psInstallPrefix splits them back
+# into arrays. Setting $env: ahead of the extracted prefix is what the child
+# sees when Exec puts them in its environment.
 function Get-InstallPrefix([bool]$All, [string[]]$KBs, [string[]]$IDs) {
-    $lit = { param($v) if (-not $v -or $v.Count -eq 0) { '@()' } else { '@(' + (($v | ForEach-Object { "'$_'" }) -join ',') + ')' } }
-    $allLit = if ($All) { 'true' } else { 'false' }
-    return ('$InstallAll = ${0}; $TargetKBs = {1}; $TargetUpdateIDs = {2};' -f $allLit, (& $lit $KBs), (& $lit $IDs))
+    $q = { param($v) "'" + ($v -replace "'", "''") + "'" }
+    $allValue = if ($All) { 'true' } else { 'false' }
+    $envLines = @(
+        '$env:NL_INSTALL_ALL = ' + (& $q $allValue)
+        '$env:NL_TARGET_KBS = ' + (& $q (@($KBs) -join ','))
+        '$env:NL_TARGET_UPDATE_IDS = ' + (& $q (@($IDs) -join ','))
+    )
+    return (($envLines -join '; ') + "`n" + $installPrefix)
 }
 
 # --- assertions ---------------------------------------------------------------

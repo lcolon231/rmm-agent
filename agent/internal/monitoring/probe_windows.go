@@ -5,21 +5,13 @@ package monitoring
 
 import (
 	"context"
-	"os/exec"
-	"strings"
-	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 // powerShell is a package var so Windows tests can drive the probe methods
 // with captured output instead of a live system.
-var powerShell psRunner = execPowerShell
-
-func execPowerShell(ctx context.Context, script string) (string, error) {
-	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(probeCtx, "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script).Output()
-	return strings.TrimSpace(string(out)), err
-}
+var powerShell pwsh.Runner = pwsh.Exec
 
 func (platformProbe) DiskPercent(ctx context.Context, mount string) (float64, bool, string) {
 	return diskPercent(ctx, powerShell, mount)

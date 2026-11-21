@@ -3,10 +3,13 @@ package svcproc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 const (
@@ -14,13 +17,35 @@ const (
 	controlTimeout = 90 * time.Second
 )
 
-// psRunner runs a bounded PowerShell command with an optional single
-// environment value bound to NL_ARG, so a validated target name/id never
-// enters the script text itself. It returns combined stdout+stderr.
-//
-// The Windows build binds it to powershell.exe. The glue below lives in an
-// untagged file so every CI job covers it; tests feed captured output.
-type psRunner func(ctx context.Context, timeout time.Duration, arg, script string) ([]byte, error)
+// The glue below runs through a pwsh.Runner, binding an optional single target
+// value to NL_ARG so a validated name/id never enters the script text itself.
+// The Windows build binds it to pwsh.Exec. It lives in an untagged file so
+// every CI job covers it; tests feed captured output.
+
+// script builds the Script for body, with target bound to NL_ARG when set.
+func script(body, target string, timeout time.Duration) pwsh.Script {
+	s := pwsh.Script{Body: body, Timeout: timeout}
+	if target != "" {
+		s.Env = map[string]string{"NL_ARG": target}
+	}
+	return s
+}
+
+// failureDetail is the text to report for a failed run: PowerShell writes
+// errors to stderr, but a script's own message may be on stdout. A run that
+// printed nothing, such as one killed at its timeout, reports err instead.
+func failureDetail(res pwsh.Result, err error) string {
+	if text := strings.TrimSpace(string(res.Stderr)); text != "" {
+		return text
+	}
+	if text := strings.TrimSpace(string(res.Stdout)); text != "" {
+		return text
+	}
+	if err != nil && !errors.As(err, new(*pwsh.ExitError)) {
+		return err.Error()
+	}
+	return ""
+}
 
 const (
 	listServicesScript  = "Get-CimInstance Win32_Service | Select-Object Name,DisplayName,State,StartMode,StartName | ConvertTo-Json -Compress"
@@ -29,11 +54,12 @@ const (
 	terminateScript     = "$ErrorActionPreference='Stop'; Stop-Process -Id ([int]$env:NL_ARG) -Force"
 )
 
-func psListServices(ctx context.Context, run psRunner) ([]ServiceInfo, error) {
-	out, err := run(ctx, listTimeout, "", listServicesScript)
+func psListServices(ctx context.Context, run pwsh.Runner) ([]ServiceInfo, error) {
+	res, err := run(ctx, script(listServicesScript, "", listTimeout))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("%w: %s", err, failureDetail(res, nil))
 	}
+	out := res.Stdout
 	var rows []struct {
 		Name        string `json:"Name"`
 		DisplayName string `json:"DisplayName"`
@@ -54,11 +80,12 @@ func psListServices(ctx context.Context, run psRunner) ([]ServiceInfo, error) {
 	return services, nil
 }
 
-func psListProcesses(ctx context.Context, run psRunner) ([]ProcessInfo, error) {
-	out, err := run(ctx, listTimeout, "", listProcessesScript)
+func psListProcesses(ctx context.Context, run pwsh.Runner) ([]ProcessInfo, error) {
+	res, err := run(ctx, script(listProcessesScript, "", listTimeout))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("%w: %s", err, failureDetail(res, nil))
 	}
+	out := res.Stdout
 	var rows []struct {
 		ProcessID int    `json:"ProcessId"`
 		Name      string `json:"Name"`
@@ -91,25 +118,25 @@ func controlServiceScript(action string) (string, error) {
 		verb + "; (Get-Service -Name $env:NL_ARG).Status.ToString()", nil
 }
 
-func psControlService(ctx context.Context, run psRunner, name, action string) (string, error) {
-	script, err := controlServiceScript(action)
+func psControlService(ctx context.Context, run pwsh.Runner, name, action string) (string, error) {
+	body, err := controlServiceScript(action)
 	if err != nil {
 		return "", err
 	}
-	out, err := run(ctx, controlTimeout, name, script)
-	text := strings.TrimSpace(string(out))
+	res, err := run(ctx, script(body, name, controlTimeout))
+	text := strings.TrimSpace(string(res.Stdout))
 	if strings.Contains(text, "NL_NOTFOUND") {
 		return "", fmt.Errorf("service does not exist")
 	}
 	if err != nil {
-		return "", fmt.Errorf("%s", firstLine(text))
+		return "", fmt.Errorf("%s", firstLine(failureDetail(res, err)))
 	}
 	return lastLine(text), nil
 }
 
-func psProcessName(ctx context.Context, run psRunner, pid int) (string, error) {
-	out, err := run(ctx, listTimeout, strconv.Itoa(pid), processNameScript)
-	text := strings.TrimSpace(string(out))
+func psProcessName(ctx context.Context, run pwsh.Runner, pid int) (string, error) {
+	res, err := run(ctx, script(processNameScript, strconv.Itoa(pid), listTimeout))
+	text := strings.TrimSpace(string(res.Stdout))
 	if err != nil || text == "" || strings.Contains(text, "NL_NOTFOUND") {
 		return "", fmt.Errorf("process not found")
 	}
@@ -122,10 +149,10 @@ func psProcessName(ctx context.Context, run psRunner, pid int) (string, error) {
 	return name, nil
 }
 
-func psTerminateProcess(ctx context.Context, run psRunner, pid int) error {
-	out, err := run(ctx, controlTimeout, strconv.Itoa(pid), terminateScript)
+func psTerminateProcess(ctx context.Context, run pwsh.Runner, pid int) error {
+	res, err := run(ctx, script(terminateScript, strconv.Itoa(pid), controlTimeout))
 	if err != nil {
-		return fmt.Errorf("%s", firstLine(strings.TrimSpace(string(out))))
+		return fmt.Errorf("%s", firstLine(failureDetail(res, err)))
 	}
 	return nil
 }

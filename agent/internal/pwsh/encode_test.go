@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package patching
+package pwsh
 
 import (
 	"encoding/base64"
@@ -18,7 +18,7 @@ func TestEncodeUTF16LE(t *testing.T) {
 		{"empty", "", ""},
 		{"single ascii", "A", "QQA="},
 		{"documented example", `dir "c:\program files" `, "ZABpAHIAIAAiAGMAOgBcAHAAcgBvAGcAcgBhAG0AIABmAGkAbABlAHMAIgAgAA=="},
-		{"install prefix", "$InstallAll = $false; $TargetKBs = @('KB5034441');",
+		{"assignment script", "$InstallAll = $false; $TargetKBs = @('KB5034441');",
 			"JABJAG4AcwB0AGEAbABsAEEAbABsACAAPQAgACQAZgBhAGwAcwBlADsAIAAkAFQAYQByAGcAZQB0AEsAQgBzACAAPQAgAEAAKAAnAEsAQgA1ADAAMwA0ADQANAAxACcAKQA7AA=="},
 		{"latin-1 and BMP", "café €", "YwBhAGYA6QAgAKwg"},
 		{"surrogate pair", "\U0001F600", "PdgA3g=="},
@@ -33,10 +33,10 @@ func TestEncodeUTF16LE(t *testing.T) {
 	}
 }
 
-// The whole install script must survive the encoding unchanged, since that is
+// A whole script must survive the encoding unchanged, since that is
 // the exact payload handed to -EncodedCommand.
-func TestEncodeUTF16LERoundTripsInstallScript(t *testing.T) {
-	raw, err := base64.StdEncoding.DecodeString(encodeUTF16LE(psInstallScriptForEncodingTest))
+func TestEncodeUTF16LERoundTripsAScript(t *testing.T) {
+	raw, err := base64.StdEncoding.DecodeString(encodeUTF16LE(scriptForEncodingTest))
 	if err != nil {
 		t.Fatalf("decode base64: %v", err)
 	}
@@ -47,10 +47,10 @@ func TestEncodeUTF16LERoundTripsInstallScript(t *testing.T) {
 	for i := range units {
 		units[i] = uint16(raw[2*i]) | uint16(raw[2*i+1])<<8
 	}
-	if got := string(utf16.Decode(units)); got != psInstallScriptForEncodingTest {
+	if got := string(utf16.Decode(units)); got != scriptForEncodingTest {
 		t.Fatalf("round trip changed the script")
 	}
 }
 
-const psInstallScriptForEncodingTest = "$InstallAll = $true; $TargetKBs = @(); $TargetUpdateIDs = @();\n" +
+const scriptForEncodingTest = "$InstallAll = $true; $TargetKBs = @(); $TargetUpdateIDs = @();\n" +
 	"$result = [ordered]@{ status = 'success' }\n$result | ConvertTo-Json -Compress\n# naïve — ✓ \U0001F600\n"

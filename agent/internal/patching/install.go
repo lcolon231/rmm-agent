@@ -17,6 +17,26 @@ var (
 	updateIDTargetPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
+// psInstallPrefix binds the variables psInstallScript reads from the
+// environment arguments installEnv builds. The identifiers are validated
+// against kbTargetPattern and updateIDTargetPattern, so none contains the comma
+// that separates them. It stays one raw literal so test/wua_scripts.ps1 can
+// extract it.
+const psInstallPrefix = `$InstallAll = $env:NL_INSTALL_ALL -eq 'true'; $TargetKBs = @(if ($env:NL_TARGET_KBS) { $env:NL_TARGET_KBS -split ',' }); $TargetUpdateIDs = @(if ($env:NL_TARGET_UPDATE_IDS) { $env:NL_TARGET_UPDATE_IDS -split ',' });`
+
+// installEnv returns the environment arguments for normalized targets.
+func installEnv(targets InstallTargets) map[string]string {
+	all := "false"
+	if targets.All {
+		all = "true"
+	}
+	return map[string]string{
+		"NL_INSTALL_ALL":       all,
+		"NL_TARGET_KBS":        strings.Join(targets.KBIDs, ","),
+		"NL_TARGET_UPDATE_IDS": strings.Join(targets.UpdateIDs, ","),
+	}
+}
+
 // InstallTargets is the fail-closed selection for one installation command.
 // All must be explicitly true when no identifiers are supplied.
 type InstallTargets struct {
@@ -26,7 +46,7 @@ type InstallTargets struct {
 }
 
 // NormalizeInstallTargets validates, normalizes, and deduplicates signed target
-// values before they are embedded into the PowerShell command.
+// values before they are passed to the PowerShell command.
 func NormalizeInstallTargets(targets InstallTargets) (InstallTargets, error) {
 	if targets.All && (len(targets.KBIDs) > 0 || len(targets.UpdateIDs) > 0) {
 		return InstallTargets{}, fmt.Errorf("install_all cannot be combined with update identifiers")

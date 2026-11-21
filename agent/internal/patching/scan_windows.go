@@ -7,10 +7,10 @@ package patching
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/inventory"
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 // scanTimeout bounds the whole Windows Update search. A live scan against the
@@ -134,18 +134,13 @@ $result | ConvertTo-Json -Depth 4 -Compress
 // failure that still yields installed state is returned as a section with a
 // non-empty error_code and StatusUnavailable.
 func Scan(ctx context.Context) (inventory.Section, Summary, error) {
-	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive",
-		"-ExecutionPolicy", "Bypass", "-Command", psScript)
-	out, err := cmd.Output()
+	res, err := runPS(ctx, pwsh.Script{Body: psScript, Timeout: scanTimeout})
 	if err != nil {
 		return inventory.Section{}, Summary{}, err
 	}
 
 	var raw rawScan
-	if err := json.Unmarshal(extractPSJSON(out), &raw); err != nil {
+	if err := json.Unmarshal(extractPSJSON(res.Stdout), &raw); err != nil {
 		return inventory.Section{}, Summary{}, err
 	}
 	section, summary := BuildSection(

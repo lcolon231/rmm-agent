@@ -6,15 +6,10 @@ package inventory
 
 import (
 	"context"
-	"encoding/json"
-	"os/exec"
 	"time"
-)
 
-// Per-section timeout. Inventory runs on the heartbeat goroutine, so a wedged
-// CIM provider must not be able to stall check-in; the section it belongs to
-// is reported unavailable and the rest still collect.
-const sectionTimeout = 30 * time.Second
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
+)
 
 // collect gathers each section independently. A section that fails is returned
 // with StatusUnavailable rather than dropped, so the server can distinguish
@@ -49,34 +44,12 @@ func collect(ctx context.Context) []Section {
 	return sections
 }
 
-// psJSON runs a PowerShell snippet and decodes its JSON output into rows.
-//
-// Windows PowerShell 5.1 collapses a single-element array to a bare object, so
-// the result is decoded as an array first and retried as one object. Getting
-// this wrong would silently report a one-disk machine as having no disks.
+// runPS is a var so tests can drive the collectors without PowerShell.
+var runPS pwsh.Runner = pwsh.Exec
+
+// psJSON runs a collector snippet through runJSON.
 func psJSON(ctx context.Context, script string) ([]map[string]any, error) {
-	ctx, cancel := context.WithTimeout(ctx, sectionTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive",
-		"-ExecutionPolicy", "Bypass", "-Command", script)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-
-	var rows []map[string]any
-	if err := json.Unmarshal(out, &rows); err == nil {
-		return rows, nil
-	}
-	var single map[string]any
-	if err := json.Unmarshal(out, &single); err != nil {
-		return nil, err
-	}
-	return []map[string]any{single}, nil
+	return runJSON(ctx, runPS, script)
 }
 
 func collectSystem(ctx context.Context) (map[string]any, string) {

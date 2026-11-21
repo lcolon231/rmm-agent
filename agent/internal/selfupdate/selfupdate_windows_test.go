@@ -12,6 +12,10 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/lcolon231/rmm/agent/internal/authenticode"
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
+	"github.com/lcolon231/rmm/agent/internal/pwsh/pwshtest"
 )
 
 // openLikeTheLoader opens path the way the Windows image loader holds a running
@@ -203,33 +207,30 @@ func TestPlatformRestartService(t *testing.T) {
 func TestPlatformVerifyAuthenticode(t *testing.T) {
 	tests := []struct {
 		name      string
-		out       string
-		err       error
+		reply     func(pwsh.Script) (pwsh.Result, error)
 		wantValid bool
 		wantThumb string
 		wantErr   bool
 	}{
-		{"valid", "Valid|AABBCCDDEEFF00112233445566778899AABBCCDD\r\n", nil, true, "AABBCCDDEEFF00112233445566778899AABBCCDD", false},
-		{"not signed", "NotSigned|\r\n", nil, false, "", false},
-		{"powershell failed", "", errors.New("exit status 1"), false, "", true},
+		{"valid", pwshtest.Stdout("Valid|AABBCCDDEEFF00112233445566778899AABBCCDD\r\n"), true, "AABBCCDDEEFF00112233445566778899AABBCCDD", false},
+		{"not signed", pwshtest.Stdout("NotSigned|\r\n"), false, "", false},
+		{"powershell failed", pwshtest.Exit("", "denied", 1), false, "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			orig := runPowerShell
-			var env []string
-			var ran string
-			runPowerShell = func(_ context.Context, e []string, name string, _ ...string) ([]byte, error) {
-				env, ran = e, name
-				return []byte(tt.out), tt.err
-			}
+			fake := &pwshtest.Fake{Reply: tt.reply}
+			runPowerShell = fake.Run
 			t.Cleanup(func() { runPowerShell = orig })
 
-			valid, thumb, err := platformVerifyAuthenticode(context.Background(), `C:\NodeLink\update\staged-1`)
+			path := `C:\NodeLink\update\staged-1`
+			valid, thumb, err := platformVerifyAuthenticode(context.Background(), path)
 			if valid != tt.wantValid || thumb != tt.wantThumb || (err != nil) != tt.wantErr {
 				t.Fatalf("got %v, %q, %v", valid, thumb, err)
 			}
-			if ran != "powershell.exe" || !reflect.DeepEqual(env, []string{`NL_UPDATE_PATH=C:\NodeLink\update\staged-1`}) {
-				t.Fatalf("ran %q with env %#v", ran, env)
+			want := []pwsh.Script{authenticode.Script("NL_UPDATE_PATH", path)}
+			if calls := fake.Calls(); !reflect.DeepEqual(calls, want) {
+				t.Fatalf("calls = %#v", calls)
 			}
 		})
 	}

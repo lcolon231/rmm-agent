@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lcolon231/rmm/agent/internal/authenticode"
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 // The shell-outs behind the Windows platform functions. They live in an
@@ -80,16 +80,20 @@ const productCodeScript = "$i = New-Object -ComObject WindowsInstaller.Installer
 	"$r = $v.GetType().InvokeMember('Fetch','InvokeMethod',$null,$v,$null); " +
 	"if ($r) { Write-Output $r.GetType().InvokeMember('StringData','GetProperty',$null,$r,@(1)) }"
 
+// productCodeTimeout bounds the ProductCode read.
+const productCodeTimeout = 60 * time.Second
+
 // readProductCodeWith returns the MSI's ProductCode so an operator has the code
 // needed to uninstall (`msiexec /x`). A read failure yields an empty string
 // rather than failing the deployment.
-func readProductCodeWith(ctx context.Context, run authenticode.Runner, path string) string {
-	bounded, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	out, err := run(bounded, []string{pathEnvVar + "=" + path},
-		"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", productCodeScript)
+func readProductCodeWith(ctx context.Context, run pwsh.Runner, path string) string {
+	res, err := run(ctx, pwsh.Script{
+		Body:    productCodeScript,
+		Env:     map[string]string{pathEnvVar: path},
+		Timeout: productCodeTimeout,
+	})
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(string(res.Stdout))
 }

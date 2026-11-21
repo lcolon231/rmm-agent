@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 // These run the real Get-AuthenticodeSignature, so they prove the script and
@@ -18,7 +20,7 @@ func TestVerifyAcceptsASignedSystemBinary(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Skipf("no Windows PowerShell at %s: %v", path, err)
 	}
-	valid, thumb, err := Verify(context.Background(), Exec, "NL_TEST_PATH", path)
+	valid, thumb, err := Verify(context.Background(), pwsh.Exec, "NL_TEST_PATH", path)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -32,7 +34,7 @@ func TestVerifyRejectsAnUnsignedFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("MZ not really a program"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	valid, thumb, err := Verify(context.Background(), Exec, "NL_TEST_PATH", path)
+	valid, thumb, err := Verify(context.Background(), pwsh.Exec, "NL_TEST_PATH", path)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}

@@ -5,13 +5,12 @@
 package patching
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
-	"strings"
 	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 const installTimeout = 20 * time.Minute
@@ -131,51 +130,31 @@ $result | ConvertTo-Json -Depth 3 -Compress
 // Install downloads and installs the explicitly selected targets. Installing all
 // applicable updates requires targets.All; an empty request is rejected.
 func Install(ctx context.Context, targets InstallTargets) (InstallResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, installTimeout)
-	defer cancel()
-
 	normalized, err := NormalizeInstallTargets(targets)
 	if err != nil {
 		return InstallResult{Status: "failed", Message: err.Error()}, err
 	}
 
-	arrayLiteral := func(values []string) string {
-		if len(values) == 0 {
-			return "@()"
-		}
-		quoted := make([]string, len(values))
-		for i, value := range values {
-			quoted[i] = fmt.Sprintf("'%s'", value)
-		}
-		return "@(" + strings.Join(quoted, ",") + ")"
-	}
-	prefix := fmt.Sprintf(
-		"$InstallAll = $%t; $TargetKBs = %s; $TargetUpdateIDs = %s;",
-		normalized.All,
-		arrayLiteral(normalized.KBIDs),
-		arrayLiteral(normalized.UpdateIDs),
-	)
-
-	fullScript := fmt.Sprintf("%s\n%s", prefix, psInstallScript)
-	encoded := encodeUTF16LE(fullScript)
-
-	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil && stdout.Len() == 0 {
+	// -EncodedCommand keeps the long multi-line script clear of command-line
+	// quoting; the selection travels in the environment.
+	run, err := runPS(ctx, pwsh.Script{
+		Body:    psInstallPrefix + "\n" + psInstallScript,
+		Env:     installEnv(normalized),
+		Timeout: installTimeout,
+		Encoded: true,
+	})
+	if err != nil && len(run.Stdout) == 0 {
 		return InstallResult{
 			Status:  "failed",
-			Message: fmt.Sprintf("powershell install execution failed: %v: %s", err, stderr.String()),
+			Message: fmt.Sprintf("powershell install execution failed: %v: %s", err, run.Stderr),
 		}, err
 	}
 
 	var res InstallResult
-	if err := json.Unmarshal(extractPSJSON(stdout.Bytes()), &res); err != nil {
+	if err := json.Unmarshal(extractPSJSON(run.Stdout), &res); err != nil {
 		return InstallResult{
 			Status:  "failed",
-			Message: fmt.Sprintf("failed to parse install script result JSON: %v, raw stdout: %s", err, stdout.String()),
+			Message: fmt.Sprintf("failed to parse install script result JSON: %v, raw stdout: %s", err, run.Stdout),
 		}, err
 	}
 

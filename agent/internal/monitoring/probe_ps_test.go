@@ -6,87 +6,54 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
+	"github.com/lcolon231/rmm/agent/internal/pwsh/pwshtest"
 )
 
-// fakePS returns a psRunner that records the script it was given and replies
-// with captured PowerShell output.
-func fakePS(out string, err error, gotScript *string) psRunner {
-	return func(_ context.Context, script string) (string, error) {
-		if gotScript != nil {
-			*gotScript = script
-		}
-		return out, err
+// fakePS returns a Fake that replies with captured PowerShell stdout, or fails
+// with err when it is set.
+func fakePS(out string, err error) *pwshtest.Fake {
+	if err != nil {
+		return &pwshtest.Fake{Reply: pwshtest.Fail(err)}
 	}
+	return &pwshtest.Fake{Reply: pwshtest.Stdout(out)}
 }
 
-func TestPSQuote(t *testing.T) {
-	cases := []struct {
-		name, in, want string
-	}{
-		{"plain", "C:", "C:"},
-		{"empty", "", ""},
-		{"single quote", "O'Brien", "O''Brien"},
-		{"injection", "C:'; Remove-Item C:\\important; '", "C:''; Remove-Item C:\\important; ''"},
-		{"double quote and dollar left alone", `"$env:X"`, `"$env:X"`},
+func onlyCall(t *testing.T, fake *pwshtest.Fake) pwsh.Script {
+	t.Helper()
+	calls := fake.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("runner called %d times, want 1", len(calls))
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := psQuote(tc.in); got != tc.want {
-				t.Fatalf("psQuote(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
+	if calls[0].Timeout != probeTimeout {
+		t.Fatalf("probe timeout = %s, want %s", calls[0].Timeout, probeTimeout)
 	}
+	return calls[0]
 }
 
-// singleQuotedLiterals returns the bodies of every '...' literal in script,
-// honouring PowerShell's doubled-quote escape.
-func singleQuotedLiterals(script string) []string {
-	var out []string
-	for i := 0; i < len(script); i++ {
-		if script[i] != '\'' {
-			continue
-		}
-		var b strings.Builder
-		j := i + 1
-		for ; j < len(script); j++ {
-			if script[j] == '\'' {
-				if j+1 < len(script) && script[j+1] == '\'' {
-					b.WriteByte('\'')
-					j++
-					continue
-				}
-				break
-			}
-			b.WriteByte(script[j])
-		}
-		out = append(out, b.String())
-		i = j
-	}
-	return out
-}
-
-func TestProbeScriptsKeepUntrustedValuesInsideOneLiteral(t *testing.T) {
+// Policy-supplied mount points and service names travel as environment
+// arguments; the script text is a constant they can never reach.
+func TestProbeValuesNeverEnterScriptText(t *testing.T) {
 	hostile := `x'; Remove-Item -Recurse C:\; 'y`
 	cases := []struct {
 		name   string
-		script string
+		probe  func(*pwshtest.Fake)
+		envVar string
 	}{
-		{"disk", diskPercentScript(hostile)},
-		{"service", serviceStateScript(hostile)},
+		{"disk", func(f *pwshtest.Fake) { diskPercent(context.Background(), f.Run, hostile) }, "NL_MOUNT"},
+		{"service", func(f *pwshtest.Fake) { serviceState(context.Background(), f.Run, hostile) }, "NL_SERVICE"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if !strings.Contains(tc.script, psQuote(hostile)) {
-				t.Fatalf("script does not carry the quoted value: %s", tc.script)
+			fake := fakePS("", nil)
+			tc.probe(fake)
+			call := onlyCall(t, fake)
+			if strings.Contains(call.Body, hostile) || strings.Contains(call.Body, "Remove-Item") {
+				t.Fatalf("value leaked into script: %s", call.Body)
 			}
-			found := false
-			for _, lit := range singleQuotedLiterals(tc.script) {
-				if lit == hostile {
-					found = true
-				}
-			}
-			if !found {
-				t.Fatalf("value did not round-trip as a single literal: %s", tc.script)
+			if !strings.Contains(call.Body, "$env:"+tc.envVar) || call.Env[tc.envVar] != hostile || len(call.Env) != 1 {
+				t.Fatalf("value not passed via %s: %+v", tc.envVar, call)
 			}
 		})
 	}
@@ -113,13 +80,13 @@ func TestDiskPercent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var script string
-			got, ok, cause := diskPercent(context.Background(), fakePS(tc.out, tc.err, &script), "C:")
+			fake := fakePS(tc.out, tc.err)
+			got, ok, cause := diskPercent(context.Background(), fake.Run, "C:")
 			if got != tc.want || ok != tc.wantOK || cause != tc.wantCause {
 				t.Fatalf("diskPercent = (%v, %v, %q), want (%v, %v, %q)", got, ok, cause, tc.want, tc.wantOK, tc.wantCause)
 			}
-			if !strings.HasPrefix(script, "$mount='C:';") || !strings.Contains(script, "Win32_LogicalDisk") {
-				t.Fatalf("unexpected disk script: %s", script)
+			if call := onlyCall(t, fake); call.Body != diskPercentScript || call.Env["NL_MOUNT"] != "C:" {
+				t.Fatalf("unexpected disk call: %+v", call)
 			}
 		})
 	}
@@ -142,13 +109,13 @@ func TestServiceState(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var script string
-			got, ok, cause := serviceState(context.Background(), fakePS(tc.out, tc.err, &script), "Spooler")
+			fake := fakePS(tc.out, tc.err)
+			got, ok, cause := serviceState(context.Background(), fake.Run, "Spooler")
 			if got != tc.want || ok != tc.wantOK || cause != tc.wantCause {
 				t.Fatalf("serviceState = (%q, %v, %q), want (%q, %v, %q)", got, ok, cause, tc.want, tc.wantOK, tc.wantCause)
 			}
-			if !strings.HasPrefix(script, "$s=Get-Service -Name 'Spooler' ") {
-				t.Fatalf("unexpected service script: %s", script)
+			if call := onlyCall(t, fake); call.Body != serviceStateScript || call.Env["NL_SERVICE"] != "Spooler" {
+				t.Fatalf("unexpected service call: %+v", call)
 			}
 		})
 	}
@@ -176,8 +143,9 @@ func TestRebootPending(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var script string
-			got, ok, cause := rebootPending(context.Background(), fakePS(tc.out, tc.err, &script))
+			fake := fakePS(tc.out, tc.err)
+			got, ok, cause := rebootPending(context.Background(), fake.Run)
+			script := onlyCall(t, fake).Body
 			if got != tc.want || ok != tc.wantOK || cause != tc.wantCause {
 				t.Fatalf("rebootPending = (%+v, %v, %q), want (%+v, %v, %q)", got, ok, cause, tc.want, tc.wantOK, tc.wantCause)
 			}
