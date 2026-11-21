@@ -39,7 +39,14 @@ try {
   $search   = $searcher.Search("IsInstalled=0 and IsHidden=0")
   
   if ($search.Updates.Count -eq 0) {
-    $result.message = 'No missing updates found to install.'
+    if ($InstallAll) {
+      $result.message = 'No missing updates found to install.'
+    } else {
+      # Explicit targets on a fully patched endpoint matched nothing; reporting
+      # success would claim the requested KBs or Update IDs were handled.
+      $result.status = 'failed'
+      $result.message = 'None of the requested KB or Windows Update IDs were found among applicable missing updates.'
+    }
     $result | ConvertTo-Json -Depth 3 -Compress
     exit 0
   }
