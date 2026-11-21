@@ -2398,7 +2398,7 @@ async def list_commands(
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated command history for one endpoint, newest first."""
-    agent = await access.agent(agent_id)
+    await access.agent(agent_id)
     total = (
         await db.execute(
             select(func.count()).select_from(Command).where(Command.agent_id == agent_id)
@@ -3570,7 +3570,7 @@ async def list_agent_monitoring_results(
     access: TenantAccess = Depends(tenant_access(OperatorRole.readonly)),
     db: AsyncSession = Depends(get_db),
 ):
-    agent = await access.agent(agent_id)
+    await access.agent(agent_id)
     conditions = [CheckResult.agent_id == agent_id]
     if check_key is not None:
         conditions.append(CheckResult.check_key == check_key)
@@ -4902,7 +4902,7 @@ async def get_endpoint_inventory(
     listed separately rather than omitted, so "we have no data for this" is
     visible instead of looking like the section does not exist.
     """
-    agent = await access.agent(endpoint_id, not_found="Endpoint not found")
+    await access.agent(endpoint_id, not_found="Endpoint not found")
 
     latest = await inventory.latest_sections(db, endpoint_id)
     items = [
@@ -4943,7 +4943,7 @@ async def get_inventory_history(
     *changes* rather than a sample of every collection. Retention bounds how far
     back it reaches; the newest row is never pruned.
     """
-    agent = await access.agent(endpoint_id, not_found="Endpoint not found")
+    await access.agent(endpoint_id, not_found="Endpoint not found")
 
     filters = [
         AgentInventorySnapshot.agent_id == endpoint_id,
@@ -4997,7 +4997,7 @@ async def get_inventory_diff(
     snapshots must belong to this endpoint and this section — a diff across
     endpoints would silently compare unrelated machines.
     """
-    agent = await access.agent(endpoint_id, not_found="Endpoint not found")
+    await access.agent(endpoint_id, not_found="Endpoint not found")
 
     async def _load(snapshot_id: str) -> AgentInventorySnapshot:
         row = await db.get(AgentInventorySnapshot, snapshot_id)

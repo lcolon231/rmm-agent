@@ -22,7 +22,9 @@ by each handler's author remembering it.
 """
 from __future__ import annotations
 
+import enum
 from collections.abc import Awaitable, Callable
+from typing import Literal
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,14 +47,27 @@ from app.models.models import (
 # A 404 ``detail``: prose, or a coded body such as ``{"code": ...}``.
 NotFoundDetail = str | dict
 
-# Marker for "use the tier the route declared". ``None`` is a real tier value
-# meaning "visibility only", so it cannot double as the default.
-_ROUTE_TIER = object()
-# Marker for "attribute the event to the resolved tenant".
-_INFER = object()
-# The request authorized resources in two different tenants, so no single
-# client can be inferred for its audit events.
-_AMBIGUOUS = object()
+
+
+class _Marker(enum.Enum):
+    """Typed sentinels, for parameters where ``None`` is itself meaningful."""
+
+    # "Use the tier the route declared": ``None`` already means "visibility
+    # only", so it cannot double as the default.
+    ROUTE_TIER = enum.auto()
+    # "Attribute the audit event to the resolved tenant."
+    INFER = enum.auto()
+    # The request authorized resources in two different tenants, so no single
+    # client can be inferred for its audit events.
+    AMBIGUOUS = enum.auto()
+
+
+_ROUTE_TIER: Literal[_Marker.ROUTE_TIER] = _Marker.ROUTE_TIER
+_INFER: Literal[_Marker.INFER] = _Marker.INFER
+_AMBIGUOUS: Literal[_Marker.AMBIGUOUS] = _Marker.AMBIGUOUS
+
+# A loader's tier: a client role, ``None`` for visibility only, or the route's.
+Tier = ClientRole | None | Literal[_Marker.ROUTE_TIER]
 
 
 class TenantAccess:
@@ -70,7 +85,7 @@ class TenantAccess:
         self._db = db
         self._request = request
         self._tier = tier
-        self._client_id: str | None | object = None
+        self._client_id: str | None | Literal[_Marker.AMBIGUOUS] = None
 
     @property
     def operator(self) -> Operator:
@@ -89,7 +104,7 @@ class TenantAccess:
         self,
         client_id: str | None,
         *,
-        tier: ClientRole | None | object = _ROUTE_TIER,
+        tier: Tier = _ROUTE_TIER,
         not_found: NotFoundDetail = "Not found",
     ) -> None:
         """Gate on a client id the handler resolved itself.
@@ -126,7 +141,7 @@ class TenantAccess:
         self,
         client_id: str,
         *,
-        tier: ClientRole | None | object = _ROUTE_TIER,
+        tier: Tier = _ROUTE_TIER,
         not_found: NotFoundDetail = "Client not found",
     ) -> Client:
         client = await self._load(Client, client_id, not_found)
@@ -137,7 +152,7 @@ class TenantAccess:
         self,
         site_id: str,
         *,
-        tier: ClientRole | None | object = _ROUTE_TIER,
+        tier: Tier = _ROUTE_TIER,
         not_found: NotFoundDetail = "Site not found",
     ) -> Site:
         site = await self._load(Site, site_id, not_found)
@@ -148,7 +163,7 @@ class TenantAccess:
         self,
         agent_id: str,
         *,
-        tier: ClientRole | None | object = _ROUTE_TIER,
+        tier: Tier = _ROUTE_TIER,
         not_found: NotFoundDetail = "Agent not found",
     ) -> Agent:
         agent = await self._load(Agent, agent_id, not_found)
@@ -160,7 +175,7 @@ class TenantAccess:
         self,
         alert_id: str,
         *,
-        tier: ClientRole | None | object = _ROUTE_TIER,
+        tier: Tier = _ROUTE_TIER,
         not_found: NotFoundDetail = "Alert not found",
     ) -> Alert:
         """An alert belongs to its agent's client; an orphaned alert is a 404."""
@@ -174,7 +189,7 @@ class TenantAccess:
         detail: dict | None = None,
         *,
         agent_id: str | None = None,
-        organization_id: str | None | object = _INFER,
+        organization_id: str | None | Literal[_Marker.INFER] = _INFER,
     ) -> AuditEvent:
         """Append an audit event attributed to this request.
 
