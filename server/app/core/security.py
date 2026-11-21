@@ -20,13 +20,11 @@ import base64
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import bcrypt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
-    Ed25519PublicKey,
 )
 from jose import JWTError, jwt
 

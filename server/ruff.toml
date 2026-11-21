@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Server lint gate, run in CI. Deliberately narrow: pyflakes (unused or
+# undefined names, redefinitions) and syntax errors -- mistakes, not style.
+# Widen the selection in its own change, fixing the tree in the same PR.
+target-version = "py312"
+
+[lint]
+select = ["E9", "F"]
+
+[lint.per-file-ignores]
+# Reuses test_monitoring's `operator_client` fixture by import, the pytest
+# idiom pyflakes reads as an unused import shadowed by each test parameter.
+"tests/test_patch_age_checks.py" = ["F401", "F811"]

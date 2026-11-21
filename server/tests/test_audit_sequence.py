@@ -29,7 +29,7 @@ os.environ.setdefault("COMMAND_SIGNING_KEY_PATH", "command_signing_key.pem")
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from alembic import command  # noqa: E402
-from sqlalchemy import select, text  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncSession,
     create_async_engine,

@@ -2,7 +2,6 @@
 import os
 from datetime import timedelta
 from urllib.parse import parse_qs, urlsplit
-from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_support_chat.db")
 os.environ.setdefault("SECRET_KEY", "test-secret")
