@@ -5,7 +5,9 @@ package patching
 import (
 	"context"
 	"errors"
+	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -78,5 +80,31 @@ func TestNormalizeInstallTargetsRequiresExplicitScope(t *testing.T) {
 	all, err := NormalizeInstallTargets(InstallTargets{All: true})
 	if err != nil || !all.All {
 		t.Fatalf("explicit install_all should be accepted: %+v, %v", all, err)
+	}
+}
+
+// The signed selection reaches PowerShell as environment arguments that
+// psInstallPrefix splits back into arrays; it never enters the script text.
+func TestInstallEnvBindsTargets(t *testing.T) {
+	cases := []struct {
+		name    string
+		targets InstallTargets
+		want    map[string]string
+	}{
+		{"all", InstallTargets{All: true}, map[string]string{"NL_INSTALL_ALL": "true", "NL_TARGET_KBS": "", "NL_TARGET_UPDATE_IDS": ""}},
+		{"explicit", InstallTargets{KBIDs: []string{"KB5034441", "KB5002500"}, UpdateIDs: []string{"22222222-2222-2222-2222-222222222222"}},
+			map[string]string{"NL_INSTALL_ALL": "false", "NL_TARGET_KBS": "KB5034441,KB5002500", "NL_TARGET_UPDATE_IDS": "22222222-2222-2222-2222-222222222222"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := installEnv(tc.targets); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("installEnv = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	for _, name := range []string{"NL_INSTALL_ALL", "NL_TARGET_KBS", "NL_TARGET_UPDATE_IDS"} {
+		if !strings.Contains(psInstallPrefix, "$env:"+name) {
+			t.Fatalf("psInstallPrefix does not read %s: %s", name, psInstallPrefix)
+		}
 	}
 }

@@ -29,7 +29,7 @@ if (-not (Test-Path $Source)) { throw "probe source not found: $Source" }
 # comments between them and stopping at the closing backtick of the last chunk.
 $go = Get-Content -Raw $Source
 $body = $go.Substring($go.IndexOf('func rebootPending('))
-$body = $body.Substring(0, $body.IndexOf('out, err := run(ctx, script)'))
+$body = $body.Substring(0, $body.IndexOf('out, err := probe(ctx, run, script, nil)'))
 $chunks = [regex]::Matches($body, '`([^`]*)`') | ForEach-Object { $_.Groups[1].Value }
 if ($chunks.Count -lt 2) { throw "could not extract the probe script from $Source" }
 $script = -join $chunks

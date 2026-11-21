@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
+	"github.com/lcolon231/rmm/agent/internal/pwsh/pwshtest"
 )
 
 func TestInstallerCommand(t *testing.T) {
@@ -110,39 +113,28 @@ func TestRunInstallerWithReportsTimeout(t *testing.T) {
 	}
 }
 
-type psCall struct {
-	env  []string
-	name string
-	args []string
-}
-
 func TestReadProductCodeWith(t *testing.T) {
 	tests := []struct {
-		name string
-		out  string
-		err  error
-		want string
+		name  string
+		reply func(pwsh.Script) (pwsh.Result, error)
+		want  string
 	}{
-		{"code with CRLF", "{2B7C2A5E-1F1D-4E4B-9C61-0D5A3B1E7F10}\r\n", nil, "{2B7C2A5E-1F1D-4E4B-9C61-0D5A3B1E7F10}"},
-		{"no ProductCode row", "", nil, ""},
-		{"read failure is not fatal", "partial", errors.New("COM error"), ""},
+		{"code with CRLF", pwshtest.Stdout("{2B7C2A5E-1F1D-4E4B-9C61-0D5A3B1E7F10}\r\n"), "{2B7C2A5E-1F1D-4E4B-9C61-0D5A3B1E7F10}"},
+		{"no ProductCode row", pwshtest.Stdout(""), ""},
+		{"read failure is not fatal", pwshtest.Exit("partial", "COM error", 1), ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var calls []psCall
-			run := func(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
-				calls = append(calls, psCall{env, name, args})
-				return []byte(tt.out), tt.err
-			}
-			if got := readProductCodeWith(context.Background(), run, `C:\tmp\app.msi`); got != tt.want {
+			fake := &pwshtest.Fake{Reply: tt.reply}
+			if got := readProductCodeWith(context.Background(), fake.Run, `C:\tmp\app.msi`); got != tt.want {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
-			want := []psCall{{
-				[]string{`NL_DEPLOY_PATH=C:\tmp\app.msi`},
-				"powershell.exe",
-				[]string{"-NoProfile", "-NonInteractive", "-Command", productCodeScript},
+			want := []pwsh.Script{{
+				Body:    productCodeScript,
+				Env:     map[string]string{"NL_DEPLOY_PATH": `C:\tmp\app.msi`},
+				Timeout: productCodeTimeout,
 			}}
-			if !reflect.DeepEqual(calls, want) {
+			if calls := fake.Calls(); !reflect.DeepEqual(calls, want) {
 				t.Fatalf("calls = %#v", calls)
 			}
 		})

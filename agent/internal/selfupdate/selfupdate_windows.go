@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/authenticode"
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 // Process seams, swapped by tests so no PowerShell or sc.exe ever starts.
 var (
-	runPowerShell authenticode.Runner = authenticode.Exec
-	lookPath                          = exec.LookPath
-	startDetached                     = func(name string, args ...string) error {
+	runPowerShell pwsh.Runner = pwsh.Exec
+	lookPath                  = exec.LookPath
+	startDetached             = func(name string, args ...string) error {
 		cmd := exec.Command(name, args...)
 		if err := cmd.Start(); err != nil {
 			return err

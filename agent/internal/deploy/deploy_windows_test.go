@@ -5,12 +5,13 @@ package deploy
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/authenticode"
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
+	"github.com/lcolon231/rmm/agent/internal/pwsh/pwshtest"
 )
 
 func fakeProcess(t *testing.T, code int, err error) *[]processCall {
@@ -25,16 +26,13 @@ func fakeProcess(t *testing.T, code int, err error) *[]processCall {
 	return &calls
 }
 
-func fakePowerShell(t *testing.T, out string, err error) *[]psCall {
+func fakePowerShell(t *testing.T, reply func(pwsh.Script) (pwsh.Result, error)) *pwshtest.Fake {
 	t.Helper()
 	orig := runPowerShell
-	var calls []psCall
-	runPowerShell = func(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
-		calls = append(calls, psCall{env, name, append([]string(nil), args...)})
-		return []byte(out), err
-	}
+	fake := &pwshtest.Fake{Reply: reply}
+	runPowerShell = fake.Run
 	t.Cleanup(func() { runPowerShell = orig })
-	return &calls
+	return fake
 }
 
 func TestPlatformRunInstallerArgv(t *testing.T) {
@@ -77,38 +75,36 @@ func TestPlatformRunInstallerRefusesUnknownTypeWithoutStarting(t *testing.T) {
 func TestPlatformVerifyAuthenticode(t *testing.T) {
 	tests := []struct {
 		name      string
-		out       string
-		err       error
+		reply     func(pwsh.Script) (pwsh.Result, error)
 		wantValid bool
 		wantThumb string
 		wantErr   bool
 	}{
-		{"valid", "Valid|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n", nil, true, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", false},
-		{"not signed", "NotSigned|\r\n", nil, false, "", false},
-		{"powershell failed", "", errors.New("exit status 1"), false, "", true},
+		{"valid", pwshtest.Stdout("Valid|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n"), true, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", false},
+		{"not signed", pwshtest.Stdout("NotSigned|\r\n"), false, "", false},
+		{"powershell failed", pwshtest.Exit("", "denied", 1), false, "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			calls := fakePowerShell(t, tt.out, tt.err)
+			fake := fakePowerShell(t, tt.reply)
 			valid, thumb, err := platformVerifyAuthenticode(context.Background(), `C:\Temp\app.msi`)
 			if valid != tt.wantValid || thumb != tt.wantThumb || (err != nil) != tt.wantErr {
 				t.Fatalf("got %v, %q, %v", valid, thumb, err)
 			}
-			name, args := authenticode.Command(pathEnvVar)
-			want := []psCall{{[]string{`NL_DEPLOY_PATH=C:\Temp\app.msi`}, name, args}}
-			if !reflect.DeepEqual(*calls, want) {
-				t.Fatalf("calls = %#v", *calls)
+			want := []pwsh.Script{authenticode.Script(pathEnvVar, `C:\Temp\app.msi`)}
+			if calls := fake.Calls(); !reflect.DeepEqual(calls, want) {
+				t.Fatalf("calls = %#v", calls)
 			}
 		})
 	}
 }
 
 func TestPlatformReadProductCode(t *testing.T) {
-	calls := fakePowerShell(t, "{2B7C2A5E-1F1D-4E4B-9C61-0D5A3B1E7F10}\r\n", nil)
+	fake := fakePowerShell(t, pwshtest.Stdout("{2B7C2A5E-1F1D-4E4B-9C61-0D5A3B1E7F10}\r\n"))
 	if got := platformReadProductCode(context.Background(), `C:\Temp\app.msi`); got != "{2B7C2A5E-1F1D-4E4B-9C61-0D5A3B1E7F10}" {
 		t.Fatalf("got %q", got)
 	}
-	if len(*calls) != 1 || (*calls)[0].name != "powershell.exe" {
-		t.Fatalf("calls = %#v", *calls)
+	if calls := fake.Calls(); len(calls) != 1 || calls[0].Body != productCodeScript {
+		t.Fatalf("calls = %#v", calls)
 	}
 }

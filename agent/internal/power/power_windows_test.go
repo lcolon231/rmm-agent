@@ -10,6 +10,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
+	"github.com/lcolon231/rmm/agent/internal/pwsh/pwshtest"
 )
 
 type recordedCall struct {
@@ -111,17 +114,21 @@ func TestPlatformCancel(t *testing.T) {
 }
 
 func TestPlatformActiveUser(t *testing.T) {
-	calls := fakeCommand(t, []byte(" HOST\alice\r\n"), nil)
+	orig := runPS
+	t.Cleanup(func() { runPS = orig })
+
+	fake := &pwshtest.Fake{Reply: pwshtest.Stdout(` HOST\alice` + "\r\n")}
+	runPS = fake.Run
 	user, err := platformActiveUser(context.Background())
-	if err != nil || user != "HOST\alice" {
+	if err != nil || user != `HOST\alice` {
 		t.Fatalf("got %q %v", user, err)
 	}
-	want := []string{"-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_ComputerSystem).UserName"}
-	if len(*calls) != 1 || (*calls)[0].name != "powershell.exe" || !reflect.DeepEqual((*calls)[0].args, want) {
-		t.Fatalf("calls = %#v", *calls)
+	want := []pwsh.Script{{Body: "(Get-CimInstance Win32_ComputerSystem).UserName", Timeout: commandTimeout}}
+	if calls := fake.Calls(); !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %#v", calls)
 	}
 
-	fakeCommand(t, nil, errors.New("nope"))
+	runPS = (&pwshtest.Fake{Reply: pwshtest.Exit("", "Get-CimInstance : denied", 1)}).Run
 	if user, err := platformActiveUser(context.Background()); err == nil || user != "" {
 		t.Fatalf("got %q %v", user, err)
 	}

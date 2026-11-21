@@ -3,29 +3,33 @@ package monitoring
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
-// psRunner runs one PowerShell script and returns its trimmed stdout. The
-// Windows build binds it to powershell.exe; tests feed captured output.
-//
-// The probe logic below lives in an untagged file so every CI job covers it,
-// not only the Windows one. Only the exec call stays behind the build tag.
-type psRunner func(ctx context.Context, script string) (string, error)
+// probeTimeout bounds each probe's PowerShell run.
+const probeTimeout = 5 * time.Second
 
-func psQuote(value string) string { return strings.ReplaceAll(value, "'", "''") }
+// The probe logic below runs through a pwsh.Runner and lives in an untagged
+// file so every CI job covers it, not only the Windows one. The Windows build
+// binds the runner to pwsh.Exec; tests feed captured output.
 
-func diskPercentScript(mount string) string {
-	// Keep the policy-supplied mount point inside a single-quoted PowerShell
-	// literal. Filtering an already-created object avoids interpolating it into
-	// a WQL expression, which has a second quoting language of its own.
-	return fmt.Sprintf(`$mount='%s'; $d=Get-CimInstance Win32_LogicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.DeviceID -eq $mount } | Select-Object -First 1; if ($null -eq $d -or $d.Size -le 0) { 'missing' } else { [math]::Round((($d.Size-$d.FreeSpace)/$d.Size)*100,2) }`, psQuote(mount))
+// probe runs body with env as its arguments and returns the trimmed stdout.
+func probe(ctx context.Context, run pwsh.Runner, body string, env map[string]string) (string, error) {
+	res, err := run(ctx, pwsh.Script{Body: body, Env: env, Timeout: probeTimeout})
+	return strings.TrimSpace(string(res.Stdout)), err
 }
 
-func diskPercent(ctx context.Context, run psRunner, mount string) (float64, bool, string) {
-	out, err := run(ctx, diskPercentScript(mount))
+// diskPercentScript reads the policy-supplied mount point from NL_MOUNT.
+// Filtering an already-created object avoids putting it into a WQL
+// expression, which has a quoting language of its own.
+const diskPercentScript = `$d=Get-CimInstance Win32_LogicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.DeviceID -eq $env:NL_MOUNT } | Select-Object -First 1; if ($null -eq $d -or $d.Size -le 0) { 'missing' } else { [math]::Round((($d.Size-$d.FreeSpace)/$d.Size)*100,2) }`
+
+func diskPercent(ctx context.Context, run pwsh.Runner, mount string) (float64, bool, string) {
+	out, err := probe(ctx, run, diskPercentScript, map[string]string{"NL_MOUNT": mount})
 	if err != nil {
 		return 0, false, "disk_probe_failed"
 	}
@@ -41,12 +45,11 @@ func diskPercent(ctx context.Context, run psRunner, mount string) (float64, bool
 	return value, true, "sample_collected"
 }
 
-func serviceStateScript(name string) string {
-	return fmt.Sprintf(`$s=Get-Service -Name '%s' -ErrorAction SilentlyContinue; if ($null -eq $s) { 'absent' } else { $s.Status.ToString().ToLowerInvariant() }`, psQuote(name))
-}
+// serviceStateScript reads the policy-supplied service name from NL_SERVICE.
+const serviceStateScript = `$s=Get-Service -Name $env:NL_SERVICE -ErrorAction SilentlyContinue; if ($null -eq $s) { 'absent' } else { $s.Status.ToString().ToLowerInvariant() }`
 
-func serviceState(ctx context.Context, run psRunner, name string) (string, bool, string) {
-	out, err := run(ctx, serviceStateScript(name))
+func serviceState(ctx context.Context, run pwsh.Runner, name string) (string, bool, string) {
+	out, err := probe(ctx, run, serviceStateScript, map[string]string{"NL_SERVICE": name})
 	if err != nil {
 		return "", false, "service_probe_failed"
 	}
@@ -58,9 +61,9 @@ func serviceState(ctx context.Context, run psRunner, name string) (string, bool,
 
 // rebootPending runs the reboot-source probe. agent/test/reboot_probe_script.ps1
 // extracts the script literal below (from "func rebootPending" up to the
-// run call) and executes it against stubbed registry state, so keep the
+// probe call) and executes it against stubbed registry state, so keep the
 // script as backtick chunks inside this function.
-func rebootPending(ctx context.Context, run psRunner) (RebootStatus, bool, string) {
+func rebootPending(ctx context.Context, run pwsh.Runner) (RebootStatus, bool, string) {
 	// Report each source separately rather than ORing them: only the
 	// WindowsUpdate key means an installed update is waiting on a restart.
 	//
@@ -82,7 +85,7 @@ func rebootPending(ctx context.Context, run psRunner) (RebootStatus, bool, strin
 		`if ($null -ne $entries) { $list = @($entries); $n = 0; ` +
 		`for ($i = 0; $i -lt $list.Count; $i += 2) { if (-not [string]::IsNullOrEmpty($list[$i])) { $n++ } }; $count = $n } }; ` +
 		`@($cbs.ToString().ToLowerInvariant(), $wu.ToString().ToLowerInvariant(), $pfr.ToString().ToLowerInvariant(), $count.ToString()) -join ([string][char]10)`
-	out, err := run(ctx, script)
+	out, err := probe(ctx, run, script, nil)
 	if err != nil {
 		return RebootStatus{}, false, "reboot_probe_failed"
 	}

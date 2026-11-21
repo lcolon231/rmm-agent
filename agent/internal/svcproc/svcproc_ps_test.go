@@ -3,64 +3,64 @@ package svcproc
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
+	"github.com/lcolon231/rmm/agent/internal/pwsh/pwshtest"
 )
 
-type psCall struct {
-	timeout time.Duration
-	arg     string
-	script  string
+// reply describes what the fake PowerShell printed and how it exited.
+type reply struct {
+	stdout, stderr string
+	code           int
 }
 
-// fakePS returns a psRunner that records its call and replies with captured
-// PowerShell output.
-func fakePS(out string, err error, calls *[]psCall) psRunner {
-	return func(_ context.Context, timeout time.Duration, arg, script string) ([]byte, error) {
-		*calls = append(*calls, psCall{timeout: timeout, arg: arg, script: script})
-		return []byte(out), err
-	}
+func fakePS(r reply) *pwshtest.Fake {
+	return &pwshtest.Fake{Reply: pwshtest.Exit(r.stdout, r.stderr, r.code)}
 }
 
-func assertOneCall(t *testing.T, calls []psCall, want psCall) {
+func assertOneCall(t *testing.T, fake *pwshtest.Fake, want pwsh.Script) {
 	t.Helper()
+	calls := fake.Calls()
 	if len(calls) != 1 {
 		t.Fatalf("runner called %d times, want 1", len(calls))
 	}
-	if calls[0] != want {
+	if !reflect.DeepEqual(calls[0], want) {
 		t.Fatalf("runner call = %+v, want %+v", calls[0], want)
 	}
 }
+
+func arg(v string) map[string]string { return map[string]string{"NL_ARG": v} }
 
 func TestPSListServices(t *testing.T) {
 	spooler := ServiceInfo{Name: "Spooler", DisplayName: "Print Spooler", State: "Running", StartMode: "Auto", Account: "LocalSystem"}
 	w32 := ServiceInfo{Name: "W32Time", DisplayName: "Windows Time", State: "Stopped", StartMode: "Manual", Account: `NT AUTHORITY\LocalService`}
 	cases := []struct {
 		name    string
-		out     string
-		err     error
+		reply   reply
 		want    []ServiceInfo
 		wantErr string
 	}{
-		{"array", `[{"Name":"Spooler","DisplayName":"Print Spooler","State":"Running","StartMode":"Auto","StartName":"LocalSystem"},` +
-			`{"Name":"W32Time","DisplayName":"Windows Time","State":"Stopped","StartMode":"Manual","StartName":"NT AUTHORITY\\LocalService"}]`,
-			nil, []ServiceInfo{spooler, w32}, ""},
-		{"single object", "\r\n{\"Name\":\"Spooler\",\"DisplayName\":\"Print Spooler\",\"State\":\"Running\",\"StartMode\":\"Auto\",\"StartName\":\"LocalSystem\"}\r\n",
-			nil, []ServiceInfo{spooler}, ""},
-		{"empty", "", nil, []ServiceInfo{}, ""},
-		{"null account", `{"Name":"X","DisplayName":"X","State":"Stopped","StartMode":"Disabled","StartName":null}`,
-			nil, []ServiceInfo{{Name: "X", DisplayName: "X", State: "Stopped", StartMode: "Disabled"}}, ""},
-		{"malformed", `{"Name":`, nil, nil, "invalid character"},
-		{"exec failure carries output", "Get-CimInstance : Access denied\r\n", errors.New("exit status 1"), nil, "exit status 1: Get-CimInstance : Access denied"},
+		{"array", reply{stdout: `[{"Name":"Spooler","DisplayName":"Print Spooler","State":"Running","StartMode":"Auto","StartName":"LocalSystem"},` +
+			`{"Name":"W32Time","DisplayName":"Windows Time","State":"Stopped","StartMode":"Manual","StartName":"NT AUTHORITY\\LocalService"}]`},
+			[]ServiceInfo{spooler, w32}, ""},
+		{"single object", reply{stdout: "\r\n{\"Name\":\"Spooler\",\"DisplayName\":\"Print Spooler\",\"State\":\"Running\",\"StartMode\":\"Auto\",\"StartName\":\"LocalSystem\"}\r\n"},
+			[]ServiceInfo{spooler}, ""},
+		{"empty", reply{}, []ServiceInfo{}, ""},
+		{"null account", reply{stdout: `{"Name":"X","DisplayName":"X","State":"Stopped","StartMode":"Disabled","StartName":null}`},
+			[]ServiceInfo{{Name: "X", DisplayName: "X", State: "Stopped", StartMode: "Disabled"}}, ""},
+		{"malformed", reply{stdout: `{"Name":`}, nil, "invalid character"},
+		// A warning on stderr must not corrupt the JSON on stdout.
+		{"stderr noise ignored on success", reply{stdout: `{"Name":"X"}`, stderr: "WARNING: slow provider"}, []ServiceInfo{{Name: "X"}}, ""},
+		{"exec failure carries stderr", reply{stderr: "Get-CimInstance : Access denied\r\n", code: 1}, nil, "exit status 1: Get-CimInstance : Access denied"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var calls []psCall
-			got, err := psListServices(context.Background(), fakePS(tc.out, tc.err, &calls))
-			assertOneCall(t, calls, psCall{timeout: listTimeout, script: listServicesScript})
+			fake := fakePS(tc.reply)
+			got, err := psListServices(context.Background(), fake.Run)
+			assertOneCall(t, fake, pwsh.Script{Body: listServicesScript, Timeout: listTimeout})
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("error = %v, want %q", err, tc.wantErr)
@@ -80,23 +80,22 @@ func TestPSListServices(t *testing.T) {
 func TestPSListProcesses(t *testing.T) {
 	cases := []struct {
 		name    string
-		out     string
-		err     error
+		reply   reply
 		want    []ProcessInfo
 		wantErr string
 	}{
-		{"array", `[{"ProcessId":0,"Name":"System Idle Process"},{"ProcessId":4242,"Name":"notepad.exe"}]`,
-			nil, []ProcessInfo{{PID: 0, Name: "System Idle Process"}, {PID: 4242, Name: "notepad.exe"}}, ""},
-		{"single object", `{"ProcessId":4,"Name":"System"}`, nil, []ProcessInfo{{PID: 4, Name: "System"}}, ""},
-		{"empty", "  \r\n", nil, []ProcessInfo{}, ""},
-		{"wrong type", `{"ProcessId":"four","Name":"System"}`, nil, nil, "cannot unmarshal"},
-		{"exec failure", "boom", errors.New("exit status 1"), nil, "exit status 1: boom"},
+		{"array", reply{stdout: `[{"ProcessId":0,"Name":"System Idle Process"},{"ProcessId":4242,"Name":"notepad.exe"}]`},
+			[]ProcessInfo{{PID: 0, Name: "System Idle Process"}, {PID: 4242, Name: "notepad.exe"}}, ""},
+		{"single object", reply{stdout: `{"ProcessId":4,"Name":"System"}`}, []ProcessInfo{{PID: 4, Name: "System"}}, ""},
+		{"empty", reply{stdout: "  \r\n"}, []ProcessInfo{}, ""},
+		{"wrong type", reply{stdout: `{"ProcessId":"four","Name":"System"}`}, nil, "cannot unmarshal"},
+		{"exec failure", reply{stdout: "boom", code: 1}, nil, "exit status 1: boom"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var calls []psCall
-			got, err := psListProcesses(context.Background(), fakePS(tc.out, tc.err, &calls))
-			assertOneCall(t, calls, psCall{timeout: listTimeout, script: listProcessesScript})
+			fake := fakePS(tc.reply)
+			got, err := psListProcesses(context.Background(), fake.Run)
+			assertOneCall(t, fake, pwsh.Script{Body: listProcessesScript, Timeout: listTimeout})
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("error = %v, want %q", err, tc.wantErr)
@@ -147,24 +146,25 @@ func TestControlServiceScript(t *testing.T) {
 func TestPSControlService(t *testing.T) {
 	cases := []struct {
 		name    string
-		out     string
-		err     error
+		reply   reply
 		want    string
 		wantErr string
 	}{
-		{"running", "Running\r\n", nil, "Running", ""},
-		{"warnings before status", "WARNING: Waiting for service 'Spooler' to start...\r\nRunning", nil, "Running", ""},
-		{"not found", "NL_NOTFOUND", errors.New("exit status 3"), "", "service does not exist"},
-		{"not found wins without exit error", "NL_NOTFOUND\r\n", nil, "", "service does not exist"},
-		{"failure reports first line", "Stop-Service : Cannot stop service 'Spooler'\r\nAt line:1 char:1", errors.New("exit status 1"), "", "Stop-Service : Cannot stop service 'Spooler'"},
-		{"failure without output", "", errors.New("exit status 1"), "", "service control failed"},
+		{"running", reply{stdout: "Running\r\n"}, "Running", ""},
+		{"warnings before status", reply{stdout: "WARNING: Waiting for service 'Spooler' to start...\r\nRunning"}, "Running", ""},
+		{"warning on stderr", reply{stdout: "Running", stderr: "WARNING: Waiting for service 'Spooler' to start..."}, "Running", ""},
+		{"not found", reply{stdout: "NL_NOTFOUND", code: 3}, "", "service does not exist"},
+		{"not found wins without exit error", reply{stdout: "NL_NOTFOUND\r\n"}, "", "service does not exist"},
+		{"failure reports first stderr line", reply{stderr: "Stop-Service : Cannot stop service 'Spooler'\r\nAt line:1 char:1", code: 1}, "", "Stop-Service : Cannot stop service 'Spooler'"},
+		{"failure falls back to stdout", reply{stdout: "Stop-Service : Cannot stop service 'Spooler'", code: 1}, "", "Stop-Service : Cannot stop service 'Spooler'"},
+		{"failure without output", reply{code: 1}, "", "service control failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var calls []psCall
-			got, err := psControlService(context.Background(), fakePS(tc.out, tc.err, &calls), "Spooler", ActionRestart)
+			fake := fakePS(tc.reply)
+			got, err := psControlService(context.Background(), fake.Run, "Spooler", ActionRestart)
 			script, _ := controlServiceScript(ActionRestart)
-			assertOneCall(t, calls, psCall{timeout: controlTimeout, arg: "Spooler", script: script})
+			assertOneCall(t, fake, pwsh.Script{Body: script, Env: arg("Spooler"), Timeout: controlTimeout})
 			if tc.wantErr != "" {
 				if err == nil || err.Error() != tc.wantErr {
 					t.Fatalf("error = %v, want %q", err, tc.wantErr)
@@ -179,11 +179,11 @@ func TestPSControlService(t *testing.T) {
 }
 
 func TestPSControlServiceRejectsUnknownActionWithoutRunning(t *testing.T) {
-	var calls []psCall
-	if _, err := psControlService(context.Background(), fakePS("", nil, &calls), "Spooler", "pause"); err == nil {
+	fake := fakePS(reply{})
+	if _, err := psControlService(context.Background(), fake.Run, "Spooler", "pause"); err == nil {
 		t.Fatal("unknown action succeeded")
 	}
-	if len(calls) != 0 {
+	if calls := fake.Calls(); len(calls) != 0 {
 		t.Fatalf("runner called for an unknown action: %+v", calls)
 	}
 }
@@ -192,49 +192,49 @@ func TestPSControlServiceRejectsUnknownActionWithoutRunning(t *testing.T) {
 // script text, so hostile names cannot change what PowerShell runs.
 func TestPSTargetsNeverEnterScriptText(t *testing.T) {
 	hostile := `Spooler'; Remove-Item -Recurse C:\; '`
-	var calls []psCall
-	run := fakePS("Running", nil, &calls)
+	fake := fakePS(reply{stdout: "Running"})
 	for _, action := range []string{ActionStart, ActionStop, ActionRestart} {
-		_, _ = psControlService(context.Background(), run, hostile, action)
+		_, _ = psControlService(context.Background(), fake.Run, hostile, action)
 	}
-	_, _ = psProcessName(context.Background(), run, 31337)
-	_ = psTerminateProcess(context.Background(), run, 31337)
+	_, _ = psProcessName(context.Background(), fake.Run, 31337)
+	_ = psTerminateProcess(context.Background(), fake.Run, 31337)
+	calls := fake.Calls()
 	if len(calls) != 5 {
 		t.Fatalf("runner called %d times, want 5", len(calls))
 	}
 	for _, call := range calls {
-		if strings.Contains(call.script, hostile) || strings.Contains(call.script, "31337") {
-			t.Fatalf("target leaked into script: %s", call.script)
+		if strings.Contains(call.Body, hostile) || strings.Contains(call.Body, "31337") {
+			t.Fatalf("target leaked into script: %s", call.Body)
 		}
-		if !strings.Contains(call.script, "$env:NL_ARG") {
-			t.Fatalf("script does not read NL_ARG: %s", call.script)
+		if !strings.Contains(call.Body, "$env:NL_ARG") {
+			t.Fatalf("script does not read NL_ARG: %s", call.Body)
 		}
 	}
-	if calls[0].arg != hostile || calls[3].arg != "31337" || calls[4].arg != "31337" {
-		t.Fatalf("targets not passed via arg: %+v", calls)
+	if calls[0].Env["NL_ARG"] != hostile || calls[3].Env["NL_ARG"] != "31337" || calls[4].Env["NL_ARG"] != "31337" {
+		t.Fatalf("targets not passed via NL_ARG: %+v", calls)
 	}
 }
 
 func TestPSProcessName(t *testing.T) {
 	cases := []struct {
 		name    string
-		out     string
-		err     error
+		reply   reply
 		want    string
 		wantErr bool
 	}{
-		{"base name gets exe", "notepad\r\n", nil, "notepad.exe", false},
-		{"dotted name kept", "svchost.exe", nil, "svchost.exe", false},
-		{"last line wins", "WARNING: noise\r\nlsass", nil, "lsass.exe", false},
-		{"not found marker", "NL_NOTFOUND", nil, "", true},
-		{"empty", "  ", nil, "", true},
-		{"exec failure", "notepad", errors.New("exit status 1"), "", true},
+		{"base name gets exe", reply{stdout: "notepad\r\n"}, "notepad.exe", false},
+		{"dotted name kept", reply{stdout: "svchost.exe"}, "svchost.exe", false},
+		{"last line wins", reply{stdout: "WARNING: noise\r\nlsass"}, "lsass.exe", false},
+		{"stderr noise ignored", reply{stdout: "lsass", stderr: "WARNING: noise"}, "lsass.exe", false},
+		{"not found marker", reply{stdout: "NL_NOTFOUND"}, "", true},
+		{"empty", reply{stdout: "  "}, "", true},
+		{"exec failure", reply{stdout: "notepad", code: 1}, "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var calls []psCall
-			got, err := psProcessName(context.Background(), fakePS(tc.out, tc.err, &calls), 4242)
-			assertOneCall(t, calls, psCall{timeout: listTimeout, arg: "4242", script: processNameScript})
+			fake := fakePS(tc.reply)
+			got, err := psProcessName(context.Background(), fake.Run, 4242)
+			assertOneCall(t, fake, pwsh.Script{Body: processNameScript, Env: arg("4242"), Timeout: listTimeout})
 			if tc.wantErr {
 				if err == nil || err.Error() != "process not found" {
 					t.Fatalf("error = %v, want process not found", err)
@@ -251,20 +251,19 @@ func TestPSProcessName(t *testing.T) {
 func TestPSTerminateProcess(t *testing.T) {
 	cases := []struct {
 		name    string
-		out     string
-		err     error
+		reply   reply
 		wantErr string
 	}{
-		{"success", "", nil, ""},
-		{"success ignores output", "noise", nil, ""},
-		{"failure reports first line", "Stop-Process : Access is denied\r\nAt line:1", errors.New("exit status 1"), "Stop-Process : Access is denied"},
-		{"failure without output", "", errors.New("exit status 1"), "service control failed"},
+		{"success", reply{}, ""},
+		{"success ignores output", reply{stdout: "noise"}, ""},
+		{"failure reports first stderr line", reply{stderr: "Stop-Process : Access is denied\r\nAt line:1", code: 1}, "Stop-Process : Access is denied"},
+		{"failure without output", reply{code: 1}, "service control failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var calls []psCall
-			err := psTerminateProcess(context.Background(), fakePS(tc.out, tc.err, &calls), 4242)
-			assertOneCall(t, calls, psCall{timeout: controlTimeout, arg: "4242", script: terminateScript})
+			fake := fakePS(tc.reply)
+			err := psTerminateProcess(context.Background(), fake.Run, 4242)
+			assertOneCall(t, fake, pwsh.Script{Body: terminateScript, Env: arg("4242"), Timeout: controlTimeout})
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatal(err)

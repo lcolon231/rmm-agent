@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/lcolon231/rmm/agent/internal/authenticode"
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 // Process seams, swapped by tests so no installer or PowerShell ever starts.
 var (
-	runProcess    processRunner       = execProcess
-	runPowerShell authenticode.Runner = authenticode.Exec
+	runProcess    processRunner = execProcess
+	runPowerShell pwsh.Runner   = pwsh.Exec
 )
 
 func platformRunInstaller(ctx context.Context, installerType, path string, args []string, timeout time.Duration) (int, error) {

@@ -7,10 +7,15 @@ package telemetry
 import (
 	"context"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
+
+// psTimeout bounds each CIM query so a wedged provider cannot stall the
+// heartbeat that collects the sample.
+const psTimeout = 15 * time.Second
 
 // osVersion returns the Windows product name and build.
 func osVersion() string {
@@ -44,12 +49,13 @@ func collect(ctx context.Context) Sample {
 	}
 }
 
-// psOutput runs a PowerShell script; a var so tests can substitute a fake.
-var psOutput = func(ctx context.Context, script string) (string, error) {
-	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive",
-		"-ExecutionPolicy", "Bypass", "-Command", script)
-	out, err := cmd.Output()
-	return string(out), err
+// runPS is a var so tests can substitute a fake.
+var runPS pwsh.Runner = pwsh.Exec
+
+// psOutput runs a PowerShell script and returns its stdout.
+func psOutput(ctx context.Context, script string) (string, error) {
+	res, err := runPS(ctx, pwsh.Script{Body: script, Timeout: psTimeout})
+	return string(res.Stdout), err
 }
 
 func psFloat(ctx context.Context, script string) (float64, bool) {

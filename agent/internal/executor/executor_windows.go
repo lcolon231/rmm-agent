@@ -12,14 +12,14 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 func buildCommand(kind, script string) *exec.Cmd {
 	switch kind {
 	case KindPowerShell, KindInventory:
-		return exec.Command("powershell.exe",
-			"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-			"-Command", script)
+		return exec.Command(pwsh.Exe, pwsh.Args(pwsh.Script{Body: script})...)
 	case KindShell:
 		return exec.Command("cmd.exe", "/C", script)
 	default:
@@ -28,9 +28,7 @@ func buildCommand(kind, script string) *exec.Cmd {
 }
 
 func interactiveCommand() *exec.Cmd {
-	return exec.Command("powershell.exe",
-		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-		"-Command", "-")
+	return exec.Command(pwsh.Exe, pwsh.StdinArgs()...)
 }
 
 var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")

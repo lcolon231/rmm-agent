@@ -4,68 +4,34 @@
 // asking PowerShell's Get-AuthenticodeSignature for the status and the signer
 // thumbprint. The deploy and self-update paths both gate execution on it.
 //
-// The process launch is a Runner so the command line and the parsing of its
-// output are testable on every platform; only the Windows callers wire the real
-// Exec runner to powershell.exe.
+// The PowerShell run goes through a pwsh.Runner so the script and the parsing
+// of its output are testable on every platform; only the Windows callers wire
+// the real pwsh.Exec.
 package authenticode
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 // Timeout bounds one verification.
 const Timeout = 60 * time.Second
 
-// Runner runs name with args, adding env to the inherited environment, and
-// returns the process's standard output. A failure to start or a non-zero exit
-// is an error that carries whatever the process printed.
-type Runner func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
-
-// Exec is the Runner that starts a real process.
-func Exec(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = append(childEnv(cmd.Environ()), env...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		detail := strings.TrimSpace(strings.TrimSpace(stderr.String()) + " " + strings.TrimSpace(string(out)))
-		return out, fmt.Errorf("%w: %s", err, detail)
-	}
-	return out, nil
-}
-
-// childEnv drops an inherited PSModulePath. When the agent is started from
-// PowerShell 7, that variable points at PowerShell 7's modules, and the Windows
-// PowerShell child then cannot load Microsoft.PowerShell.Security, so every
-// signature check would fail. Without it, powershell.exe rebuilds its default.
-func childEnv(environ []string) []string {
-	kept := make([]string, 0, len(environ))
-	for _, kv := range environ {
-		if len(kv) >= len("PSModulePath=") && strings.EqualFold(kv[:len("PSModulePath=")], "PSModulePath=") {
-			continue
-		}
-		kept = append(kept, kv)
-	}
-	return kept
-}
-
-// Command returns the PowerShell invocation that verifies the file named by the
+// Script returns the PowerShell run that verifies path, passed in the
 // environment variable envVar. The path travels in the environment, never in
 // the script text, so a hostile file name cannot change what PowerShell runs.
-func Command(envVar string) (string, []string) {
-	script := "$s = Get-AuthenticodeSignature -LiteralPath $env:" + envVar + "; " +
+func Script(envVar, path string) pwsh.Script {
+	body := "$s = Get-AuthenticodeSignature -LiteralPath $env:" + envVar + "; " +
 		"if ($s.SignerCertificate) { Write-Output ($s.Status.ToString() + '|' + $s.SignerCertificate.Thumbprint) } " +
 		"else { Write-Output ($s.Status.ToString() + '|') }"
-	return "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command", script}
+	return pwsh.Script{Body: body, Env: map[string]string{envVar: path}, Timeout: Timeout}
 }
 
-// Parse reads the "Status|Thumbprint" line Command prints. Only a status of
+// Parse reads the "Status|Thumbprint" line Script prints. Only a status of
 // Valid counts as signed; NotSigned, HashMismatch, UnknownError and anything
 // unrecognised do not.
 func Parse(out []byte) (valid bool, thumbprint string) {
@@ -79,15 +45,13 @@ func Parse(out []byte) (valid bool, thumbprint string) {
 
 // Verify reports whether path carries a Valid Authenticode signature and the
 // signer certificate's SHA-1 thumbprint. envVar names the variable that carries
-// the path to PowerShell.
-func Verify(ctx context.Context, run Runner, envVar, path string) (bool, string, error) {
-	bounded, cancel := context.WithTimeout(ctx, Timeout)
-	defer cancel()
-	name, args := Command(envVar)
-	out, err := run(bounded, []string{envVar + "=" + path}, name, args...)
+// the path to PowerShell. A failed run is an error carrying what it printed.
+func Verify(ctx context.Context, run pwsh.Runner, envVar, path string) (bool, string, error) {
+	res, err := run(ctx, Script(envVar, path))
 	if err != nil {
-		return false, "", err
+		detail := strings.TrimSpace(strings.TrimSpace(string(res.Stderr)) + " " + strings.TrimSpace(string(res.Stdout)))
+		return false, "", fmt.Errorf("%w: %s", err, detail)
 	}
-	valid, thumbprint := Parse(out)
+	valid, thumbprint := Parse(res.Stdout)
 	return valid, thumbprint, nil
 }

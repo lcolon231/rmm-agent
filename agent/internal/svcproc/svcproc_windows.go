@@ -5,23 +5,13 @@ package svcproc
 
 import (
 	"context"
-	"os/exec"
-	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
 
 // runPS is a package var so Windows tests can drive the platform functions
 // with captured output instead of a live system.
-var runPS psRunner = execPS
-
-func execPS(ctx context.Context, timeout time.Duration, arg, script string) ([]byte, error) {
-	bounded, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	cmd := exec.CommandContext(bounded, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
-	if arg != "" {
-		cmd.Env = append(cmd.Environ(), "NL_ARG="+arg)
-	}
-	return cmd.CombinedOutput()
-}
+var runPS pwsh.Runner = pwsh.Exec
 
 func platformListServices(ctx context.Context) ([]ServiceInfo, error) {
 	return psListServices(ctx, runPS)

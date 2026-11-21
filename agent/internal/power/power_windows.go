@@ -10,11 +10,19 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
 )
+
+// commandTimeout bounds each shutdown.exe or PowerShell call.
+const commandTimeout = 10 * time.Second
+
+// runPS is a var so tests can drive the active-user query without PowerShell.
+var runPS pwsh.Runner = pwsh.Exec
 
 // commandContext is a var so tests can record argv without running programs.
 var commandContext = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
+	bounded, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 	return exec.CommandContext(bounded, name, args...).CombinedOutput()
 }
@@ -43,9 +51,9 @@ func platformCancel(ctx context.Context) (string, string, error) {
 }
 
 func platformActiveUser(ctx context.Context) (string, error) {
-	out, err := commandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_ComputerSystem).UserName")
+	res, err := runPS(ctx, pwsh.Script{Body: "(Get-CimInstance Win32_ComputerSystem).UserName", Timeout: commandTimeout})
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(string(res.Stdout)), nil
 }

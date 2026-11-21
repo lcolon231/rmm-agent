@@ -4,23 +4,25 @@ package authenticode
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
+	"github.com/lcolon231/rmm/agent/internal/pwsh/pwshtest"
 )
 
-func TestCommandKeepsThePathOutOfTheScript(t *testing.T) {
-	name, args := Command("NL_TEST_PATH")
-	if name != "powershell.exe" {
-		t.Fatalf("name = %q", name)
+func TestScriptKeepsThePathOutOfTheBody(t *testing.T) {
+	path := `C:\tmp\a b;$(evil).exe`
+	s := Script("NL_TEST_PATH", path)
+	if !strings.Contains(s.Body, "Get-AuthenticodeSignature -LiteralPath $env:NL_TEST_PATH;") {
+		t.Fatalf("script does not read the path from the environment: %q", s.Body)
 	}
-	if len(args) != 4 || !reflect.DeepEqual(args[:3], []string{"-NoProfile", "-NonInteractive", "-Command"}) {
-		t.Fatalf("args = %#v", args)
+	if strings.Contains(s.Body, "evil") {
+		t.Fatalf("path leaked into the script: %q", s.Body)
 	}
-	if !strings.Contains(args[3], "Get-AuthenticodeSignature -LiteralPath $env:NL_TEST_PATH;") {
-		t.Fatalf("script does not read the path from the environment: %q", args[3])
+	if !reflect.DeepEqual(s.Env, map[string]string{"NL_TEST_PATH": path}) || s.Timeout != Timeout {
+		t.Fatalf("script = %+v", s)
 	}
 }
 
@@ -51,121 +53,45 @@ func TestParse(t *testing.T) {
 	}
 }
 
-type call struct {
-	env  []string
-	name string
-	args []string
-}
-
 func TestVerify(t *testing.T) {
-	runErr := errors.New("exit status 1: Get-AuthenticodeSignature : Cannot find path")
+	const thumb = "0123456789ABCDEF0123456789ABCDEF01234567"
 	tests := []struct {
-		name      string
-		out       string
-		err       error
-		wantValid bool
-		wantThumb string
-		wantErr   error
+		name       string
+		reply      func(pwsh.Script) (pwsh.Result, error)
+		wantValid  bool
+		wantThumb  string
+		wantErrHas []string
 	}{
-		{"signed", "Valid|0123456789ABCDEF0123456789ABCDEF01234567\r\n", nil, true, "0123456789ABCDEF0123456789ABCDEF01234567", nil},
-		{"unsigned", "NotSigned|\r\n", nil, false, "", nil},
-		{"verifier failed", "", runErr, false, "", runErr},
+		{"signed", pwshtest.Stdout("Valid|" + thumb + "\r\n"), true, thumb, nil},
+		// Only stdout is parsed; a warning on stderr cannot forge a status.
+		{"stderr is not parsed", pwshtest.Exit("NotSigned|\r\n", "Valid|"+thumb, 0), false, "", nil},
+		{"unsigned", pwshtest.Stdout("NotSigned|\r\n"), false, "", nil},
+		{"verifier failed carries what it printed", pwshtest.Exit("partial", "Get-AuthenticodeSignature : Cannot find path", 1), false, "",
+			[]string{"exit status 1", "Cannot find path", "partial"}},
+		{"timeout", pwshtest.Fail(pwsh.ErrTimeout), false, "", []string{"timed out"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var calls []call
-			run := func(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
-				if _, ok := ctx.Deadline(); !ok {
-					t.Error("verification must run under a deadline")
+			fake := &pwshtest.Fake{Reply: tt.reply}
+			path := `C:\tmp\a b;$(evil).exe`
+			valid, gotThumb, err := Verify(context.Background(), fake.Run, "NL_TEST_PATH", path)
+			if valid != tt.wantValid || gotThumb != tt.wantThumb {
+				t.Fatalf("Verify = %v, %q, %v; want %v, %q", valid, gotThumb, err, tt.wantValid, tt.wantThumb)
+			}
+			if tt.wantErrHas == nil && err != nil {
+				t.Fatalf("Verify error = %v", err)
+			}
+			for _, part := range tt.wantErrHas {
+				if err == nil || !strings.Contains(err.Error(), part) {
+					t.Fatalf("Verify error = %v, want it to contain %q", err, part)
 				}
-				calls = append(calls, call{env, name, args})
-				return []byte(tt.out), tt.err
 			}
-			valid, thumb, err := Verify(context.Background(), run, "NL_TEST_PATH", `C:\tmp\a b;$(evil).exe`)
-			if valid != tt.wantValid || thumb != tt.wantThumb || !errors.Is(err, tt.wantErr) {
-				t.Fatalf("Verify = %v, %q, %v; want %v, %q, %v", valid, thumb, err, tt.wantValid, tt.wantThumb, tt.wantErr)
-			}
-			wantName, wantArgs := Command("NL_TEST_PATH")
-			want := []call{{[]string{`NL_TEST_PATH=C:\tmp\a b;$(evil).exe`}, wantName, wantArgs}}
-			if !reflect.DeepEqual(calls, want) {
-				t.Fatalf("calls = %#v, want %#v", calls, want)
+			if calls := fake.Calls(); !reflect.DeepEqual(calls, []pwsh.Script{Script("NL_TEST_PATH", path)}) {
+				t.Fatalf("calls = %#v", calls)
 			}
 		})
 	}
-}
-
-// TestHelperProcess is not a real test: Exec's tests start the test binary as
-// a child process that lands here and behaves as the parent asked.
-func TestHelperProcess(t *testing.T) {
-	mode := os.Getenv("AUTHENTICODE_HELPER")
-	if mode == "" {
-		return
-	}
-	switch mode {
-	case "echo-env":
-		fmt.Fprint(os.Stdout, os.Getenv("NL_TEST_PATH"))
-		fmt.Fprint(os.Stderr, "noise on stderr")
-		os.Exit(0)
-	case "echo-psmodulepath":
-		value, set := os.LookupEnv("PSModulePath")
-		fmt.Fprintf(os.Stdout, "%v|%s", set, value)
-		os.Exit(0)
-	case "fail":
-		fmt.Fprint(os.Stdout, "partial")
-		fmt.Fprint(os.Stderr, "access denied")
-		os.Exit(3)
-	}
-	os.Exit(2)
-}
-
-func runHelper(mode string, env ...string) ([]byte, error) {
-	env = append([]string{"AUTHENTICODE_HELPER=" + mode}, env...)
-	return Exec(context.Background(), env, os.Args[0], "-test.run=^TestHelperProcess$")
-}
-
-func TestExecReturnsStdoutOnlyAndPassesEnv(t *testing.T) {
-	out, err := runHelper("echo-env", "NL_TEST_PATH=C:\\x.exe")
-	if err != nil {
-		t.Fatalf("Exec: %v", err)
-	}
-	if string(out) != `C:\x.exe` {
-		t.Fatalf("stdout = %q; stderr must not be mixed into what is parsed", out)
-	}
-}
-
-// TestExecDropsInheritedPSModulePath reproduces an agent started from
-// PowerShell 7: the child Windows PowerShell must not inherit its module path.
-func TestExecDropsInheritedPSModulePath(t *testing.T) {
-	t.Setenv("PSModulePath", `C:\Program Files\PowerShell\7\Modules`)
-	out, err := runHelper("echo-psmodulepath")
-	if err != nil {
-		t.Fatalf("Exec: %v", err)
-	}
-	if string(out) != "false|" {
-		t.Fatalf("child saw PSModulePath %q; it must be dropped", out)
-	}
-}
-
-func TestChildEnvKeepsEverythingElse(t *testing.T) {
-	got := childEnv([]string{"PATH=x", "psmodulepath=y", "PSModulePathExtra=z", "PSModulePath="})
-	want := []string{"PATH=x", "PSModulePathExtra=z"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("childEnv = %#v, want %#v", got, want)
-	}
-}
-
-func TestExecFailureCarriesWhatTheProcessPrinted(t *testing.T) {
-	_, err := runHelper("fail")
-	if err == nil {
-		t.Fatal("a non-zero exit must be an error")
-	}
-	if !strings.Contains(err.Error(), "access denied") || !strings.Contains(err.Error(), "partial") {
-		t.Fatalf("error %q must carry stderr and stdout", err)
-	}
-}
-
-func TestExecFailsWhenTheProgramIsMissing(t *testing.T) {
-	if _, err := Exec(context.Background(), nil, "nodelink-no-such-program"); err == nil {
-		t.Fatal("a missing program must be an error")
+	if _, _, err := Verify(context.Background(), (&pwshtest.Fake{Reply: pwshtest.Fail(pwsh.ErrTimeout)}).Run, "NL_TEST_PATH", "x"); !errors.Is(err, pwsh.ErrTimeout) {
+		t.Fatalf("Verify must wrap the runner error, got %v", err)
 	}
 }

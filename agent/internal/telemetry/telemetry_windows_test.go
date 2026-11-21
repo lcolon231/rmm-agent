@@ -9,13 +9,25 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/lcolon231/rmm/agent/internal/pwsh"
+	"github.com/lcolon231/rmm/agent/internal/pwsh/pwshtest"
 )
 
+// fakePS routes every PowerShell run to fn and fails the test if any run is
+// unbounded, since telemetry runs on the heartbeat path.
 func fakePS(t *testing.T, fn func(script string) (string, error)) {
 	t.Helper()
-	orig := psOutput
-	psOutput = func(_ context.Context, script string) (string, error) { return fn(script) }
-	t.Cleanup(func() { psOutput = orig })
+	orig := runPS
+	fake := &pwshtest.Fake{Reply: func(s pwsh.Script) (pwsh.Result, error) {
+		if s.Timeout != psTimeout {
+			t.Errorf("script %q ran with timeout %s, want %s", s.Body, s.Timeout, psTimeout)
+		}
+		out, err := fn(s.Body)
+		return pwsh.Result{Stdout: []byte(out)}, err
+	}}
+	runPS = fake.Run
+	t.Cleanup(func() { runPS = orig })
 }
 
 func TestCollectWindowsAvailable(t *testing.T) {
