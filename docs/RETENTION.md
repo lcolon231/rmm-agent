@@ -124,6 +124,10 @@ All three endpoints are under `/api/v1/clients/{client_id}/retention-policy`.
 | 422 | (validation) | Unknown field or missing `expected_version` |
 | 404 | `retention_policy_not_found` | `DELETE` when the tenant never had a policy |
 
+`GET` also returns two hints for the dashboard (#311), which the write endpoints never rely on:
+- `can_edit` is `true` exactly when `PUT`/`DELETE` would pass the role checks for the caller: global `admin` plus `client_admin` on the tenant, or a platform admin. Step-up is still required separately.
+- `forever_allowed` is set on each category and is `true` when `0` would pass validation: the category allows keep-forever and has no ceiling.
+
 Each change is audited as `tenant.retention_policy_set` or `tenant.retention_policy_cleared`. The event carries the old and new values aligned with `categories`, and `organization_id` set to the tenant.
 
 ### Enforcement, legal hold, and deletion proof
@@ -156,12 +160,27 @@ The retention sweep (`retention_sweep_interval_seconds`) handles each tenant in 
 
 Audit events are only ever **appended** by the sweep. Existing events, anchors and receipts are never touched, so `verify_chain` and anchor verification still hold.
 
+### Dashboard (issue #311)
+
+The **Retention** section on the client details page (`/clients/{client_id}`, linked from the Overview as "Client details" when a client is selected) shows each category's effective value, `source`, saved override, platform default and allowed range. When `pruning_suspended` is true it shows a banner linking to the tenant's legal-hold audit events.
+
+When `can_edit` is true, the section offers an editor:
+- Each category can inherit the platform default, be kept forever (only where `forever_allowed`), or take a custom value. The bounds hints mirror the server's minimum and maximum.
+- Any save or reset that lowers an effective value must be confirmed, and the confirmation states that pruned data cannot be recovered.
+- Every write sends `expected_version`. On a `409 retention_policy_conflict` the editor reloads the policy and lists the other administrator's changes instead of overwriting them.
+- A `422` is shown on the field named by `category`.
+- A `403 step_up_required` offers a security-key confirmation. Once it succeeds, the same request is retried.
+
+Read-only members see the table without any edit controls. The server stays the authority on every write.
+
+The section links to the tenant's `retention.purged`, `retention.purge_suspended` and `retention.purge_failed` events in the audit timeline, using the existing `organization` filter. No new endpoint was needed for this.
+
 ### Rollout, compatibility, and rollback
 
 - **Migration.** `0049` adds `tenant_retention_policies` and `ix_alerts_state_resolved`. Both are additive and need no backfill. A missing row inherits.
 - **Default behaviour.** The new destructive classes default to `0`, so deploying deletes nothing new until an operator sets a platform default or a tenant override.
 - **Existing classes.** Telemetry, command output and inventory keep their previous platform defaults, so existing deployments prune exactly as before, now per tenant.
-- **Compatibility.** Agents and the dashboard are unaffected. No protocol changes, and there is no dashboard UI in this change (tracked in #311).
+- **Compatibility.** Agents are unaffected and there are no protocol changes. The dashboard UI followed in #311 (see below).
 - **Rollback.**
   - For a tenant: `DELETE` the policy.
   - For the capability: set the new `*_RETENTION_DAYS` back to `0`.

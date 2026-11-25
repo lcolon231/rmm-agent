@@ -19,3 +19,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Both tiers use `tsx` so c8 merges identical source locations. Mixing native type stripping and tsx reported duplicate functions for the same TypeScript source.
 - **Coverage** (`npm run test:coverage`): wraps `npm test` in `c8` (config in `.c8rc.json`). `all: true` counts every file under `src/` that no test loads as 0%, so the number is honest, and the floors in `.c8rc.json` fail CI if coverage drops. Raise the floors when coverage goes up; never lower them.
 - Playwright is out of scope for unit work. The browser-level check stays the CI page-load smoke test.
+
+# Route cores
+
+New `src/lib/*-route-core.ts` handlers build on `src/lib/bff-route-core.ts` (`isSameOriginRequest`, `authorizeSession`, `json`). Most existing cores predate it, so copy a core that imports it, not the older ones. ESLint enforces this; remove a core from `LEGACY_ROUTE_CORES` in `eslint.config.mjs` when you migrate it.

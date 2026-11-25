@@ -19,7 +19,12 @@ from app.api.deps import get_current_operator, require_role, require_step_up
 from app.core import evidence_vault, retention_policy
 from app.core.clientip import client_ip
 from app.core.database import get_db
-from app.core.tenant_scope import assert_client_action, assert_client_visible
+from app.core.tenant_scope import (
+    assert_client_action,
+    assert_client_visible,
+    client_role_permits,
+    resolve_membership,
+)
 from app.models.models import Client, ClientRole, Operator, OperatorRole
 
 router = APIRouter(tags=["retention"])
@@ -57,11 +62,26 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat()
 
 
-async def _view(db: AsyncSession, client_id: str) -> dict:
+async def _can_edit(operator: Operator, client_id: str, db: AsyncSession) -> bool:
+    """Mirror of the PUT/DELETE authorization, so the dashboard hides edit
+    controls from exactly the callers the server would refuse. A hint only: the
+    write endpoints still enforce every rule themselves."""
+    if operator.role != OperatorRole.admin:
+        return False
+    if operator.is_platform_admin:
+        return True
+    membership = await resolve_membership(operator, client_id, db)
+    return membership is not None and client_role_permits(
+        membership.role, ClientRole.client_admin
+    )
+
+
+async def _view(db: AsyncSession, client_id: str, operator: Operator) -> dict:
     policy = await retention_policy.effective_policy(db, client_id)
     return {
         "client_id": client_id,
         "version": policy.version,
+        "can_edit": await _can_edit(operator, client_id, db),
         "set_by": policy.set_by,
         "updated_at": _iso(policy.updated_at),
         # A tenant-wide legal hold suspends every purge for the tenant.
@@ -75,6 +95,8 @@ async def _view(db: AsyncSession, client_id: str) -> dict:
                 "platform_default": value.platform_default,
                 "minimum": value.minimum,
                 "maximum": value.maximum,
+                # 0 (keep forever) passes validation only without a ceiling.
+                "forever_allowed": category.allow_forever and value.maximum == 0,
             }
             for category in retention_policy.CATEGORIES
             for value in (policy.values[category.name],)
@@ -114,7 +136,7 @@ async def get_retention_policy(
 ):
     await assert_client_visible(operator, client_id, db, detail=_NOT_FOUND)
     await _require_client(db, client_id)
-    return await _view(db, client_id)
+    return await _view(db, client_id, operator)
 
 
 @router.put(
@@ -146,7 +168,7 @@ async def set_retention_policy(
     except retention_policy.RetentionPolicyError as exc:
         _raise(exc)
     await db.commit()
-    return await _view(db, client_id)
+    return await _view(db, client_id, operator)
 
 
 @router.delete(
@@ -175,4 +197,4 @@ async def clear_retention_policy(
     except retention_policy.RetentionPolicyError as exc:
         _raise(exc)
     await db.commit()
-    return await _view(db, client_id)
+    return await _view(db, client_id, operator)

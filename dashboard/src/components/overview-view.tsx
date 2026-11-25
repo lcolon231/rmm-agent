@@ -26,6 +26,8 @@ export type OverviewData = {
   compliance: { percent: number; compliant: number; inScope: number } | null | "error";
   approvals: ApprovalRequest[] | null;
   activity: ActivityRow[] | null;
+  /** Set only when a client the operator can see is selected. */
+  clientHref?: string;
 };
 
 const ATTENTION_LIMIT = 6;
@@ -225,9 +227,12 @@ export function OverviewView({ data }: { data: OverviewData }) {
         title="Overview"
         description={`How ${data.scopeName ? `${data.scopeName}’s` : "your clients’"} devices are doing right now, and what needs you first.`}
         actions={
-          <ButtonLink href="/alerts" variant="primary" icon={Bell}>
-            Review open alerts
-          </ButtonLink>
+          <>
+            {data.clientHref ? <ButtonLink href={data.clientHref}>Client details</ButtonLink> : null}
+            <ButtonLink href="/alerts" variant="primary" icon={Bell}>
+              Review open alerts
+            </ButtonLink>
+          </>
         }
       />
       <StatRow>

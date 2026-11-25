@@ -28,3 +28,14 @@ export async function getClientNavigation(sessionToken: string): Promise<Navigat
     sessionToken,
   });
 }
+
+/** One visible client; a client the caller cannot see is a 404, like a missing one. */
+export async function getClientNavigationEntry(
+  sessionToken: string,
+  clientId: string,
+): Promise<NavigationClient> {
+  return nodelinkApiRequest<NavigationClient>(`/api/v1/clients/${encodeURIComponent(clientId)}`, {
+    method: "GET",
+    sessionToken,
+  });
+}

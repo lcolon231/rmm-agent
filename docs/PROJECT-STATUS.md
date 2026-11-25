@@ -301,7 +301,8 @@ The code in this repository currently provides:
   - Each tenant's purge is isolated in its own savepoint.
   - Every purge appends audit-chained deletion proof.
   - The new destructive classes default to keep-forever.
-  - It is server side and API-only. See `docs/RETENTION.md`.
+  - The dashboard shows and edits it on the client details page (`/clients/{id}`,
+    #311). See `docs/RETENTION.md`.
 - Fail-closed production startup validation (`ENVIRONMENT=production` rejects
   debug mode, placeholder secrets, missing signing keys, and non-HTTPS public
   URLs) with explicit opt-in proxy trust for client IPs.
@@ -502,7 +503,7 @@ and a rebuilt Windows agent; the tagged `v0.1.11` release ships `0044`.
   authorization (#66) and deterministic JSON/CSV/PDF/signed-ZIP evidence
   bundles and packages (#79/#80), and approval workflows with two-person
   authorization (#64) are implemented server side, as is tenant-specific
-  retention (#88, API-only). Tenant membership UI, stronger identity controls
+  retention (#88, with its dashboard UI in #311). Tenant membership UI, stronger identity controls
   (MFA, WebAuthn, OIDC/SAML), immutable retention and legal hold, a packaged
   audit verification tool, and a customer audit portal remain planned.
 - **Milestone 4 — Scale and Ecosystem:** shared infrastructure, distributed
@@ -561,8 +562,8 @@ The repository does **not** currently contain:
   certificate-based signing is
   missing). External audit-anchor publication ships (`docs/AUDIT-ANCHORING.md`)
   but the operator must configure and operate the destination.
-- OIDC/SAML federation, and a dashboard UI for the evidence vault and for
-  tenant retention policies (#88 ships the API only; UI is #311). Evidence retention and legal hold
+- OIDC/SAML federation, and a dashboard UI for the evidence vault (tenant
+  retention policies have one since #311). Evidence retention and legal hold
   are implemented server side (`docs/EVIDENCE-VAULT.md`), but a live-bucket
   verification has not been recorded.
   Tenant-scoped authorization with per-tenant roles
