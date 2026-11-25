@@ -9,8 +9,8 @@ Usage (from server/, with the env from docs/LOCAL-E2E.md):
     python scripts/dev_seed.py --reset
     python scripts/dev_seed.py --reset --scenario retention
 
-Prints the client IDs and operator emails as JSON. Every operator's password is
-``NODELINK_DEV_SEED_PASSWORD`` (default ``dev-seed-pw``).
+Prints the client IDs, operator emails and the shared operator password as
+JSON. The password is ``NODELINK_DEV_SEED_PASSWORD`` if set, else random per run.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import json
 import os
+import secrets
 import sys
 from collections.abc import Awaitable, Callable
 
@@ -39,8 +40,6 @@ from app.models.models import (  # noqa: E402
     OperatorRole,
     TenantRetentionPolicy,
 )
-
-DEFAULT_PASSWORD = "dev-seed-pw"
 
 # persona: (global role, client role on every seeded client, platform admin)
 PERSONAS: dict[str, tuple[OperatorRole, ClientRole | None, bool]] = {
@@ -125,6 +124,7 @@ async def seed(password: str, scenarios: list[str]) -> dict[str, object]:
         result: dict[str, object] = {
             "clients": {key: client.id for key, client in clients.items()},
             "operators": {name: persona_email(name) for name in PERSONAS},
+            "password": password,
             "scenarios": scenarios,
         }
     await engine.dispose()
@@ -141,7 +141,7 @@ def main() -> int:
     if reason:
         print(f"Refusing to seed: {reason}", file=sys.stderr)
         return 2
-    password = os.environ.get("NODELINK_DEV_SEED_PASSWORD", DEFAULT_PASSWORD)
+    password = os.environ.get("NODELINK_DEV_SEED_PASSWORD") or secrets.token_urlsafe(12)
     print(json.dumps(asyncio.run(seed(password, args.scenario)), indent=2))
     return 0
 
