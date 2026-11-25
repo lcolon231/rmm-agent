@@ -12,8 +12,11 @@
     "start": "next start",
     "lint": "eslint",
     "smoke:production": "node scripts/production-smoke.mjs",
+    "deps:check": "npm ls --depth=0 --silent || (echo node_modules does not match package-lock.json. Run npm ci. && exit 1)",
+    "pretypecheck": "npm run deps:check",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --import ./test/support/module-hooks.mjs --test \"test/*.test.ts\" && npm run test:ui",
+    "pretest:coverage": "npm run deps:check",
     "test:coverage": "c8 npm test",
     "validate:env": "node --experimental-strip-types scripts/validate-environment.ts",
     "test:ui": "node --import tsx --import ./test/ui/setup-dom.ts --experimental-test-module-mocks --test \"test/ui/**/*.test.tsx\""

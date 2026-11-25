@@ -26,7 +26,7 @@ cd server
 py -3.12 -m venv .venv
 & .\.venv\Scripts\Activate.ps1
 python --version  # must report Python 3.12.x
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt -r requirements-lint.txt
 
 python scripts/gen_command_keys.py
 Copy-Item .env.example .env  # replace every placeholder
@@ -40,7 +40,7 @@ Unix:
 cd server
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt -r requirements-lint.txt
 python scripts/gen_command_keys.py
 cp .env.example .env
 python scripts/create_admin.py admin@example.com --role admin
