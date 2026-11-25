@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { scheduleLastResult } from "@/lib/automation-presentation-core";
 import type { OperatorRole } from "@/lib/script-library-core";
+import { NO_SCHEDULE_SOURCES, scheduleDisplayNames, type ScheduleSources } from "@/lib/schedule-form-core";
 import { formatScheduleDateTime, type ScheduledTaskItem, type ScheduledTaskListData } from "@/lib/scheduled-tasks-core";
 
 import { PageHeader, PageStack } from "../shell/page-header";
@@ -41,11 +42,22 @@ function sortSchedules(items: readonly ScheduledTaskItem[]) {
   return items.map((task, index) => ({ task, index })).sort((a, b) => rank(a.task) - rank(b.task) || a.index - b.index).map(({ task }) => task);
 }
 
+type DisplayNames = ReturnType<typeof scheduleDisplayNames>;
+
+const rawId = "font-(family-name:--font-data) text-[13px] break-all";
+
+/** A resolved name with its raw ID beneath, or the raw ID alone when the
+ * record is gone or not visible to this operator. */
+function NamedId({ name, id }: { name: string | null; id: string }) {
+  if (!name) return <span className={rawId}>{id}</span>;
+  return <span className="grid gap-0.5"><span>{name}</span><span className={`${rawId} text-[12px] text-(--muted)`}>{id}</span></span>;
+}
+
 function StateBadge({ task }: { task: ScheduledTaskItem }) {
   return task.enabled ? <StatusBadge tone="ok">Active</StatusBadge> : <StatusBadge tone="off">Paused</StatusBadge>;
 }
 
-function ScheduleDrawer({ task, canChange, onClose }: { task: ScheduledTaskItem | null; canChange: boolean; onClose: () => void }) {
+function ScheduleDrawer({ task, canChange, names, onClose }: { task: ScheduledTaskItem | null; canChange: boolean; names: DisplayNames; onClose: () => void }) {
   if (!task) return null;
   const last = scheduleLastResult(task.last_status);
   return (
@@ -66,9 +78,9 @@ function ScheduleDrawer({ task, canChange, onClose }: { task: ScheduledTaskItem 
           { term: "Last run", value: formatScheduleDateTime(task.last_run_at, "Never") },
           { term: "Last result", value: last.text },
           { term: "Applies to", value: appliesTo(task) },
-          { term: task.target_type === "site" ? "Site ID" : "Device ID", value: <span className="font-(family-name:--font-data) text-[13px] break-all">{task.target_id}</span> },
+          { term: task.target_type === "site" ? "Site" : "Endpoint", value: <NamedId name={names.target(task.target_type, task.target_id)} id={task.target_id} /> },
           { term: "Kind", value: kindLabel(task.kind) },
-          { term: "Library script", value: task.script_version_id ? <span className="font-(family-name:--font-data) text-[13px] break-all">{task.script_version_id}</span> : "None" },
+          { term: "Library script", value: task.script_version_id ? <NamedId name={names.script(task.script_version_id)} id={task.script_version_id} /> : "None" },
         ]}
       />
       <p className="m-0 text-xs text-(--muted)">&ldquo;Sent to devices&rdquo; means the commands were sent, not that they finished. Each run&apos;s result is in Tasks.</p>
@@ -76,11 +88,12 @@ function ScheduleDrawer({ task, canChange, onClose }: { task: ScheduledTaskItem 
   );
 }
 
-export function SchedulesView({ schedules, role }: { schedules: ScheduledTaskListData | null; role: OperatorRole }) {
+export function SchedulesView({ schedules, role, sources = NO_SCHEDULE_SOURCES }: { schedules: ScheduledTaskListData | null; role: OperatorRole; sources?: ScheduleSources }) {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const canChange = role !== "readonly";
+  const names = scheduleDisplayNames(sources);
   const items = schedules?.items ?? [];
   const partial = schedules !== null && schedules.total > items.length;
   const scope = partial ? `Of the first ${items.length} loaded` : undefined;
@@ -95,8 +108,13 @@ export function SchedulesView({ schedules, role }: { schedules: ScheduledTaskLis
   const columns: Column<ScheduledTaskItem>[] = [
     { key: "name", header: "Schedule", cell: (task) => <PrimaryCell title={task.name} sub={task.description ?? undefined} /> },
     { key: "when", header: "When it runs", cell: (task) => <PrimaryCell title={<span className="font-(family-name:--font-data) text-[13px] font-normal">{task.cron_expression}</span>} sub={task.timezone} /> },
-    { key: "kind", header: "Kind", cell: (task) => kindLabel(task.kind) },
-    { key: "target", header: "Applies to", cell: (task) => <PrimaryCell title={appliesTo(task)} sub={<span className="font-(family-name:--font-data)">{task.target_id.slice(0, 12)}…</span>} /> },
+    {
+      key: "kind",
+      header: "Kind",
+      cell: (task) => <PrimaryCell title={<span className="font-normal">{kindLabel(task.kind)}</span>}
+        sub={task.script_version_id ? (names.script(task.script_version_id) ?? <span className={rawId}>{task.script_version_id}</span>) : undefined} />,
+    },
+    { key: "target", header: "Applies to", cell: (task) => <PrimaryCell title={names.target(task.target_type, task.target_id) ?? appliesTo(task)} sub={<span className={rawId}>{task.target_id}</span>} /> },
     { key: "next", header: "Next run", cell: (task) => (task.enabled ? formatScheduleDateTime(task.next_run_at) : <span className="text-(--muted)">Not while paused</span>) },
     {
       key: "last",
@@ -130,7 +148,7 @@ export function SchedulesView({ schedules, role }: { schedules: ScheduledTaskLis
         breadcrumb={[{ label: "Automation" }, { label: "Schedules" }]}
         title="Schedules"
         description="Commands that run automatically on a repeating timetable, on one device or every device at a site."
-        actions={canChange ? <NewScheduleButton /> : <span className="text-[13px] text-(--muted)">View only</span>}
+        actions={canChange ? <NewScheduleButton sources={sources} /> : <span className="text-[13px] text-(--muted)">View only</span>}
       />
       <StatRow>
         <StatTile icon={Clock} tone="ok" label="Active" value={schedules ? active.length : "—"} sub={scope ?? (schedules ? `${items.length - active.length} paused` : undefined)} />
@@ -160,7 +178,7 @@ export function SchedulesView({ schedules, role }: { schedules: ScheduledTaskLis
           ? <TableFooter shown={rows.length} total={schedules.total} sortNote={partial ? "not sent last run first, among those loaded" : "not sent last run first"} />
           : null}
       />
-      <ScheduleDrawer task={selected} canChange={canChange} onClose={() => setSelectedId(null)} />
+      <ScheduleDrawer task={selected} canChange={canChange} names={names} onClose={() => setSelectedId(null)} />
     </PageStack>
   );
 }

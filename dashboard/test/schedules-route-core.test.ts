@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   handleCreateSchedule,
   handleRunScheduleNow,
+  handleScheduleScriptSource,
   handleToggleSchedule,
   scheduleCreateInputFromUnknown,
   scheduledTaskActionPath,
@@ -25,6 +26,22 @@ const task = {
   payload: {},
   next_run_at: "2026-10-22T02:00:00Z",
   signing_key_ref: SENTINEL,
+};
+const scriptVersion = {
+  id: "version-2",
+  version: 2,
+  language: "powershell",
+  content_sha256: "a".repeat(64),
+  content_bytes: 11,
+  description: null,
+  tags: [],
+  supported_platforms: ["windows"],
+  parameters: [],
+  created_by: "author",
+  created_at: "2026-01-01T00:00:00Z",
+  review: { state: "approved", reviewed_by: "reviewer", reason_sha256: "b".repeat(64), reason_bytes: 2, created_at: "2026-01-02T00:00:00Z" },
+  content: "Get-Process",
+  internal: SENTINEL,
 };
 const createBody = {
   name: "Nightly inventory",
@@ -70,7 +87,47 @@ bffContract([
         runScheduledTaskNow: call,
       }),
   },
+  {
+    name: "read a library script's source for a schedule",
+    minRole: "operator",
+    mutation: false,
+    upstreamResult: scriptVersion,
+    invoke: ({ getSession, call }) =>
+      handleScheduleScriptSource(request("/api/schedules/script-source/s1/2", "GET"), "s1", "2", {
+        getScriptVersion: call,
+        getSession,
+      }),
+  },
 ]);
+
+test("script source answers with the version body and refuses a non-numeric version", async () => {
+  const double = upstream(scriptVersion);
+  const response = await handleScheduleScriptSource(request("/x", "GET"), "s1", "2", {
+    getScriptVersion: double.fn,
+    getSession: sessionFor("operator"),
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.id, "version-2");
+  assert.equal(body.content, "Get-Process");
+  assert.deepEqual(double.calls[0].slice(1), ["s1", 2]);
+
+  const refused = await handleScheduleScriptSource(request("/x", "GET"), "s1", "latest", {
+    getScriptVersion: double.fn,
+    getSession: sessionFor("operator"),
+  });
+  assert.equal(refused.status, 400);
+  assert.equal(double.calls.length, 1);
+});
+
+test("create explains a refusal to pin an unapproved script version", async () => {
+  const response = await handleCreateSchedule(request("/api/schedules", "POST", createBody), {
+    createScheduledTask: async () => { throw apiError(409, "script_version_not_approved"); },
+    getSession: sessionFor("operator"),
+  });
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).error, /no longer approved/);
+});
 
 test("create forwards only the fields the service accepts", async () => {
   const double = upstream(task);
