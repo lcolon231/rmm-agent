@@ -10,7 +10,7 @@ function policyPath(clientId: string): string {
   return `/api/v1/clients/${encodeURIComponent(clientId)}/retention-policy`;
 }
 
-/** The tenant's effective policy; throws `NodelinkApiError` on a non-2xx. */
+/** The client's effective policy; throws `NodelinkApiError` on a non-2xx. */
 export async function getRetentionPolicy(
   sessionToken: string,
   clientId: string,

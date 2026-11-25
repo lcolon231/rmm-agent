@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * Tenant retention policy presentation and editing rules (issue #311).
+ * Client retention policy presentation and editing rules (issue #311).
  *
  * Mirrors the #88 contract in `docs/RETENTION.md`. The bounds checks here are
  * hints that save a round trip; the server re-validates every value and stays
@@ -20,6 +20,7 @@ export const RETENTION_CATEGORY_NAMES = [
 
 export type RetentionCategoryName = (typeof RETENTION_CATEGORY_NAMES)[number];
 export type RetentionUnit = "days" | "count";
+/** `"tenant"` is the #88 wire value for a client override. */
 export type RetentionSource = "default" | "tenant" | "floor" | "ceiling";
 
 export const RETENTION_CATEGORY_LABELS: Record<

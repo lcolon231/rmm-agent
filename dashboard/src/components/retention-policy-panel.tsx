@@ -57,7 +57,7 @@ function allInherited(): RetentionValues {
 }
 
 /**
- * A tenant's retention policy (issue #311): what is kept, why, and within which
+ * A client's retention policy (issue #311): what is kept, why, and within which
  * platform bounds, with an editor for client admins.
  *
  * Every save carries `expected_version`, so a concurrent change is reported
@@ -214,7 +214,7 @@ export function RetentionPolicyPanel({ clientId, initialPolicy, performStepUp = 
         <div role="status" aria-label="Pruning suspended" className="flex gap-3 rounded-lg bg-(--amber-soft) p-3 text-sm text-(--ink)">
           <Archive size={18} aria-hidden="true" className="mt-0.5 shrink-0" />
           <p className="m-0">
-            <strong>Pruning suspended.</strong> A tenant-wide legal hold is active, so nothing of this
+            <strong>Pruning suspended.</strong> A client-wide legal hold is active, so nothing of this
             client&apos;s is pruned until it is released.{" "}
             <Link href={auditLink("evidence_legal_hold.placed", clientId)}>Review evidence vault holds</Link>
           </p>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * Authenticated proxy for a tenant's retention policy (issue #311).
+ * Authenticated proxy for a client's retention policy (issue #311).
  *
  * The browser never talks to the management service directly. Reads pass for
  * any signed-in operator (the server decides visibility); writes need a
@@ -12,50 +12,47 @@
  * validation remain the authority; nothing here can widen them.
  */
 
-import { isSameOrigin, requestOrigin } from "./dashboard-auth-core.ts";
+import {
+  authorizeSession,
+  isRecord,
+  isSameOriginRequest,
+  json,
+  readJsonBody,
+  type GetSession,
+} from "./bff-route-core.ts";
 import {
   RETENTION_CATEGORY_NAMES,
   retentionErrorMessage,
   retentionPolicyFromUnknown,
 } from "./retention-policy-core.ts";
 
-type Role = "readonly" | "operator" | "admin";
-type RouteSession =
-  | { kind: "anonymous" }
-  | { kind: "unavailable" }
-  | { kind: "authenticated"; operator: { role: Role }; sessionToken: string };
-
 export type RetentionMethod = "GET" | "PUT" | "DELETE";
 
 export type RetentionRouteDependencies = {
-  getSession: () => Promise<RouteSession>;
+  getSession: GetSession;
   send: (token: string, method: RetentionMethod, clientId: string, body?: unknown) => Promise<Response>;
 };
 
 const CATEGORY_KEYS: readonly string[] = RETENTION_CATEGORY_NAMES;
 
-function json(body: unknown, status = 200): Response {
-  return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
-}
-
 function failure(status: number, error: string, code: string | null = null, category: string | null = null) {
   return json({ error, code, category }, status);
 }
 
-function isVersion(value: unknown): value is number {
+function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 /** The exact body to forward, or `null` if it is not a well-formed #88 write. */
 function writeBody(method: "PUT" | "DELETE", body: unknown): Record<string, unknown> | null {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
-  const raw = body as Record<string, unknown>;
-  if (!isVersion(raw.expected_version)) return null;
+  if (!isRecord(body)) return null;
+  const raw = body;
+  if (!isNonNegativeInteger(raw.expected_version)) return null;
   const allowed = method === "PUT" ? CATEGORY_KEYS : [];
   const forwarded: Record<string, unknown> = { expected_version: raw.expected_version };
   for (const [key, value] of Object.entries(raw)) {
     if (key === "expected_version") continue;
-    if (!allowed.includes(key) || (value !== null && !isVersion(value))) return null;
+    if (!allowed.includes(key) || (value !== null && !isNonNegativeInteger(value))) return null;
     forwarded[key] = value;
   }
   return forwarded;
@@ -92,23 +89,22 @@ export async function handleRetentionPolicyRequest(
   dependencies: RetentionRouteDependencies,
 ): Promise<Response> {
   const method = request.method.toUpperCase() as RetentionMethod;
-  const writing = method === "PUT" || method === "DELETE";
-  if (writing && !isSameOrigin(
-    request.headers.get("origin"),
-    requestOrigin(request.url, request.headers.get("host")),
-  )) return failure(403, "The retention policy request was rejected.");
-  const session = await dependencies.getSession().catch(() => ({ kind: "unavailable" } as const));
-  if (session.kind === "anonymous") return failure(401, "Your session expired. Sign in again.");
-  if (session.kind === "unavailable") return failure(503, "Session verification is unavailable.");
-  if (!clientId.trim() || clientId.length > 36) {
-    return failure(404, retentionErrorMessage("client_not_found") ?? "", "client_not_found");
+  const write = method === "GET" ? null : method;
+  if (write && !isSameOriginRequest(request)) {
+    return failure(403, "The retention policy request was rejected.");
   }
-  if (writing && session.operator.role !== "admin") {
-    return failure(403, "Your role cannot change retention for this client.");
+  const session = await authorizeSession(dependencies.getSession, {
+    minRole: write ? "admin" : "readonly",
+    signedOut: "Your session expired. Sign in again.",
+    forbidden: "Your role cannot change retention for this client.",
+  });
+  if (session instanceof Response) return session;
+  if (!clientId.trim() || clientId.length > 36) {
+    return failure(404, "This client is no longer available to you.", "client_not_found");
   }
   let body: Record<string, unknown> | undefined;
-  if (method === "PUT" || method === "DELETE") {
-    const parsed = writeBody(method, await request.json().catch(() => null));
+  if (write) {
+    const parsed = writeBody(write, await readJsonBody(request));
     if (!parsed) return failure(400, "The retention policy request is malformed.");
     body = parsed;
   }

@@ -75,7 +75,7 @@ test("a read-only member sees the policy with no edit control at all", () => {
   assert.equal(screen.queryByRole("textbox"), null);
 });
 
-test("an active tenant-wide legal hold is announced", () => {
+test("an active client-wide legal hold is announced", () => {
   render(<RetentionPolicyPanel clientId="client-1" initialPolicy={policy({ pruning_suspended: true })} />);
   const banner = screen.getByRole("status", { name: "Pruning suspended" });
   assert.match(banner.textContent ?? "", /legal hold/i);
