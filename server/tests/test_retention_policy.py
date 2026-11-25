@@ -333,6 +333,37 @@ async def test_authorization_matrix(api):
 
 
 @pytest.mark.asyncio
+async def test_get_reports_whether_the_caller_may_edit(api):
+    """The dashboard hides edit controls from exactly the callers PUT refuses."""
+    client, ids, tokens = api
+    expected = {
+        "admin": True,
+        "platform": True,
+        "reader": False,
+        "elevated_reader": False,
+        "weak_admin": False,
+    }
+    for key, can_edit in expected.items():
+        resp = await client.get(_url(ids["a"]), headers=_auth(tokens[key]))
+        assert resp.status_code == 200, (key, resp.text)
+        assert resp.json()["can_edit"] is can_edit, key
+
+
+@pytest.mark.asyncio
+async def test_get_reports_where_keep_forever_is_allowed(api, monkeypatch):
+    client, ids, tokens = api
+    monkeypatch.setattr(settings, "retention_max_alert_days", 0)
+    body = (await client.get(_url(ids["a"]), headers=_auth(tokens["reader"]))).json()
+    categories = body["categories"]
+    assert categories["alert_days"]["forever_allowed"] is True  # no ceiling
+    assert categories["telemetry_days"]["forever_allowed"] is False  # ceiling set
+    # Evidence records always need a finite retention, whatever the ceiling.
+    monkeypatch.setattr(settings, "evidence_vault_max_retention_days", 0)
+    body = (await client.get(_url(ids["a"]), headers=_auth(tokens["reader"]))).json()
+    assert body["categories"]["evidence_default_days"]["forever_allowed"] is False
+
+
+@pytest.mark.asyncio
 async def test_change_requires_fresh_step_up_when_enrolled(api, monkeypatch):
     client, ids, tokens = api
 

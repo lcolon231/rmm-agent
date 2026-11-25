@@ -105,6 +105,7 @@ export default async function Home({ searchParams }: HomePageProps) {
         )
       : null,
     activity: auditPage ? recentActivity(auditPage.items, hostnames) : null,
+    clientHref: selectedClient ? `/clients/${encodeURIComponent(selectedClient.id)}` : undefined,
   };
 
   return (
