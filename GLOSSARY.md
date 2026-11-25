@@ -156,7 +156,11 @@ _Avoid_: terminal, remote shell, console
 
 **Support chat**:
 A text conversation started by an end user and answered by an operator; never remote control.
-_Avoid_: live chat, helpdesk, ticket
+_Avoid_: live chat, helpdesk
+
+**Ticket**:
+A request an end user submits from an endpoint for an operator to triage and resolve; asynchronous, unlike support chat.
+_Avoid_: issue, case, incident, helpdesk request
 
 ## Scripts
 

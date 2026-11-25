@@ -8,8 +8,9 @@ governance in #237). The design record is
 describes shipped behavior.
 
 It is deliberately **not** remote control, not an interactive shell, not a
-ticketing system, and not operator-to-operator chat. The chat channel carries
-text only and cannot trigger any endpoint action.
+ticketing system (that is [support tickets](SUPPORT-TICKETS.md), a separate
+concept), and not operator-to-operator chat. The chat channel carries text only
+and cannot trigger any endpoint action.
 
 ## Flow
 
