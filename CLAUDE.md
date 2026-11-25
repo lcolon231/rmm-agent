@@ -15,3 +15,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, created as neede
 ## Server tools
 
 Run server tests and lint with the venv interpreter, not the system Python: `server/.venv/Scripts/python.exe -m pytest` and `-m ruff check app tests scripts alembic` (from `server/`). Set the venv up as `server/README.md` describes.
+
+## Live verification
+
+End-to-end or manual verification against a running server and dashboard: `docs/LOCAL-E2E.md`.

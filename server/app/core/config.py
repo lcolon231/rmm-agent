@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     app_name: str = "NodeLink RMM"
     environment: str = "development"
     debug: bool = True
+    # Log every SQL statement. Separate from DEBUG so local runs stay readable.
+    sql_echo: bool = False
 
     # Optional read-only assistant. Credentials never belong in dashboard config.
     assistant_enabled: bool = False
