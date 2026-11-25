@@ -2,6 +2,7 @@
 """Comprehensive automated tests for recurring task scheduling (issue #49)."""
 from __future__ import annotations
 
+import hashlib
 import os
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -39,6 +40,11 @@ from app.models.models import (  # noqa: E402
     ScheduleMisfirePolicy,
     ScheduleTargetType,
     ScheduledTask,
+    ScriptLanguage,
+    ScriptLibraryItem,
+    ScriptReviewState,
+    ScriptVersion,
+    ScriptVersionReview,
     Site,
 )
 
@@ -226,3 +232,80 @@ async def test_scheduler_engine_site_target_and_concurrency(client):
         audit_res = await db.execute(select(AuditEvent).where(AuditEvent.action == "scheduled_task.dispatched"))
         events = audit_res.scalars().all()
         assert len(events) == 2
+
+
+async def _seed_library_version(*, review: ScriptReviewState | None, deprecated: bool = False) -> str:
+    """One library script version with the given review state; returns its id."""
+    content = "Get-Process"
+    async with AsyncSessionLocal() as db:
+        item = ScriptLibraryItem(
+            name="Health",
+            normalized_name=f"health-{uuid4().hex}",
+            created_by="sched-admin@nodelink.test",
+            deprecated_at=datetime.now(timezone.utc) if deprecated else None,
+            deprecated_by="sched-admin@nodelink.test" if deprecated else None,
+        )
+        db.add(item)
+        await db.flush()
+        version = ScriptVersion(
+            script_id=item.id,
+            version=1,
+            language=ScriptLanguage.powershell,
+            content=content,
+            content_sha256=hashlib.sha256(content.encode()).hexdigest(),
+            content_bytes=len(content.encode()),
+            supported_platforms=["windows"],
+            created_by="sched-admin@nodelink.test",
+        )
+        db.add(version)
+        await db.flush()
+        if review is not None:
+            db.add(
+                ScriptVersionReview(
+                    script_version_id=version.id,
+                    state=review,
+                    reviewed_by="sched-admin@nodelink.test",
+                    reason_sha256="r" * 64,
+                    reason_bytes=6,
+                )
+            )
+        await db.commit()
+        return version.id
+
+
+@pytest.mark.asyncio
+async def test_schedule_creation_requires_an_approved_live_script_version(client):
+    async with AsyncSessionLocal() as db:
+        org = Client(id=str(uuid4()), name="Approval Org")
+        site = Site(id=str(uuid4()), client_id=org.id, name="Approval Site")
+        db.add_all([org, site])
+        await db.commit()
+        site_id = site.id
+
+    def body(version_id: str) -> dict:
+        return {
+            "name": "Library health check",
+            "enabled": True,
+            "target_type": "site",
+            "target_id": site_id,
+            "cron_expression": "0 * * * *",
+            "timezone": "UTC",
+            "kind": "powershell",
+            "script_version_id": version_id,
+            "payload": {"script": "Get-Process"},
+            "concurrency_policy": "skip",
+            "misfire_policy": "run_once",
+        }
+
+    unreviewed = await _seed_library_version(review=None)
+    rejected = await _seed_library_version(review=ScriptReviewState.rejected)
+    deprecated = await _seed_library_version(review=ScriptReviewState.approved, deprecated=True)
+    for version_id in (unreviewed, rejected, deprecated):
+        refused = await client.post("/scheduled-tasks", json=body(version_id))
+        assert refused.status_code == 409
+        assert refused.json()["detail"]["code"] == "script_version_not_approved"
+
+    approved = await _seed_library_version(review=ScriptReviewState.approved)
+    created = await client.post("/scheduled-tasks", json=body(approved))
+    assert created.status_code == 201
+    assert created.json()["script_version_id"] == approved

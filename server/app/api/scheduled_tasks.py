@@ -23,7 +23,10 @@ from app.models.models import (
     OperatorRole,
     ScheduleTargetType,
     ScheduledTask,
+    ScriptLibraryItem,
+    ScriptReviewState,
     ScriptVersion,
+    ScriptVersionReview,
     Site,
 )
 from app.schemas.scheduled_tasks import (
@@ -151,6 +154,25 @@ async def create_scheduled_task(
             raise HTTPException(
                 status_code=409, detail={"code": refusal.code}
             ) from refusal
+        # Unattended runs execute only reviewed code: the pinned version must
+        # carry an approval and its script must not be retired (issue #358).
+        review = (
+            await db.execute(
+                select(ScriptVersionReview).where(
+                    ScriptVersionReview.script_version_id == script_version.id
+                )
+            )
+        ).scalar_one_or_none()
+        item = await db.get(ScriptLibraryItem, script_version.script_id)
+        if (
+            review is None
+            or review.state != ScriptReviewState.approved
+            or item is None
+            or item.deprecated_at is not None
+        ):
+            raise HTTPException(
+                status_code=409, detail={"code": "script_version_not_approved"}
+            )
 
     now = _now()
     try:

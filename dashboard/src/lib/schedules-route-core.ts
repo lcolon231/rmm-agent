@@ -20,6 +20,7 @@ import {
   type GetSession,
 } from "./bff-route-core.ts";
 import { scheduledTaskFromUnknown } from "./scheduled-tasks-core.ts";
+import { scriptVersionFromUnknown } from "./script-library-core.ts";
 
 type ScheduleAction = "create" | "toggle" | "run-now";
 
@@ -37,6 +38,9 @@ const CREATE_FIELDS = [
   "concurrency_policy",
   "misfire_policy",
 ] as const;
+
+const SIGNED_OUT = "Your session expired. Sign in again.";
+const FORBIDDEN = "Your role cannot manage scheduled tasks.";
 
 const failure: Record<ScheduleAction, string> = {
   create: "The scheduled task could not be created. Try again.",
@@ -58,9 +62,19 @@ export function scheduleCreateInputFromUnknown(value: unknown): Record<string, u
   return input;
 }
 
-export function scheduleErrorMessage(action: ScheduleAction, status: number): { message: string; status: number } {
-  if (status === 401) return { message: "Your session expired. Sign in again.", status: 401 };
-  if (status === 403) return { message: "Your role cannot manage scheduled tasks.", status: 403 };
+export function scheduleErrorMessage(
+  action: ScheduleAction,
+  status: number,
+  code: string | null = null,
+): { message: string; status: number } {
+  if (status === 409 && code === "script_version_not_approved") {
+    return {
+      message: "The chosen library script version is no longer approved, or its script was retired. Pick another script.",
+      status: 409,
+    };
+  }
+  if (status === 401) return { message: SIGNED_OUT, status: 401 };
+  if (status === 403) return { message: FORBIDDEN, status: 403 };
   if (status === 404) {
     return {
       message: action === "create"
@@ -76,18 +90,19 @@ export function scheduleErrorMessage(action: ScheduleAction, status: number): { 
   return { message: failure[action], status: 502 };
 }
 
+/** Same operator floor for every schedule handler, reads included. */
+function requireOperator(getSession: GetSession) {
+  return authorizeSession(getSession, { minRole: "operator", signedOut: SIGNED_OUT, forbidden: FORBIDDEN });
+}
+
 async function authorize(request: Request, getSession: GetSession) {
   if (!isSameOriginRequest(request)) return json({ error: "Scheduled task request was rejected." }, 403);
-  return authorizeSession(getSession, {
-    minRole: "operator",
-    signedOut: "Your session expired. Sign in again.",
-    forbidden: "Your role cannot manage scheduled tasks.",
-  });
+  return requireOperator(getSession);
 }
 
 function mappedError(action: ScheduleAction, error: unknown): Response {
   const upstream = upstreamError(error);
-  const { message, status } = scheduleErrorMessage(action, upstream?.status ?? 503);
+  const { message, status } = scheduleErrorMessage(action, upstream?.status ?? 503, upstream?.code ?? null);
   return json({ error: message }, status);
 }
 
@@ -151,5 +166,35 @@ export async function handleRunScheduleNow(
     return json({ status: "triggered", dispatched: Number(result.dispatched) });
   } catch (error) {
     return mappedError("run-now", error);
+  }
+}
+
+/**
+ * The body of one library script version, for the New schedule drawer's
+ * preview and payload (issue #358). The list API omits bodies, so the drawer
+ * reads only the version the operator picked. Operator floor, like create.
+ */
+export async function handleScheduleScriptSource(
+  _request: Request,
+  scriptId: string,
+  version: string,
+  deps: {
+    getSession: GetSession;
+    getScriptVersion: (sessionToken: string, scriptId: string, version: number) => Promise<unknown>;
+  },
+): Promise<Response> {
+  const auth = await requireOperator(deps.getSession);
+  if (auth instanceof Response) return auth;
+  const versionNumber = /^[1-9][0-9]{0,8}$/.test(version) ? Number(version) : null;
+  if (versionNumber === null) return json({ error: "Unknown script version." }, 400);
+  const unavailable = json({ error: "The script could not be loaded. Nothing was changed." }, 502);
+  try {
+    const loaded = scriptVersionFromUnknown(await deps.getScriptVersion(auth.sessionToken, scriptId, versionNumber));
+    return loaded && typeof loaded.content === "string" ? json(loaded) : unavailable;
+  } catch (error) {
+    const status = upstreamError(error)?.status;
+    if (status === 401) return json({ error: SIGNED_OUT }, 401);
+    if (status === 404) return json({ error: "This script version no longer exists." }, 404);
+    return unavailable;
   }
 }
